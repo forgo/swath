@@ -1,0 +1,23 @@
+# PR-title lint (ENGINEERING.md §7, issue #12). Squash-only merges make the PR
+# title the commit title on main — release-plz reads that history, so titles
+# must be conventional commits. Uses the original amannn action (the
+# step-security fork is paid on private repos; see the paths-filter precedent).
+
+name: PR Title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-pr-title:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
