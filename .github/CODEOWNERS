@@ -1,0 +1,6 @@
+# Default owner for everything.
+* @forgo
+
+# Workflow changes are the supply-chain attack surface — always owner-reviewed.
+/.github/workflows/ @forgo
+/.github/actions/ @forgo

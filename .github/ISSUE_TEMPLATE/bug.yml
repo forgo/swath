@@ -1,0 +1,26 @@
+name: Bug report
+description: Something is wrong or behaves unexpectedly
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Minimal steps or commands. For tile/render issues, include the layer, tile coordinate (z/x/y), and the x-ray trace if available.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, how Swath is running (binary / compose / cloud), version or commit.
+    validations:
+      required: true

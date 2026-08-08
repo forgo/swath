@@ -1,0 +1,24 @@
+name: Feature request
+description: Propose an enhancement or new capability
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't you do today? Tie it to a requirement (R1-R10 in docs/REQUIREMENTS.md) if you can.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Sketch the behavior. Standards-shaped proposals (OGC / STAC / openEO surfaces) travel fastest.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
