@@ -25,6 +25,9 @@ defaults:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # paths-filter lists PR changed files via the API
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
     steps:
