@@ -3,5 +3,21 @@
     "commit": "",
     "pr": "",
     "sessionUrl": false
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/block-merge-unless-green.sh",
+            "if": "Bash(gh pr merge*)",
+            "statusMessage": "Verifying PR checks are green before merge",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
   }
 }
