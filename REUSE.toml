@@ -15,6 +15,7 @@ path = [
     ".gitignore",
     "**/.gitignore",
     ".pre-commit-config.yaml",
+    "docker-compose.yml",
     "justfile",
     "**/justfile",
     "renovate.json",
