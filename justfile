@@ -8,6 +8,8 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 nextest_version := "0.9.143"
 llvm_cov_version := "0.8.7"
 deny_version := "0.20.2"
+zizmor_version := "1.29.0"
+prek_version := "0.4.12"
 
 # List available recipes.
 default:
@@ -27,6 +29,10 @@ setup:
     command -v cargo-nextest  >/dev/null || install cargo-nextest  "{{nextest_version}}"
     cargo llvm-cov --version >/dev/null 2>&1 || install cargo-llvm-cov "{{llvm_cov_version}}"
     command -v cargo-deny     >/dev/null || install cargo-deny     "{{deny_version}}"
+    command -v zizmor         >/dev/null || install zizmor         "{{zizmor_version}}"
+    command -v prek           >/dev/null || install prek           "{{prek_version}}"
+    # Optional, never mandatory: install the git pre-commit hook.
+    prek install 2>/dev/null || true
     echo "setup complete"
 
 # Format all Rust code.
@@ -56,5 +62,9 @@ cov:
     cargo llvm-cov --workspace --lcov --output-path lcov.info nextest
     cargo llvm-cov report
 
+# Workflow static analysis (all findings are errors in CI).
+zizmor:
+    zizmor .github
+
 # The one-command gate: everything CI enforces.
-check: fmt-check lint test deny
+check: fmt-check lint test deny zizmor
