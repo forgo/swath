@@ -1,0 +1,30 @@
+{
+  "//": "Branch ruleset for main (issue #12). Enforcement requires GitHub Pro or a public repo — apply when unblocked (#50) with: gh api -X POST repos/forgo/swath/rulesets --input .github/rulesets/main.json (strip this // key first, or use jq 'del(.[\"//\"])').",
+  "name": "main protections",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "bypass_actors": [
+    { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
+  ],
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "pull_request", "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false,
+        "allowed_merge_methods": ["squash"]
+    }},
+    { "type": "required_status_checks", "parameters": {
+        "strict_required_status_checks_policy": false,
+        "required_status_checks": [
+          { "context": "ci-ok" },
+          { "context": "DCO" },
+          { "context": "lint-pr-title" }
+        ]
+    }}
+  ]
+}
