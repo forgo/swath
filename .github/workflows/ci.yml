@@ -23,18 +23,23 @@ defaults:
     shell: bash
 
 jobs:
+  # Path filtering applies to PRs only. On push to main everything runs: it's
+  # the post-squash re-verification, and paths-filter's push-mode git diff
+  # can't fetch on a credential-less checkout in a private repo anyway.
   changes:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read # paths-filter lists PR changed files via the API
     outputs:
-      rust: ${{ steps.filter.outputs.rust }}
+      rust: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.rust }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - id: filter
+      - if: github.event_name == 'pull_request'
+        id: filter
         # dorny (original), not the step-security fork: the fork requires a paid
         # subscription on private repos. Revisit when the repo goes public.
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
