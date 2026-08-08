@@ -1,0 +1,18 @@
+# Light pre-commit hooks, run by prek (Rust pre-commit; same config format).
+# Philosophy (ENGINEERING.md §8): hooks catch the obvious fast — CI is the
+# source of truth. Installed by `just setup`; never mandatory.
+repos:
+  - repo: local
+    hooks:
+      - id: fmt-check
+        name: cargo fmt --check
+        entry: just fmt-check
+        language: system
+        pass_filenames: false
+        types: [rust]
+      - id: zizmor
+        name: zizmor (workflow static analysis)
+        entry: zizmor .github
+        language: system
+        pass_filenames: false
+        files: ^\.github/

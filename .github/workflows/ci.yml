@@ -110,11 +110,25 @@ jobs:
           toolchain: "1.95"
       - run: cargo check --workspace
 
+  # Workflow static analysis. Cheap, so it runs unconditionally — it audits the
+  # very file that defines it. Plain output for now: SARIF upload to code
+  # scanning requires a public repo or GHAS; switch when the repo goes public.
+  zizmor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+        with:
+          tool: zizmor@1.29.0
+      - run: zizmor .github
+
   # The single required status check. Green iff every needed job succeeded or
   # was skipped by the path filter; red on any failure, cancellation, or a
   # failed `changes` job (which would silently skip everything downstream).
   ci-ok:
-    needs: [changes, rust-fmt, rust-lint, rust-test, rust-deny, rust-msrv]
+    needs: [changes, rust-fmt, rust-lint, rust-test, rust-deny, rust-msrv, zizmor]
     if: always()
     runs-on: ubuntu-latest
     steps:
