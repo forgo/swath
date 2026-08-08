@@ -73,5 +73,17 @@ zizmor:
 reuse:
     uvx --from 'reuse[charset-normalizer]' reuse lint
 
+# Bring up the local stack (pgstac + MinIO), smoke-check it, tear it down.
+# Grows into the real e2e harness as the binary and viewer land (issues #29+).
+e2e:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    trap 'docker compose down -v' EXIT
+    docker compose up -d --wait
+    docker compose exec -T pgstac psql -qtA -c "select pgstac.get_version();" | grep -E '^[0-9.]+' \
+        && echo "pgstac: migrations present"
+    curl -sf http://localhost:9000/minio/health/live && echo "minio: live"
+    echo "e2e smoke OK"
+
 # The one-command gate: everything CI enforces.
 check: fmt-check lint test deny zizmor reuse
