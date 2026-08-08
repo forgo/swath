@@ -1,0 +1,82 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+    ":semanticCommits",
+    ":dependencyDashboard"
+  ],
+  "description": "One config for Cargo, npm, pip/uv, and GitHub Actions (ENGINEERING.md §5). best-practices includes pinning action digests and config migration.",
+  "minimumReleaseAge": "3 days",
+  "labels": ["dependencies"],
+  "schedule": ["before 9am on monday"],
+  "packageRules": [
+    {
+      "description": "Group all GitHub Actions bumps into one PR",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions"
+    },
+    {
+      "description": "Group Rust dependency bumps",
+      "matchManagers": ["cargo"],
+      "groupName": "rust-dependencies"
+    },
+    {
+      "description": "Group the justfile dev-tool pins",
+      "matchManagers": ["custom.regex"],
+      "matchFileNames": ["justfile"],
+      "groupName": "dev-tools"
+    },
+    {
+      "description": "Security advisories bypass the weekly schedule and cooldown",
+      "matchCategories": ["security"],
+      "schedule": ["at any time"],
+      "minimumReleaseAge": null
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^justfile$/"],
+      "matchStrings": ["nextest_version := \"(?<currentValue>[0-9.]+)\""],
+      "depNameTemplate": "cargo-nextest",
+      "datasourceTemplate": "crate"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^justfile$/"],
+      "matchStrings": ["llvm_cov_version := \"(?<currentValue>[0-9.]+)\""],
+      "depNameTemplate": "cargo-llvm-cov",
+      "datasourceTemplate": "crate"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^justfile$/"],
+      "matchStrings": ["deny_version := \"(?<currentValue>[0-9.]+)\""],
+      "depNameTemplate": "cargo-deny",
+      "datasourceTemplate": "crate"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^justfile$/"],
+      "matchStrings": ["zizmor_version := \"(?<currentValue>[0-9.]+)\""],
+      "depNameTemplate": "zizmor",
+      "datasourceTemplate": "crate"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^justfile$/"],
+      "matchStrings": ["prek_version := \"(?<currentValue>[0-9.]+)\""],
+      "depNameTemplate": "prek",
+      "datasourceTemplate": "crate"
+    },
+    {
+      "customType": "regex",
+      "description": "Pinned stable toolchain in rust-toolchain.toml",
+      "managerFilePatterns": ["/^rust-toolchain\\.toml$/"],
+      "matchStrings": ["channel = \"(?<currentValue>\\d+\\.\\d+(\\.\\d+)?)\""],
+      "depNameTemplate": "rust",
+      "packageNameTemplate": "rust-lang/rust",
+      "datasourceTemplate": "github-releases"
+    }
+  ]
+}
