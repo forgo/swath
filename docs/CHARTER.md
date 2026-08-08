@@ -1,6 +1,8 @@
 # Swath — Project Charter
 
-*Working document. Draft v0.1 — August 2026.*
+*Working document. Draft v0.2 — August 2026. Reconciled with ADRs 0001-0006: Apache-2.0 license,
+pure-Rust core, Web Components + MapLibre frontend, anchor datasets. Where this charter and an ADR
+disagree, the ADR wins; the north-star requirements live in `REQUIREMENTS.md`.*
 
 ---
 
@@ -164,17 +166,21 @@ openEO reference tooling / an OGC API - Processes engine.
 eoAPI (catalog + serve). Each solves a slice; none fuses ingest + a low-latency publish loop + cost-aware
 serving + a single pane. That fusion is ours.
 
-**Stack:**
+**Stack** *(revised per ADRs 0002, 0005, 0006 — the original draft described a Python core and a
+React/deck.gl frontend; superseded):*
 
-- **Core:** Python (where xarray / rio-tiler / TiTiler live) — FastAPI, Pydantic v2, fully typed, async;
-  `uv` + `ruff`. Reach for **Rust (via PyO3)** *only* in the planner's hot path or reprojection kernels,
-  and only after profiling proves the need.
+- **Core:** **pure Rust, single static binary** (`tokio` + `axum`) — the tiler, materialization planner,
+  process compiler, control plane, and trace model are owned Rust IP. Adopt Rust reader/codec crates
+  (`async-geotiff`, `zarrs`, `object_store`); bind projection math (`proj4rs`, PROJ for the long tail);
+  never reimplement GDAL/PROJ. (ADR 0002)
+- **Ingest sidecars:** thin **Python** (`uv` + `ruff`) only for legacy virtual-reference *generation*
+  (VirtualiZarr), staged toward Rust behind one manifest port. (ADR 0006)
 - **Catalog / state:** pgstac (Postgres); object store + Icechunk for cubes.
-- **Frontend:** TypeScript + React + MapLibre GL / deck.gl for the viewer and the x-ray overlay.
+- **Frontend:** TypeScript **Web Components** (no framework) + **MapLibre GL**; deck.gl deferred. (ADR 0005)
 - **Deploy:** one-command local (`docker compose`) and IaC (Terraform / Helm) for cloud — the "stand up a
   real production instance" piece. Designed to layer onto an existing eoAPI/pgstac deployment.
-- **Testing:** pytest + Hypothesis (property-based) for the planner; perceptual-diff snapshots for rendered
-  tiles; the x-ray trace as the assertion layer.
+- **Testing:** property-based tests (`proptest`) for the planner; perceptual-diff snapshots for rendered
+  tiles vs a GDAL oracle; the x-ray trace as the assertion layer.
 
 ## 9. Reference datasets
 
@@ -235,14 +241,20 @@ turns "assemble the tilers" into an actual product.
 
 ## 13. Open decisions
 
-- **License:** MIT now for simplicity; consider **Apache-2.0** before first release for its explicit patent
-  grant (matters for a serious, adoptable platform).
-- **Rust in the hot path:** yes-in-principle, but gated on profiling. Define the benchmark first.
-- **Legacy dataset for the Phase-2 proof:** MODIS (deep HDF-EOS archive) vs. VIIRS (closer analog to the
-  GOES/weather lineage). Decide by which best demonstrates virtualization value.
+Decided since v0.1 (see `docs/decisions/`):
+
+- ~~**License**~~ → **Apache-2.0 with DCO** (ADR 0003).
+- ~~**Rust in the hot path**~~ → superseded by the **pure-Rust core** decision (ADR 0002); the question
+  is no longer "when to add Rust" but "what to adopt vs build vs bind."
+- ~~**Legacy dataset for the Phase-2 proof**~~ → **VIIRS primary, MODIS stretch** (ADR 0004).
+
+Still open:
+
 - **openEO surface:** adopt an existing openEO backend / Processes engine vs. implement a minimal Processes
   subset first. Bias toward composing.
 - **Embedding model for the frontier:** Clay vs. Prithvi vs. AlphaEarth-style — decide when Phase 4 nears.
+- **Extension mechanism** beyond compile-time features (WASM plug-ins vs sidecar RPC) — see
+  `ARCHITECTURE.md` §14/§16.
 
 ## 14. Glossary
 

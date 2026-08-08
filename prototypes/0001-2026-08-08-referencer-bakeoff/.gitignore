@@ -1,0 +1,5 @@
+/target
+/out
+/data
+.venv/
+Cargo.lock

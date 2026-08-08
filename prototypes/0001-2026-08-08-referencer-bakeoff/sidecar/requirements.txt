@@ -1,0 +1,11 @@
+# Python sidecar deps for prototype 0001 (the VirtualiZarr reference generator).
+# Pin versions when you run the bake-off so results are reproducible; recorded in README §7.
+virtualizarr
+# Backends VirtualiZarr uses to scan legacy containers (install what your granule needs):
+h5py          # HDF5 / NetCDF4 (VIIRS VNP09)
+kerchunk      # reference generation backend used by some VirtualiZarr paths
+cfgrib        # GRIB2 (optional; the Rust path uses gribberish instead)
+xarray
+numpy
+# NASA data access for scripts/fetch_sample.sh:
+earthaccess

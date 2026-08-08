@@ -1,0 +1,23 @@
+[package]
+name = "swath-referencer-bakeoff"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Prototype 0001: compare Python (VirtualiZarr) vs pure-Rust virtual-reference generation."
+
+[[bin]]
+name = "swath-referencer-bakeoff"
+path = "src/main.rs"
+
+# Deliberately ZERO external dependencies: the harness is std-only so it builds and runs anywhere,
+# offline, with no supply chain. Format-specific generators are feature-gated; when implementing them,
+# add the real crates here and enable in the matching feature:
+#   grib  -> gribberish
+#   hdf5  -> hdf5-metno
+[dependencies]
+
+[features]
+default = []
+grib = []
+hdf5 = []

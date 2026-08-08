@@ -1,4 +1,15 @@
-# ---- Python ----
+# ---- Rust ----
+target/
+*.profraw
+# Cargo.lock IS committed at the workspace root (binary project); prototype
+# subdirs may ignore their own via local .gitignore.
+# insta pending snapshots (accepted .snap files ARE committed)
+*.snap.new
+# profiling artifacts
+flamegraph.svg
+perf.data*
+
+# ---- Python (uv; uv.lock IS committed) ----
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -7,8 +18,7 @@ build/
 dist/
 .venv/
 venv/
-.env
-.python-version
+.python-version.local
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
@@ -16,16 +26,26 @@ venv/
 htmlcov/
 .hypothesis/
 
-# ---- Node / frontend ----
+# ---- Node / web (pnpm; pnpm-lock.yaml IS committed) ----
 node_modules/
-dist-ssr/
-*.local
 .vite/
+# test artifacts
 coverage/
-.next/
-.turbo/
+lcov.info
+playwright-report/
+test-results/
+.vitest/
 
-# ---- Data & artifacts (never commit imagery/cubes) ----
+# ---- Secrets & local env (never commit) ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# ---- Data & artifacts (never commit imagery/cubes; tiny test fixtures live
+#      under tests/fixtures/ and are force-added deliberately) ----
 *.tif
 *.tiff
 *.nc
@@ -33,9 +53,14 @@ coverage/
 *.h5
 *.zarr/
 *.parquet
+*.grib2
 data/
 tmp/
 scratch/
+
+# ---- Tooling / agents (local state) ----
+.claude/
+.direnv/
 
 # ---- OS / editor ----
 .DS_Store

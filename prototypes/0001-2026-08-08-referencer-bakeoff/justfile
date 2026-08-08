@@ -1,0 +1,33 @@
+set shell := ["bash", "-cu"]
+
+# List available recipes.
+default:
+    @just --list
+
+# Create a Python venv and install the sidecar deps.
+setup:
+    python3 -m venv .venv && . .venv/bin/activate && pip install -r sidecar/requirements.txt
+
+# Download sample granules (VIIRS needs a NASA Earthdata login).
+fetch:
+    bash scripts/fetch_sample.sh
+
+# Build the (zero-dependency) Rust harness.
+build:
+    cargo build
+
+# Generate a manifest with the VirtualiZarr sidecar.
+vz-gen granule out="out/vz.json":
+    mkdir -p out && cargo run --quiet -- gen --with virtualizarr {{granule}} -o {{out}}
+
+# Generate a manifest with the pure-Rust generator (format features on).
+rust-gen granule out="out/rs.json":
+    mkdir -p out && cargo run --quiet --features hdf5,grib -- gen --with rust {{granule}} -o {{out}}
+
+# Compare two manifests for equivalence.
+compare a b:
+    cargo run --quiet -- compare {{a}} {{b}}
+
+# Run both generators on a granule, time them, and compare.
+bakeoff granule:
+    cargo run --quiet --features hdf5,grib -- bakeoff {{granule}}

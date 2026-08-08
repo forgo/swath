@@ -25,10 +25,24 @@ Everything in the platform optimizes and reports this number.
 
 ## Status
 
-Pre-alpha. Design phase. See [`docs/CHARTER.md`](docs/CHARTER.md) for the full vision, architecture,
-build-vs-compose boundary, and roadmap.
+Pre-alpha. Design phase.
+
+## Documentation
+
+Read in this order:
+
+1. [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) — the north star: mission, non-negotiable
+   requirements (R1-R10), success criteria. Changes rarely and deliberately.
+2. [`docs/CHARTER.md`](docs/CHARTER.md) — the full vision: why now, the wedge, pillars, milestones,
+   positioning.
+3. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — ports & adapters, the build/adopt/bind boundary,
+   component model, data flows.
+4. [`docs/ENGINEERING.md`](docs/ENGINEERING.md) — repo standards: toolchains, linting, testing,
+   CI/CD, release, security posture.
+5. [`docs/decisions/`](docs/decisions/) — dated, immutable ADRs recording *why* Swath is shaped
+   this way; [`prototypes/`](prototypes/) holds the dated experiments that produced the evidence.
 
 ## License
 
-MIT (see [`LICENSE`](LICENSE)). Under review -- may move to Apache-2.0 for its explicit patent grant
-before first release.
+Apache-2.0 (see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE)) — chosen for its explicit patent
+grant (ADR 0003). Contributions require DCO sign-off.
