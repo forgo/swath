@@ -32,7 +32,9 @@ jobs:
         with:
           persist-credentials: false
       - id: filter
-        uses: step-security/paths-filter@9098a7821b83402dbe267c0c801e7d580ce74f92 # v4.0.2
+        # dorny (original), not the step-security fork: the fork requires a paid
+        # subscription on private repos. Revisit when the repo goes public.
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
             rust:
