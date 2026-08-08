@@ -1,0 +1,63 @@
+# Scheduled security scanning (ENGINEERING.md §5, issue #7).
+# Nightly RustSec advisories via cargo-deny; a failure files/updates a pinned
+# issue so it can't scroll past unnoticed. Manual dispatch for validation.
+#
+# Deferred until the repo is public (or GHAS): OpenSSF Scorecard, CodeQL (Rust),
+# dependency-review-action on PRs, zizmor SARIF upload — tracked in a dedicated
+# issue; none of them run on a private repo without a paid plan.
+
+name: Security
+
+on:
+  schedule:
+    - cron: "17 5 * * *" # nightly; off the top-of-hour thundering herd
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+        with:
+          tool: cargo-deny@0.20.2
+
+      - name: Check RustSec advisories
+        id: advisories
+        run: |
+          set +e
+          cargo deny check advisories 2>&1 | tee deny-advisories.log
+          echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: File or update advisory issue on failure
+        if: steps.advisories.outputs.exit != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "security: RustSec advisory check failing"
+        run: |
+          body="Nightly \`cargo deny check advisories\` failed on $(date -u +%F).
+
+          \`\`\`
+          $(tail -60 deny-advisories.log)
+          \`\`\`
+
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          existing=$(gh issue list --state open --search "in:title \"$TITLE\"" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$TITLE" --label "area:ci" --body "$body"
+          fi
+
+      - name: Fail the run if advisories failed
+        if: steps.advisories.outputs.exit != '0'
+        run: exit 1
