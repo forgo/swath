@@ -69,5 +69,9 @@ cov:
 zizmor:
     zizmor .github
 
+# License/SPDX compliance (REUSE 3.3; needs uv).
+reuse:
+    uvx --from 'reuse[charset-normalizer]' reuse lint
+
 # The one-command gate: everything CI enforces.
-check: fmt-check lint test deny zizmor
+check: fmt-check lint test deny zizmor reuse

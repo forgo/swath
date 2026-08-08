@@ -1,0 +1,32 @@
+# REUSE 3.3 (ENGINEERING.md §8, issue #14). Source files carry real SPDX
+# headers; docs, configs, and dated prototype records are annotated here in
+# bulk. `just reuse` / the CI job keep the boundary machine-checkable.
+version = 1
+SPDX-PackageName = "swath"
+SPDX-PackageDownloadLocation = "https://github.com/forgo/swath"
+
+[[annotations]]
+path = [
+    "docs/**",
+    "prototypes/**",
+    "**/*.md",
+    "*.md",
+    "NOTICE",
+    ".gitignore",
+    "**/.gitignore",
+    ".pre-commit-config.yaml",
+    "justfile",
+    "**/justfile",
+    "renovate.json",
+    "deny.toml",
+    "Cargo.toml",
+    "Cargo.lock",
+    "**/Cargo.toml",
+    "rust-toolchain.toml",
+    "REUSE.toml",
+    ".claude/settings.json",
+    ".github/**",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Elliott Richerson <elliott.richerson@gmail.com>"
+SPDX-License-Identifier = "Apache-2.0"
