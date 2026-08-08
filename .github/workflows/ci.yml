@@ -132,6 +132,15 @@ jobs:
           files: lcov.info
           fail_ci_if_error: true
 
+  # REUSE/SPDX compliance: the open-core license boundary stays machine-checkable.
+  reuse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: fsfe/reuse-action@676e2d560c9a403aa252096d99fcab3e1132b0f5 # v6.0.0
+
   # Workflow static analysis. Cheap, so it runs unconditionally — it audits the
   # very file that defines it. Plain output for now: SARIF upload to code
   # scanning requires a public repo or GHAS; switch when the repo goes public.
@@ -150,7 +159,7 @@ jobs:
   # was skipped by the path filter; red on any failure, cancellation, or a
   # failed `changes` job (which would silently skip everything downstream).
   ci-ok:
-    needs: [changes, rust-fmt, rust-lint, rust-test, rust-deny, rust-msrv, rust-coverage, zizmor]
+    needs: [changes, rust-fmt, rust-lint, rust-test, rust-deny, rust-msrv, rust-coverage, zizmor, reuse]
     if: always()
     runs-on: ubuntu-latest
     steps:
