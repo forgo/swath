@@ -1,0 +1,45 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+.python-version
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.hypothesis/
+
+# ---- Node / frontend ----
+node_modules/
+dist-ssr/
+*.local
+.vite/
+coverage/
+.next/
+.turbo/
+
+# ---- Data & artifacts (never commit imagery/cubes) ----
+*.tif
+*.tiff
+*.nc
+*.hdf
+*.h5
+*.zarr/
+*.parquet
+data/
+tmp/
+scratch/
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
