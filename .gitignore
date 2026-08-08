@@ -58,8 +58,9 @@ data/
 tmp/
 scratch/
 
-# ---- Tooling / agents (local state) ----
-.claude/
+# ---- Tooling / agents (shared settings ARE committed; local state is not) ----
+.claude/*
+!.claude/settings.json
 .direnv/
 
 # ---- OS / editor ----
