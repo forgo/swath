@@ -1,0 +1,37 @@
+# cargo-deny configuration (ENGINEERING.md §2/§5, issue #5).
+# Gates: security advisories, license allowlist, dependency bans, registry sources.
+# Runs on every PR (`just deny`) and nightly (security.yml files issues on new advisories).
+
+[graph]
+all-features = true
+
+[advisories]
+# RustSec advisories: any advisory or yanked crate fails the gate.
+yanked = "deny"
+
+[licenses]
+# Permissive-only allowlist (Apache-2.0 project, ADR 0003). Extend deliberately,
+# per-license, when a dependency demands it — never with a blanket "OR later".
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.93
+# The allowlist is aspirational until dependencies arrive; don't nag about
+# licenses no current dep uses.
+unused-allowed-license = "allow"
+
+[bans]
+# Duplicate versions warn (tightened later); wildcard requirements are forbidden.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
