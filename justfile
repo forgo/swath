@@ -19,11 +19,14 @@ default:
 setup:
     #!/usr/bin/env bash
     set -euo pipefail
+    # --force: we only call install() when the binary is provably absent, but a
+    # restored CI cache can contain binstall's .crates.toml (claiming "already
+    # installed") without the binaries — binstall would otherwise skip.
     install() { # name version
         if command -v cargo-binstall >/dev/null; then
-            cargo binstall --no-confirm --version "$2" "$1"
+            cargo binstall --no-confirm --force --version "$2" "$1"
         else
-            cargo install --locked --version "$2" "$1"
+            cargo install --locked --force --version "$2" "$1"
         fi
     }
     command -v cargo-nextest  >/dev/null || install cargo-nextest  "{{nextest_version}}"
