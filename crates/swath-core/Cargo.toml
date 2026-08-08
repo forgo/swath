@@ -1,0 +1,15 @@
+[package]
+name = "swath-core"
+description = "Swath domain core: types, port traits, planner, compiler + IR, trace model. No I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

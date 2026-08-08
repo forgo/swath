@@ -1,0 +1,48 @@
+# Swath workspace root. Standards: docs/ENGINEERING.md §2 (ADR 0007).
+# Crates inherit shared metadata/lints via [workspace.package] / [workspace.lints];
+# per-crate Cargo.toml stays boilerplate-free.
+
+[workspace]
+resolver = "3"
+members = ["crates/swath-core"]
+# Prototypes are standalone, dated experiments — never workspace members.
+exclude = ["prototypes/*"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "Apache-2.0"
+repository = "https://github.com/forgo/swath"
+authors = ["Elliott Richerson <elliott.richerson@gmail.com>"]
+
+# Shared dependency versions live here as crates adopt them (`dep = { workspace = true }`).
+[workspace.dependencies]
+
+[workspace.lints.rust]
+unsafe_code = "warn"       # visible and justified; scopes Miri to unsafe-bearing crates
+unreachable_pub = "warn"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# Pedantic-with-allows (uv-style). The allow-list below is grown honestly: an
+# entry is added only when a lint produces a real false positive here, with the
+# reasoning kept in this file. Never enable `restriction` or `nursery` wholesale.
+pedantic = { level = "warn", priority = -1 }
+# -- pedantic allows: documented false-positive patterns --
+module_name_repetitions = "allow" # port/adapter naming (e.g. catalog::CatalogError) is deliberate
+missing_errors_doc = "allow"      # error semantics live on the error types, not every fn
+missing_panics_doc = "allow"      # asserts on internal invariants; public APIs must not panic anyway
+must_use_candidate = "allow"      # too noisy on builder-style domain types
+# -- targeted restriction lints --
+print_stdout = "warn"             # library/server code logs via tracing, never prints
+print_stderr = "warn"
+dbg_macro = "warn"
+exit = "warn"
+get_unwrap = "warn"
+rc_buffer = "warn"
+rc_mutex = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

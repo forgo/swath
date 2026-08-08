@@ -1,0 +1,5 @@
+# Pinned stable toolchain (ENGINEERING.md §2). Renovate bumps this; MSRV in
+# [workspace.package] rust-version trails it by ~2 releases.
+[toolchain]
+channel = "1.97.1"
+components = ["clippy", "rustfmt"]
