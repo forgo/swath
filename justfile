@@ -69,9 +69,25 @@ cov:
 zizmor:
     zizmor .github
 
-# License/SPDX compliance (REUSE 3.3; needs uv).
+# License/SPDX compliance (REUSE 3.3; needs uv). Lints exactly the files git
+# tracks — reuse's own walker trips over pnpm's node_modules/.bin shims even
+# though they're gitignored (CI's reuse job lints a clean checkout, same set).
 reuse:
-    uvx --from 'reuse[charset-normalizer]' reuse lint
+    git ls-files -z | xargs -0 uvx --from 'reuse[charset-normalizer]' reuse lint-file
+
+# --- web/ (pnpm; see web/package.json scripts) ---
+
+# Install web deps + the Playwright chromium the browser tests run in.
+setup-web:
+    cd web && pnpm install --frozen-lockfile && pnpm exec playwright install chromium
+
+# Biome lint/format check + TypeScript typecheck.
+lint-web:
+    cd web && pnpm run lint && pnpm run typecheck
+
+# Vitest Browser Mode (real chromium — Custom Elements + WebGL are untestable in jsdom).
+test-web:
+    cd web && pnpm run test
 
 # Bring up the local stack (pgstac + MinIO), smoke-check it, tear it down.
 # Grows into the real e2e harness as the binary and viewer land (issues #29+).

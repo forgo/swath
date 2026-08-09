@@ -1,0 +1,29 @@
+{
+  "name": "@swath/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Swath frontend: vanilla Web Components + MapLibre GL (ADR 0005). No framework.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "pnpm@11.20.0",
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": ">=24",
+      "onFail": "error"
+    }
+  },
+  "scripts": {
+    "lint": "biome ci .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.7",
+    "@vitest/browser-playwright": "4.1.10",
+    "playwright": "1.62.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

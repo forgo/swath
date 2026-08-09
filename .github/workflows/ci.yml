@@ -34,6 +34,7 @@ jobs:
     outputs:
       rust: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.rust }}
       stack: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.stack }}
+      web: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.web }}
     steps:
       - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -56,6 +57,10 @@ jobs:
               - '.github/**'
             stack:
               - 'docker-compose.yml'
+              - 'justfile'
+              - '.github/**'
+            web:
+              - 'web/**'
               - 'justfile'
               - '.github/**'
 
@@ -137,6 +142,31 @@ jobs:
           files: lcov.info
           fail_ci_if_error: true
 
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install chromium --with-deps
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm run test
+
   # Local-stack smoke: compose up (pgstac + MinIO), health + migration checks,
   # teardown. Grows into the real e2e harness as the binary/viewer land.
   e2e:
@@ -179,7 +209,7 @@ jobs:
   # was skipped by the path filter; red on any failure, cancellation, or a
   # failed `changes` job (which would silently skip everything downstream).
   ci-ok:
-    needs: [changes, rust-fmt, rust-lint, rust-test, rust-deny, rust-msrv, rust-coverage, zizmor, reuse, e2e]
+    needs: [changes, rust-fmt, rust-lint, rust-test, rust-deny, rust-msrv, rust-coverage, zizmor, reuse, e2e, web]
     if: always()
     runs-on: ubuntu-latest
     steps:
