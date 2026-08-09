@@ -1,0 +1,23 @@
+# uv workspace root for Swath's Python sidecars (ENGINEERING.md §4, ADR 0006).
+# Thin, ingest-time-only Python: anything serve-time is Rust. Shared lint/type
+# config lives here; packages under sidecars/.
+
+[tool.uv.workspace]
+members = ["sidecars/*"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+# ruff 0.16+ defaults are broad; add imports, security, naive-datetime bans
+# (ingest handles acquisition timestamps), pathlib, pytest style, simplify.
+extend-select = ["I", "S", "DTZ", "PTH", "PT", "SIM", "PL", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# asserts are the point of tests
+"**/tests/**" = ["S101"]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.13"

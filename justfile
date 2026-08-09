@@ -89,6 +89,25 @@ zizmor:
 reuse:
     git ls-files -z | xargs -0 uvx --from 'reuse[charset-normalizer]' reuse lint-file
 
+# --- python/ (uv workspace; ingest sidecars only, ADR 0006) ---
+
+# Sync the python workspace (all packages + dev groups).
+setup-py:
+    cd python && uv sync --all-packages
+
+# ruff lint + format check + pyright (strict).
+lint-py:
+    cd python && uv run ruff check . && uv run ruff format --check . && uv run pyright
+
+# pytest (hypothesis property tests included).
+test-py:
+    cd python && uv run pytest -q
+
+# Dependency vulnerability scan of the locked python graph.
+audit-py:
+    cd python && uv export --frozen --no-emit-workspace --format requirements-txt \
+        | uvx pip-audit -r /dev/stdin --disable-pip
+
 # --- web/ (pnpm; see web/package.json scripts) ---
 
 # Install web deps + the Playwright chromium the browser tests run in.
