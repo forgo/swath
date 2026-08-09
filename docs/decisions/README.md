@@ -16,5 +16,6 @@ that produced the evidence).
 | 0003 | 2026-08-08 | License: Apache-2.0 with DCO; defer CLA | Accepted |
 | 0004 | 2026-08-08 | Anchor datasets: HLS (clean), VIIRS (legacy-primary), MODIS (stretch) | Accepted |
 | 0005 | 2026-08-08 | Frontend: Web Components + MapLibre GL; no framework/deck.gl | Accepted |
-| 0006 | 2026-08-08 | Legacy referencer: staged Python→Rust behind one manifest port | Accepted (pending prototype 0001) |
+| 0006 | 2026-08-08 | Legacy referencer: staged Python→Rust behind one manifest port | Accepted (confirmed by prototype 0001) |
 | 0007 | 2026-08-08 | Engineering standards & CI/CD foundation (see `docs/ENGINEERING.md`) | Accepted |
+| 0008 | 2026-08-08 | Legacy-primary dataset: VNP09GA — VNP09 swath is HDF4 (amends 0004) | Accepted |

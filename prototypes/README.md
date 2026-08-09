@@ -26,7 +26,7 @@ prototypes/NNNN-YYYY-MM-DD-short-name/
 
 | # | Date | Prototype | Question it settles | Status |
 |---|------|-----------|---------------------|--------|
-| 0001 | 2026-08-08 | referencer-bakeoff | Python (VirtualiZarr) vs pure-Rust for legacy virtual-reference generation | In progress |
+| 0001 | 2026-08-08 | referencer-bakeoff | Python (VirtualiZarr) vs pure-Rust for legacy virtual-reference generation | Concluded 2026-08-08 → ADR 0006 confirmed, ADR 0008 |
 
 ## Template
 

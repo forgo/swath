@@ -1,11 +1,12 @@
 # Python sidecar deps for prototype 0001 (the VirtualiZarr reference generator).
-# Pin versions when you run the bake-off so results are reproducible; recorded in README §7.
-virtualizarr
-# Backends VirtualiZarr uses to scan legacy containers (install what your granule needs):
-h5py          # HDF5 / NetCDF4 (VIIRS VNP09)
-kerchunk      # reference generation backend used by some VirtualiZarr paths
-cfgrib        # GRIB2 (optional; the Rust path uses gribberish instead)
-xarray
-numpy
+# PINNED as run for the recorded bake-off results (README §7, 2026-08-08) so the
+# results stay reproducible. The prototype is concluded; do not bump casually.
+virtualizarr==2.7.3
+h5py==3.16.0          # HDF5 / NetCDF4 (VIIRS VNP09GA)
+kerchunk==0.2.10      # GRIB2 reference scanner (scan_grib)
+cfgrib==0.9.15.1      # GRIB2 decoding for the reference path
+eccodes==2.47.0
+xarray==2026.7.0
+numpy==2.5.1
 # NASA data access for scripts/fetch_sample.sh:
-earthaccess
+earthaccess==0.18.0
