@@ -1,0 +1,16 @@
+[package]
+name = "swath-testkit"
+description = "Test-only utilities: perceptual image diff against the GDAL/rio-tiler oracle (never shipped)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+image = { workspace = true }
+
+[lints]
+workspace = true

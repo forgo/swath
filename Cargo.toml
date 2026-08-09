@@ -4,7 +4,7 @@
 
 [workspace]
 resolver = "3"
-members = ["crates/swath-core"]
+members = ["crates/swath-core", "crates/swath-testkit"]
 # Prototypes are standalone, dated experiments — never workspace members.
 exclude = ["prototypes/*"]
 
@@ -18,6 +18,10 @@ authors = ["Elliott Richerson <elliott.richerson@gmail.com>"]
 
 # Shared dependency versions live here as crates adopt them (`dep = { workspace = true }`).
 [workspace.dependencies]
+# PNG decode/encode only — the perceptual-diff oracle (issue #19) and, later,
+# the tile encoder. Default features off: every extra codec is supply-chain
+# surface the license gate (deny.toml) must then carry.
+image = { version = "0.25.8", default-features = false, features = ["png"] }
 
 [workspace.lints.rust]
 unsafe_code = "warn"       # visible and justified; scopes Miri to unsafe-bearing crates
