@@ -148,6 +148,9 @@ pub struct CatalogLayer {
     pub resampling: swath_render::Resampling,
     /// Tile side length in pixels.
     pub tile_size: u32,
+    /// The layer's materialization budget (#37) — the planner's knobs;
+    /// defaults reproduce pre-planner behavior.
+    pub budget: swath_core::planner::Budget,
 }
 
 /// The catalog-backed [`LayerProvider`]: static identities (compiled from
@@ -246,6 +249,7 @@ impl<C: Catalog> LayerProvider for CatalogLayers<C> {
                 plan: entry.plan.clone(),
                 resampling: entry.resampling,
                 tile_size: entry.tile_size,
+                budget: entry.budget.clone(),
             },
             ingested_at: granule.ingested_at.clone(),
             granule_id: Some(granule.id.to_string()),
@@ -366,6 +370,7 @@ mod tests {
                 plan,
                 resampling: Resampling::Bilinear(NodataPolicy::ExcludeRenormalize),
                 tile_size: 256,
+                budget: swath_core::planner::Budget::default(),
             }],
         )
     }

@@ -130,45 +130,11 @@ pub(crate) fn source_extent(
     Ok(any.then_some(ext))
 }
 
-/// GDAL's overview oversampling threshold (`GDALBandGetBestOverviewLevel2`):
-/// an overview is eligible when its decimation factor is at most the
-/// desired downsampling ratio times this slack. The slack matters in
-/// practice — a z11 tile of a 30 m source works out to a desired ratio of
-/// ~1.97, and GDAL (hence rio-tiler, observed on the committed goldens)
-/// still serves the ×2 overview there; a threshold of 1.0 would refuse it
-/// and diverge from the oracle.
-const OVERSAMPLING_THRESHOLD: f64 = 1.2;
-
-/// Picks the overview to read for a warp of `ext` (fractional full-res
-/// source extent of the target boundary) onto a `dst_w × dst_h` grid:
-/// the **coarsest** factor in `overview_levels` no greater than the
-/// desired downsampling ratio × [`OVERSAMPLING_THRESHOLD`] — the standard
-/// GDAL selection rule (an overview whose resolution still covers the
-/// target, with GDAL's slack). The desired ratio is the *smaller* of the
-/// per-axis ratios, so an axis that decimates less is never starved of
-/// resolution. `None` (full resolution) when the warp doesn't decimate
-/// enough for any level, or the asset has no overviews.
-pub(crate) fn select_overview(
-    overview_levels: &[u32],
-    ext: &SourceExtent,
-    dst_w: u32,
-    dst_h: u32,
-) -> Option<u32> {
-    if dst_w == 0 || dst_h == 0 {
-        return None;
-    }
-    let ratio_x = (ext.max_col - ext.min_col) / f64::from(dst_w);
-    let ratio_y = (ext.max_row - ext.min_row) / f64::from(dst_h);
-    let desired = ratio_x.min(ratio_y);
-    if !desired.is_finite() {
-        return None;
-    }
-    overview_levels
-        .iter()
-        .copied()
-        .filter(|&f| f > 1 && f64::from(f) <= desired * OVERSAMPLING_THRESHOLD)
-        .max()
-}
+// NOTE: the overview selection rule (#38's `select_overview` and its 1.2
+// oversampling threshold) was re-homed to `swath_core::planner` by #37:
+// eligibility is now the planner's overview-candidate rule, with the
+// threshold promoted to the `Budget::overview_oversample` knob. This
+// module keeps the pure window geometry the tiler feeds the planner.
 
 /// Expands the fractional pixel bounds by `margin`, snaps outward to whole
 /// pixels, and intersects with the raster grid.
@@ -303,65 +269,9 @@ mod tests {
         assert_eq!(source_window(&g, &info(), &NoDomain, 1).unwrap(), None);
     }
 
-    #[test]
-    fn overview_selection_follows_the_gdal_rule() {
-        use super::{SourceExtent, select_overview};
-
-        // A z11-like extent: ~505 source pixels per 256-pixel axis, i.e. a
-        // desired ratio of ~1.97 — inside GDAL's 1.2 oversampling slack for
-        // the x2 overview (the calibrated case; see OVERSAMPLING_THRESHOLD).
-        let z11 = SourceExtent {
-            min_col: 194.0,
-            max_col: 699.0,
-            min_row: -126.0,
-            max_row: 379.0,
-        };
-        assert_eq!(select_overview(&[2], &z11, 256, 256), Some(2));
-        // Coarser levels are chosen when eligible, and the coarsest wins.
-        let deep = SourceExtent {
-            min_col: 0.0,
-            max_col: 2048.0,
-            min_row: 0.0,
-            max_row: 2048.0,
-        };
-        assert_eq!(select_overview(&[2, 4, 8], &deep, 256, 256), Some(8));
-        // A z12-like non-decimating warp (~0.99 ratio) stays full-res.
-        let z12 = SourceExtent {
-            min_col: 0.0,
-            max_col: 254.0,
-            min_row: 0.0,
-            max_row: 254.0,
-        };
-        assert_eq!(select_overview(&[2], &z12, 256, 256), None);
-        // Just inside the slack (ratio 1.7, 1.7 * 1.2 = 2.04 >= 2)…
-        let inside = SourceExtent {
-            min_col: 0.0,
-            max_col: 1.7 * 256.0,
-            min_row: 0.0,
-            max_row: 1.7 * 256.0,
-        };
-        assert_eq!(select_overview(&[2], &inside, 256, 256), Some(2));
-        // …and just outside it (ratio 1.6, 1.6 * 1.2 = 1.92 < 2).
-        let outside = SourceExtent {
-            min_col: 0.0,
-            max_col: 1.6 * 256.0,
-            min_row: 0.0,
-            max_row: 1.6 * 256.0,
-        };
-        assert_eq!(select_overview(&[2], &outside, 256, 256), None);
-        // No overviews, or degenerate targets: full resolution.
-        assert_eq!(select_overview(&[], &deep, 256, 256), None);
-        assert_eq!(select_overview(&[2], &deep, 0, 256), None);
-        // The limiting axis is the *less* decimating one: an axis at ratio
-        // ~1 vetoes the overview even if the other decimates by 4.
-        let anisotropic = SourceExtent {
-            min_col: 0.0,
-            max_col: 256.0,
-            min_row: 0.0,
-            max_row: 1024.0,
-        };
-        assert_eq!(select_overview(&[2], &anisotropic, 256, 256), None);
-    }
+    // The overview selection truth table moved to `swath_core::planner`
+    // with the rule itself (#37) — see
+    // `planner::tests::overview_selection_follows_the_gdal_rule`.
 
     #[test]
     fn singular_geotransform_is_an_error() {

@@ -52,8 +52,11 @@ pub const DEFAULT_OVERVIEW_OVERSAMPLE: f64 = 1.2;
 /// The v1 per-layer budget: three explicit knobs trading storage against
 /// latency (spec §1 documents each; §16.4 resolved — knobs + transparent
 /// estimates, no learned model in v1).
+///
+/// Deliberately **not** `#[non_exhaustive]`: configuration layers build
+/// budgets field-by-field (`..Budget::default()`), and a new knob *should*
+/// be a visible, reviewed change at every construction site.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[non_exhaustive]
 pub struct Budget {
     /// Consult the tile cache and write fresh renders through (`true`,
     /// the default) — or opt this layer out entirely (`false`: no probe,

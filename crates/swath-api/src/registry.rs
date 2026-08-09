@@ -18,6 +18,7 @@
 
 use std::collections::BTreeMap;
 
+use swath_core::planner::Budget;
 use swath_core::raster::AssetRef;
 use swath_core::tile::TileCoord;
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
@@ -41,6 +42,9 @@ pub struct Layer {
     pub resampling: Resampling,
     /// Tile side length in pixels.
     pub tile_size: u32,
+    /// The layer's materialization budget (#37) — the planner's knobs;
+    /// defaults reproduce pre-planner behavior.
+    pub budget: Budget,
 }
 
 impl Layer {
@@ -54,6 +58,7 @@ impl Layer {
             self.tile_size,
             self.resampling,
         )
+        .with_budget(self.budget.clone())
     }
 }
 
@@ -140,6 +145,7 @@ impl LayerRegistry {
             ),
             resampling: BILINEAR,
             tile_size: 256,
+            budget: Budget::default(),
         };
 
         let ndvi = Layer {
@@ -170,6 +176,7 @@ impl LayerRegistry {
             ),
             resampling: BILINEAR,
             tile_size: 256,
+            budget: Budget::default(),
         };
 
         Self::new([truecolor, ndvi])

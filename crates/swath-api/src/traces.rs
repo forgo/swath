@@ -263,6 +263,10 @@ mod tests {
                 total_ms: 18,
             },
             ingest_to_pixel_ms: None,
+            // Synthetic direct-publish trace: no planner ran. Planned
+            // renders carry `Some(PlanTrace)`; the wire shape of the
+            // plan payload is pinned in swath-core (trace.rs).
+            plan: None,
         }
     }
 
@@ -300,6 +304,7 @@ mod tests {
                     "total_ms": 18,
                 },
                 "ingest_to_pixel_ms": null,
+                "plan": null,
             },
         });
         assert_eq!(serde_json::to_value(&envelope).unwrap(), expected);
@@ -328,6 +333,7 @@ mod tests {
                 ..Timings::default()
             },
             ingest_to_pixel_ms: None,
+            plan: None,
         };
         let envelope = Envelope {
             tile: "12/848/1561",
@@ -353,6 +359,7 @@ mod tests {
                     "total_ms": 1,
                 },
                 "ingest_to_pixel_ms": null,
+                "plan": null,
             },
         });
         assert_eq!(serde_json::to_value(&envelope).unwrap(), expected);
@@ -382,6 +389,45 @@ mod tests {
         // Provenance/bytes stay real-read fields, exactly as in a live
         // render — nothing else about the envelope changes shape.
         assert_eq!(json["trace"]["bytes_read"], 131_072);
+    }
+
+    /// The planner payload on the wire (#37): a planned render's
+    /// envelope carries `trace.plan` — chosen strategy + every candidate
+    /// with estimate/admissibility/reason — verbatim (exact shape pinned
+    /// in swath-core; this pins that the envelope forwards it untouched
+    /// and that candidates reuse the decision tag vocabulary).
+    #[test]
+    fn plan_payload_rides_the_envelope() {
+        use std::borrow::Cow;
+        use swath_core::planner::{CandidateTrace, PlannedStrategy};
+        use swath_core::trace::PlanTrace;
+
+        let mut trace = sample_trace();
+        trace.plan = Some(PlanTrace {
+            chosen: PlannedStrategy::Live,
+            considered: vec![CandidateTrace {
+                strategy: PlannedStrategy::Live,
+                estimated_cost_bytes: 510_050,
+                admissible: true,
+                reason: Cow::Borrowed("full-resolution read"),
+            }],
+        });
+        let envelope = Envelope {
+            tile: "12/848/1561",
+            layer: "truecolor",
+            trace: &trace,
+        };
+        let json = serde_json::to_value(&envelope).unwrap();
+        assert_eq!(json["trace"]["plan"]["chosen"], serde_json::json!("live"));
+        assert_eq!(
+            json["trace"]["plan"]["considered"][0],
+            serde_json::json!({
+                "strategy": "live",
+                "estimated_cost_bytes": 510_050,
+                "admissible": true,
+                "reason": "full-resolution read",
+            })
+        );
     }
 
     /// Publishing to a bus nobody subscribed to is a no-op, not an error

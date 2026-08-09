@@ -426,12 +426,22 @@ async fn trace_json_schema_matches_the_pinned_contract() {
             "crs_to",
             "decision",
             "ingest_to_pixel_ms",
+            "plan",
             "provenance",
             "source",
             "sources",
             "timings",
         ],
         "Trace JSON keys drifted from the pinned contract (swath-core trace.rs)"
+    );
+
+    // The plan payload (#37): chosen + all three candidates, each with
+    // estimate/admissibility/reason.
+    assert_eq!(sorted_keys(&json["plan"]), ["chosen", "considered"]);
+    assert_eq!(json["plan"]["considered"].as_array().map(Vec::len), Some(3));
+    assert_eq!(
+        sorted_keys(&json["plan"]["considered"][0]),
+        ["admissible", "estimated_cost_bytes", "reason", "strategy"]
     );
 
     assert_eq!(
