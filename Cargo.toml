@@ -8,6 +8,7 @@ members = [
     "crates/adapters/swath-reproject-proj4rs",
     "crates/adapters/swath-source-cog",
     "crates/swath-core",
+    "crates/swath-render",
     "crates/swath-testkit",
 ]
 # Prototypes are standalone, dated experiments — never workspace members.

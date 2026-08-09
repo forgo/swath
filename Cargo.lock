@@ -1102,6 +1102,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "swath-render"
+version = "0.0.0"
+dependencies = [
+ "object_store",
+ "proptest",
+ "swath-core",
+ "swath-reproject-proj4rs",
+ "swath-source-cog",
+ "swath-testkit",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "swath-reproject-proj4rs"
 version = "0.0.0"
 dependencies = [
