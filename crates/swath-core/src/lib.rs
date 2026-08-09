@@ -13,6 +13,8 @@
 //! signatures; it depends on no executor
 //! ([ARCHITECTURE.md §5–6, §9](https://github.com/forgo/swath/blob/main/docs/ARCHITECTURE.md)).
 //!
+//! - [`cache`] — the `TileCache` port and the content-derived `TileKey`
+//!   (ARCHITECTURE.md §10)
 //! - [`catalog`] — Dataset/Granule/Layer domain, the `Catalog` port, and the
 //!   lossless STAC converters (REQUIREMENTS.md R2/R5)
 //! - [`events`] — the `EventSource` port: granule-arrival announcements
@@ -25,6 +27,7 @@
 //! - [`trace`] — the per-render x-ray record (REQUIREMENTS.md R4)
 //! - [`error`] — the crate's small invariant-violation taxonomy
 
+pub mod cache;
 pub mod catalog;
 pub mod crs;
 pub mod error;
