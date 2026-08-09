@@ -3,7 +3,9 @@
 
 //! The ingest orchestrator's registration step (ARCHITECTURE.md §5/§8,
 //! REQUIREMENTS.md R1): a granule event becomes a catalog upsert, stamped
-//! with its ingest time.
+//! with its ingest time. Also home of the [`IngestReferencer`] port
+//! (ADR 0006): legacy granule → [`VirtualManifest`], the generation half of
+//! the legacy path (the manifest model itself lives in [`crate::manifest`]).
 //!
 //! Pure port composition — this module awaits futures the [`Catalog`] port
 //! defines but performs no I/O of its own and reads no clock (the ingest
@@ -28,8 +30,73 @@
 //!   §3), and any queueing delay between observation and this upsert is
 //!   ingest latency the metric must include, not hide.
 
+use std::path::Path;
+
 use crate::catalog::{Catalog, CatalogError, Granule};
 use crate::events::GranuleEvent;
+use crate::manifest::VirtualManifest;
+
+/// What can go wrong generating virtual references for a legacy granule.
+///
+/// The port's error contract, defined in the core so consumers match on
+/// semantics, not adapter internals (same pattern as
+/// [`EventError`](crate::events::EventError)). The taxonomy separates "this
+/// generator does not do that" from "this granule is broken" from "the
+/// machine failed" — consumers route the first to the fallback/conformance
+/// story (ADR 0006), log the second per granule, and retry the third.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum ReferencerError {
+    /// The granule is readable but uses something the generator deliberately
+    /// does not map (an unrecognized extension, an exotic/big-endian dtype,
+    /// an unknown projection). A hard, honest error — never a guessed
+    /// manifest (prototype 0001 §7).
+    #[error("unsupported by this referencer: {detail}")]
+    Unsupported {
+        /// What was encountered, naming the offending array/feature.
+        detail: String,
+    },
+
+    /// The granule could not be understood at all (not a valid container,
+    /// corrupt structure, missing required metadata).
+    #[error("malformed granule: {detail}")]
+    Malformed {
+        /// What was wrong, naming the offending granule/structure.
+        detail: String,
+    },
+
+    /// The underlying filesystem/library machinery failed.
+    #[error("referencer backend failure: {detail}")]
+    Backend {
+        /// What was being attempted.
+        detail: String,
+        /// The underlying error.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
+
+/// The virtual-reference generation port (ADR 0006): a legacy granule file
+/// becomes a [`VirtualManifest`]. Implemented by generator crates
+/// (`swath-referencer`, pure Rust, is production; the Python `VirtualiZarr`
+/// sidecar implements the same contract as the conformance reference);
+/// consumed by ingest adapters and the CLI.
+///
+/// Synchronous and dyn-compatible, like
+/// [`Reproject`](crate::reproject::Reproject): generation is a local
+/// metadata walk (chunk indexes, not pixel data) and the consumers hold
+/// generators behind `dyn` without becoming generic.
+pub trait IngestReferencer: Send + Sync {
+    /// Generates the virtual manifest for one granule file. The manifest's
+    /// chunk `path`s reference `granule` as given (the caller controls
+    /// whether that is relative or absolute).
+    ///
+    /// # Errors
+    ///
+    /// A [`ReferencerError`] per the taxonomy above; a partial manifest is
+    /// never returned.
+    fn generate(&self, granule: &Path) -> Result<VirtualManifest, ReferencerError>;
+}
 
 /// Registers one arrived granule: stamps `ingested_at` from the event's
 /// arrival time and upserts it through the catalog port. Returns the granule

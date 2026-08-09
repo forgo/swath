@@ -19,6 +19,9 @@
 //!   lossless STAC converters (REQUIREMENTS.md R2/R5)
 //! - [`events`] — the `EventSource` port: granule-arrival announcements
 //! - [`ingest`] — the ingest orchestrator's registration step (REQUIREMENTS.md R1)
+//!   and the `IngestReferencer` port (ADR 0006)
+//! - [`manifest`] — virtual-reference manifest schema v1, the port contract
+//!   (ADR 0006), plus the generator-equivalence check
 //! - [`tile`] — quadtree tile addressing + `WebMercatorQuad` TMS math
 //! - [`crs`] — CRS identity (EPSG codes; projection math is an adapter concern)
 //! - [`raster`] — raster metadata, pixel windows, asset references
@@ -33,6 +36,7 @@ pub mod crs;
 pub mod error;
 pub mod events;
 pub mod ingest;
+pub mod manifest;
 pub mod raster;
 pub mod reproject;
 pub mod source;
