@@ -374,6 +374,13 @@ async fn describe_bands<'a, S: RasterSource>(
 /// in declaration order (`None` when the band's transform domain or
 /// raster misses the tile) — the pure geometry both the planner's
 /// availability and the reads are built from, computed once.
+#[allow(
+    clippy::result_large_err,
+    reason = "TileError is deliberately diagnostic-rich (MixedCrs carries both \
+              CRSs, bands, and assets); these helpers run once per render on \
+              an error path, and boxing would obscure the taxonomy. The async \
+              render fns return the same type; the lint only sees sync fns."
+)]
 fn band_extents(
     bands: &[BandAsset<'_>],
     geometry: &RenderGeometry,
@@ -394,6 +401,13 @@ fn band_extents(
 /// or the refusal as an error. The probe handed to the render engine is
 /// never a hit (`render_tile_cached` serves hits without rendering), so
 /// the planner cannot choose `CacheHit` here.
+#[allow(
+    clippy::result_large_err,
+    reason = "TileError is deliberately diagnostic-rich (MixedCrs carries both \
+              CRSs, bands, and assets); these helpers run once per render on \
+              an error path, and boxing would obscure the taxonomy. The async \
+              render fns return the same type; the lint only sees sync fns."
+)]
 fn planned_factor(planned: &Plan) -> Result<Option<u32>, TileError> {
     match planned.strategy {
         PlanChoice::Overview { factor } => Ok(Some(factor)),
