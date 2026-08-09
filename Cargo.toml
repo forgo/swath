@@ -22,6 +22,14 @@ authors = ["Elliott Richerson <elliott.richerson@gmail.com>"]
 # the tile encoder. Default features off: every extra codec is supply-chain
 # surface the license gate (deny.toml) must then carry.
 image = { version = "0.25.8", default-features = false, features = ["png"] }
+# Trace model serialization (ARCHITECTURE.md §9): the SSE stream and the test
+# suite both consume the same JSON shape.
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.145" }
+# Error taxonomy derive (ENGINEERING.md adopt list).
+thiserror = { version = "2.0.17" }
+# Property tests (ENGINEERING.md §2 testing stack). Dev-dependency only.
+proptest = { version = "1.8.0" }
 
 [workspace.lints.rust]
 unsafe_code = "warn"       # visible and justified; scopes Miri to unsafe-bearing crates
