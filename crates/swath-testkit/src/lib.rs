@@ -228,6 +228,50 @@ mod tests {
     }
 
     #[test]
+    fn errors_render_and_chain_usefully() {
+        use std::error::Error as _;
+
+        let decode = super::load_png(std::path::Path::new("/nonexistent/oracle.png"))
+            .expect_err("missing file");
+        assert!(
+            decode
+                .to_string()
+                .contains("failed to load /nonexistent/oracle.png")
+        );
+        assert!(decode.source().is_some());
+
+        let mismatch = DiffError::DimensionMismatch {
+            a: (256, 256),
+            b: (256, 128),
+        };
+        assert_eq!(
+            mismatch.to_string(),
+            "dimension mismatch: 256x256 vs 256x128"
+        );
+        assert!(mismatch.source().is_none());
+    }
+
+    #[test]
+    fn report_display_summarizes_the_comparison() {
+        let a = gradient(4, 4);
+        let report = diff(&a, &a.clone()).expect("same dimensions");
+        let rendered = report.to_string();
+        assert!(rendered.contains("dimensions:            4x4"));
+        assert!(rendered.contains("max |channel diff|:    0"));
+        assert!(rendered.contains("mean |channel diff|:   0.000000"));
+    }
+
+    #[test]
+    fn zero_pixel_images_compare_as_equal() {
+        let a = RgbaImage::new(0, 0);
+        let report = diff(&a, &RgbaImage::new(0, 0)).expect("same dimensions");
+        assert_eq!(report.total_pixels(), 0);
+        assert!((report.mean_abs_diff - 0.0).abs() < f64::EPSILON);
+        assert!((report.pct_pixels_exceeding_tolerance(0) - 0.0).abs() < f64::EPSILON);
+        assert!(report.passes(&DiffPolicy::default()));
+    }
+
+    #[test]
     fn identical_images_pass_with_zero_tolerance() {
         let a = gradient(64, 48);
         let report = diff(&a, &a.clone()).expect("same dimensions");
