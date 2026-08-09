@@ -13,6 +13,7 @@ members = [
     "crates/swath-api",
     "crates/swath-cli",
     "crates/swath-core",
+    "crates/swath-referencer",
     "crates/swath-render",
     "crates/swath-testkit",
 ]
@@ -112,6 +113,15 @@ toml = { version = "0.9.5" }
 # features — level selection is a hand-parsed SWATH_LOG, not a regex DSL.
 tracing = { version = "0.1.41" }
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt"] }
+
+# The production referencer (ADR 0006, issue #40). gribberish: GRIB2 section
+# metadata (offsets/lengths/grids/packing templates) — referencing needs no
+# field decode, so default features stay off. hdf5-metno `static`: builds the
+# bundled libhdf5 from source, so no system HDF5 is required on any platform
+# (the single-binary story, prototype 0001 H4); versions pinned to the ones
+# the bake-off validated.
+gribberish = { version = "1.6.0", default-features = false }
+hdf5-metno = { version = "0.14.0", features = ["static"] }
 
 [workspace.lints.rust]
 unsafe_code = "warn"       # visible and justified; scopes Miri to unsafe-bearing crates

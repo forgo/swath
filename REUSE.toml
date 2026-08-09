@@ -38,6 +38,8 @@ path = [
     ".config/nextest.toml",
     ".github/**",
     "crates/swath-core/tests/data/*.json",
+    "crates/swath-referencer/tests/data/tiny.h5",
+    "crates/swath-referencer/tests/data/tiny.expected.json",
     "crates/swath-core/tests/snapshots/*.snap",
     "crates/swath-core/tests/*.proptest-regressions",
     "crates/adapters/swath-reproject-proj4rs/tests/data/*.json",
@@ -70,4 +72,14 @@ SPDX-License-Identifier = "OGC-1.0"
 path = ["crates/swath-render/tests/data/openeo/*.json"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "openEO consortium contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Real VNP09GA StructMetadata.0 text, committed verbatim as parser test truth
+# (extracted from LP DAAC granule VNP09GA.A2012019.h33v12.002.2023122182434.h5;
+# NASA LP DAAC data carry no use restrictions). Same aggregate treatment as
+# the HLS-derived fixtures in tests/fixtures/.
+[[annotations]]
+path = ["crates/swath-referencer/tests/data/structmetadata_vnp09ga.txt"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Elliott Richerson <elliott.richerson@gmail.com>"
 SPDX-License-Identifier = "Apache-2.0"
