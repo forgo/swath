@@ -36,6 +36,7 @@ path = [
     ".claude/settings.json",
     ".github/**",
     "crates/swath-core/tests/data/*.json",
+    "crates/adapters/swath-reproject-proj4rs/tests/data/*.json",
     "crates/adapters/swath-source-cog/tests/data/*.json",
     "tests/fixtures/*.tif",
     "tests/fixtures/SHA256SUMS",

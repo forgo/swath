@@ -5,6 +5,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/adapters/swath-reproject-proj4rs",
     "crates/adapters/swath-source-cog",
     "crates/swath-core",
     "crates/swath-testkit",
@@ -50,6 +51,11 @@ bytes = { version = "1.10.1" }
 tokio = { version = "1.49.0", default-features = false }
 # Truth-table pixel-hash comparison in adapter integration tests (dev-only).
 sha2 = { version = "0.10.9" }
+# Projection math is BIND, never build (ADR 0002): pure-Rust proj4 for the
+# common CRS set; PROJ C-bindings feature-gated later for the long tail.
+# Default features off: they only add binaries and multi-thread NAD-grid
+# machinery the adapter doesn't use.
+proj4rs = { version = "0.1.10", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "warn"       # visible and justified; scopes Miri to unsafe-bearing crates

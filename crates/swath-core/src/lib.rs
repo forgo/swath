@@ -17,12 +17,14 @@
 //! - [`crs`] — CRS identity (EPSG codes; projection math is an adapter concern)
 //! - [`raster`] — raster metadata, pixel windows, asset references
 //! - [`source`] — the `RasterSource` port: async windowed reads + provenance
+//! - [`reproject`] — the `Reproject` port: sync CRS-to-CRS point transforms
 //! - [`trace`] — the per-render x-ray record (REQUIREMENTS.md R4)
 //! - [`error`] — the crate's small invariant-violation taxonomy
 
 pub mod crs;
 pub mod error;
 pub mod raster;
+pub mod reproject;
 pub mod source;
 pub mod tile;
 pub mod trace;
