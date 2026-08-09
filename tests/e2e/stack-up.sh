@@ -2,7 +2,8 @@
 # SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
 
-# Shared bring-up for the compose e2e suites (`just e2e`, `just e2e-web`):
+# Shared bring-up for the compose e2e suites (`just e2e`, `just e2e-web`)
+# and the human-facing stopwatch demo (`just demo`):
 # build the swath image, start the full stack, verify infra health, assert
 # the honest pre-drop 404, drop the fixture granule (the filedrop
 # convention: band COGs first, manifest renamed into place last), and poll
@@ -36,6 +37,17 @@ tile="$base/tilesets/truecolor/tiles/12/1561/848"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$tile")
 [ "$code" = "404" ] || { echo "FAIL: expected 404 before any granule, got $code"; exit 1; }
 echo "swath: tile is 404 before ingest (catalog empty)"
+# `just demo` sets SWATH_DROP_COUNTDOWN so a human watching the map sees
+# the before-state (the honest 404 gray) turn into imagery: hold the drop
+# for a visible countdown. Default 0 — the e2e suites drop immediately.
+countdown=${SWATH_DROP_COUNTDOWN:-0}
+if [ "$countdown" -gt 0 ]; then
+    for i in $(seq "$countdown" -1 1); do
+        printf '\r  granule drops in %2ds — watch the map ' "$i"
+        sleep 1
+    done
+    printf '\r%45s\r' ''
+fi
 # THE DROP (the manual step count for everything below: zero). Per the
 # filedrop convention: band COGs land first, the manifest is staged
 # under an ignored dotfile name and renamed into place last.
