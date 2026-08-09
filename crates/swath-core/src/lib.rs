@@ -5,20 +5,21 @@
 //!
 //! The pure-logic center of Swath (ADR 0001, ADR 0002): domain types, port
 //! traits, the materialization planner, the process-graph compiler + Render IR,
-//! and the [`Trace`] model. This crate performs **no I/O** — everything
-//! external enters through port traits implemented by adapter crates.
+//! and the [`Trace`](trace::Trace) model. This crate performs **no I/O** — no
+//! filesystem, no network, no clocks, nothing async. Everything external
+//! enters through port traits implemented by adapter crates; the port traits
+//! themselves land alongside their first adapters, so today this crate is the
+//! shared *vocabulary* those traits will speak
+//! ([ARCHITECTURE.md §5–6, §9](https://github.com/forgo/swath/blob/main/docs/ARCHITECTURE.md)).
 //!
-//! Modules land incrementally per the roadmap (issues #21+); this crate
-//! currently establishes the workspace contract (lints, edition, MSRV) only.
-//!
-//! [`Trace`]: https://github.com/forgo/swath/blob/main/docs/ARCHITECTURE.md#9-trace--observability-model-the-x-ray-keystone
+//! - [`tile`] — quadtree tile addressing + `WebMercatorQuad` TMS math
+//! - [`crs`] — CRS identity (EPSG codes; projection math is an adapter concern)
+//! - [`raster`] — raster metadata, pixel windows, asset references
+//! - [`trace`] — the per-render x-ray record (REQUIREMENTS.md R4)
+//! - [`error`] — the crate's small invariant-violation taxonomy
 
-#[cfg(test)]
-mod tests {
-    /// The workspace builds, tests run, and the lint contract is active.
-    #[test]
-    fn workspace_contract_smoke() {
-        let edition_2024 = 2024_u16;
-        assert_eq!(edition_2024, 2024);
-    }
-}
+pub mod crs;
+pub mod error;
+pub mod raster;
+pub mod tile;
+pub mod trace;

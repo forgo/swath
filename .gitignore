@@ -55,7 +55,7 @@ test-results/
 *.zarr/
 *.parquet
 *.grib2
-data/
+/data/
 tmp/
 scratch/
 
