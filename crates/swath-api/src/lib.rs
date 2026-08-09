@@ -27,6 +27,7 @@
 //! | `GET /tilesets/{layerId}` | tileset metadata (`WebMercatorQuad`) |
 //! | `GET /tilesets/{layerId}/tiles/{tileMatrix}/{tileRow}/{tileCol}` | a PNG tile |
 //! | `GET /traces` | the x-ray Trace SSE stream (control-plane, issue #28) |
+//! | `GET /healthz` | liveness probe: plain 200 `ok` (operational, non-OGC, issue #29) |
 //!
 //! Users address **layers** (R2): a layer id is the only name a client
 //! ever sees — band assets, plans, and catalog plumbing stay behind the

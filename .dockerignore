@@ -1,0 +1,11 @@
+# Keep the image build context to what `cargo build -p swath-cli` and the
+# fixture COPY actually consume: the workspace + tests/fixtures.
+.git
+target
+docs
+prototypes
+python
+web
+tests/oracle
+.github
+.claude
