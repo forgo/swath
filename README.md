@@ -1,5 +1,7 @@
 # Swath
 
+[![CI](https://github.com/forgo/swath/actions/workflows/ci.yml/badge.svg)](https://github.com/forgo/swath/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/forgo/swath/graph/badge.svg)](https://codecov.io/gh/forgo/swath) [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/forgo/swath/badge)](https://scorecard.dev/viewer/?uri=github.com/forgo/swath)
+
 **Satellite data comes in, and is immediately live on a map — from one pane of glass.**
 
 Swath is an open-source, cloud-native geospatial data platform. It ingests Earth-observation

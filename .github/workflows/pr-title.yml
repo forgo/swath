@@ -1,7 +1,9 @@
 # PR-title lint (ENGINEERING.md §7, issue #12). Squash-only merges make the PR
 # title the commit title on main — release-plz reads that history, so titles
-# must be conventional commits. Uses the original amannn action (the
-# step-security fork is paid on private repos; see the paths-filter precedent).
+# must be conventional commits. Uses the StepSecurity maintained fork of the
+# amannn action (free now that the repo is public; issue #50) — the
+# maintained-fork preference of ENGINEERING.md §5, same call as ci.yml's
+# paths-filter. The required check keeps its name: it's the job id below.
 
 name: PR Title
 
@@ -18,6 +20,6 @@ jobs:
     permissions:
       pull-requests: read
     steps:
-      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+      - uses: step-security/action-semantic-pull-request@75d2dd5deafa3e9fccc1626ecd58d076ed1d2c79 # v6.1.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

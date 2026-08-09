@@ -1,0 +1,37 @@
+# CodeQL, Rust pack (ENGINEERING.md §5 item 10, issue #50). Supplementary
+# signal, not primary — so it runs weekly + on push to main rather than on
+# every PR: a full Rust extraction is minutes of CI per run, and the primary
+# gates (clippy, cargo-deny, tests, zizmor) already run per-PR. Findings land
+# in code scanning; cron offset from scorecard.yml and security.yml.
+
+name: CodeQL
+
+on:
+  schedule:
+    - cron: "39 3 * * 2" # weekly (Tue); offset from scorecard + advisories crons
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload analysis results to code scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: github/codeql-action/init@9e3211c9a3b9311dfe05da2ed48eea3386f042dd # v4.37.6
+        with:
+          languages: rust
+          build-mode: none # Rust extraction is build-free (GA Oct 2025)
+
+      - uses: github/codeql-action/analyze@9e3211c9a3b9311dfe05da2ed48eea3386f042dd # v4.37.6
+        with:
+          category: "/language:rust"
