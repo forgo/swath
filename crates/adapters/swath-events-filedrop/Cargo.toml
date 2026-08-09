@@ -1,0 +1,26 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-events-filedrop"
+description = "EventSource adapter: a polled drop directory of granule manifests — the walking-skeleton ingest trigger."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+swath-core = { path = "../../swath-core", version = "0.0.0" }
+thiserror = { workspace = true }
+# `time` only: the poll interval between directory scans. The adapter owns
+# the clock the core refuses to (arrival stamping + pacing).
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

@@ -2821,6 +2821,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "swath-events-filedrop"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "swath-core",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "swath-render"
 version = "0.0.0"
 dependencies = [

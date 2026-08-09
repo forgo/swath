@@ -209,12 +209,14 @@ impl Datetime {
             second_of_day % 3600 / 60,
             second_of_day % 60,
         );
-        let mut text = format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}");
-        if ms != 0 {
-            text.push_str(&format!(".{ms:03}"));
-        }
-        text.push('Z');
-        Self::new(text)
+        let fraction = if ms == 0 {
+            String::new()
+        } else {
+            format!(".{ms:03}")
+        };
+        Self::new(format!(
+            "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}{fraction}Z"
+        ))
     }
 }
 

@@ -1,0 +1,345 @@
+// SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+//! Filedrop watcher + ingest orchestrator integration tests: a real
+//! filesystem (temp dir), a real poll loop, an in-memory catalog — no
+//! pgstac needed for the unit path (the live path joins `just
+//! test-catalog`'s gated suite).
+
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
+
+use swath_core::catalog::{
+    Bbox, Catalog, CatalogError, Dataset, DatasetId, Datetime, Extent, Granule, GranuleId,
+    GranuleQuery, TimeRange,
+};
+use swath_core::events::{EventError, EventSource as _, GranuleEvent};
+use swath_core::ingest::ingest_granule;
+use swath_events_filedrop::FiledropEvents;
+
+/// A fresh, self-deleting temp directory per test (no tempfile dep — the
+/// supply-chain gate stays untouched).
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(tag: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "swath-filedrop-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        Self(dir)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+/// Fast-polling watcher over `dir` (tests should not wait real cadences).
+fn watcher(dir: &Path) -> FiledropEvents {
+    FiledropEvents::new(dir, Duration::from_millis(10))
+}
+
+fn manifest_json(dataset: &str, granule: &str) -> String {
+    format!(
+        r#"{{
+            "dataset": "{dataset}",
+            "granule": "{granule}",
+            "bbox": [-106.1, 39.2, -105.9, 39.4],
+            "datetime": "2024-06-06T17:54:00Z",
+            "assets": {{
+                "b04": "{granule}-b04.tif",
+                "b03": "{granule}-b03.tif"
+            }}
+        }}"#
+    )
+}
+
+/// Writes per the drop convention: temp name first, rename into place.
+fn drop_manifest(dir: &Path, dataset: &str, granule: &str) {
+    let staged = dir.join(format!(".{granule}.json"));
+    std::fs::write(&staged, manifest_json(dataset, granule)).unwrap();
+    std::fs::rename(&staged, dir.join(format!("{granule}.json"))).unwrap();
+}
+
+async fn next(source: &mut FiledropEvents) -> Result<Option<GranuleEvent>, EventError> {
+    tokio::time::timeout(Duration::from_secs(5), source.next_event())
+        .await
+        .expect("an event within the test timeout")
+}
+
+#[tokio::test]
+async fn manifest_appearance_becomes_a_granule_event() {
+    let dir = TempDir::new("basic");
+    let mut source = watcher(dir.path());
+
+    let before = Datetime::from_unix_millis(now_millis()).unwrap();
+    drop_manifest(dir.path(), "hls-s30", "g-2024158");
+    let event = next(&mut source).await.unwrap().unwrap();
+
+    assert_eq!(event.granule.id, GranuleId::new("g-2024158"));
+    assert_eq!(event.granule.dataset, DatasetId::new("hls-s30"));
+    assert_eq!(event.granule.datetime.as_str(), "2024-06-06T17:54:00Z");
+    assert_eq!(event.granule.assets.len(), 2);
+    assert_eq!(event.granule.assets["b04"].as_str(), "g-2024158-b04.tif");
+    assert_eq!(
+        event.granule.ingested_at, None,
+        "the orchestrator stamps it"
+    );
+    // Observation-time stamp: within [before, now].
+    let arrived = event.arrived_at.to_unix_millis();
+    assert!(arrived >= before.to_unix_millis() && arrived <= now_millis());
+}
+
+#[tokio::test]
+async fn watcher_survives_a_directory_created_after_start() {
+    let dir = TempDir::new("late-dir");
+    let missing = dir.path().join("drop");
+    let mut source = watcher(&missing);
+
+    // Directory doesn't exist yet; create it and drop mid-watch.
+    let waiter = async {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        std::fs::create_dir_all(&missing).unwrap();
+        drop_manifest(&missing, "hls-s30", "late");
+    };
+    let (event, ()) = tokio::join!(next(&mut source), waiter);
+    assert_eq!(event.unwrap().unwrap().granule.id, GranuleId::new("late"));
+}
+
+#[tokio::test]
+async fn each_manifest_is_announced_once_in_name_order() {
+    let dir = TempDir::new("once");
+    // Both present before the first scan: yielded in name order.
+    drop_manifest(dir.path(), "hls-s30", "a-first");
+    drop_manifest(dir.path(), "hls-s30", "b-second");
+    let mut source = watcher(dir.path());
+
+    let first = next(&mut source).await.unwrap().unwrap();
+    let second = next(&mut source).await.unwrap().unwrap();
+    assert_eq!(first.granule.id, GranuleId::new("a-first"));
+    assert_eq!(second.granule.id, GranuleId::new("b-second"));
+
+    // No re-announcement: a third pull pends until something NEW arrives.
+    let waiter = async {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        drop_manifest(dir.path(), "hls-s30", "c-third");
+    };
+    let (third, ()) = tokio::join!(next(&mut source), waiter);
+    assert_eq!(
+        third.unwrap().unwrap().granule.id,
+        GranuleId::new("c-third")
+    );
+}
+
+#[tokio::test]
+async fn non_manifests_and_staging_files_are_ignored() {
+    let dir = TempDir::new("ignore");
+    std::fs::write(dir.path().join("band-b04.tif"), b"not a manifest").unwrap();
+    std::fs::write(dir.path().join(".staged.json"), b"{").unwrap();
+    std::fs::write(dir.path().join("notes.txt"), b"hello").unwrap();
+    let mut source = watcher(dir.path());
+
+    let waiter = async {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        drop_manifest(dir.path(), "hls-s30", "real");
+    };
+    let (event, ()) = tokio::join!(next(&mut source), waiter);
+    assert_eq!(event.unwrap().unwrap().granule.id, GranuleId::new("real"));
+}
+
+#[tokio::test]
+async fn malformed_manifests_error_once_then_stop_reporting() {
+    let dir = TempDir::new("malformed");
+    std::fs::write(dir.path().join("broken.json"), b"{ not json").unwrap();
+    let mut source = watcher(dir.path());
+
+    // Reported exactly once, naming the file...
+    let err = next(&mut source).await.unwrap_err();
+    assert!(matches!(&err, EventError::Malformed { detail } if detail.contains("broken.json")));
+
+    // ...then consumed: the next pull sees only new arrivals.
+    let waiter = async {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        drop_manifest(dir.path(), "hls-s30", "good");
+    };
+    let (event, ()) = tokio::join!(next(&mut source), waiter);
+    assert_eq!(event.unwrap().unwrap().granule.id, GranuleId::new("good"));
+}
+
+#[tokio::test]
+async fn name_mismatch_and_empty_assets_are_malformed() {
+    let dir = TempDir::new("invalid");
+    std::fs::write(
+        dir.path().join("wrong-name.json"),
+        manifest_json("hls-s30", "other-id"),
+    )
+    .unwrap();
+    let mut source = watcher(dir.path());
+    let err = next(&mut source).await.unwrap_err();
+    assert!(matches!(&err, EventError::Malformed { detail }
+            if detail.contains("wrong-name") && detail.contains("other-id")));
+
+    std::fs::write(
+        dir.path().join("empty.json"),
+        r#"{"dataset":"d","granule":"empty","bbox":[0,0,1,1],
+            "datetime":"2024-06-06T17:54:00Z","assets":{}}"#,
+    )
+    .unwrap();
+    let err = next(&mut source).await.unwrap_err();
+    assert!(matches!(&err, EventError::Malformed { detail } if detail.contains("assets")));
+}
+
+// --- the orchestrator path: drop -> event -> catalog upsert, end to end ---
+
+/// A minimal in-memory catalog enforcing the dataset-must-exist contract.
+#[derive(Default)]
+struct MemoryCatalog {
+    datasets: Mutex<Vec<Dataset>>,
+    granules: Mutex<Vec<Granule>>,
+}
+
+impl Catalog for MemoryCatalog {
+    async fn upsert_dataset(&self, dataset: &Dataset) -> Result<(), CatalogError> {
+        self.datasets.lock().unwrap().push(dataset.clone());
+        Ok(())
+    }
+
+    async fn upsert_granules(&self, granules: &[Granule]) -> Result<(), CatalogError> {
+        for granule in granules {
+            let known = self
+                .datasets
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|d| d.id == granule.dataset);
+            if !known {
+                return Err(CatalogError::DatasetNotFound {
+                    id: granule.dataset.clone(),
+                });
+            }
+            let mut stored = self.granules.lock().unwrap();
+            stored.retain(|g| g.id != granule.id || g.dataset != granule.dataset);
+            stored.push(granule.clone());
+        }
+        Ok(())
+    }
+
+    async fn get_dataset(&self, id: &DatasetId) -> Result<Option<Dataset>, CatalogError> {
+        Ok(self
+            .datasets
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|d| d.id == *id)
+            .cloned())
+    }
+
+    async fn list_datasets(&self) -> Result<Vec<Dataset>, CatalogError> {
+        Ok(self.datasets.lock().unwrap().clone())
+    }
+
+    async fn find_granules(
+        &self,
+        dataset: &DatasetId,
+        _query: &GranuleQuery,
+    ) -> Result<Vec<Granule>, CatalogError> {
+        Ok(self
+            .granules
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|g| g.dataset == *dataset)
+            .cloned()
+            .collect())
+    }
+}
+
+fn hls_dataset() -> Dataset {
+    Dataset {
+        id: DatasetId::new("hls-s30"),
+        title: "HLS S30".to_owned(),
+        description: String::new(),
+        license: "CC0-1.0".to_owned(),
+        extent: Extent {
+            bbox: Bbox {
+                west: -180.0,
+                south: -90.0,
+                east: 180.0,
+                north: 90.0,
+            },
+            interval: TimeRange::default(),
+        },
+        bands: ["b03", "b04"].map(str::to_owned).into(),
+        layers: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn dropped_granule_lands_in_the_catalog_with_ingested_at() {
+    let dir = TempDir::new("orchestrated");
+    let catalog = MemoryCatalog::default();
+    catalog.upsert_dataset(&hls_dataset()).await.unwrap();
+
+    let mut source = watcher(dir.path());
+    drop_manifest(dir.path(), "hls-s30", "g-2024158");
+    let event = next(&mut source).await.unwrap().unwrap();
+
+    let stored = ingest_granule(&catalog, &event).await.unwrap();
+    assert_eq!(stored.ingested_at, Some(event.arrived_at.clone()));
+
+    let found = catalog
+        .find_granules(&DatasetId::new("hls-s30"), &GranuleQuery::default())
+        .await
+        .unwrap();
+    assert_eq!(found, vec![stored]);
+}
+
+#[tokio::test]
+async fn dropped_granule_of_unknown_dataset_fails_loudly() {
+    let dir = TempDir::new("unknown-dataset");
+    let catalog = MemoryCatalog::default();
+
+    let mut source = watcher(dir.path());
+    drop_manifest(dir.path(), "never-registered", "g1");
+    let event = next(&mut source).await.unwrap().unwrap();
+
+    let err = ingest_granule(&catalog, &event).await.unwrap_err();
+    assert!(
+        matches!(err, CatalogError::DatasetNotFound { id } if id.as_str() == "never-registered")
+    );
+}
+
+fn now_millis() -> i64 {
+    i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis(),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn seen_before_start_is_still_announced() {
+    // A manifest already present when the watcher starts is an arrival too:
+    // restart-safety (module docs) means the directory's current contents
+    // are announced, idempotently re-upserted downstream.
+    let dir = TempDir::new("preexisting");
+    drop_manifest(dir.path(), "hls-s30", "old");
+    let mut source = watcher(dir.path());
+    let event = next(&mut source).await.unwrap().unwrap();
+    assert_eq!(event.granule.id, GranuleId::new("old"));
+}
