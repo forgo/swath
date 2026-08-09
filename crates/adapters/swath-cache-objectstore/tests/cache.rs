@@ -12,7 +12,11 @@ use std::sync::Arc;
 use object_store::local::LocalFileSystem;
 use object_store::memory::InMemory;
 use swath_cache_objectstore::ObjectStoreTileCache;
-use swath_core::cache::{CacheError, TileCache, TileKey, TileKeyInputs};
+// CacheError is only consumed by the unix-gated read-only-dir test below;
+// an unconditional import is an unused-import error on Windows (-D warnings).
+#[cfg(unix)]
+use swath_core::cache::CacheError;
+use swath_core::cache::{TileCache, TileKey, TileKeyInputs};
 use swath_core::tile::TileCoord;
 
 /// A fresh, self-deleting temp directory per test (no tempfile dep —
