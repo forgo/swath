@@ -402,7 +402,14 @@ export class XRayOverlay {
       this.#store.delete(oldest);
     }
     if (envelope.trace.ingest_to_pixel_ms !== null) {
-      this.#ingestMs = envelope.trace.ingest_to_pixel_ms;
+      // The server reports elapsed-since-ingest on EVERY render of a
+      // granule-backed layer, so "latest" grows without bound as you pan.
+      // The metric (REQUIREMENTS.md §3) is the FIRST render after arrival —
+      // keep the minimum observed, which is exactly that.
+      this.#ingestMs = Math.min(
+        this.#ingestMs ?? Number.POSITIVE_INFINITY,
+        envelope.trace.ingest_to_pixel_ms,
+      );
       this.#ingest.textContent = `ingest→pixel: ${this.#ingestMs} ms`;
     }
     this.#schedule();

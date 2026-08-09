@@ -41,11 +41,22 @@ function json(body: object): Response {
 
 /** A stub Swath API over `globalThis.fetch`: the tilesets list, per-layer
  * metadata (with the fixture bbox), and PNG bytes for tile requests. */
-function stubSwathApi(): { requests: string[] } {
+function stubSwathApi(opts: { tilesLiveAfterMs?: number; serverLiveAfterMs?: number } = {}): {
+  requests: string[];
+} {
   const requests: string[] = [];
+  const liveAt = opts.tilesLiveAfterMs === undefined ? 0 : Date.now() + opts.tilesLiveAfterMs;
+  const serverLiveAt =
+    opts.serverLiveAfterMs === undefined ? 0 : Date.now() + opts.serverLiveAfterMs;
   vi.stubGlobal("fetch", (input: RequestInfo | URL): Promise<Response> => {
     const url = input instanceof Request ? input.url : String(input);
     requests.push(url);
+    if (Date.now() < serverLiveAt) {
+      return Promise.resolve(new Response("bad gateway", { status: 502 }));
+    }
+    if (url.includes("/tiles/") && Date.now() < liveAt) {
+      return Promise.resolve(new Response("no granule yet", { status: 404 }));
+    }
     if (/\/tilesets$/.test(url)) {
       const base = new URL(url).origin;
       return Promise.resolve(
@@ -73,6 +84,17 @@ function stubSwathApi(): { requests: string[] } {
     if (url.includes("/tiles/")) {
       return Promise.resolve(
         new Response(TINY_PNG.slice().buffer, { headers: { "content-type": "image/png" } }),
+      );
+    }
+    if (url.endsWith("/basemap-style.json")) {
+      return Promise.resolve(
+        json({
+          version: 8,
+          sources: {
+            base: { type: "raster", tiles: ["https://basemap.example/{z}/{x}/{y}.png"] },
+          },
+          layers: [{ id: "base", type: "raster", source: "base" }],
+        }),
       );
     }
     return Promise.reject(new Error(`unstubbed fetch: ${url}`));
@@ -213,6 +235,70 @@ test("built-in switcher renders accessible buttons with aria-pressed", async () 
     (button) => button.getAttribute("aria-pressed"),
   );
   expect(pressed).toEqual(["false", "true"]);
+});
+
+test("basemap style merges with the swath raster layer painted on top", async () => {
+  // The demo-page fix (post-#35): without a basemap, everything outside the
+  // fixture footprint is blank void; with one, the imagery gets a world for
+  // context. The merge must keep our raster LAST (on top) and untouched.
+  stubSwathApi();
+  const el = mount({
+    server: SERVER,
+    layer: "truecolor",
+    basemap: `${SERVER}/basemap-style.json`,
+  });
+  await el.ready;
+  const style = el.map?.getStyle();
+  expect(style?.layers.map((l) => l.id)).toEqual(["base", "swath"]);
+  expect(Object.keys(style?.sources ?? {})).toEqual(expect.arrayContaining(["base", "swath"]));
+  expect(tileTemplates(el)).toContain(`${SERVER}/tilesets/truecolor/tiles/{z}/{y}/{x}`);
+});
+
+test("basemap fetch failure degrades to the bare style, never blocks imagery", async () => {
+  stubSwathApi();
+  const el = mount({
+    server: SERVER,
+    layer: "truecolor",
+    basemap: `${SERVER}/no-such-style.json`,
+  });
+  await el.ready;
+  expect(el.map?.getStyle().layers.map((l) => l.id)).toEqual(["swath"]);
+});
+
+test("tiles that 404 are retried automatically until data appears", {
+  timeout: 15_000,
+}, async () => {
+  // The stopwatch-demo flow: viewer open BEFORE the granule exists. The
+  // component must recover on its own once tiles go live — no reload, no
+  // map-nudging (MapLibre never refetches a tile it saw fail).
+  const { requests } = stubSwathApi({ tilesLiveAfterMs: 4_000 });
+  const el = mount({ server: SERVER, layer: "truecolor" });
+  await el.ready;
+  // Every tile request 404s for the first 4s (viewer opened pre-drop), then
+  // the layer goes live. The component's liveness probe must notice and
+  // re-apply with a bumped source version (`?v=n`) so MapLibre — which never
+  // refetches a failed tile — paints the imagery with no user action.
+  await vi.waitFor(
+    () => expect(requests.some((u) => u.includes("/tiles/") && u.includes("?v="))).toBe(true),
+    { timeout: 12_000, interval: 250 },
+  );
+  el.remove();
+});
+
+test("a server that is still starting is retried until it comes up", {
+  timeout: 15_000,
+}, async () => {
+  // The demo prints its URL during the docker build: the page loads while
+  // every request 502s. The component must keep retrying the whole apply
+  // (layer resolution AND basemap) instead of going permanently blank.
+  stubSwathApi({ serverLiveAfterMs: 4_000 });
+  const el = mount({ server: SERVER, layer: "truecolor" });
+  el.ready.catch(() => undefined); // first apply is EXPECTED to fail
+  await vi.waitFor(
+    () => expect(tileTemplates(el)).toContain(`${SERVER}/tilesets/truecolor/tiles/{z}/{y}/{x}`),
+    { timeout: 12_000, interval: 250 },
+  );
+  el.remove();
 });
 
 test("a failing server rejects ready and fires a swath-error event", async () => {

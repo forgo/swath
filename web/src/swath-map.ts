@@ -64,13 +64,66 @@ interface OgcTileSetItem {
 
 const SOURCE_ID = "swath";
 const RASTER_LAYER_ID = "swath";
+
+/**
+ * The `basemap="demo"` shorthand: MapLibre's own demo world tiles — a light
+ * vector world map hosted by maplibre.org for exactly this kind of demo use.
+ * Any other non-empty `basemap` value is treated as a style-JSON URL. Without
+ * a basemap, tiles outside the layer footprint are transparent over the page
+ * background — geographically honest, but disorienting; the basemap gives the
+ * imagery a world for context. Fetched once per URL and cached; a fetch
+ * failure falls back to the bare style (the imagery must never be hostage to
+ * a third-party host, so e2e/CI runs keep basemap off).
+ */
+const DEMO_BASEMAP_URL = "https://demotiles.maplibre.org/style.json";
+
+/** Tile-404 auto-retry pacing: one style re-apply per interval while tiles
+ * are missing, up to the cap (~3 minutes of patience for the demo's
+ * "viewer open before the granule exists" flow, then quiet). */
+const RETRY_INTERVAL_MS = 3000;
+const MAX_TILE_RETRIES = 60;
+
+/** Slippy/WebMercatorQuad tile containing (lon, lat) at the zoom's integer
+ * level — the liveness probe's target. Mirrors the server-side TMS math. */
+function centerTile(lon: number, lat: number, zoom: number): { z: number; x: number; y: number } {
+  const z = Math.max(0, Math.min(22, Math.round(zoom)));
+  const n = 2 ** z;
+  const clampedLat = Math.max(-85.0511, Math.min(85.0511, lat));
+  const latRad = (clampedLat * Math.PI) / 180;
+  const x = Math.min(n - 1, Math.max(0, Math.floor(((lon + 180) / 360) * n)));
+  const y = Math.min(
+    n - 1,
+    Math.max(
+      0,
+      Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n),
+    ),
+  );
+  return { z, x, y };
+}
+const basemapCache = new Map<string, Promise<Record<string, unknown> | undefined>>();
+
+function fetchBasemapStyle(url: string): Promise<Record<string, unknown> | undefined> {
+  let cached = basemapCache.get(url);
+  if (!cached) {
+    cached = fetch(url)
+      .then((r) => (r.ok ? (r.json() as Promise<Record<string, unknown>>) : undefined))
+      .catch(() => undefined);
+    basemapCache.set(url, cached);
+  }
+  return cached;
+}
 const STYLE_ELEMENT_ID = "swath-map-styles";
 
 /** Component chrome on top of MapLibre's stylesheet: a block host with a
  * usable default height (consumer CSS overrides both), plus the minimal
  * layer-switcher skin. */
 const COMPONENT_CSS = `
-swath-map { display: block; height: 400px; position: relative; }
+swath-map { display: block; position: relative; }
+/* Zero-specificity default height: the injected sheet lands AFTER consumer
+ * styles in <head>, so at normal specificity this fallback would BEAT an
+ * equally-specific consumer rule (it silently squashed the full-viewport
+ * demo to a 400px strip). :where() keeps it losing to any consumer CSS. */
+:where(swath-map) { height: 400px; }
 swath-map .swath-map-container { width: 100%; height: 100%; }
 swath-map .swath-map-switcher button {
   width: auto;
@@ -226,10 +279,18 @@ export class SwathMap extends HTMLElement {
   static readonly tagName = "swath-map";
 
   static get observedAttributes(): readonly string[] {
-    return ["server", "layer", "center", "zoom", "xray"];
+    return ["server", "layer", "center", "zoom", "xray", "basemap"];
   }
 
   #map: MapLibreMap | undefined;
+  #retriesLeft = MAX_TILE_RETRIES;
+  #retryTimer: number | undefined;
+  // Bumped when a liveness probe turns 404→200 and appended to the tile
+  // template (`?v=n`): MapLibre treats raster-tile 404s as "empty, done" (no
+  // error event, no refetch — ever), and its style diff no-ops an unchanged
+  // source, so recovery needs BOTH a poll and a genuinely different source.
+  #retrySeq = 0;
+  #probedEmpty = false;
   #switcher: LayerSwitcherControl | undefined;
   #xrayToggle: XRayToggleControl | undefined;
   #xray: XRayOverlay | undefined;
@@ -293,8 +354,17 @@ export class SwathMap extends HTMLElement {
     this.#startApply();
   }
 
+  /** Re-applies the current layer (style + sources) — refetches tiles. */
+  refresh(): void {
+    this.#startApply();
+  }
+
   disconnectedCallback(): void {
     this.#epoch += 1;
+    if (this.#retryTimer !== undefined) {
+      window.clearTimeout(this.#retryTimer);
+      this.#retryTimer = undefined;
+    }
     this.#disableXRay();
     this.#map?.remove();
     this.#map = undefined;
@@ -310,6 +380,7 @@ export class SwathMap extends HTMLElement {
     switch (name) {
       case "server":
       case "layer":
+      case "basemap":
         this.#startApply();
         break;
       case "center": {
@@ -400,6 +471,17 @@ export class SwathMap extends HTMLElement {
       // Namespaced (not `error`): a bubbling `error` event would reach
       // `window` and read as an unhandled page error to host tooling.
       this.dispatchEvent(new CustomEvent("swath-error", { detail: { error }, bubbles: true }));
+      // Self-healing applies: a viewer opened while the server is still
+      // starting (the demo prints its URL during the docker build) sees
+      // /tilesets fail — without a retry the component would stay blank
+      // forever, basemap included. Same bounded budget as the tile probe.
+      if (this.#retriesLeft > 0 && this.#retryTimer === undefined && this.isConnected) {
+        this.#retriesLeft -= 1;
+        this.#retryTimer = window.setTimeout(() => {
+          this.#retryTimer = undefined;
+          this.#startApply();
+        }, RETRY_INTERVAL_MS);
+      }
     });
   }
 
@@ -420,24 +502,47 @@ export class SwathMap extends HTMLElement {
     // data" — read its geographic bounds off the tileset metadata.
     const fit = this.getAttribute("center") === null && this.getAttribute("zoom") === null;
     const bounds = fit ? await this.#layerBounds(layerId) : undefined;
+
+    // Optional basemap under the imagery: fetch (cached) and merge our raster
+    // source/layer ON TOP of its sources/layers. Failure → bare style.
+    const basemapAttr = this.getAttribute("basemap");
+    const basemapUrl =
+      basemapAttr === null || basemapAttr === ""
+        ? undefined
+        : basemapAttr === "demo"
+          ? DEMO_BASEMAP_URL
+          : basemapAttr;
+    const basemap = basemapUrl ? await fetchBasemapStyle(basemapUrl) : undefined;
     if (epoch !== this.#epoch || !this.#map) {
       return;
     }
 
+    const retrySuffix = this.#retrySeq > 0 ? `?v=${this.#retrySeq}` : "";
+    const swathSource = {
+      type: "raster",
+      tiles: [`${this.#tileTemplate(layerId)}${retrySuffix}`],
+      tileSize: 256,
+    };
+    const swathLayer = { id: RASTER_LAYER_ID, type: "raster", source: SOURCE_ID };
     const applied = new Promise<void>((resolve) => {
       map.once("styledata", () => resolve());
     });
-    map.setStyle({
-      version: 8,
-      sources: {
-        [SOURCE_ID]: {
-          type: "raster",
-          tiles: [this.#tileTemplate(layerId)],
-          tileSize: 256,
-        },
-      },
-      layers: [{ id: RASTER_LAYER_ID, type: "raster", source: SOURCE_ID }],
-    });
+    map.setStyle(
+      basemap
+        ? ({
+            ...basemap,
+            sources: {
+              ...(basemap["sources"] as Record<string, unknown>),
+              [SOURCE_ID]: swathSource,
+            },
+            layers: [...(basemap["layers"] as unknown[]), swathLayer],
+          } as never)
+        : {
+            version: 8,
+            sources: { [SOURCE_ID]: swathSource as never },
+            layers: [swathLayer as never],
+          },
+    );
     await applied;
     if (epoch !== this.#epoch) {
       return;
@@ -460,6 +565,60 @@ export class SwathMap extends HTMLElement {
     this.dispatchEvent(
       new CustomEvent("layerchange", { detail: { layer: layerId }, bubbles: true }),
     );
+    this.#startLivenessProbe(layerId, epoch);
+  }
+
+  /** Self-healing tiles for the "viewer open before the data exists" flow
+   * (the stopwatch demo): probe the view's center tile; while it 404s,
+   * re-probe each interval (bounded); on the first 200, bump the source
+   * version and re-apply so MapLibre — which never refetches a failed tile —
+   * actually paints the now-live imagery. A layer that is already live on
+   * the first probe ends the loop immediately. */
+  #startLivenessProbe(layerId: string, epoch: number): void {
+    if (this.#retryTimer !== undefined) {
+      window.clearTimeout(this.#retryTimer);
+      this.#retryTimer = undefined;
+    }
+    const probe = async (): Promise<void> => {
+      const map = this.#map;
+      if (epoch !== this.#epoch || !map || this.#retriesLeft <= 0) {
+        return;
+      }
+      let live = false;
+      try {
+        const { z, x, y } = centerTile(map.getCenter().lng, map.getCenter().lat, map.getZoom());
+        const url = this.#tileTemplate(layerId)
+          .replace("{z}", String(z))
+          .replace("{y}", String(y))
+          .replace("{x}", String(x));
+        const response = await fetch(url, { cache: "no-store" });
+        if (response.ok) {
+          live = true;
+        } else if (response.status !== 404) {
+          return; // real errors are not "not yet" — stop probing
+        }
+      } catch {
+        return; // network-level failure: stop; a reload is a fresh start
+      }
+      if (epoch !== this.#epoch) {
+        return;
+      }
+      if (live) {
+        if (this.#probedEmpty) {
+          this.#probedEmpty = false;
+          this.#retrySeq += 1;
+          this.refresh();
+        }
+        return; // live on first probe: nothing to heal
+      }
+      this.#probedEmpty = true;
+      this.#retriesLeft -= 1;
+      this.#retryTimer = window.setTimeout(() => {
+        this.#retryTimer = undefined;
+        void probe();
+      }, RETRY_INTERVAL_MS);
+    };
+    void probe();
   }
 
   /** Geographic bounds from `/tilesets/{id}` metadata; undefined when the

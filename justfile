@@ -302,6 +302,12 @@ e2e:
     echo "swath: SSE trace proves ndvi was computed on the fly (decision: live)"
     grep -q '"ingest_to_pixel_ms":[0-9]' "$dir/traces.txt" \
         && echo "swath: SSE trace carries ingest_to_pixel_ms"
+    # Metadata-vs-pixels: the tileset's DECLARED bounds must contain the tile
+    # we just proved correct (12/848/1561, center -105.4248, 39.27). A wrong
+    # granule bbox once put the demo viewport 48 km from the imagery while
+    # every pixel test stayed green — declared geography is now asserted too.
+    curl -sf "$base/tilesets/ndvi" \
+        | python3 -c 'import json,sys; bb=json.load(sys.stdin)["boundingBox"]; (w,s),(e,n)=bb["lowerLeft"],bb["upperRight"]; ok=w<=-105.4248<=e and s<=39.27<=n; print(f"swath: declared tileset bounds contain the proven tile ({[w,s,e,n]})" if ok else f"FAIL: tileset bbox {[w,s,e,n]} does not contain the proven tile"); sys.exit(0 if ok else 1)'
     echo "e2e OK"
 
 # The viewer e2e (issue #33): the same stack bring-up + granule drop as
@@ -329,6 +335,15 @@ e2e-web:
 demo countdown="15":
     #!/usr/bin/env bash
     set -euo pipefail
+    # Refuse to start over a live sibling: a previous `just demo` (waiting on
+    # ctrl-c) or a running e2e shares the compose project, drop dir, and port
+    # 5173 — colliding silently made runs look flaky. Fail loudly instead.
+    if lsof -ti :5173 >/dev/null 2>&1; then
+        echo "FAIL: port 5173 is busy — a previous demo/vite is still running (ctrl-c it first)"; exit 1
+    fi
+    if curl -sf http://localhost:8080/healthz >/dev/null 2>&1; then
+        echo "FAIL: a swath stack is already up on :8080 — 'docker compose down -v' first"; exit 1
+    fi
     vite=""
     teardown() {
         [ -n "$vite" ] && kill "$vite" 2>/dev/null || true
@@ -339,7 +354,7 @@ demo countdown="15":
     (cd web && exec pnpm exec vite dev --port 5173 --strictPort) \
         > target/demo/vite.log 2>&1 &
     vite=$!
-    url="http://localhost:5173/demo/?xray&center=-106.0,39.3&zoom=11"
+    url="http://localhost:5173/demo/?xray&basemap=demo&layer=truecolor&center=-105.4475,39.2650&zoom=12"
     echo ""
     echo "  Building and starting the stack (the first run takes a while)."
     echo "  Open NOW and keep it visible:"
