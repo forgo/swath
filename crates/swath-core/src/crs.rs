@@ -5,7 +5,8 @@
 //!
 //! [`Crs`] is vocabulary only: an EPSG code the rest of the domain passes
 //! around (raster metadata, the [`Trace`](crate::trace::Trace) `crs_from` /
-//! `crs_to` fields, the future `Reproject` port). Projection **math** is
+//! `crs_to` fields, the [`Reproject`](crate::reproject::Reproject) port).
+//! Projection **math** is
 //! deliberately absent — per ARCHITECTURE.md §6 that lives behind the
 //! `Reproject` port, implemented by adapter crates (proj4rs first).
 
