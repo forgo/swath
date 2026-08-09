@@ -1,0 +1,35 @@
+---
+source: crates/swath-render/tests/ir_snapshots.rs
+expression: truecolor_plan()
+---
+{
+  "inputs": [
+    {
+      "name": "b04"
+    },
+    {
+      "name": "b03"
+    },
+    {
+      "name": "b02"
+    }
+  ],
+  "ops": [
+    {
+      "Composite": {
+        "r": "b04",
+        "g": "b03",
+        "b": "b02"
+      }
+    },
+    {
+      "Rescale": {
+        "min": 0.0,
+        "max": 3000.0
+      }
+    }
+  ],
+  "output": {
+    "format": "Png"
+  }
+}
