@@ -35,6 +35,7 @@ path = [
     "REUSE.toml",
     ".claude/settings.json",
     ".github/**",
+    "crates/swath-core/tests/data/*.json",
     "tests/fixtures/*.tif",
     "tests/fixtures/SHA256SUMS",
     "tests/fixtures/manifest.json",
