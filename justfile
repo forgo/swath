@@ -228,60 +228,13 @@ e2e:
     #!/usr/bin/env bash
     set -euo pipefail
     trap 'docker compose down -v' EXIT
+    # Stack bring-up + granule drop + poll-to-live: shared with `just
+    # e2e-web` (issue #33) via tests/e2e/stack-up.sh, which leaves
+    # $dir/tile.png and $dir/tile-headers.txt for the assertions below.
+    tests/e2e/stack-up.sh
     dir=target/e2e
-    granule=hlss30-t13sdd-2024158
-    # The mounted data plane must exist (and be empty) before `up`.
-    rm -rf "$dir" && mkdir -p "$dir/store/drop"
-    docker compose build swath
-    start=$(date +%s)
-    docker compose up -d --wait
-    echo "stack healthy in $(( $(date +%s) - start ))s (pull/start -> all healthchecks green)"
-    docker compose exec -T pgstac psql -qtA -c "select pgstac.get_version();" | grep -E '^[0-9.]+' \
-        && echo "pgstac: migrations present"
-    curl -sf http://localhost:9000/minio/health/live && echo "minio: live"
     base=http://localhost:8080
-    # Landing page (OGC API root) answers with the Swath document.
-    curl -sf "$base/" | grep -q '"title":"Swath"' && echo "swath: landing page OK"
-    # The catalog-backed dataset registered at startup: visible to a plain
-    # STAC client (R5) before any granule exists.
-    docker compose exec -T pgstac psql -qtA -c \
-        "select pgstac.get_collection('hls-s30') is not null;" | grep -qx t \
-        && echo "pgstac: hls-s30 dataset registered (plain STAC visibility)"
-    # R1 pre-condition: the layer exists, its pixels don't — a tile of the
-    # empty catalog is an honest 404.
     tile="$base/tilesets/truecolor/tiles/12/1561/848"
-    code=$(curl -s -o /dev/null -w '%{http_code}' "$tile")
-    [ "$code" = "404" ] || { echo "FAIL: expected 404 before any granule, got $code"; exit 1; }
-    echo "swath: tile is 404 before ingest (catalog empty)"
-    # THE DROP (the manual step count for everything below: zero). Per the
-    # filedrop convention: band COGs land first, the manifest is staged
-    # under an ignored dotfile name and renamed into place last.
-    cp tests/fixtures/$granule-*.tif "$dir/store/"
-    printf '%s\n' \
-      '{' \
-      '  "dataset": "hls-s30",' \
-      "  \"granule\": \"$granule\"," \
-      '  "bbox": [-106.1, 39.2, -105.9, 39.4],' \
-      '  "datetime": "2024-06-06T17:54:00Z",' \
-      '  "assets": {' \
-      "    \"b02\": \"$granule-b02.tif\"," \
-      "    \"b03\": \"$granule-b03.tif\"," \
-      "    \"b04\": \"$granule-b04.tif\"," \
-      "    \"b8a\": \"$granule-b8a.tif\"," \
-      "    \"fmask\": \"$granule-fmask.tif\"" \
-      '  }' \
-      '}' > "$dir/store/drop/.$granule.json"
-    mv "$dir/store/drop/.$granule.json" "$dir/store/drop/$granule.json"
-    echo "swath: granule dropped at $(date -u '+%H:%M:%S') UTC"
-    # Arrive -> catalog -> serve, automatically: poll until the tile is live.
-    code=000
-    for _ in $(seq 1 120); do
-        code=$(curl -s -D "$dir/tile-headers.txt" -o "$dir/tile.png" -w '%{http_code}' "$tile")
-        [ "$code" = "200" ] && break
-        sleep 0.5
-    done
-    [ "$code" = "200" ] || { echo "FAIL: tile not servable within 60s of the drop (last: $code)"; exit 1; }
-    echo "swath: tile went live with zero manual steps (R1)"
     # The Trace explains the served tile: header present, provenance
     # non-empty (real bytes were read for this granule's pixels).
     grep -qi '^x-swath-trace:' "$dir/tile-headers.txt" && echo "swath: X-Swath-Trace header present"
@@ -323,6 +276,21 @@ e2e:
     grep -q '"ingest_to_pixel_ms":[0-9]' "$dir/traces.txt" \
         && echo "swath: SSE trace carries ingest_to_pixel_ms"
     echo "e2e OK"
+
+# The viewer e2e (issue #33): the same stack bring-up + granule drop as
+# `just e2e` (shared, tests/e2e/stack-up.sh — no duplicated drop logic),
+# then the Playwright suite drives the <swath-map> demo page against it:
+# map renders, real tile requests answer 200 image/png, the canvas shows
+# actual pixels, and the layer switcher re-points requests at the ndvi
+# tileset. Playwright itself manages the vite dev server (which proxies
+# the OGC routes to :8080 — the API serves no CORS headers yet). Needs
+# `just setup-web` first (deps + chromium).
+e2e-web:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    trap 'docker compose down -v' EXIT
+    tests/e2e/stack-up.sh
+    cd web && pnpm exec playwright test
 
 # The one-command gate: everything CI enforces.
 check: fmt-check lint test deny zizmor reuse

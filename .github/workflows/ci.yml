@@ -69,6 +69,7 @@ jobs:
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
               - 'tests/fixtures/**'
+              - 'tests/e2e/**'
               - 'justfile'
               - '.config/nextest.toml'
               - '.github/**'
@@ -266,6 +267,36 @@ jobs:
       - run: just test-catalog
       - run: just e2e
 
+  # The viewer e2e (issue #33): the compose stack (via the shared
+  # tests/e2e/stack-up.sh bring-up + granule drop) with the Playwright
+  # suite driving the <swath-map> demo page against it. Needs BOTH the
+  # docker stack and node, hence its own job spanning the stack and web
+  # filters. No Rust toolchain: the bring-up is docker+curl only.
+  e2e-web:
+    needs: changes
+    if: needs.changes.outputs.stack == 'true' || needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+        with:
+          tool: just@1.58.0
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - run: pnpm exec playwright install chromium --with-deps
+        working-directory: web
+      - run: just e2e-web
+
   # REUSE/SPDX compliance: the open-core license boundary stays machine-checkable.
   reuse:
     runs-on: ubuntu-latest
@@ -315,7 +346,7 @@ jobs:
   # was skipped by the path filter; red on any failure, cancellation, or a
   # failed `changes` job (which would silently skip everything downstream).
   ci-ok:
-    needs: [changes, rust-fmt, rust-lint, rust-test, rust-deny, rust-msrv, rust-coverage, zizmor, reuse, e2e, web, python, oracle]
+    needs: [changes, rust-fmt, rust-lint, rust-test, rust-deny, rust-msrv, rust-coverage, zizmor, reuse, e2e, e2e-web, web, python, oracle]
     if: always()
     runs-on: ubuntu-latest
     steps:
