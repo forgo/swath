@@ -105,17 +105,26 @@ fn layer() -> impl Strategy<Value = Layer> {
         proptest::option::of(Just(Colormap::Grayscale)),
         prop_oneof![Just(Resampling::Nearest), Just(Resampling::Bilinear)],
         1..=1024_u32,
+        // The optional openEO process record: any JSON object round-trips
+        // verbatim (stored opaquely, served back by GET /services/{id}).
+        proptest::option::of(
+            text()
+                .prop_map(|summary| serde_json::json!({ "process_graph": {}, "summary": summary })),
+        ),
     )
         .prop_map(
-            |(id, title, description, plan, rescale, colormap, resampling, tile_size)| Layer {
-                id,
-                title,
-                description,
-                plan,
-                rescale,
-                colormap,
-                resampling,
-                tile_size,
+            |(id, title, description, plan, rescale, colormap, resampling, tile_size, process)| {
+                Layer {
+                    id,
+                    title,
+                    description,
+                    plan,
+                    rescale,
+                    colormap,
+                    resampling,
+                    tile_size,
+                    process,
+                }
             },
         )
 }
@@ -240,6 +249,7 @@ fn hls_dataset() -> Dataset {
                 colormap: None,
                 resampling: Resampling::Bilinear,
                 tile_size: 256,
+                process: None,
             },
             Layer {
                 id: "ndvi".to_owned(),
@@ -255,6 +265,7 @@ fn hls_dataset() -> Dataset {
                 colormap: Some(Colormap::Grayscale),
                 resampling: Resampling::Bilinear,
                 tile_size: 256,
+                process: None,
             },
         ],
     }

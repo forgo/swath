@@ -153,13 +153,21 @@ pub struct CatalogLayer {
     pub budget: swath_core::planner::Budget,
 }
 
-/// The catalog-backed [`LayerProvider`]: static identities (compiled from
-/// config), per-request asset resolution from the latest granule.
+/// The catalog-backed [`LayerProvider`]: identities compiled from config
+/// (plus any layers the openEO services surface publishes at runtime,
+/// ADR 0010), per-request asset resolution from the latest granule.
+///
+/// The layer set lives behind a shared lock: **clones share it**, which is
+/// the seam the openEO surface uses — the services handlers hold a clone
+/// of the same provider the tile handlers resolve through, so a `POST`ed
+/// service is servable on the very next tile request. The lock is never
+/// held across an await (entries are cloned out).
 #[derive(Debug, Clone)]
 pub struct CatalogLayers<C> {
     catalog: C,
-    /// In id order (sorted at construction) for a stable tilesets list.
-    layers: Vec<CatalogLayer>,
+    /// Kept in id order (restored on every mutation) for a stable
+    /// tilesets list.
+    layers: std::sync::Arc<std::sync::RwLock<Vec<CatalogLayer>>>,
 }
 
 impl<C> CatalogLayers<C> {
@@ -168,11 +176,43 @@ impl<C> CatalogLayers<C> {
     #[must_use]
     pub fn new(catalog: C, mut layers: Vec<CatalogLayer>) -> Self {
         layers.sort_by(|a, b| a.id.cmp(&b.id));
-        Self { catalog, layers }
+        Self {
+            catalog,
+            layers: std::sync::Arc::new(std::sync::RwLock::new(layers)),
+        }
     }
 
-    fn entry(&self, id: &str) -> Option<&CatalogLayer> {
-        self.layers.iter().find(|layer| layer.id == id)
+    /// The catalog this provider resolves granules from — shared with the
+    /// openEO services surface, which persists authored layers through it.
+    pub fn catalog(&self) -> &C {
+        &self.catalog
+    }
+
+    /// Inserts (or replaces, by id) a servable layer at runtime — the
+    /// openEO `POST /services` seam. Visible to every clone immediately.
+    pub fn insert(&self, layer: CatalogLayer) {
+        let mut layers = self.layers.write().expect("layer lock is not poisoned");
+        layers.retain(|existing| existing.id != layer.id);
+        layers.push(layer);
+        layers.sort_by(|a, b| a.id.cmp(&b.id));
+    }
+
+    /// Removes a layer by id (openEO `DELETE /services/{id}`); `false`
+    /// when no such layer was served.
+    pub fn remove(&self, id: &str) -> bool {
+        let mut layers = self.layers.write().expect("layer lock is not poisoned");
+        let before = layers.len();
+        layers.retain(|layer| layer.id != id);
+        layers.len() != before
+    }
+
+    fn entry(&self, id: &str) -> Option<CatalogLayer> {
+        self.layers
+            .read()
+            .expect("layer lock is not poisoned")
+            .iter()
+            .find(|layer| layer.id == id)
+            .cloned()
     }
 }
 
@@ -188,6 +228,8 @@ fn latest(granules: Vec<Granule>) -> Option<Granule> {
 impl<C: Catalog> LayerProvider for CatalogLayers<C> {
     fn identities(&self) -> Vec<LayerIdentity> {
         self.layers
+            .read()
+            .expect("layer lock is not poisoned")
             .iter()
             .map(|layer| LayerIdentity {
                 id: layer.id.clone(),

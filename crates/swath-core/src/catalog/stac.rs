@@ -491,6 +491,7 @@ mod tests {
                     colormap: None,
                     resampling: Resampling::Bilinear,
                     tile_size: 256,
+                    process: None,
                 },
                 Layer {
                     id: "ndvi".to_owned(),
@@ -506,6 +507,7 @@ mod tests {
                     colormap: Some(Colormap::Grayscale),
                     resampling: Resampling::Bilinear,
                     tile_size: 256,
+                    process: None,
                 },
             ],
         }

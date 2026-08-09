@@ -85,6 +85,7 @@ fn dataset(id: &str) -> Dataset {
                 colormap: None,
                 resampling: Resampling::Bilinear,
                 tile_size: 256,
+                process: None,
             },
             Layer {
                 id: "ndvi".to_owned(),
@@ -100,6 +101,7 @@ fn dataset(id: &str) -> Dataset {
                 colormap: Some(Colormap::Grayscale),
                 resampling: Resampling::Bilinear,
                 tile_size: 256,
+                process: None,
             },
         ],
     }

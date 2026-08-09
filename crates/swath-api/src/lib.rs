@@ -29,6 +29,12 @@
 //! | `GET /traces` | the x-ray Trace SSE stream (control-plane, issue #28) |
 //! | `GET /healthz` | liveness probe: plain 200 `ok` (operational, non-OGC, issue #29) |
 //!
+//! Catalog-backed deployments additionally merge in the **openEO
+//! authoring surface** (ADR 0010, [`openeo`] module: capabilities,
+//! collections, processes, XYZ secondary services) — `GET /` then serves
+//! the OGC landing page and the openEO capabilities from one root
+//! ([`ApiState::with_openeo`]).
+//!
 //! Users address **layers** (R2): a layer id is the only name a client
 //! ever sees — band assets, plans, and catalog plumbing stay behind the
 //! [`LayerRegistry`].
@@ -85,6 +91,7 @@
 
 mod error;
 mod model;
+pub mod openeo;
 mod provider;
 mod registry;
 mod routes;
@@ -92,6 +99,9 @@ pub mod traces;
 
 pub use error::ApiError;
 pub use model::{Conformance, LandingPage, Link, TileSetItem, TileSetList, TileSetMetadata};
+pub use openeo::{
+    OPENEO_API_VERSION, OpenEoError, OpenEoState, compile_service_layer, openeo_router,
+};
 pub use provider::{CatalogLayer, CatalogLayers, LayerIdentity, LayerProvider, ResolvedLayer};
 pub use registry::{Layer, LayerRegistry};
 pub use routes::{ApiState, CONFORMANCE_CLASSES, TraceExtension, router};

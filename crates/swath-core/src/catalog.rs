@@ -434,6 +434,15 @@ pub struct Layer {
     pub resampling: Resampling,
     /// Tile side length in pixels.
     pub tile_size: u32,
+    /// The openEO process (a `process_graph_with_metadata` JSON object)
+    /// this layer was authored from, when it was created through the
+    /// openEO secondary-services surface (ADR 0010). `None` for layers
+    /// defined by operator config. Stored verbatim so `GET /services/{id}`
+    /// returns exactly what was submitted and serving can recompile the
+    /// graph at startup; omitted from the persisted document when absent,
+    /// so pre-existing `swath:layers` entries keep their bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process: Option<serde_json::Value>,
 }
 
 /// A logical collection of granules sharing a band vocabulary, CRS family,

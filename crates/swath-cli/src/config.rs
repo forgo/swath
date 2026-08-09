@@ -670,6 +670,9 @@ impl LayerConfig {
                 ResamplingConfig::Nearest => domain::Resampling::Nearest,
             },
             tile_size,
+            // Operator-config layers carry no openEO process record; only
+            // the services surface (ADR 0010) authors layers with one.
+            process: None,
         };
         Ok((template, domain_layer))
     }

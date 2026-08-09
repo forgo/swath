@@ -142,6 +142,37 @@ impl std::ops::Div for Expr {
     }
 }
 
+/// Renders the expression as infix text, operands parenthesized when they
+/// are themselves binary: NDVI displays as `(b8a - b04) / (b8a + b04)` —
+/// exactly the `BandMath` expression convention the catalog persists,
+/// which is why this impl exists (the openEO services surface records a
+/// compiled graph's band math in that form, ADR 0010).
+impl std::fmt::Display for Expr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn operand(e: &Expr, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match e {
+                Expr::Binary { .. } => write!(f, "({e})"),
+                Expr::Band(_) | Expr::Const(_) => write!(f, "{e}"),
+            }
+        }
+        match self {
+            Self::Band(name) => f.write_str(name),
+            Self::Const(c) => write!(f, "{c}"),
+            Self::Binary { op, lhs, rhs } => {
+                operand(lhs, f)?;
+                let symbol = match op {
+                    BinaryOp::Add => " + ",
+                    BinaryOp::Sub => " - ",
+                    BinaryOp::Mul => " * ",
+                    BinaryOp::Div => " / ",
+                };
+                f.write_str(symbol)?;
+                operand(rhs, f)
+            }
+        }
+    }
+}
+
 impl Expr {
     /// The named band's value.
     pub fn band(name: impl Into<String>) -> Self {

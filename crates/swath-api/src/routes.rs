@@ -93,6 +93,10 @@ pub struct ApiState<S, R, L, C = NoCache> {
     /// The trace bus: the tile handler publishes every render, the
     /// `GET /traces` SSE stream (issue #28) fans them out.
     traces: TraceBus,
+    /// Whether the openEO surface is mounted beside this router
+    /// (ADR 0010): the landing page then serves the openEO capabilities
+    /// vocabulary alongside the OGC one.
+    openeo: bool,
 }
 
 impl<S, R, L> ApiState<S, R, L> {
@@ -114,6 +118,7 @@ impl<S, R, L> ApiState<S, R, L> {
             cache: None,
             base_url,
             traces: TraceBus::default(),
+            openeo: false,
         }
     }
 }
@@ -138,7 +143,18 @@ impl<S, R, L, C> ApiState<S, R, L, C> {
             cache: Some(cache),
             base_url: self.base_url,
             traces: self.traces,
+            openeo: self.openeo,
         }
+    }
+
+    /// Declares that the openEO surface (ADR 0010) is merged beside this
+    /// router: `GET /` then serves the openEO capabilities fields
+    /// (`api_version`, `endpoints`, …) alongside the OGC landing page — one
+    /// root, both vocabularies.
+    #[must_use]
+    pub fn with_openeo(mut self) -> Self {
+        self.openeo = true;
+        self
     }
 
     /// The trace bus renders are published to. Exposed so tests (and,
@@ -198,7 +214,13 @@ async fn healthz() -> &'static str {
 
 // --- JSON document handlers ---
 
-async fn landing<S, R, L, C>(State(app): State<Arc<ApiState<S, R, L, C>>>) -> Json<LandingPage>
+/// `GET /` — the OGC API landing page; with the openEO surface mounted
+/// ([`ApiState::with_openeo`]), the same document additionally carries
+/// the openEO capabilities fields (both standards claim the root, so the
+/// root speaks both — each schema tolerates the other's fields).
+async fn landing<S, R, L, C>(
+    State(app): State<Arc<ApiState<S, R, L, C>>>,
+) -> Json<serde_json::Value>
 where
     S: RasterSource + 'static,
     R: Reproject + 'static,
@@ -206,7 +228,7 @@ where
     C: TileCache + 'static,
 {
     let base = &app.base_url;
-    Json(LandingPage {
+    let page = LandingPage {
         title: "Swath".to_owned(),
         description: "Live satellite imagery tiles: OGC API - Tiles over the Swath tiler."
             .to_owned(),
@@ -232,7 +254,12 @@ where
             .media_type("application/json")
             .title("Tilesets, one per layer"),
         ],
-    })
+    };
+    let mut doc = serde_json::to_value(page).expect("landing page serializes");
+    if app.openeo {
+        crate::openeo::extend_capabilities(&mut doc, base);
+    }
+    Json(doc)
 }
 
 async fn conformance() -> Json<Conformance> {
