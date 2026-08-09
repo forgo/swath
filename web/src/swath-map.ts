@@ -76,6 +76,30 @@ const RASTER_LAYER_ID = "swath";
  * a third-party host, so e2e/CI runs keep basemap off).
  */
 const DEMO_BASEMAP_URL = "https://demotiles.maplibre.org/style.json";
+
+/** Tile-404 auto-retry pacing: one style re-apply per interval while tiles
+ * are missing, up to the cap (~3 minutes of patience for the demo's
+ * "viewer open before the granule exists" flow, then quiet). */
+const RETRY_INTERVAL_MS = 3000;
+const MAX_TILE_RETRIES = 60;
+
+/** Slippy/WebMercatorQuad tile containing (lon, lat) at the zoom's integer
+ * level — the liveness probe's target. Mirrors the server-side TMS math. */
+function centerTile(lon: number, lat: number, zoom: number): { z: number; x: number; y: number } {
+  const z = Math.max(0, Math.min(22, Math.round(zoom)));
+  const n = 2 ** z;
+  const clampedLat = Math.max(-85.0511, Math.min(85.0511, lat));
+  const latRad = (clampedLat * Math.PI) / 180;
+  const x = Math.min(n - 1, Math.max(0, Math.floor(((lon + 180) / 360) * n)));
+  const y = Math.min(
+    n - 1,
+    Math.max(
+      0,
+      Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n),
+    ),
+  );
+  return { z, x, y };
+}
 const basemapCache = new Map<string, Promise<Record<string, unknown> | undefined>>();
 
 function fetchBasemapStyle(url: string): Promise<Record<string, unknown> | undefined> {
@@ -259,6 +283,14 @@ export class SwathMap extends HTMLElement {
   }
 
   #map: MapLibreMap | undefined;
+  #retriesLeft = MAX_TILE_RETRIES;
+  #retryTimer: number | undefined;
+  // Bumped when a liveness probe turns 404→200 and appended to the tile
+  // template (`?v=n`): MapLibre treats raster-tile 404s as "empty, done" (no
+  // error event, no refetch — ever), and its style diff no-ops an unchanged
+  // source, so recovery needs BOTH a poll and a genuinely different source.
+  #retrySeq = 0;
+  #probedEmpty = false;
   #switcher: LayerSwitcherControl | undefined;
   #xrayToggle: XRayToggleControl | undefined;
   #xray: XRayOverlay | undefined;
@@ -322,8 +354,17 @@ export class SwathMap extends HTMLElement {
     this.#startApply();
   }
 
+  /** Re-applies the current layer (style + sources) — refetches tiles. */
+  refresh(): void {
+    this.#startApply();
+  }
+
   disconnectedCallback(): void {
     this.#epoch += 1;
+    if (this.#retryTimer !== undefined) {
+      window.clearTimeout(this.#retryTimer);
+      this.#retryTimer = undefined;
+    }
     this.#disableXRay();
     this.#map?.remove();
     this.#map = undefined;
@@ -430,6 +471,17 @@ export class SwathMap extends HTMLElement {
       // Namespaced (not `error`): a bubbling `error` event would reach
       // `window` and read as an unhandled page error to host tooling.
       this.dispatchEvent(new CustomEvent("swath-error", { detail: { error }, bubbles: true }));
+      // Self-healing applies: a viewer opened while the server is still
+      // starting (the demo prints its URL during the docker build) sees
+      // /tilesets fail — without a retry the component would stay blank
+      // forever, basemap included. Same bounded budget as the tile probe.
+      if (this.#retriesLeft > 0 && this.#retryTimer === undefined && this.isConnected) {
+        this.#retriesLeft -= 1;
+        this.#retryTimer = window.setTimeout(() => {
+          this.#retryTimer = undefined;
+          this.#startApply();
+        }, RETRY_INTERVAL_MS);
+      }
     });
   }
 
@@ -465,9 +517,10 @@ export class SwathMap extends HTMLElement {
       return;
     }
 
+    const retrySuffix = this.#retrySeq > 0 ? `?v=${this.#retrySeq}` : "";
     const swathSource = {
       type: "raster",
-      tiles: [this.#tileTemplate(layerId)],
+      tiles: [`${this.#tileTemplate(layerId)}${retrySuffix}`],
       tileSize: 256,
     };
     const swathLayer = { id: RASTER_LAYER_ID, type: "raster", source: SOURCE_ID };
@@ -512,6 +565,60 @@ export class SwathMap extends HTMLElement {
     this.dispatchEvent(
       new CustomEvent("layerchange", { detail: { layer: layerId }, bubbles: true }),
     );
+    this.#startLivenessProbe(layerId, epoch);
+  }
+
+  /** Self-healing tiles for the "viewer open before the data exists" flow
+   * (the stopwatch demo): probe the view's center tile; while it 404s,
+   * re-probe each interval (bounded); on the first 200, bump the source
+   * version and re-apply so MapLibre — which never refetches a failed tile —
+   * actually paints the now-live imagery. A layer that is already live on
+   * the first probe ends the loop immediately. */
+  #startLivenessProbe(layerId: string, epoch: number): void {
+    if (this.#retryTimer !== undefined) {
+      window.clearTimeout(this.#retryTimer);
+      this.#retryTimer = undefined;
+    }
+    const probe = async (): Promise<void> => {
+      const map = this.#map;
+      if (epoch !== this.#epoch || !map || this.#retriesLeft <= 0) {
+        return;
+      }
+      let live = false;
+      try {
+        const { z, x, y } = centerTile(map.getCenter().lng, map.getCenter().lat, map.getZoom());
+        const url = this.#tileTemplate(layerId)
+          .replace("{z}", String(z))
+          .replace("{y}", String(y))
+          .replace("{x}", String(x));
+        const response = await fetch(url, { cache: "no-store" });
+        if (response.ok) {
+          live = true;
+        } else if (response.status !== 404) {
+          return; // real errors are not "not yet" — stop probing
+        }
+      } catch {
+        return; // network-level failure: stop; a reload is a fresh start
+      }
+      if (epoch !== this.#epoch) {
+        return;
+      }
+      if (live) {
+        if (this.#probedEmpty) {
+          this.#probedEmpty = false;
+          this.#retrySeq += 1;
+          this.refresh();
+        }
+        return; // live on first probe: nothing to heal
+      }
+      this.#probedEmpty = true;
+      this.#retriesLeft -= 1;
+      this.#retryTimer = window.setTimeout(() => {
+        this.#retryTimer = undefined;
+        void probe();
+      }, RETRY_INTERVAL_MS);
+    };
+    void probe();
   }
 
   /** Geographic bounds from `/tilesets/{id}` metadata; undefined when the

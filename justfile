@@ -335,6 +335,15 @@ e2e-web:
 demo countdown="15":
     #!/usr/bin/env bash
     set -euo pipefail
+    # Refuse to start over a live sibling: a previous `just demo` (waiting on
+    # ctrl-c) or a running e2e shares the compose project, drop dir, and port
+    # 5173 — colliding silently made runs look flaky. Fail loudly instead.
+    if lsof -ti :5173 >/dev/null 2>&1; then
+        echo "FAIL: port 5173 is busy — a previous demo/vite is still running (ctrl-c it first)"; exit 1
+    fi
+    if curl -sf http://localhost:8080/healthz >/dev/null 2>&1; then
+        echo "FAIL: a swath stack is already up on :8080 — 'docker compose down -v' first"; exit 1
+    fi
     vite=""
     teardown() {
         [ -n "$vite" ] && kill "$vite" 2>/dev/null || true

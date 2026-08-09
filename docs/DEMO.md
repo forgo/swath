@@ -35,8 +35,10 @@ just demo        # bring-up, countdown, drop, number; ctrl-c tears down
 ```
 
 The recipe prints the URL to open (`http://localhost:5173/demo/?xray&basemap=demo&layer=truecolor&center=-105.4475,39.2650&zoom=12`)
-while the stack builds. Open it before the countdown ends. If tiles stay gray after the drop,
-nudge the map (drag or zoom) — MapLibre doesn't refetch tiles it already saw 404.
+while the stack builds. Open it whenever you like — pre-drop tiles 404 (honestly empty), and the
+component auto-retries every few seconds, so the imagery appears on its own moments after ingest;
+no reloading or map-nudging needed. The recipe refuses to start if a previous demo is still
+running (shared ports/stack made overlapping sessions look flaky).
 
 ## What the x-ray overlay is telling you
 
