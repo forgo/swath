@@ -10,6 +10,11 @@ repository.workspace = true
 authors.workspace = true
 publish = false
 
+# The conformance harness's equivalence gate (`just test-referencer`).
+[[bin]]
+name = "vmanifest-compare"
+path = "src/bin/vmanifest_compare.rs"
+
 [dependencies]
 # GRIB2 metadata walk (prototype 0001: message offsets/lengths/grids/packing
 # come straight from the section structs — no field decode, no default

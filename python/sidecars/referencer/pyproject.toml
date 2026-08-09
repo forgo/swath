@@ -1,12 +1,13 @@
-# The production home of the VirtualiZarr referencer sidecar (ADR 0006):
-# legacy granule (NetCDF4/HDF5/GRIB2) -> virtual chunk manifest. Prototype 0001
-# holds the bake-off harness; its requirements.txt migrates here as the
-# dependency set below. Serve-time reading is pure Rust — this is ingest-only.
+# The VirtualiZarr referencer sidecar (ADR 0006, post-bake-off role): the
+# CONFORMANCE REFERENCE and long-tail fallback for the production pure-Rust
+# generator (crates/swath-referencer). legacy granule (NetCDF4/HDF5) ->
+# virtual chunk manifest, independently derived; the equivalence harness
+# (`just test-referencer`) is what keeps the two interchangeable.
 
 [project]
 name = "swath-referencer"
 version = "0.0.0"
-description = "Swath ingest sidecar: legacy granules to virtual chunk manifests via VirtualiZarr"
+description = "Swath conformance-reference referencer: legacy granules to virtual chunk manifests via VirtualiZarr"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.13"
@@ -17,6 +18,11 @@ dependencies = [
     "xarray>=2025.1",
     "numpy>=2",
 ]
+
+[project.scripts]
+# The conformance-reference CLI (ADR 0006): granule -> schema-v1 manifest
+# via VirtualiZarr, independent of the production Rust generator.
+swath-referencer = "swath_referencer.cli:main"
 
 [dependency-groups]
 dev = [
