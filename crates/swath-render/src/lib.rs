@@ -37,12 +37,18 @@
 //! Phase 1). The IR is the typed target the process compiler (issue #34)
 //! lowers openEO graphs into; [`eval`] executes it.
 //!
+//! [`render_tile`] stitches all of the stages into one motion — describe,
+//! window, read, warp, eval, encode — and returns the encoded tile
+//! together with the fully populated [`Trace`](swath_core::trace::Trace)
+//! that explains it (REQUIREMENTS.md R4).
+//!
 //! [`CoordTransform`]: swath_core::reproject::CoordTransform
 
 mod encode;
 mod error;
 mod grid;
 pub mod ir;
+mod tiler;
 mod warp;
 mod window;
 
@@ -50,5 +56,6 @@ pub use encode::{EncodeError, encode_png};
 pub use error::RenderError;
 pub use grid::TargetGrid;
 pub use ir::{RenderPlan, RgbaTile, eval};
+pub use tiler::{EncodedTile, TileError, TileRequest, render_tile};
 pub use warp::{NodataPolicy, Resampling, WarpedBuffer, warp};
 pub use window::{BOUNDARY_SAMPLES_PER_EDGE, source_window};

@@ -90,12 +90,26 @@ pub struct Timings {
 ///   lives on each [`Timings`] field, where it is adjacent to the value.
 /// - `cache_key` is absent for now: `TileKey` is defined by the cache model
 ///   (§10) and lands with the `TileCache` port; it will be added here then.
+/// - `sources` is an addition the sketch's single `source` could not
+///   express: a composite render (true color: three reflectance bands from
+///   three COGs) reads *several* assets, and R4 demands every one be
+///   accounted for. Issue #21 deliberately deferred the multi-asset
+///   question; `render_tile` (#26) answered it by keeping `source` as the
+///   primary asset (the first declared band input's) for one-line summaries
+///   and adding `sources` as the full list.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Trace {
     /// The planner's materialization choice for this tile.
     pub decision: Strategy,
-    /// The source asset pixels came from (or would have, on a cache hit).
+    /// The primary source asset — the first declared band input's asset.
+    /// The one-line answer to "where did this tile come from?"; the full
+    /// accounting is [`sources`](Self::sources).
     pub source: AssetRef,
+    /// Every distinct source asset read (or consulted) for this tile, in
+    /// declared band-input order. Always contains
+    /// [`source`](Self::source) first; single-asset renders have exactly
+    /// one entry.
+    pub sources: Vec<AssetRef>,
     /// CRS of the source pixels.
     pub crs_from: Crs,
     /// CRS of the rendered tile.
@@ -121,6 +135,10 @@ mod tests {
         Trace {
             decision: Strategy::Overview { level: 2 },
             source: AssetRef::new("s3://hls/granule/B04.tif"),
+            sources: vec![
+                AssetRef::new("s3://hls/granule/B04.tif"),
+                AssetRef::new("s3://hls/granule/B03.tif"),
+            ],
             crs_from: Crs::from_epsg(32613),
             crs_to: Crs::WEB_MERCATOR,
             bytes_read: 131_072,
@@ -148,6 +166,7 @@ mod tests {
         let expected = serde_json::json!({
             "decision": {"overview": {"level": 2}},
             "source": "s3://hls/granule/B04.tif",
+            "sources": ["s3://hls/granule/B04.tif", "s3://hls/granule/B03.tif"],
             "crs_from": 32613,
             "crs_to": 3857,
             "bytes_read": 131_072,
