@@ -4,19 +4,36 @@
 //! `swath serve`: resolve config, build the object store, wire the
 //! Phase-1 adapters into the API router, and run axum on a multi-thread
 //! tokio runtime with graceful SIGINT/SIGTERM shutdown.
+//!
+//! Catalog mode (`--catalog`, issue #31) additionally: connects to pgstac,
+//! registers the configured datasets (upsert — the dataset-must-pre-exist
+//! half of the ingest contract), serves layers that resolve assets from
+//! each dataset's latest granule, and — with `--watch-dir` — runs the
+//! filedrop ingest loop as a background task in the same process, so
+//! `docker compose up` + a dropped manifest is the whole R1 happy path.
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use object_store::ObjectStore;
 use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
 use object_store::prefix::PrefixStore;
-use swath_api::ApiState;
+use swath_api::{ApiState, CatalogLayers, LayerProvider};
+use swath_catalog_pgstac::PgstacCatalog;
+use swath_core::catalog::{Catalog as _, CatalogError};
+use swath_core::events::EventSource as _;
+use swath_events_filedrop::FiledropEvents;
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
 
-use crate::config::{self, ResolvedConfig};
+use crate::config::{self, CatalogMode, LayerSource, ResolvedConfig};
+
+/// Filedrop scan cadence. A quarter second is well under the noise floor
+/// of the ingest-to-pixel budget while keeping the idle cost negligible
+/// (one `read_dir` per tick).
+const WATCH_POLL: Duration = Duration::from_millis(250);
 
 /// `swath serve` arguments. Scalars carry both a flag and a `SWATH_*`
 /// variable (clap's `env` attribute — `--help` documents both); either
@@ -44,6 +61,27 @@ pub(crate) struct ServeArgs {
     /// (S3 credentials/endpoint via the standard AWS_* environment).
     #[arg(long, value_name = "ROOT", env = "SWATH_STORE_ROOT")]
     pub(crate) store_root: Option<String>,
+
+    /// Catalog mode: postgres URL of a pgstac database. Layers then come
+    /// from [[datasets]] in the config file and resolve their assets from
+    /// each dataset's latest ingested granule.
+    #[arg(
+        long,
+        value_name = "URL",
+        env = "SWATH_CATALOG",
+        conflicts_with = "fixtures"
+    )]
+    pub(crate) catalog: Option<String>,
+
+    /// Watch this directory for granule manifests (catalog mode): each
+    /// `<granule-id>.json` dropped in is ingested automatically.
+    #[arg(
+        long,
+        value_name = "PATH",
+        env = "SWATH_WATCH_DIR",
+        conflicts_with = "fixtures"
+    )]
+    pub(crate) watch_dir: Option<PathBuf>,
 }
 
 /// Serve-path errors, each phrased for the operator reading the log.
@@ -71,6 +109,9 @@ pub(crate) enum ServeError {
     /// The server itself failed.
     #[error("server error: {0}")]
     Serve(#[source] std::io::Error),
+    /// The pgstac catalog could not be reached or prepared.
+    #[error("catalog: {0}")]
+    Catalog(#[from] CatalogError),
 }
 
 /// Resolves config, builds the runtime, and serves until SIGINT/SIGTERM.
@@ -85,10 +126,68 @@ pub(crate) fn run(args: &ServeArgs) -> Result<(), ServeError> {
 
 /// Wires adapters into the router and runs axum with graceful shutdown.
 async fn serve(cfg: ResolvedConfig) -> Result<(), ServeError> {
+    let ResolvedConfig {
+        bind,
+        base_url,
+        store_root,
+        layers,
+    } = cfg;
+    let shared = Shared {
+        bind,
+        base_url,
+        store_root,
+    };
+    match layers {
+        LayerSource::Static(registry) => {
+            let layer_count = registry.identities().len();
+            run_server(&shared, registry, layer_count).await
+        }
+        LayerSource::Catalog(mode) => serve_catalog(&shared, mode).await,
+    }
+}
+
+/// The mode-independent scalars of a resolved config.
+struct Shared {
+    bind: std::net::SocketAddr,
+    base_url: String,
+    store_root: String,
+}
+
+/// Catalog mode: connect, register datasets, start the ingest loop, serve.
+async fn serve_catalog(cfg: &Shared, mode: CatalogMode) -> Result<(), ServeError> {
+    let catalog = PgstacCatalog::connect(&mode.url).await?;
+    // Register the configured datasets up front: config is the source of
+    // truth for dataset identity + layers, and granules ingested later
+    // require their dataset to pre-exist (swath_core::ingest docs).
+    for dataset in &mode.datasets {
+        catalog.upsert_dataset(dataset).await?;
+        tracing::info!(
+            "registered dataset {id} ({layers} layer(s))",
+            id = dataset.id,
+            layers = dataset.layers.len(),
+        );
+    }
+    if let Some(dir) = &mode.watch_dir {
+        tracing::info!("watching {} for granule manifests", dir.display());
+        tokio::spawn(ingest_loop(
+            FiledropEvents::new(dir.clone(), WATCH_POLL),
+            catalog.clone(),
+        ));
+    }
+    let layer_count = mode.layers.len();
+    let provider = CatalogLayers::new(catalog, mode.layers);
+    run_server(cfg, provider, layer_count).await
+}
+
+/// The mode-independent tail of `serve`: build the store, assemble the
+/// state, bind, run until SIGINT/SIGTERM.
+async fn run_server<L>(cfg: &Shared, layers: L, layer_count: usize) -> Result<(), ServeError>
+where
+    L: LayerProvider + 'static,
+{
     let store = build_store(&cfg.store_root)?;
-    let layer_count = cfg.registry.iter().count();
     let state = ApiState::new(
-        cfg.registry,
+        layers,
         CogSource::new(store),
         Proj4rsReproject,
         &cfg.base_url,
@@ -114,6 +213,46 @@ async fn serve(cfg: ResolvedConfig) -> Result<(), ServeError> {
         .map_err(ServeError::Serve)?;
     tracing::info!("shutdown complete");
     Ok(())
+}
+
+/// The ingest loop (ARCHITECTURE.md §8): pull granule arrivals from the
+/// filedrop watcher, register each through the core's ingest step, log the
+/// outcome with its ingest latency. Errors never stop the loop — one bad
+/// manifest must not block the next granule (R1).
+async fn ingest_loop(mut source: FiledropEvents, catalog: PgstacCatalog) {
+    loop {
+        match source.next_event().await {
+            Ok(Some(event)) => match swath_core::ingest::ingest_granule(&catalog, &event).await {
+                Ok(granule) => {
+                    let elapsed =
+                        now_unix_millis().saturating_sub(event.arrived_at.to_unix_millis());
+                    tracing::info!(
+                        "ingested granule {id} into dataset {dataset} \
+                             ({bands} band(s)) in {elapsed} ms",
+                        id = granule.id,
+                        dataset = granule.dataset,
+                        bands = granule.assets.len(),
+                    );
+                }
+                Err(err) => tracing::error!(
+                    "ingest of granule {id} failed: {err}",
+                    id = event.granule.id,
+                ),
+            },
+            Ok(None) => {
+                tracing::info!("event source exhausted; ingest loop exiting");
+                break;
+            }
+            Err(err) => tracing::warn!("event source: {err}"),
+        }
+    }
+}
+
+/// Wall-clock milliseconds since the Unix epoch.
+fn now_unix_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
 /// The object store behind the configured root: `s3://bucket[/prefix]`

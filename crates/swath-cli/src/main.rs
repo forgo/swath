@@ -55,6 +55,25 @@ Config file (--config, TOML; flags/env override its scalars):
   g = \"granule-b03.tif\"
   b = \"granule-b02.tif\"
 
+Catalog mode (--catalog / SWATH_CATALOG, or `catalog` in the file): layers
+are defined per dataset and resolve their assets from the dataset's latest
+ingested granule; a watch-dir ingests dropped `<granule-id>.json` manifests
+automatically (the ingest-to-pixel path):
+  catalog = \"postgres://user:pass@host:5432/db\"   # pgstac
+  watch-dir = \"/data/drop\"          # optional: filedrop ingest
+  [[datasets]]
+  id = \"hls-s30\"
+  title = \"HLS S30\"
+  license = \"CC0-1.0\"
+  [[datasets.layers]]               # same layer schema, except bands map
+  id = \"truecolor\"                  # roles to DATASET BAND NAMES:
+  kind = \"truecolor\"
+  rescale = [0.0, 3000.0]
+  [datasets.layers.bands]
+  r = \"b04\"
+  g = \"b03\"
+  b = \"b02\"
+
 The layer `kind` enum is the walking-skeleton stand-in the openEO process
 compiler (issue #32) replaces.";
 

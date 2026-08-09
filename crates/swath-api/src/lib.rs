@@ -71,19 +71,28 @@
 //!   `render_tile` runs inline on the handler task; `spawn_blocking`/rayon
 //!   offload and admission control wait until a real server feels the
 //!   latency (§16.7).
-//! - **Catalog-backed layers**: the in-memory [`LayerRegistry`] is the
-//!   walking-skeleton stand-in the pgstac catalog replaces in issue #30.
 //! - **WebP / content negotiation beyond PNG**: PNG is the only encode
 //!   format the render path emits today (`TileFormat`).
+//!
+//! # Layer resolution (issue #31)
+//!
+//! Handlers resolve `{layerId}` through the [`LayerProvider`] seam: the
+//! in-memory [`LayerRegistry`] (fixtures/config mode, unchanged) or the
+//! catalog-backed [`CatalogLayers`], whose tiles render from the **latest
+//! granule** of each layer's dataset and whose Traces carry
+//! `ingest_to_pixel_ms` (also surfaced in the `X-Swath-Trace` header) — the
+//! north-star metric's serve half. See [`provider`](CatalogLayers) docs.
 
 mod error;
 mod model;
+mod provider;
 mod registry;
 mod routes;
 pub mod traces;
 
 pub use error::ApiError;
 pub use model::{Conformance, LandingPage, Link, TileSetItem, TileSetList, TileSetMetadata};
+pub use provider::{CatalogLayer, CatalogLayers, LayerIdentity, LayerProvider, ResolvedLayer};
 pub use registry::{Layer, LayerRegistry};
 pub use routes::{ApiState, CONFORMANCE_CLASSES, TraceExtension, router};
 pub use traces::{TraceBus, TraceEvent};

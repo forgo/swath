@@ -9,11 +9,12 @@
 //! description) the OGC documents expose. Users see layer ids and nothing
 //! else (REQUIREMENTS.md R2).
 //!
-//! **Walking-skeleton scope:** the registry is in-memory and immutable,
-//! constructed once at startup. The pgstac catalog adapter (issue #30)
-//! replaces this with catalog-resolved layers behind the same lookup; the
-//! registry's read surface (`get`/`iter`) is deliberately the shape that
-//! swap needs.
+//! **Scope:** the registry is in-memory and immutable, constructed once at
+//! startup — the `--fixtures`/config-file serving mode. Catalog-backed
+//! serving (issue #31) lives beside it as
+//! [`CatalogLayers`](crate::provider::CatalogLayers); both plug into the
+//! handlers through the [`LayerProvider`](crate::provider::LayerProvider)
+//! seam.
 
 use std::collections::BTreeMap;
 
