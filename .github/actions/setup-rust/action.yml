@@ -2,8 +2,19 @@ name: Setup Rust
 description: >-
   Toolchain from rust-toolchain.toml (with components), Swatinem rust-cache
   (embedded in setup-rust-toolchain: registry + git + target keyed on
-  Cargo.lock), and the pinned dev tools via `just setup` (versions pinned in
-  the justfile — one place, bumped by Renovate).
+  Cargo.lock), and the pinned dev tools via `just setup-ci` (versions pinned in
+  the justfile — one place, bumped by Renovate). GITHUB_TOKEN is passed to the
+  installers: unauthenticated GitHub API calls get 403-rate-limited on shared
+  runner IPs (worst on macOS), which forced binstall into slow — and
+  semver-drift-fragile — source builds.
+
+inputs:
+  tools:
+    description: >-
+      Space-separated pinned tools to install via `just setup-ci` (subset of:
+      nextest llvm-cov deny), or "none". Install only what the job runs.
+    required: false
+    default: "nextest llvm-cov deny"
 
 runs:
   using: composite
@@ -13,9 +24,17 @@ runs:
 
     - name: Install just + cargo-binstall (prebuilt, checksum-verified)
       uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       with:
         tool: just@1.58.0,cargo-binstall@1.21.1
 
-    - name: Install pinned dev tools (CI set only)
+    - name: Install pinned dev tools (job-scoped)
       shell: bash
-      run: just setup-ci
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        # Env-var indirection, not direct template expansion in `run:` —
+        # zizmor template-injection hygiene (defense-in-depth; inputs here are
+        # repo-controlled, but the rule stays cheap and absolute).
+        TOOLS: ${{ inputs.tools }}
+      run: just setup-ci $TOOLS
