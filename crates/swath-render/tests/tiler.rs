@@ -24,6 +24,7 @@ use std::sync::Arc;
 
 use object_store::local::LocalFileSystem;
 use swath_core::crs::Crs;
+use swath_core::planner::{Budget, PlannedStrategy};
 use swath_core::raster::{AssetRef, RasterInfo, WindowRequest};
 use swath_core::source::{BandSelection, RasterSource, ReadLevel, SourceError, WindowData};
 use swath_core::tile::TileCoord;
@@ -243,15 +244,44 @@ impl RasterSource for OverviewHider {
     }
 }
 
-/// The z11 tile decimates (~2x), so the tiler serves the fixtures' x2
-/// overview: the Trace says so, and the tile perceptually matches
-/// rio-tiler's own overview-path render of the same tile (the `-ov-`
-/// goldens, generated WITHOUT `--no-overviews`).
+/// The charter's promise, verbatim (CHARTER.md §6: "this tile at z3 must
+/// come from an overview, not live" — our fixture pyramid's case is z11):
+/// the z11 tile decimates (~2x), so it MUST be `Overview`, not `Live`,
+/// and the Trace says so. The tile perceptually matches rio-tiler's own
+/// overview-path render of the same tile (the `-ov-` goldens, generated
+/// WITHOUT `--no-overviews`). Since #37 the Trace also SHOWS THE WORK:
+/// `plan.considered` carries all three candidates with sane estimates —
+/// live strictly above overview at this zoom.
 #[tokio::test]
 async fn b04_z11_renders_through_the_overview_and_matches_the_oracle() {
     let request = singleband_request(B04, Some((0.0, 3000.0)), BILINEAR, 11, 424, 780);
     let (_, trace) = render(&request).await;
     assert_eq!(trace.decision, Strategy::Overview { level: 2 });
+
+    // The planner's reasoning rides the Trace (#37).
+    let plan = trace.plan.as_ref().expect("planned render carries a plan");
+    assert_eq!(plan.chosen, PlannedStrategy::Overview { factor: 2 });
+    assert_eq!(plan.considered.len(), 3, "all three candidates weighed");
+    let by_strategy = |s: fn(&PlannedStrategy) -> bool| {
+        plan.considered
+            .iter()
+            .find(|c| s(&c.strategy))
+            .expect("candidate recorded")
+    };
+    let cache = by_strategy(|s| matches!(s, PlannedStrategy::CacheHit));
+    let overview = by_strategy(|s| matches!(s, PlannedStrategy::Overview { .. }));
+    let live = by_strategy(|s| matches!(s, PlannedStrategy::Live));
+    assert!(!cache.admissible, "no cache configured");
+    assert_eq!(cache.reason, "no cache configured");
+    assert!(overview.admissible);
+    assert!(live.admissible);
+    assert!(
+        live.estimated_cost_bytes > overview.estimated_cost_bytes,
+        "at z11 the live estimate ({}) must exceed the overview estimate ({})",
+        live.estimated_cost_bytes,
+        overview.estimated_cost_bytes,
+    );
+
     assert_matches_oracle(&request, "b04-ov-11-424-780.png").await;
 }
 
@@ -310,6 +340,145 @@ async fn overview_render_reads_fewer_bytes_than_full_res() {
 async fn z12_tiles_stay_live_full_res() {
     let (_, trace) = render(&truecolor_request(12, 848, 1561)).await;
     assert_eq!(trace.decision, Strategy::Live);
+}
+
+// --- The planner's estimates vs reality (#37, spec §5) ---
+
+/// The candidate estimate for `strategy` in a trace's plan.
+fn estimate_of(trace: &Trace, admissible_only: bool, live: bool) -> u64 {
+    let plan = trace.plan.as_ref().expect("planned render");
+    let c = plan
+        .considered
+        .iter()
+        .find(|c| {
+            live == matches!(c.strategy, PlannedStrategy::Live)
+                && (live || matches!(c.strategy, PlannedStrategy::Overview { .. }))
+        })
+        .expect("candidate recorded");
+    assert!(!admissible_only || c.admissible);
+    c.estimated_cost_bytes
+}
+
+/// The cost model is tied to ground truth: for the z11 fixture tile the
+/// estimated bytes of the executed strategy are within 3x of the
+/// MEASURED `bytes_read` of the actual render, in both directions and
+/// for both strategies (overview via the normal source; live via the
+/// overview-hiding control). The bound is loose on purpose — the
+/// estimate prices uncompressed boundary-extent pixels while the wire
+/// carries clipped, margin-padded, DEFLATE-compressed COG tiles (spec
+/// §2 documents the calibration) — but it guarantees the x-ray's
+/// numbers stay the same order of magnitude as reality.
+#[allow(clippy::print_stdout, reason = "the ratios are the test's report")]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "byte counts far below 2^52; display + ratio only"
+)]
+#[tokio::test]
+async fn plan_estimates_are_within_3x_of_measured_bytes() {
+    let within_3x = |estimated: u64, measured: u64| {
+        let ratio = estimated as f64 / measured as f64;
+        (1.0 / 3.0..=3.0).contains(&ratio)
+    };
+
+    // Overview: estimate vs the bytes the overview render actually read.
+    let request = singleband_request(B04, Some((0.0, 3000.0)), BILINEAR, 11, 424, 780);
+    let (_, trace) = render(&request).await;
+    assert_eq!(trace.decision, Strategy::Overview { level: 2 });
+    let estimated = estimate_of(&trace, true, false);
+    println!(
+        "z11 b04 overview: estimated {estimated} vs measured {} ({:.2}x)",
+        trace.bytes_read,
+        estimated as f64 / trace.bytes_read as f64,
+    );
+    assert!(
+        within_3x(estimated, trace.bytes_read),
+        "overview estimate {estimated} vs measured {} outside 3x",
+        trace.bytes_read,
+    );
+
+    // Live: the overview-hiding control forces the full-res read the
+    // live candidate prices.
+    let hidden = OverviewHider {
+        inner: cog_source(),
+    };
+    let (_, trace) = render_tile(&hidden, &Proj4rsReproject, &request)
+        .await
+        .expect("full-res control render");
+    assert_eq!(trace.decision, Strategy::Live);
+    let estimated = estimate_of(&trace, true, true);
+    println!(
+        "z11 b04 live: estimated {estimated} vs measured {} ({:.2}x)",
+        trace.bytes_read,
+        estimated as f64 / trace.bytes_read as f64,
+    );
+    assert!(
+        within_3x(estimated, trace.bytes_read),
+        "live estimate {estimated} vs measured {} outside 3x",
+        trace.bytes_read,
+    );
+}
+
+// --- Budget knobs change behavior, visibly (#37) ---
+
+/// `overview_oversample = 1.0` (strict decimation) refuses the x2
+/// overview GDAL's 1.2 slack serves at z11 — the same tile renders Live,
+/// and the plan says why.
+#[tokio::test]
+async fn strict_oversample_knob_forces_live_at_z11() {
+    let request =
+        singleband_request(B04, Some((0.0, 3000.0)), BILINEAR, 11, 424, 780).with_budget(Budget {
+            overview_oversample: 1.0,
+            ..Budget::default()
+        });
+    let (_, trace) = render(&request).await;
+    assert_eq!(trace.decision, Strategy::Live);
+    let plan = trace.plan.expect("planned");
+    let overview = plan
+        .considered
+        .iter()
+        .find(|c| matches!(c.strategy, PlannedStrategy::Overview { .. }))
+        .expect("overview candidate");
+    assert!(!overview.admissible);
+    assert_eq!(overview.reason, "no overview factor eligible at this zoom");
+}
+
+/// A `max_estimated_live_bytes` ceiling under the tile's live estimate,
+/// with overviews hidden so nothing cheaper exists, is an explicit
+/// `BudgetExceeded` error — never an unbounded read.
+#[tokio::test]
+async fn live_over_the_ceiling_is_refused_loudly() {
+    let hidden = OverviewHider {
+        inner: cog_source(),
+    };
+    let request =
+        singleband_request(B04, Some((0.0, 3000.0)), BILINEAR, 11, 424, 780).with_budget(Budget {
+            max_estimated_live_bytes: Some(1_000),
+            ..Budget::default()
+        });
+    let err = render_tile(&hidden, &Proj4rsReproject, &request)
+        .await
+        .expect_err("a busted budget must refuse");
+    match err {
+        TileError::BudgetExceeded {
+            estimated_live_bytes,
+            limit,
+        } => {
+            assert_eq!(limit, 1_000);
+            assert!(estimated_live_bytes > limit);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+
+    // The same ceiling with overviews visible serves the overview
+    // instead: the budget protects latency without denying service.
+    let (_, trace) = render(
+        &singleband_request(B04, Some((0.0, 3000.0)), BILINEAR, 11, 424, 780).with_budget(Budget {
+            max_estimated_live_bytes: Some(1_000),
+            ..Budget::default()
+        }),
+    )
+    .await;
+    assert_eq!(trace.decision, Strategy::Overview { level: 2 });
 }
 
 // --- Trace assertions: the R4 keystone ---

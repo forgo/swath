@@ -21,6 +21,7 @@ use object_store::memory::InMemory;
 use swath_cache_objectstore::ObjectStoreTileCache;
 use swath_core::cache::{CacheError, CachedTile, TileCache, TileKey, TileKeyInputs, layer_version};
 use swath_core::crs::Crs;
+use swath_core::planner::{Budget, PlannedStrategy};
 use swath_core::raster::AssetRef;
 use swath_core::tile::TileCoord;
 use swath_core::trace::Strategy;
@@ -118,6 +119,65 @@ async fn miss_renders_live_then_hit_serves_identical_bytes() {
     assert_eq!(second_trace.timings.pixel_ops_ms, 0);
     assert_eq!(second_trace.timings.encode_ms, 0);
     assert_eq!(second_trace.ingest_to_pixel_ms, None);
+
+    // The plan shows the work on both requests (#37): the miss weighed
+    // all three candidates and chose live (no overview decimates at
+    // z12); the hit is the planner's terminal cache choice, with the
+    // payload length as its estimate and the alternatives honestly
+    // marked unestimated (a hit must never trigger source metadata I/O).
+    let miss_plan = first_trace.plan.as_ref().expect("miss carries a plan");
+    assert_eq!(miss_plan.chosen, PlannedStrategy::Live);
+    assert_eq!(miss_plan.considered.len(), 3);
+    assert_eq!(miss_plan.considered[0].reason, "cache miss");
+    let hit_plan = second_trace.plan.as_ref().expect("hit carries a plan");
+    assert_eq!(hit_plan.chosen, PlannedStrategy::CacheHit);
+    assert_eq!(hit_plan.considered.len(), 3);
+    assert!(hit_plan.considered[0].admissible);
+    assert_eq!(
+        hit_plan.considered[0].estimated_cost_bytes,
+        second.bytes.len() as u64,
+        "the cache candidate's estimate is the stored payload length"
+    );
+    for other in &hit_plan.considered[1..] {
+        assert!(!other.admissible);
+        assert_eq!(other.reason, "not estimated: cache hit short-circuits");
+    }
+}
+
+/// The budget's cache knob (#37): `cache_enabled = false` opts the layer
+/// out entirely — no probe (the trace says "cache disabled by budget"),
+/// no write-through (a later enabled request still misses).
+#[tokio::test]
+async fn disabled_cache_budget_skips_probe_and_write_through() {
+    let source = cog_source();
+    let cache = ObjectStoreTileCache::new(Arc::new(InMemory::new()));
+    let request = request().with_budget(Budget {
+        cache_enabled: false,
+        ..Budget::default()
+    });
+    let key = key(&request, "g-2024158");
+
+    // Two identical requests: both live (nothing is ever stored).
+    for _ in 0..2 {
+        let (_, trace) = render_tile_cached(&source, &Proj4rsReproject, &cache, &key, &request)
+            .await
+            .expect("renders");
+        assert_eq!(trace.decision, Strategy::Live);
+        let plan = trace.plan.expect("planned");
+        assert_eq!(plan.considered[0].reason, "cache disabled by budget");
+    }
+
+    // The write-through was skipped too: re-enabling the cache still
+    // misses under the same key.
+    let enabled = request.clone().with_budget(Budget::default());
+    let (_, trace) = render_tile_cached(&source, &Proj4rsReproject, &cache, &key, &enabled)
+        .await
+        .expect("renders");
+    assert_eq!(
+        trace.decision,
+        Strategy::Live,
+        "nothing was stored while the budget had the cache off"
+    );
 }
 
 #[tokio::test]
