@@ -210,3 +210,14 @@ async fn malformed_tile_coordinates_are_schema_valid_400_exceptions() {
     common::assert_valid("common/exception.json", &exception);
     assert_eq!(exception["status"], 400);
 }
+
+// --- Operational endpoints (non-OGC) ---
+
+/// The liveness probe (#29): plain 200 `ok`, no JSON, no data-plane I/O —
+/// the contract container healthchecks depend on.
+#[tokio::test]
+async fn healthz_is_plain_200_ok() {
+    let response = common::get("/healthz").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(common::body_bytes(response).await, b"ok");
+}

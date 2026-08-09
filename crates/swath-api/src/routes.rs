@@ -153,7 +153,18 @@ where
         )
         // The x-ray Trace stream (issue #28) — control-plane, not OGC.
         .route("/traces", get(traces))
+        // Operational liveness probe (#29) — not an OGC resource; kept
+        // dependency-free (no registry/source I/O) so orchestrator
+        // healthchecks measure the process, not the data plane.
+        .route("/healthz", get(healthz))
         .with_state(state)
+}
+
+/// `GET /healthz` — plain 200 `ok`. Liveness only: the process is up and
+/// serving HTTP. Readiness of catalog/store dependencies is a later,
+/// separate concern (issues #30/#31).
+async fn healthz() -> &'static str {
+    "ok"
 }
 
 // --- JSON document handlers ---

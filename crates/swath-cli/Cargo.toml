@@ -1,0 +1,42 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-cli"
+description = "The `swath` binary: wires the concrete Phase-1 adapters into the OGC API - Tiles surface and serves it (`swath serve`)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+# The crate is `swath-cli` (ARCHITECTURE.md §12); the installed binary is
+# plain `swath`.
+[[bin]]
+name = "swath"
+path = "src/main.rs"
+
+[dependencies]
+# `http1` + `tokio`: this is the crate that actually runs `axum::serve`
+# (the API crate only builds Routers — see its manifest).
+axum = { workspace = true, features = ["http1", "tokio"] }
+clap = { workspace = true }
+# `aws` beyond the workspace default: `SWATH_STORE_ROOT=s3://...` builds an
+# AmazonS3 store from the standard AWS_* environment (MinIO included).
+object_store = { workspace = true, features = ["aws"] }
+serde = { workspace = true }
+swath-api = { path = "../swath-api", version = "0.0.0" }
+swath-core = { path = "../swath-core", version = "0.0.0" }
+swath-render = { path = "../swath-render", version = "0.0.0" }
+swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.0.0" }
+swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.0.0" }
+thiserror = { workspace = true }
+# The binary owns the runtime (ARCHITECTURE.md §11): multi-thread tokio,
+# TCP listener, and the SIGINT/SIGTERM graceful-shutdown signals.
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

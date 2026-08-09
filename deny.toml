@@ -20,6 +20,11 @@ allow = [
     "ISC",
     "Zlib",
     "Unicode-3.0",
+    # webpki-root-certs (Mozilla's CA root store as data, via reqwest/rustls
+    # in object_store's S3 support, #29). CDLA-Permissive-2.0 is a permissive
+    # data license: use/modify/redistribute freely, no copyleft, no
+    # attribution requirement on results.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.93
 # The allowlist is aspirational until dependencies arrive; don't nag about
