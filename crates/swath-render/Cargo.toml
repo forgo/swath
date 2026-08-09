@@ -1,7 +1,7 @@
 # SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
 [package]
 name = "swath-render"
-description = "Tiler warp/resample kernels: source-window computation and nearest/bilinear resampling into WebMercator tile grids, validated against the GDAL oracle."
+description = "Tiler pixel stages: warp/resample kernels, the Render IR pixel ops (band math, rescale, composite), and PNG tile encoding, validated against the GDAL oracle."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,12 +11,16 @@ authors.workspace = true
 publish = false
 
 [dependencies]
+image = { workspace = true }
+serde = { workspace = true }
 swath-core = { path = "../swath-core", version = "0.0.0" }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+insta = { workspace = true }
 object_store = { workspace = true }
 proptest = { workspace = true }
+serde_json = { workspace = true }
 swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.0.0" }
 swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.0.0" }
 swath-testkit = { path = "../swath-testkit", version = "0.0.0" }

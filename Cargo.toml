@@ -36,6 +36,9 @@ serde_json = { version = "1.0.145" }
 thiserror = { version = "2.0.17" }
 # Property tests (ENGINEERING.md §2 testing stack). Dev-dependency only.
 proptest = { version = "1.8.0" }
+# Snapshot tests (ENGINEERING.md §2 testing stack): pins the Render IR's
+# serde JSON shape and small eval outputs. Dev-dependency only.
+insta = { version = "1.48.0", features = ["json"] }
 # COG/TIFF reading is ADOPT (ARCHITECTURE.md §3): async-tiff (developmentseed)
 # parses headers/IFDs/GeoKeys and decodes tiles; default features off — we
 # drive it through our own object_store-backed reader (no reqwest, and no

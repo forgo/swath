@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Warp and resample kernels — the first stage of the tiler engine that
-//! produces output pixels (ARCHITECTURE.md §5, ADR 0002: the tiler brain is
-//! **BUILD**).
+//! The tiler engine's pixel stages (ARCHITECTURE.md §5, ADR 0002: the
+//! tiler brain is **BUILD**): warp/resample kernels, the Render IR pixel
+//! ops that consume their output, and the tile encoder.
 //!
 //! Given a target tile grid ([`TargetGrid`]), a coordinate transform from the
 //! target CRS to the source CRS (the [`CoordTransform`] handed out by the
@@ -31,14 +31,22 @@
 //! nodata semantics of [`Resampling::Bilinear`] deliberately mirror GDAL's
 //! warper (see [`NodataPolicy`]).
 //!
+//! Downstream of the warp, the **Render IR** (the [`ir`] module) turns
+//! warped `f64` planes into an 8-bit RGBA tile — band math, rescale,
+//! composite, colormap — and the [`encode`] module serializes it (PNG in
+//! Phase 1). The IR is the typed target the process compiler (issue #34)
+//! lowers openEO graphs into; [`eval`] executes it.
+//!
 //! [`CoordTransform`]: swath_core::reproject::CoordTransform
 
 mod error;
 mod grid;
+pub mod ir;
 mod warp;
 mod window;
 
 pub use error::RenderError;
 pub use grid::TargetGrid;
+pub use ir::{RenderPlan, RgbaTile, eval};
 pub use warp::{NodataPolicy, Resampling, WarpedBuffer, warp};
 pub use window::{BOUNDARY_SAMPLES_PER_EDGE, source_window};
