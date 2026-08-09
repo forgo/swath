@@ -21,8 +21,11 @@ path = "src/main.rs"
 #   hdf5  -> hdf5-metno
 [dependencies]
 gribberish = { version = "1.6", optional = true, default-features = false }
+# `static` builds the bundled libhdf5 (no system HDF5 required); we only read metadata, so no
+# zlib/filter decode support is needed.
+hdf5-metno = { version = "0.14", optional = true, features = ["static"] }
 
 [features]
 default = []
 grib = ["dep:gribberish"]
-hdf5 = []
+hdf5 = ["dep:hdf5-metno"]

@@ -102,6 +102,46 @@ The manifest is the contract (ADR 0001, ADR 0006): whoever generates it, the ser
     section walker was needed. Residual risk: variable-name vocabulary (NCEP abbrev vs eccodes
     shortName) needs a real table for production parity.
 
+- 2026-08-08 — **HDF5/NetCDF4 (H1, H3): pure-Rust path implemented and equivalent to VirtualiZarr.**
+  - **Sample:** `data/VNP09GA.A2012019.h33v12.002.2023122182434.h5` (8,202,915 bytes, HDF-EOS5),
+    fetched via earthaccess from LP DAAC. **Substitution:** the plan named VNP09, but VNP09
+    collection-002 swath granules are distributed as **HDF4** (MODIS heritage container — verified
+    by download: magic `0e 03 13 01`), unreadable by libhdf5/h5py entirely. VNP09GA (daily gridded
+    surface reflectance, same instrument/science) is real HDF5 with netCDF-4-style nested groups,
+    so the bake-off runs on it; `scripts/fetch_sample.sh` updated accordingly.
+  - **Generators:** Rust `hdf5-metno` 0.14.0 with the `static` feature (bundled libhdf5 2.2.0
+    built from source — no system HDF5; builds clean on macOS arm64), walking each dataset's chunk
+    index with `Dataset::chunks_visit` (H5Dchunk_iter) for per-chunk (logical offset → dotted key,
+    file address, stored size); vs Python sidecar using VirtualiZarr 2.7.3's `HDFParser`
+    (h5py 3.16.0 backend). Sidecar note: `open_virtual_dataset` cannot represent this granule
+    (datasets across nested groups + phony dims with conflicting sizes in one group break the
+    xarray merge), so the sidecar walks the parser's `ManifestStore` group tree directly.
+    Grouping model: one array per dataset, named by HDF5 path without leading slash
+    (`HDFEOS/GRIDS/VIIRS_Grid_1km_2D/Data Fields/SurfReflect_M1_1`); contiguous datasets are one
+    whole-storage ref with chunk shape = shape (key `0` per rank, `""` for the scalar
+    `StructMetadata.0`, dtype `|S32000`); unallocated datasets (HDF-EOS `Projection` stubs) keep
+    empty refs. Codec vocabulary derived independently on both sides (Rust: H5Pget_filter
+    pipeline; Python: VirtualiZarr's zarr codecs): `zlib:<level>`, `shuffle`, `fletcher32`, …
+  - **Equivalence (H1):** `just compare` → `arrays: A=67 B=67 matched=67`, 0 grid/dtype
+    mismatches, 0 chunk mismatches ⇒ **EQUIVALENT** (1,551 chunk refs each, per-chunk
+    offset+length identical; codec strings verified identical for all 67 arrays).
+  - **Robustness:** granule uses deflate level 8 only (`zlib:8` on 58 arrays; no shuffle in this
+    product); 9 arrays uncompressed. All 1,544 chunked-dataset chunk `filter_mask`s are 0
+    (verified via h5py `chunk_iter`), so the per-chunk filter-skip case remains unexercised —
+    both sides currently record pipeline-level codecs only. Granule quirk survived: QF datasets
+    carry `_FillValue=b"N/A"` on uint8, which crashes VirtualiZarr's CF fill-value encoding; the
+    sidecar degrades that to no-fill (fill values are outside the manifest contract).
+  - **Latency** (Apple M2 Max, local file, dev-profile harness as with the GRIB entry):
+    referencer-rs 29 ms cold / 14 ms warm; virtualizarr sidecar 876 ms cold / ~556-574 ms warm
+    (Python import + h5py scan). **H3 supported:** Rust ≤ sidecar by ~40x warm.
+  - **Manifest size:** rs 201,585 B vs vz 201,584 B (same schema; trailing-newline difference).
+  - **Verdict on H1/H3:** supported on this granule — `hdf5-metno` exposes exactly what
+    referencing needs (`chunks_visit`, `offset`, `storage_size`, `filters`, type descriptors)
+    with no raw FFI required. Residual risks: per-chunk nonzero filter_mask handling untested;
+    big-endian/exotic dtypes unmapped (deliberate hard error); the sidecar reaches into
+    VirtualiZarr's private `ManifestStore._group` because no public API exposes the raw manifest
+    tree.
+
 ## 8. Decision
 
 *(To be recorded here and promoted to / reconciled with ADR 0006 when concluded.)*

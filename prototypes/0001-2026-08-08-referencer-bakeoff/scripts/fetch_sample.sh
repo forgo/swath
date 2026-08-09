@@ -5,19 +5,24 @@
 set -euo pipefail
 mkdir -p data
 
-echo "== VIIRS VNP09 (HDF5) via NASA earthaccess =="
-python3 - <<'PY' || echo "  (skipped: install 'earthaccess' and log in, then re-run)"
+echo "== VIIRS VNP09GA (HDF5) via NASA earthaccess =="
+# VNP09GA, not VNP09: the VNP09 collection-002 swath product is distributed as HDF4 (MODIS
+# heritage), which neither h5py nor libhdf5 reads; the gridded VNP09GA is HDF-EOS5 (real HDF5)
+# and small (~5-10 MB/tile). Uses the sidecar venv if present so earthaccess is available.
+PYBIN=python3
+[ -x .venv/bin/python3 ] && PYBIN=.venv/bin/python3
+"$PYBIN" - <<'PY' || echo "  (skipped: install 'earthaccess' and log in, then re-run)"
 import sys
 try:
     import earthaccess
 except ImportError:
     sys.exit("earthaccess not installed (pip install earthaccess)")
-earthaccess.login(persist=True)  # prompts for / reuses your NASA Earthdata Login
-results = earthaccess.search_data(short_name="VNP09", count=1)
+earthaccess.login(persist=True)  # reuses ~/.netrc / prompts for a NASA Earthdata Login
+results = earthaccess.search_data(short_name="VNP09GA", count=1)
 if not results:
-    sys.exit("no VNP09 granules found for the query")
+    sys.exit("no VNP09GA granules found for the query")
 earthaccess.download(results, "data")
-print("  downloaded a VNP09 granule into data/")
+print("  downloaded a VNP09GA granule into data/")
 PY
 
 echo "== GRIB2 sample (GFS 0.25deg subset via AWS Open Data, no auth) =="
