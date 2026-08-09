@@ -11,8 +11,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use swath_core::catalog::{
-    Bbox, Catalog, CatalogError, Dataset, DatasetId, Datetime, Extent, Granule, GranuleId,
-    GranuleQuery, TimeRange,
+    AssetKind, Bbox, Catalog, CatalogError, Dataset, DatasetId, Datetime, Extent, Granule,
+    GranuleId, GranuleQuery, TimeRange,
 };
 use swath_core::events::{EventError, EventSource as _, GranuleEvent};
 use swath_core::ingest::ingest_granule;
@@ -93,7 +93,10 @@ async fn manifest_appearance_becomes_a_granule_event() {
     assert_eq!(event.granule.dataset, DatasetId::new("hls-s30"));
     assert_eq!(event.granule.datetime.as_str(), "2024-06-06T17:54:00Z");
     assert_eq!(event.granule.assets.len(), 2);
-    assert_eq!(event.granule.assets["b04"].as_str(), "g-2024158-b04.tif");
+    assert_eq!(
+        event.granule.assets["b04"].href.as_str(),
+        "g-2024158-b04.tif"
+    );
     assert_eq!(
         event.granule.ingested_at, None,
         "the orchestrator stamps it"
@@ -320,6 +323,150 @@ async fn dropped_granule_of_unknown_dataset_fails_loudly() {
     assert!(
         matches!(err, CatalogError::DatasetNotFound { id } if id.as_str() == "never-registered")
     );
+}
+
+// --- the legacy path: drop with a .h5 asset -> manifest generated,
+// --- stored alongside, asset rewritten to a virtual cube (ADR 0006, #40) ---
+
+/// The tiny committed HDF5 fixture from the referencer's known-answer suite.
+fn tiny_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../swath-referencer/tests/data/tiny.h5")
+        .canonicalize()
+        .expect("tiny.h5 fixture exists")
+}
+
+/// A watcher with the legacy path enabled, data root = the watch dir.
+fn legacy_watcher(dir: &Path) -> FiledropEvents {
+    FiledropEvents::new(dir, Duration::from_millis(10)).with_referencer(
+        std::sync::Arc::new(swath_referencer::SwathReferencer::new()),
+        dir,
+    )
+}
+
+fn drop_legacy_granule(dir: &Path, dataset: &str, granule: &str, asset_uri: &str) {
+    let staged = dir.join(format!(".{granule}.json"));
+    std::fs::write(
+        &staged,
+        format!(
+            r#"{{
+                "dataset": "{dataset}",
+                "granule": "{granule}",
+                "bbox": [138.7, -30.0, 152.3, -27.0],
+                "datetime": "2012-01-19T00:00:00Z",
+                "assets": {{ "cube": "{asset_uri}" }}
+            }}"#
+        ),
+    )
+    .unwrap();
+    std::fs::rename(&staged, dir.join(format!("{granule}.json"))).unwrap();
+}
+
+#[tokio::test]
+async fn legacy_asset_is_referenced_stored_and_rewritten() {
+    let dir = TempDir::new("legacy");
+    // Bands-first discipline: the granule file lands before its manifest.
+    std::fs::copy(tiny_fixture(), dir.path().join("tiny.h5")).unwrap();
+    let mut source = legacy_watcher(dir.path());
+    drop_legacy_granule(dir.path(), "vnp09ga", "g-legacy", "tiny.h5");
+
+    let event = next(&mut source).await.unwrap().unwrap();
+    let asset = &event.granule.assets["cube"];
+    assert_eq!(asset.kind, AssetKind::VirtualCube);
+    assert_eq!(asset.href.as_str(), "tiny.h5.vmanifest.json");
+
+    // The manifest was stored alongside the source, parses as schema v1,
+    // and its chunk paths are the store-relative asset key (not local
+    // absolute paths).
+    let stored = dir.path().join("tiny.h5.vmanifest.json");
+    let manifest = swath_core::manifest::VirtualManifest::from_json_str(
+        &std::fs::read_to_string(&stored).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest.source, "tiny.h5");
+    assert!(!manifest.arrays.is_empty());
+    assert!(
+        manifest
+            .arrays
+            .iter()
+            .flat_map(|a| &a.refs)
+            .all(|r| r.path == "tiny.h5")
+    );
+    // No staging dotfile left behind.
+    assert!(!dir.path().join(".tiny.h5.vmanifest.json").exists());
+}
+
+#[tokio::test]
+async fn legacy_referencing_end_to_end_registers_the_virtual_granule() {
+    // Drop -> manifest generated -> granule registered: the full R1 loop
+    // for a legacy granule, against the in-memory catalog.
+    let dir = TempDir::new("legacy-e2e");
+    std::fs::copy(tiny_fixture(), dir.path().join("tiny.h5")).unwrap();
+    let catalog = MemoryCatalog::default();
+    let mut vnp = hls_dataset();
+    vnp.id = DatasetId::new("vnp09ga");
+    catalog.upsert_dataset(&vnp).await.unwrap();
+
+    let mut source = legacy_watcher(dir.path());
+    drop_legacy_granule(dir.path(), "vnp09ga", "g-e2e", "tiny.h5");
+    let event = next(&mut source).await.unwrap().unwrap();
+    let stored = ingest_granule(&catalog, &event).await.unwrap();
+
+    let found = catalog
+        .find_granules(&DatasetId::new("vnp09ga"), &GranuleQuery::default())
+        .await
+        .unwrap();
+    assert_eq!(found, vec![stored.clone()]);
+    assert_eq!(found[0].assets["cube"].kind, AssetKind::VirtualCube);
+    assert!(stored.ingested_at.is_some());
+}
+
+#[tokio::test]
+async fn broken_legacy_granule_is_malformed_and_does_not_stop_the_loop() {
+    let dir = TempDir::new("legacy-broken");
+    // A .h5 asset that is not an HDF5 file at all.
+    std::fs::write(dir.path().join("junk.h5"), b"not hdf5").unwrap();
+    let mut source = legacy_watcher(dir.path());
+    drop_legacy_granule(dir.path(), "vnp09ga", "g-bad", "junk.h5");
+
+    let err = next(&mut source).await.unwrap_err();
+    assert!(matches!(&err, EventError::Malformed { detail }
+            if detail.contains("junk.h5")));
+
+    // The loop keeps going: a good plain-raster drop still announces.
+    let waiter = async {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        drop_manifest(dir.path(), "hls-s30", "still-good");
+    };
+    let (event, ()) = tokio::join!(next(&mut source), waiter);
+    assert_eq!(
+        event.unwrap().unwrap().granule.id,
+        GranuleId::new("still-good")
+    );
+}
+
+#[tokio::test]
+async fn absolute_or_remote_legacy_assets_are_refused() {
+    let dir = TempDir::new("legacy-remote");
+    let mut source = legacy_watcher(dir.path());
+    drop_legacy_granule(dir.path(), "vnp09ga", "g-remote", "s3://bucket/granule.h5");
+    let err = next(&mut source).await.unwrap_err();
+    assert!(matches!(&err, EventError::Malformed { detail }
+            if detail.contains("store-relative")));
+}
+
+#[tokio::test]
+async fn without_a_referencer_legacy_assets_pass_through_untouched() {
+    // The pre-#40 behavior is preserved when no referencer is configured:
+    // opaque URIs, kind raster, nothing opened.
+    let dir = TempDir::new("legacy-off");
+    let mut source = watcher(dir.path());
+    drop_legacy_granule(dir.path(), "vnp09ga", "g-off", "tiny.h5");
+    let event = next(&mut source).await.unwrap().unwrap();
+    let asset = &event.granule.assets["cube"];
+    assert_eq!(asset.kind, AssetKind::Raster);
+    assert_eq!(asset.href.as_str(), "tiny.h5");
+    assert!(!dir.path().join("tiny.h5.vmanifest.json").exists());
 }
 
 fn now_millis() -> i64 {

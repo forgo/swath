@@ -16,9 +16,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use swath_catalog_pgstac::PgstacCatalog;
 use swath_core::catalog::{
     Bbox, Catalog, CatalogError, Colormap, Dataset, DatasetId, Datetime, Extent, Granule,
-    GranuleId, GranuleQuery, Layer, PlanKind, Resampling, Rescale, TimeRange,
+    GranuleAsset, GranuleId, GranuleQuery, Layer, PlanKind, Resampling, Rescale, TimeRange,
 };
-use swath_core::raster::AssetRef;
 
 /// Connects to the compose-stack pgstac (or `SWATH_PGSTAC_URL`).
 async fn catalog() -> PgstacCatalog {
@@ -115,11 +114,11 @@ fn granule(dataset: &str, id: &str, bbox: Bbox, datetime: &str) -> Granule {
         assets: BTreeMap::from([
             (
                 "b04".to_owned(),
-                AssetRef::new(format!("s3://hls/{id}/b04.tif")),
+                GranuleAsset::raster(format!("s3://hls/{id}/b04.tif")),
             ),
             (
                 "b8a".to_owned(),
-                AssetRef::new(format!("s3://hls/{id}/b8a.tif")),
+                GranuleAsset::raster(format!("s3://hls/{id}/b8a.tif")),
             ),
         ]),
         // Some on purpose: every live round-trip assertion then also covers

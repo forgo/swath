@@ -87,6 +87,12 @@ pub enum ReferencerError {
 /// metadata walk (chunk indexes, not pixel data) and the consumers hold
 /// generators behind `dyn` without becoming generic.
 pub trait IngestReferencer: Send + Sync {
+    /// Whether this generator handles `granule` (by naming convention —
+    /// extension, not content sniffing): the trigger predicate ingest
+    /// adapters use to route legacy assets here without hardcoding a
+    /// format list of their own.
+    fn handles(&self, granule: &Path) -> bool;
+
     /// Generates the virtual manifest for one granule file. The manifest's
     /// chunk `path`s reference `granule` as given (the caller controls
     /// whether that is relative or absolute).

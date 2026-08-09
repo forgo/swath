@@ -3089,6 +3089,7 @@ dependencies = [
  "swath-catalog-pgstac",
  "swath-core",
  "swath-events-filedrop",
+ "swath-referencer",
  "swath-render",
  "swath-reproject-proj4rs",
  "swath-source-cog",
@@ -3118,6 +3119,7 @@ dependencies = [
  "serde",
  "serde_json",
  "swath-core",
+ "swath-referencer",
  "thiserror 2.0.20",
  "tokio",
 ]

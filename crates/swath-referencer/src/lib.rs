@@ -60,6 +60,10 @@ impl SwathReferencer {
 }
 
 impl IngestReferencer for SwathReferencer {
+    fn handles(&self, granule: &Path) -> bool {
+        Self::handles(granule)
+    }
+
     fn generate(&self, granule: &Path) -> Result<VirtualManifest, ReferencerError> {
         match extension(granule).as_str() {
             "h5" | "hdf5" | "nc" | "nc4" => hdf::generate(granule),

@@ -20,6 +20,9 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 
 [dev-dependencies]
+# The legacy-path integration tests reference the tiny committed HDF5
+# fixture through the real production generator.
+swath-referencer = { path = "../../swath-referencer", version = "0.0.0" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [lints]

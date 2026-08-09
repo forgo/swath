@@ -30,6 +30,9 @@ swath-cache-objectstore = { path = "../adapters/swath-cache-objectstore", versio
 swath-catalog-pgstac = { path = "../adapters/swath-catalog-pgstac", version = "0.0.0" }
 swath-core = { path = "../swath-core", version = "0.0.0" }
 swath-events-filedrop = { path = "../adapters/swath-events-filedrop", version = "0.0.0" }
+# The production referencer behind the IngestReferencer port (ADR 0006):
+# `swath ingest reference` and the serve-time filedrop legacy path.
+swath-referencer = { path = "../swath-referencer", version = "0.0.0" }
 swath-render = { path = "../swath-render", version = "0.0.0" }
 swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.0.0" }
 swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.0.0" }
