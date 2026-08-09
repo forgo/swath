@@ -187,10 +187,14 @@ test("v1: heatmap buckets, feed lines, and why-view match the SSE stream", async
   const toggle = page.getByRole("button", { name: "Toggle x-ray overlay" });
   await toggle.click();
   await expect(page.locator("swath-map .swath-xray")).toBeAttached();
+  // A view of its OWN (different zoom than the v0 test): when this test
+  // runs after v0 on the same stack, v0's tiles are all cache hits by
+  // now — zero bytes_read across the board. Fresh z13 tiles guarantee
+  // live/overview renders so the heatmap has a non-degenerate range too.
   await page.evaluate(() => {
     const el = document.querySelector("swath-map");
-    el?.setAttribute("center", "-106.0,39.3");
-    el?.setAttribute("zoom", "13");
+    el?.setAttribute("center", "-105.95,39.25");
+    el?.setAttribute("zoom", "12");
   });
   await page.waitForFunction(() => document.querySelectorAll(".swath-xray-badge").length > 0);
 
@@ -223,9 +227,11 @@ test("v1: heatmap buckets, feed lines, and why-view match the SSE stream", async
     const scale = document.querySelector<HTMLElement>(".swath-xray-scale");
     const min = Number(scale?.dataset.min);
     const max = Number(scale?.dataset.max);
-    if (!Number.isFinite(min) || !Number.isFinite(max)) {
-      return null;
-    }
+    // No published range is legitimate exactly when the store holds no
+    // non-zero bytes (an all-cache-hit view): then every badge must sit
+    // in the zero bucket. Any non-zero badge without a range just means
+    // the repaint hasn't landed yet — keep polling.
+    const hasRange = Number.isFinite(min) && Number.isFinite(max);
     const badges = [...document.querySelectorAll<HTMLElement>(".swath-xray-badge")];
     if (badges.length === 0) {
       return null;
@@ -238,8 +244,9 @@ test("v1: heatmap buckets, feed lines, and why-view match the SSE stream", async
       if (badge.dataset.bytes !== String(envelope.trace.bytes_read)) {
         return null;
       }
-      const expected = bucketOf(envelope.trace.bytes_read, min, max);
-      if (badge.dataset.bytesBucket !== String(expected)) {
+      const bytes = envelope.trace.bytes_read;
+      const expected = hasRange ? bucketOf(bytes, min, max) : bytes <= 0 ? 0 : null;
+      if (expected === null || badge.dataset.bytesBucket !== String(expected)) {
         return null;
       }
     }
