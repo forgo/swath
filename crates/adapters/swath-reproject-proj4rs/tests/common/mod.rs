@@ -16,15 +16,51 @@
 use swath_core::crs::Crs;
 use swath_core::reproject::Reproject;
 
-/// One truth case: `input` in `from_epsg` native units must map to
-/// `expected` (computed by real PROJ) in `to_epsg` native units.
+/// One truth case: `input` in the source CRS's native units must map to
+/// `expected` (computed by real PROJ) in the target CRS's native units.
+///
+/// Each side is named by exactly one of `*_epsg` (a code) or `*_proj4`
+/// (a proj string — sinusoidal has no EPSG code, issue #39); the JSON
+/// grew the `*_proj4` spelling additively, so pre-#39 tables still parse.
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct Case {
     pub(crate) name: String,
-    pub(crate) from_epsg: u32,
-    pub(crate) to_epsg: u32,
+    #[serde(default)]
+    pub(crate) from_epsg: Option<u32>,
+    #[serde(default)]
+    pub(crate) to_epsg: Option<u32>,
+    #[serde(default)]
+    pub(crate) from_proj4: Option<String>,
+    #[serde(default)]
+    pub(crate) to_proj4: Option<String>,
     pub(crate) input: Vec<[f64; 2]>,
     pub(crate) expected: Vec<[f64; 2]>,
+}
+
+impl Case {
+    /// The source CRS (exactly one spelling must be present).
+    pub(crate) fn source_crs(&self) -> Crs {
+        crs_of(self.from_epsg, self.from_proj4.as_deref(), &self.name)
+    }
+
+    /// The target CRS (exactly one spelling must be present).
+    pub(crate) fn target_crs(&self) -> Crs {
+        crs_of(self.to_epsg, self.to_proj4.as_deref(), &self.name)
+    }
+
+    /// Whether the target CRS is geographic (degrees) for tolerance
+    /// selection. Every proj-string target in the table is projected.
+    pub(crate) fn target_geographic(&self) -> bool {
+        self.to_epsg == Some(4326)
+    }
+}
+
+fn crs_of(epsg: Option<u32>, proj4: Option<&str>, name: &str) -> Crs {
+    match (epsg, proj4) {
+        (Some(code), None) => Crs::from_epsg(code),
+        (None, Some(definition)) => Crs::from_proj4(definition),
+        other => panic!("case {name}: exactly one CRS spelling required, got {other:?}"),
+    }
 }
 
 /// The committed truth table with its generation provenance.
@@ -56,8 +92,8 @@ pub(crate) struct Tolerances {
 }
 
 impl Tolerances {
-    fn for_target(self, to_epsg: u32) -> f64 {
-        if to_epsg == 4326 {
+    fn for_target(self, case: &Case) -> f64 {
+        if case.target_geographic() {
             self.degrees
         } else {
             self.meters
@@ -79,9 +115,9 @@ pub(crate) fn run_truth_suite(reproject: &dyn Reproject, tol: Tolerances) -> Vec
     let mut report = Vec::new();
     for case in &table.cases {
         let t = reproject
-            .transformer(Crs::from_epsg(case.from_epsg), Crs::from_epsg(case.to_epsg))
+            .transformer(&case.source_crs(), &case.target_crs())
             .unwrap_or_else(|e| panic!("{}: transformer failed: {e}", case.name));
-        let limit = tol.for_target(case.to_epsg);
+        let limit = tol.for_target(case);
         let mut worst = 0.0_f64;
         for (input, expected) in case.input.iter().zip(&case.expected) {
             let (x, y) = t
@@ -107,7 +143,7 @@ pub(crate) fn assert_batch_matches_per_point(reproject: &dyn Reproject) {
     let table = load_truth();
     for case in &table.cases {
         let t = reproject
-            .transformer(Crs::from_epsg(case.from_epsg), Crs::from_epsg(case.to_epsg))
+            .transformer(&case.source_crs(), &case.target_crs())
             .expect("transformer");
         let mut batch: Vec<(f64, f64)> = case.input.iter().map(|p| (p[0], p[1])).collect();
         t.transform_slice(&mut batch)

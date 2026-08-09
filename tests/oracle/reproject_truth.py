@@ -29,7 +29,18 @@ skeleton, plus the classic edge cases:
 * ``utm_south``       — southern-hemisphere UTM (EPSG:32755) points,
                         against 4326 and 3857;
 * ``high_lat``        — the ±85.051129° Web Mercator edge and other
-                        high-latitude points, 4326 against 3857.
+                        high-latitude points, 4326 against 3857;
+* ``vnp09ga_sinu``    — corners + center of the VNP09GA h33v12 1-km grid
+                        (MODIS-heritage spherical sinusoidal, **no EPSG
+                        code** — named by its proj string, issue #39),
+                        against 4326 and 3857. The h33v12 tile straddles
+                        the antimeridian in longitude, so these points pin
+                        PROJ's wrapping behavior too.
+
+A case names each CRS side by ``from_epsg``/``to_epsg`` (a code) or
+``from_proj4``/``to_proj4`` (a proj string) — the proj4 spelling was added
+in #39 for sinusoidal; EPSG-only cases are byte-identical to the pre-#39
+table.
 
 Every (point set, CRS pair) appears in BOTH directions: the forward case
 transforms the native points; the inverse case feeds the forward outputs
@@ -95,8 +106,17 @@ def _corners_and_center(
     ]
 
 
-# (set name, native EPSG, points in native units, partner EPSG codes).
-POINT_SETS: list[tuple[str, int, list[tuple[float, float]], list[int]]] = [
+# The VNP09GA sinusoidal CRS, exactly as swath-referencer's StructMetadata
+# parser emits it (crates/swath-referencer/src/eos.rs).
+SINU = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +R=6371007.181 +units=m +no_defs"
+
+# VNP09GA h33v12 1-km grid corners (StructMetadata.0 of the bake-off
+# granule): UpperLeftPointMtrs / LowerRightMtrs.
+VNP_UL = (16679257.795, -3335851.559)
+VNP_LR = (17791208.314667, -4447802.078667)
+
+# (set name, native CRS (EPSG int or proj string), points, partner CRSs).
+POINT_SETS: list[tuple[str, int | str, list[tuple[float, float]], list[int | str]]] = [
     # HLS fixture window bounds, EPSG:32613 (tests/fixtures/README.md):
     # easting 453720-469080, northing 4338600-4353960.
     (
@@ -129,7 +149,27 @@ POINT_SETS: list[tuple[str, int, list[tuple[float, float]], list[int]]] = [
         ],
         [3857],
     ),
+    # VNP09GA 1-km sinusoidal grid corners + center (issue #39).
+    (
+        "vnp09ga_sinu",
+        SINU,
+        _corners_and_center(VNP_UL[0], VNP_LR[1], VNP_LR[0], VNP_UL[1]),
+        [4326, 3857],
+    ),
 ]
+
+
+def _crs_name(crs: int | str) -> str:
+    return f"EPSG:{crs}" if isinstance(crs, int) else crs
+
+
+def _crs_slug(crs: int | str) -> str:
+    return str(crs) if isinstance(crs, int) else "sinu"
+
+
+def _crs_fields(prefix: str, crs: int | str) -> dict:
+    key = f"{prefix}_epsg" if isinstance(crs, int) else f"{prefix}_proj4"
+    return {key: crs}
 
 # utm_south native points: project geographic seeds once so the catalogue
 # stores round-trippable native (easting, northing) values.
@@ -148,26 +188,26 @@ def main() -> int:
     for name, home, points, partners in POINT_SETS:
         assert points is not None
         for partner in partners:
-            fwd = Transformer.from_crs(f"EPSG:{home}", f"EPSG:{partner}", always_xy=True)
-            inv = Transformer.from_crs(f"EPSG:{partner}", f"EPSG:{home}", always_xy=True)
+            fwd = Transformer.from_crs(_crs_name(home), _crs_name(partner), always_xy=True)
+            inv = Transformer.from_crs(_crs_name(partner), _crs_name(home), always_xy=True)
             out = [fwd.transform(x, y) for x, y in points]
             back = [inv.transform(x, y) for x, y in out]
             for p in out + back:
                 assert all(math.isfinite(v) for v in p), (name, home, partner, p)
             cases.append(
                 {
-                    "name": f"{name}_{home}_to_{partner}",
-                    "from_epsg": home,
-                    "to_epsg": partner,
+                    "name": f"{name}_{_crs_slug(home)}_to_{_crs_slug(partner)}",
+                    **_crs_fields("from", home),
+                    **_crs_fields("to", partner),
                     "input": [list(p) for p in points],
                     "expected": [list(p) for p in out],
                 }
             )
             cases.append(
                 {
-                    "name": f"{name}_{partner}_to_{home}",
-                    "from_epsg": partner,
-                    "to_epsg": home,
+                    "name": f"{name}_{_crs_slug(partner)}_to_{_crs_slug(home)}",
+                    **_crs_fields("from", partner),
+                    **_crs_fields("to", home),
                     "input": [list(p) for p in out],
                     "expected": [list(p) for p in back],
                 }

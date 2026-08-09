@@ -445,22 +445,22 @@ pub async fn render_tile<S: RasterSource, R: Reproject + ?Sized>(
     };
 
     // Phase 2: one source CRS for all bands, one transform for the render.
-    let crs_from = first.info.crs;
+    let crs_from = first.info.crs.clone();
     if let Some(mismatch) = bands.iter().find(|b| b.info.crs != crs_from) {
         return Err(TileError::MixedCrs {
             expected: crs_from,
             first_band: first.name.to_owned(),
             first_asset: first.asset.clone(),
-            found: mismatch.info.crs,
+            found: mismatch.info.crs.clone(),
             band: mismatch.name.to_owned(),
             asset: mismatch.asset.clone(),
         });
     }
     let to_source = reproject
-        .transformer(Crs::WEB_MERCATOR, crs_from)
+        .transformer(&Crs::WEB_MERCATOR, &crs_from)
         .map_err(|source| TileError::Reproject {
             crs_to: Crs::WEB_MERCATOR,
-            crs_from,
+            crs_from: crs_from.clone(),
             source,
         })?;
 

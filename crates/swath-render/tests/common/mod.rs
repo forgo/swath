@@ -47,7 +47,7 @@ pub(crate) async fn render_warped(
     let info = source.describe(&asset).await.expect("describe fixture");
 
     let to_source = Proj4rsReproject
-        .transformer(Crs::WEB_MERCATOR, info.crs)
+        .transformer(&Crs::WEB_MERCATOR, &info.crs)
         .expect("3857 -> fixture UTM transform");
 
     let grid = TargetGrid::for_tile(tile, 256);

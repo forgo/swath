@@ -130,7 +130,7 @@ pub trait Reproject: Send + Sync {
     /// Returns [`ReprojectError::UnknownCrs`] if either CRS is outside the
     /// adapter's supported set. A same-CRS pair is valid and yields an
     /// identity transform.
-    fn transformer(&self, from: Crs, to: Crs) -> Result<Box<dyn CoordTransform>, ReprojectError>;
+    fn transformer(&self, from: &Crs, to: &Crs) -> Result<Box<dyn CoordTransform>, ReprojectError>;
 }
 
 #[cfg(test)]
@@ -157,11 +157,11 @@ mod tests {
     impl Reproject for SwapFactory {
         fn transformer(
             &self,
-            from: Crs,
-            _to: Crs,
+            from: &Crs,
+            _to: &Crs,
         ) -> Result<Box<dyn CoordTransform>, ReprojectError> {
-            if from.epsg() == 0 {
-                return Err(ReprojectError::UnknownCrs { crs: from });
+            if from.epsg() == Some(0) {
+                return Err(ReprojectError::UnknownCrs { crs: from.clone() });
             }
             Ok(Box::new(Swap))
         }
@@ -170,7 +170,7 @@ mod tests {
     #[test]
     fn traits_are_dyn_compatible() {
         let f: &dyn Reproject = &SwapFactory;
-        let t = f.transformer(Crs::WGS84, Crs::WEB_MERCATOR).unwrap();
+        let t = f.transformer(&Crs::WGS84, &Crs::WEB_MERCATOR).unwrap();
         assert_eq!(t.transform(1.0, 2.0).unwrap(), (2.0, 1.0));
     }
 
@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn unknown_crs_surfaces_at_resolution() {
-        let Err(err) = SwapFactory.transformer(Crs::from_epsg(0), Crs::WGS84) else {
+        let Err(err) = SwapFactory.transformer(&Crs::from_epsg(0), &Crs::WGS84) else {
             panic!("EPSG:0 unexpectedly resolved");
         };
         assert_eq!(

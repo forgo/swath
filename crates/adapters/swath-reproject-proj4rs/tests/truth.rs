@@ -41,7 +41,7 @@ const PROJ4RS_TOLERANCES: Tolerances = Tolerances {
 #[allow(clippy::print_stdout)]
 fn agrees_with_proj_within_documented_tolerances() {
     let report = common::run_truth_suite(&Proj4rsReproject::new(), PROJ4RS_TOLERANCES);
-    assert_eq!(report.len(), 14, "truth table shrank unexpectedly");
+    assert_eq!(report.len(), 18, "truth table shrank unexpectedly");
     // Keep the measured numbers inspectable: `--nocapture` prints the
     // per-case worst deviation that backs the crate-level accuracy table.
     for (name, worst) in &report {
