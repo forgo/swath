@@ -86,6 +86,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
+        with:
+          tools: "none"
       - run: just fmt-check
 
   rust-lint:
@@ -97,6 +99,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
+        with:
+          tools: "none"
       - run: just lint
 
   rust-test:
@@ -112,6 +116,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
+        with:
+          tools: "nextest"
       - run: just test
 
   rust-deny:
@@ -123,6 +129,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
+        with:
+          tools: "deny"
       - run: just deny
 
   rust-msrv:
@@ -147,6 +155,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
+        with:
+          tools: "nextest llvm-cov"
       - run: just cov
       - name: Upload to Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
@@ -167,6 +177,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
+        with:
+          tools: "none"
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: "0.12.3"

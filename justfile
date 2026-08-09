@@ -15,9 +15,10 @@ prek_version := "0.4.12"
 default:
     @just --list
 
-# Install the pinned tools CI's Rust jobs need (prebuilt via cargo-binstall;
-# --locked so a source-build fallback can't be broken by upstream semver drift).
-setup-ci:
+# Install pinned CI tools (prebuilt via cargo-binstall; --locked so a source-
+# build fallback can't be broken by upstream semver drift). Pass a subset to
+# install only what a job runs ("none" for toolchain-only jobs); default: all.
+setup-ci *tools="nextest llvm-cov deny":
     #!/usr/bin/env bash
     set -euo pipefail
     # --force: we only call install() when the binary is provably absent, but a
@@ -30,10 +31,16 @@ setup-ci:
             cargo install --locked --force --version "$2" "$1"
         fi
     }
-    command -v cargo-nextest  >/dev/null || install cargo-nextest  "{{nextest_version}}"
-    cargo llvm-cov --version >/dev/null 2>&1 || install cargo-llvm-cov "{{llvm_cov_version}}"
-    command -v cargo-deny     >/dev/null || install cargo-deny     "{{deny_version}}"
-    echo "setup-ci complete"
+    for tool in {{tools}}; do
+        case "$tool" in
+            nextest)  command -v cargo-nextest  >/dev/null || install cargo-nextest  "{{nextest_version}}" ;;
+            llvm-cov) cargo llvm-cov --version >/dev/null 2>&1 || install cargo-llvm-cov "{{llvm_cov_version}}" ;;
+            deny)     command -v cargo-deny     >/dev/null || install cargo-deny     "{{deny_version}}" ;;
+            none)     ;;
+            *)        echo "unknown tool: $tool" >&2; exit 1 ;;
+        esac
+    done
+    echo "setup-ci complete ({{tools}})"
 
 # Full developer setup: CI tools + local-only tools (zizmor, prek) + git hook.
 setup: setup-ci
