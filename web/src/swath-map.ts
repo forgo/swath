@@ -15,6 +15,10 @@
  * - `layer`  — initial layer id (default: first entry of `/tilesets`).
  * - `center` — `"lon,lat"` initial view center.
  * - `zoom`   — initial zoom.
+ * - `xray`   — presence toggles the x-ray overlay (issue #34): per-tile
+ *   decisions/timings from the `/traces` SSE stream, painted by the
+ *   built-in [`XRayOverlay`] module (see swath-xray.ts for the design
+ *   rationale). A toggle button control mirrors the attribute.
  *
  * When neither `center` nor `zoom` is given, the view fits the layer's
  * geographic bounds from `/tilesets/{id}` metadata — a bare
@@ -28,6 +32,7 @@
 
 import { type IControl, Map as MapLibreMap } from "maplibre-gl";
 import maplibreCss from "maplibre-gl/dist/maplibre-gl.css?inline";
+import { type EventSourceFactory, XRayOverlay } from "./swath-xray.js";
 
 /** One entry of the server's tilesets list, as `layers()` returns it. */
 export interface SwathLayer {
@@ -75,6 +80,15 @@ swath-map .swath-map-switcher button {
 swath-map .swath-map-switcher button[aria-pressed="true"] {
   font-weight: 700;
   background: rgb(0 0 0 / 8%);
+}
+swath-map .swath-map-xray-toggle button {
+  width: auto;
+  padding: 0 8px;
+  font: 12px/29px system-ui, sans-serif;
+}
+swath-map .swath-map-xray-toggle button[aria-pressed="true"] {
+  font-weight: 700;
+  background: rgb(22 163 74 / 15%);
 }
 `;
 
@@ -171,18 +185,65 @@ class LayerSwitcherControl implements IControl {
   }
 }
 
+/** The x-ray toggle: one accessible button whose `aria-pressed` mirrors
+ * the host's `xray` attribute — the attribute is the single source of
+ * truth, the button just flips it. */
+class XRayToggleControl implements IControl {
+  readonly #host: SwathMap;
+  #button: HTMLButtonElement | undefined;
+
+  constructor(host: SwathMap) {
+    this.#host = host;
+  }
+
+  onAdd(): HTMLElement {
+    const container = document.createElement("div");
+    container.className = "maplibregl-ctrl maplibregl-ctrl-group swath-map-xray-toggle";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "X-ray";
+    button.setAttribute("aria-label", "Toggle x-ray overlay");
+    button.addEventListener("click", () => {
+      this.#host.toggleAttribute("xray");
+    });
+    this.#button = button;
+    container.append(button);
+    this.update(this.#host.hasAttribute("xray"));
+    return container;
+  }
+
+  onRemove(): void {
+    this.#button?.parentElement?.remove();
+    this.#button = undefined;
+  }
+
+  update(pressed: boolean): void {
+    this.#button?.setAttribute("aria-pressed", String(pressed));
+  }
+}
+
 export class SwathMap extends HTMLElement {
   static readonly tagName = "swath-map";
 
   static get observedAttributes(): readonly string[] {
-    return ["server", "layer", "center", "zoom"];
+    return ["server", "layer", "center", "zoom", "xray"];
   }
 
   #map: MapLibreMap | undefined;
   #switcher: LayerSwitcherControl | undefined;
+  #xrayToggle: XRayToggleControl | undefined;
+  #xray: XRayOverlay | undefined;
+  /** The layer id the last successful apply painted — what the x-ray
+   * overlay filters its badges on. */
+  #activeLayer = "";
   /** Monotonic token: only the latest async apply may touch the map. */
   #epoch = 0;
   #ready: Promise<void> = Promise.resolve();
+
+  /** Test seam: how the x-ray overlay opens its SSE stream. Leave unset
+   * for the real `EventSource`; unit tests assign a factory producing a
+   * scriptable fake BEFORE setting the `xray` attribute. */
+  xrayEventSource: EventSourceFactory | undefined;
 
   /**
    * The underlying MapLibre `Map` instance (undefined until connected).
@@ -224,14 +285,21 @@ export class SwathMap extends HTMLElement {
     });
     this.#switcher = new LayerSwitcherControl(this);
     this.#map.addControl(this.#switcher, "top-right");
+    this.#xrayToggle = new XRayToggleControl(this);
+    this.#map.addControl(this.#xrayToggle, "top-right");
+    if (this.hasAttribute("xray")) {
+      this.#enableXRay();
+    }
     this.#startApply();
   }
 
   disconnectedCallback(): void {
     this.#epoch += 1;
+    this.#disableXRay();
     this.#map?.remove();
     this.#map = undefined;
     this.#switcher = undefined;
+    this.#xrayToggle = undefined;
     this.replaceChildren();
   }
 
@@ -258,6 +326,14 @@ export class SwathMap extends HTMLElement {
         }
         break;
       }
+      case "xray":
+        if (newValue === null) {
+          this.#disableXRay();
+        } else {
+          this.#enableXRay();
+        }
+        this.#xrayToggle?.update(newValue !== null);
+        break;
       default:
         break;
     }
@@ -287,6 +363,27 @@ export class SwathMap extends HTMLElement {
   async setLayer(id: string): Promise<void> {
     this.setAttribute("layer", id);
     await this.#ready;
+  }
+
+  /** Brings the x-ray overlay up (idempotent). The overlay's DOM lives
+   * on this host element, not inside MapLibre's container, and its map
+   * hooks are map-level events — both survive `setStyle`, so layer
+   * switches never disturb it. */
+  #enableXRay(): void {
+    const map = this.#map;
+    if (this.#xray || !map) {
+      return;
+    }
+    this.#xray = new XRayOverlay(this, map, { createEventSource: this.xrayEventSource });
+    this.#xray.connect(`${this.server}/traces`);
+    this.#xray.setLayer(this.#activeLayer);
+  }
+
+  /** Tears the x-ray overlay down (idempotent): closes its EventSource
+   * and removes its DOM. */
+  #disableXRay(): void {
+    this.#xray?.dispose();
+    this.#xray = undefined;
   }
 
   /** OGC `{tileMatrix}/{tileRow}/{tileCol}` is z/y/x, so MapLibre's
@@ -354,6 +451,11 @@ export class SwathMap extends HTMLElement {
         { duration: 0, padding: 16 },
       );
     }
+    this.#activeLayer = layerId;
+    // `connect` is idempotent per URL: this only reconnects after a
+    // `server` change, while layer switches just re-filter the badges.
+    this.#xray?.connect(`${this.server}/traces`);
+    this.#xray?.setLayer(layerId);
     this.#switcher?.update(available, layerId);
     this.dispatchEvent(
       new CustomEvent("layerchange", { detail: { layer: layerId }, bubbles: true }),
