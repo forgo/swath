@@ -26,6 +26,7 @@
 //! | `GET /tilesets` | tilesets list (same representation, canonical path) |
 //! | `GET /tilesets/{layerId}` | tileset metadata (`WebMercatorQuad`) |
 //! | `GET /tilesets/{layerId}/tiles/{tileMatrix}/{tileRow}/{tileCol}` | a PNG tile |
+//! | `GET /traces` | the x-ray Trace SSE stream (control-plane, issue #28) |
 //!
 //! Users address **layers** (R2): a layer id is the only name a client
 //! ever sees — band assets, plans, and catalog plumbing stay behind the
@@ -56,9 +57,12 @@
 //!   (non-integer) row/col → 400; both carry an RFC 7807 exception body.
 //! - Every tile response carries the render [`Trace`](swath_core::trace::Trace)
 //!   as a response extension ([`TraceExtension`]) plus the `X-Swath-Trace`
-//!   debug header (`bytes_read` + `total_ms`). The extension is the seam
-//!   the Trace SSE stream (issue #28) consumes — handlers never discard
-//!   the Trace.
+//!   debug header (`bytes_read` + `total_ms`), and every render is
+//!   published to the [`TraceBus`] feeding the `GET /traces` SSE stream
+//!   (issue #28) — handlers never discard the Trace. The stream is
+//!   best-effort telemetry with an API-layer envelope
+//!   (`{"tile","layer","trace"}`); the [`traces`] module docs carry the
+//!   full wire contract and slow-subscriber semantics.
 //!
 //! # Deferred (noted, not built)
 //!
@@ -75,8 +79,10 @@ mod error;
 mod model;
 mod registry;
 mod routes;
+pub mod traces;
 
 pub use error::ApiError;
 pub use model::{Conformance, LandingPage, Link, TileSetItem, TileSetList, TileSetMetadata};
 pub use registry::{Layer, LayerRegistry};
 pub use routes::{ApiState, CONFORMANCE_CLASSES, TraceExtension, router};
+pub use traces::{TraceBus, TraceEvent};
