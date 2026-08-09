@@ -49,6 +49,15 @@ tile says so), and on click an inspector with the sources read, byte ranges, CRS
 timings. The top-left readout shows the latest **ingest→pixel** number. Every fact it paints
 comes from the same `Trace` the e2e suite asserts on — the overlay and the test read one oracle.
 
+Since x-ray v1 (issue #42) the overlay has three display modes (top-left control): **decision**
+(the colors above), **bytes** — a log-scale heatmap of source bytes read per tile, with a legend
+showing the current min/max and a distinct dashed style for 0-byte cache hits, so panning between
+zooms makes the overview/cache savings visibly obvious — and **off**. The inspector grew the
+**why-view**: the planner's chosen strategy plus every candidate it weighed (estimated cost,
+admissibility, reason). A collapsible **trace feed** drawer (bottom-right) streams one compact
+line per received trace — bounded at 200 lines with a dropped counter, pausable, lagged gaps
+marked inline — and clicking a line opens that tile's inspector.
+
 ## Current measured numbers
 
 | Where               | ingest-to-pixel | Notes                                |
