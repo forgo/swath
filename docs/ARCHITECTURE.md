@@ -337,6 +337,12 @@ replicas) + managed Postgres + bucket. The pure-Rust core keeps the image tiny a
    or a richer `Warp` port so an adapter could offload to GPU/GDAL later? Trade purity vs. future options.
 3. **Cache key & invalidation.** Is `layer_version` monotonic per layer, content-hash, or a vector clock?
    How do partial-data updates (a new granule in a mosaic) invalidate only affected tiles?
+   *(Partially resolved by #36, for v1: `layer_version` is **content-derived** — a string built from the
+   serving inputs (latest granule id + plan hash for catalog layers; plan hash alone for static layers),
+   no persisted counters, no vector clock. A new granule or edited layer is a new version and therefore a
+   clean whole-layer miss; superseded entries are orphaned, not stale — GC is future operational work. The
+   partial-mosaic half stays open: per-footprint invalidation lands with mosaics themselves. Full
+   semantics: the `swath-core` `cache` module docs.)*
 4. **Planner budget semantics.** Per-layer policy knobs vs. a global cost model that learns from Trace
    history. How much of Phase 1 does the planner actually need (MVP could be "always Live" + Trace)?
 5. **Control-plane domain model.** Exact `Dataset`/`Layer` schema that cleanly hides STAC yet round-trips

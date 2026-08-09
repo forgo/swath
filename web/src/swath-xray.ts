@@ -39,8 +39,14 @@
  */
 
 /** The planner's decision, as the pinned `Trace` JSON serializes it:
- * unit variants as strings, `overview` externally tagged. */
-export type TraceDecision = "live" | "cache_hit" | { overview: { level: number } };
+ * `live` as a bare string; `overview` and (since #36) `cache_hit`
+ * externally tagged. The bare `"cache_hit"` string is tolerated for
+ * compatibility with pre-#36 emitters. */
+export type TraceDecision =
+  | "live"
+  | "cache_hit"
+  | { overview: { level: number } }
+  | { cache_hit: { key: string } };
 
 /** Per-stage wall-clock timings (`Timings`, pinned in swath-core). */
 export interface TraceTimings {
@@ -227,13 +233,19 @@ function injectStyles(doc: Document): void {
 }
 
 /** The decision's flat kind — what the badge color and `data-decision`
- * carry (`{"overview":{...}}` collapses to `"overview"`). */
+ * carry (`{"overview":{...}}` collapses to `"overview"`,
+ * `{"cache_hit":{...}}` to `"cache_hit"`). */
 export function decisionKind(decision: TraceDecision): "live" | "cache_hit" | "overview" {
-  return typeof decision === "string" ? decision : "overview";
+  if (typeof decision === "string") return decision;
+  return "cache_hit" in decision ? "cache_hit" : "overview";
 }
 
 function decisionLabel(decision: TraceDecision): string {
-  return typeof decision === "string" ? decision : `overview (level ${decision.overview.level})`;
+  if (typeof decision === "string") return decision;
+  if ("cache_hit" in decision) {
+    return `cache_hit (${decision.cache_hit.key.slice(0, 8)}…)`;
+  }
+  return `overview (level ${decision.overview.level})`;
 }
 
 /**

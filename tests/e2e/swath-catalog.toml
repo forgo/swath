@@ -15,6 +15,11 @@
 bind = "0.0.0.0:8080"
 base-url = "http://localhost:8080"
 store-root = "/data"
+# Write-through tile cache (#36): its own writable mount — the data
+# plane at /data stays read-only. `just e2e` asserts the second fetch of
+# a tile is a cache_hit; the north-star ingest-to-pixel number is always
+# measured on the FIRST (uncached) fetch.
+cache = "/cache"
 catalog = "postgres://swath:swath-local-dev@pgstac:5432/swath"
 watch-dir = "/data/drop"
 

@@ -59,6 +59,11 @@ pub struct ResolvedLayer {
     pub layer: Layer,
     /// When the backing granule was ingested (`None` for static layers).
     pub ingested_at: Option<Datetime>,
+    /// The id of the granule the assets resolved from (`None` for static
+    /// layers) — the granule half of the cache's `layer_version` (#36,
+    /// `swath_core::cache::layer_version`): a new granule is a new
+    /// version, which is the whole invalidation story.
+    pub granule_id: Option<String>,
 }
 
 impl ResolvedLayer {
@@ -118,6 +123,7 @@ impl LayerProvider for LayerRegistry {
         Ok(ResolvedLayer {
             layer: layer.clone(),
             ingested_at: None,
+            granule_id: None,
         })
     }
 }
@@ -238,6 +244,7 @@ impl<C: Catalog> LayerProvider for CatalogLayers<C> {
                 tile_size: entry.tile_size,
             },
             ingested_at: granule.ingested_at.clone(),
+            granule_id: Some(granule.id.to_string()),
         })
     }
 }

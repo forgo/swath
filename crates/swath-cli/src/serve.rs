@@ -21,6 +21,7 @@ use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
 use object_store::prefix::PrefixStore;
 use swath_api::{ApiState, CatalogLayers, LayerProvider};
+use swath_cache_objectstore::ObjectStoreTileCache;
 use swath_catalog_pgstac::PgstacCatalog;
 use swath_core::catalog::{Catalog as _, CatalogError};
 use swath_core::events::EventSource as _;
@@ -82,6 +83,13 @@ pub(crate) struct ServeArgs {
         conflicts_with = "fixtures"
     )]
     pub(crate) watch_dir: Option<PathBuf>,
+
+    /// Tile cache root: a local directory or `s3://bucket[/prefix]`
+    /// (issue #36). Rendered tiles are written through and served from
+    /// here on repeat requests; absent, no cache is consulted and serving
+    /// behaves exactly as before.
+    #[arg(long, value_name = "ROOT", env = "SWATH_CACHE")]
+    pub(crate) cache: Option<String>,
 }
 
 /// Serve-path errors, each phrased for the operator reading the log.
@@ -130,12 +138,14 @@ async fn serve(cfg: ResolvedConfig) -> Result<(), ServeError> {
         bind,
         base_url,
         store_root,
+        cache,
         layers,
     } = cfg;
     let shared = Shared {
         bind,
         base_url,
         store_root,
+        cache,
     };
     match layers {
         LayerSource::Static(registry) => {
@@ -151,6 +161,7 @@ struct Shared {
     bind: std::net::SocketAddr,
     base_url: String,
     store_root: String,
+    cache: Option<String>,
 }
 
 /// Catalog mode: connect, register datasets, start the ingest loop, serve.
@@ -192,7 +203,17 @@ where
         Proj4rsReproject,
         &cfg.base_url,
     );
-    let app = swath_api::router(Arc::new(state));
+    // The cache is just another object store (#36): same root grammar,
+    // same builder. Wired through `with_cache` so a cache-less config
+    // constructs the exact pre-#36 state type and serve path.
+    let app = match &cfg.cache {
+        Some(root) => {
+            tracing::info!("tile cache enabled (write-through) at {root}");
+            let cache = ObjectStoreTileCache::new(build_store(root)?);
+            swath_api::router(Arc::new(state.with_cache(cache)))
+        }
+        None => swath_api::router(Arc::new(state)),
+    };
 
     let listener = tokio::net::TcpListener::bind(cfg.bind)
         .await

@@ -61,6 +61,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use swath_core::cache::{TileCache, TileKey};
 use swath_core::catalog::Datetime;
 use swath_core::crs::Crs;
 use swath_core::raster::{AssetRef, RasterInfo};
@@ -475,4 +476,122 @@ pub async fn render_tile<S: RasterSource, R: Reproject + ?Sized>(
         },
         trace,
     ))
+}
+
+/// [`render_tile`] behind a write-through [`TileCache`] (#36,
+/// ARCHITECTURE.md §8's `write-through cache?` box): consult the cache
+/// under `key` first — a hit serves the stored bytes with a
+/// [`Strategy::CacheHit`] Trace; a miss renders live exactly as
+/// [`render_tile`] does, then writes the encoded tile through.
+///
+/// # Cache-failure policy (the port leaves it to this caller)
+///
+/// The cache can never fail a response: a failed or corrupt `get` is
+/// logged and treated as a miss, and a failed write-through `put` is
+/// logged and the freshly rendered tile served anyway. The write is
+/// awaited inline (this crate owns no executor to detach it onto); it is
+/// "non-blocking" in the sense that matters — its *failure* never blocks
+/// the response. Detaching the write onto a runtime is a caller-level
+/// optimization for when a profile shows the put latency.
+///
+/// # The cache-hit Trace (documented decisions)
+///
+/// Every field stays honest to its definition:
+///
+/// - `decision` is [`Strategy::CacheHit`] with the key — the one field
+///   that makes a hit unmistakable;
+/// - `bytes_read` is **0** and `provenance` empty: they count *source*
+///   reads, and a hit touches no source (the payload size is on the wire
+///   as `Content-Length`; no new Trace field is added — see the field
+///   docs in swath-core);
+/// - `source`/`sources` name the cache entry (`cache://<key>`): where
+///   the bytes actually came from;
+/// - `crs_from == crs_to` (Web Mercator): the cached tile is already in
+///   the tile CRS, no reprojection was consulted;
+/// - `timings` are zero except `total_ms` (the cache fetch is the whole
+///   render);
+/// - `ingest_to_pixel_ms` is `None`: the north-star number belongs to
+///   the *first* render after ingest, which is by construction a miss.
+///
+/// # Errors
+///
+/// Exactly [`render_tile`]'s errors — cache failures never surface.
+pub async fn render_tile_cached<S, R, C>(
+    source: &S,
+    reproject: &R,
+    cache: &C,
+    key: &TileKey,
+    request: &TileRequest,
+) -> Result<(EncodedTile, Trace), TileError>
+where
+    S: RasterSource,
+    R: Reproject + ?Sized,
+    C: TileCache,
+{
+    let started = Instant::now();
+    let content_type = request.plan.output.format.content_type();
+    match cache.get(key).await {
+        Ok(Some(entry)) if entry.content_type == content_type => {
+            return Ok(cache_hit(key, request, entry.bytes, started.elapsed()));
+        }
+        Ok(Some(entry)) => {
+            // The key binds the plan and the plan fixes the format, so a
+            // mismatched content type is a foreign/corrupt entry: an
+            // honest miss, logged.
+            tracing::warn!(
+                key = %key,
+                stored = %entry.content_type,
+                expected = %content_type,
+                "cache entry content type mismatches the plan output; rendering live"
+            );
+        }
+        Ok(None) => {}
+        Err(err) => {
+            tracing::warn!(key = %key, error = %err, "cache get failed; rendering live");
+        }
+    }
+
+    let (encoded, trace) = render_tile(source, reproject, request).await?;
+    if let Err(err) = cache.put(key, &encoded.bytes, content_type).await {
+        tracing::warn!(
+            key = %key,
+            error = %err,
+            "cache write-through failed; serving the rendered tile"
+        );
+    }
+    Ok((encoded, trace))
+}
+
+/// The served-from-cache result: the stored bytes and the hit Trace
+/// (field semantics documented on [`render_tile_cached`]).
+fn cache_hit(
+    key: &TileKey,
+    request: &TileRequest,
+    bytes: Vec<u8>,
+    total: Duration,
+) -> (EncodedTile, Trace) {
+    let entry = AssetRef::new(format!("cache://{key}"));
+    let trace = Trace {
+        decision: Strategy::CacheHit {
+            key: key.as_str().to_owned(),
+        },
+        source: entry.clone(),
+        sources: vec![entry],
+        crs_from: Crs::WEB_MERCATOR,
+        crs_to: Crs::WEB_MERCATOR,
+        bytes_read: 0,
+        provenance: Vec::new(),
+        timings: Timings {
+            total_ms: millis(total),
+            ..Timings::default()
+        },
+        ingest_to_pixel_ms: None,
+    };
+    (
+        EncodedTile {
+            format: request.plan.output.format,
+            bytes,
+        },
+        trace,
+    )
 }

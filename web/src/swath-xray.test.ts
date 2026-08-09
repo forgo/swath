@@ -239,12 +239,19 @@ test("decisions color and tag the badge: live vs overview vs cache_hit", () => {
   source?.emit("trace", envelope("truecolor", "2/0/0", { decision: "live" }));
   source?.emit("trace", envelope("truecolor", "2/1/0", { decision: { overview: { level: 2 } } }));
   source?.emit("trace", envelope("truecolor", "2/2/0", { decision: "cache_hit" }));
+  // The keyed shape the server emits since #36; the bare string above
+  // stays tolerated.
+  source?.emit(
+    "trace",
+    envelope("truecolor", "2/3/0", { decision: { cache_hit: { key: "0123abcd".repeat(8) } } }),
+  );
   overlay.refresh();
 
   const kinds = new Map(badges(host).map((badge) => [badge.dataset.key, badge.dataset.decision]));
   expect(kinds.get("truecolor/2/0/0")).toBe("live");
   expect(kinds.get("truecolor/2/1/0")).toBe("overview");
   expect(kinds.get("truecolor/2/2/0")).toBe("cache_hit");
+  expect(kinds.get("truecolor/2/3/0")).toBe("cache_hit");
   const borders = new Set(badges(host).map((badge) => badge.style.borderColor));
   expect(borders.size).toBe(3); // three decisions, three colors
 });
