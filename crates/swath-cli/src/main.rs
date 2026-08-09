@@ -24,6 +24,7 @@
 mod config;
 mod ingest;
 mod serve;
+mod source;
 
 use std::process::ExitCode;
 

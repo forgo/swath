@@ -39,9 +39,11 @@ fn tiny_fixture_matches_the_h5py_truth_exactly() {
         "generator disagrees with the h5py-derived truth: {report:#?}"
     );
     // The comparison is only as strong as the truth's coverage: pin it.
+    // (#39 grew the fixture: an HDF-EOS StructMetadata.0 grid block plus
+    // two georeferenced sinusoidal data fields — see make_tiny_fixture.py.)
     let refs: usize = expected().arrays.iter().map(|a| a.refs.len()).sum();
-    assert_eq!(expected().arrays.len(), 6, "fixture array count");
-    assert_eq!(refs, 13, "fixture chunk ref count");
+    assert_eq!(expected().arrays.len(), 9, "fixture array count");
+    assert_eq!(refs, 24, "fixture chunk ref count");
 }
 
 #[test]
@@ -86,8 +88,32 @@ fn storage_layouts_map_as_documented() {
     assert_eq!(meta.dtype, "|S18");
     assert_eq!(meta.refs[0].key, "");
 
-    // No georef anywhere: the fixture is plain HDF5, not HDF-EOS.
-    assert!(manifest.arrays.iter().all(|a| a.georef.is_none()));
+    // Georefs live exactly on the TinyGrid data fields (#39): the parsed
+    // StructMetadata must reproduce the maker script's own constants.
+    let nir = array("HDFEOS/GRIDS/TinyGrid/Data Fields/nir");
+    let georef = nir.georef.as_ref().expect("nir is georeferenced");
+    assert_eq!(
+        georef.crs,
+        swath_core::manifest::GeorefCrs::Proj4(
+            "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +R=6371007.181 +units=m +no_defs".to_owned()
+        )
+    );
+    assert!((georef.transform.origin_x - 16_679_257.795).abs() < 1e-6);
+    assert!((georef.transform.origin_y - -3_335_851.559).abs() < 1e-6);
+    assert!((georef.transform.pixel_width - 926.625_433_055_833).abs() < 1e-6);
+    assert!((georef.transform.pixel_height + 926.625_433_055_833).abs() < 1e-6);
+    assert_eq!(georef.nodata, Some(-28_672.0));
+    assert_eq!(georef.band.as_deref(), Some("nir"));
+    let red = array("HDFEOS/GRIDS/TinyGrid/Data Fields/red");
+    assert!(red.georef.is_some(), "red is georeferenced");
+    // Everything outside the grid stays bare.
+    assert!(
+        manifest
+            .arrays
+            .iter()
+            .filter(|a| !a.name.starts_with("HDFEOS/GRIDS/"))
+            .all(|a| a.georef.is_none())
+    );
 }
 
 #[test]

@@ -12,7 +12,7 @@ use swath_reproject_proj4rs::Proj4rsReproject;
 fn unsupported_epsg_is_unknown_crs_on_either_side() {
     let r = Proj4rsReproject::new();
     for (from, to) in [(2154_u32, 4326_u32), (4326, 2154), (999_999, 3857)] {
-        let Err(err) = r.transformer(Crs::from_epsg(from), Crs::from_epsg(to)) else {
+        let Err(err) = r.transformer(&Crs::from_epsg(from), &Crs::from_epsg(to)) else {
             panic!("{from}->{to} unexpectedly resolved");
         };
         assert!(
@@ -25,7 +25,7 @@ fn unsupported_epsg_is_unknown_crs_on_either_side() {
 #[test]
 fn out_of_domain_latitude_errors_without_panicking() {
     let t = Proj4rsReproject::new()
-        .transformer(Crs::WGS84, Crs::WEB_MERCATOR)
+        .transformer(&Crs::WGS84, &Crs::WEB_MERCATOR)
         .expect("transformer");
     for (lon, lat) in [(0.0, 95.0), (0.0, -90.5), (10.0, 400.0)] {
         let err = t.transform(lon, lat).expect_err("|lat| > 90 must error");
@@ -40,7 +40,7 @@ fn out_of_domain_latitude_errors_without_panicking() {
 #[test]
 fn non_finite_input_errors_without_panicking() {
     let t = Proj4rsReproject::new()
-        .transformer(Crs::WGS84, Crs::from_epsg(32613))
+        .transformer(&Crs::WGS84, &Crs::from_epsg(32613))
         .expect("transformer");
     for (x, y) in [
         (f64::NAN, 0.0),
@@ -60,7 +60,7 @@ fn absurd_projected_input_never_panics_or_leaks_nonfinite() {
     // Nonsense eastings/northings fed to an inverse UTM transform: the
     // contract is error-or-finite, never panic, never NaN through the port.
     let t = Proj4rsReproject::new()
-        .transformer(Crs::from_epsg(32613), Crs::WGS84)
+        .transformer(&Crs::from_epsg(32613), &Crs::WGS84)
         .expect("transformer");
     for (x, y) in [
         (1e12, 1e12),
@@ -80,7 +80,7 @@ fn absurd_projected_input_never_panics_or_leaks_nonfinite() {
 #[test]
 fn batch_with_bad_point_errors_and_names_it() {
     let t = Proj4rsReproject::new()
-        .transformer(Crs::WGS84, Crs::WEB_MERCATOR)
+        .transformer(&Crs::WGS84, &Crs::WEB_MERCATOR)
         .expect("transformer");
     let mut pts = [(0.0, 10.0), (5.0, 95.0), (10.0, 20.0)];
     let err = t

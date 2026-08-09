@@ -19,15 +19,18 @@ use swath_reproject_proj4rs::Proj4rsReproject;
 /// Web Mercator's latitude cutoff, degrees (atan(sinh(pi))).
 const MERC_LAT_LIMIT: f64 = 85.051_128_779_806_59;
 
+/// The VNP09GA sinusoidal CRS (no EPSG code — issue #39).
+const SINU: &str = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +R=6371007.181 +units=m +no_defs";
+
 /// Round-trips `(x, y)` through `from -> to -> from` and asserts the result
 /// is within `tol` (source-CRS units) of the input.
 fn roundtrip(from: u32, to: u32, x: f64, y: f64, tol: f64) {
     let r = Proj4rsReproject::new();
     let fwd = r
-        .transformer(Crs::from_epsg(from), Crs::from_epsg(to))
+        .transformer(&Crs::from_epsg(from), &Crs::from_epsg(to))
         .expect("forward transformer");
     let inv = r
-        .transformer(Crs::from_epsg(to), Crs::from_epsg(from))
+        .transformer(&Crs::from_epsg(to), &Crs::from_epsg(from))
         .expect("inverse transformer");
     let (fx, fy) = fwd.transform(x, y).expect("forward transform");
     let (bx, by) = inv.transform(fx, fy).expect("inverse transform");
@@ -78,6 +81,24 @@ proptest! {
         roundtrip(32613, 3857, easting, northing, 1e-6);
     }
 
+    /// 4326 -> sinusoidal -> 4326 over the non-wrapping domain (a round
+    /// trip across the antimeridian legitimately comes back wrapped, so
+    /// the property holds on |lon| < 180 only).
+    #[test]
+    fn wgs84_sinusoidal_roundtrip(
+        lon in -179.9f64..179.9,
+        lat in -89.9f64..89.9,
+    ) {
+        let r = Proj4rsReproject::new();
+        let sinu = Crs::from_proj4(SINU);
+        let fwd = r.transformer(&Crs::WGS84, &sinu).expect("forward transformer");
+        let inv = r.transformer(&sinu, &Crs::WGS84).expect("inverse transformer");
+        let (x, y) = fwd.transform(lon, lat).expect("forward transform");
+        let (blon, blat) = inv.transform(x, y).expect("inverse transform");
+        let dev = (blon - lon).abs().max((blat - lat).abs());
+        prop_assert!(dev <= 1e-9, "({lon}, {lat}) came back as ({blon}, {blat})");
+    }
+
     /// The adapter's overridden batch path is bit-identical to its
     /// per-point path on arbitrary in-domain input.
     #[test]
@@ -88,7 +109,7 @@ proptest! {
         ),
     ) {
         let t = Proj4rsReproject::new()
-            .transformer(Crs::WGS84, Crs::WEB_MERCATOR)
+            .transformer(&Crs::WGS84, &Crs::WEB_MERCATOR)
             .expect("transformer");
         let mut batch = pts.clone();
         t.transform_slice(&mut batch).expect("batch transform");

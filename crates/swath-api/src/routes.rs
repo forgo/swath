@@ -518,9 +518,11 @@ where
             .describe(asset)
             .await
             .map_err(|err| ApiError::internal(format!("describe failed for `{asset}`: {err}")))?;
-        let to_wgs84 = reproject.transformer(info.crs, Crs::WGS84).map_err(|err| {
-            ApiError::internal(format!("no {} -> WGS84 transform: {err}", info.crs))
-        })?;
+        let to_wgs84 = reproject
+            .transformer(&info.crs, &Crs::WGS84)
+            .map_err(|err| {
+                ApiError::internal(format!("no {} -> WGS84 transform: {err}", info.crs))
+            })?;
 
         // Boundary of the raster in fractional pixel coordinates.
         #[allow(

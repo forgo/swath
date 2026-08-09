@@ -397,6 +397,49 @@ async fn legacy_asset_is_referenced_stored_and_rewritten() {
 }
 
 #[tokio::test]
+async fn legacy_asset_fragments_select_arrays_and_share_one_manifest() {
+    // #39's addressing: a multi-band legacy granule maps each band to
+    // `<file>#<array-name>`. The watcher references the shared file ONCE
+    // and rewrites each band to `<file>.vmanifest.json#<array-name>` —
+    // exactly what the virtual RasterSource reads.
+    let dir = TempDir::new("legacy-fragments");
+    std::fs::copy(tiny_fixture(), dir.path().join("tiny.h5")).unwrap();
+    let mut source = legacy_watcher(dir.path());
+    let staged = dir.path().join(".g-frag.json");
+    std::fs::write(
+        &staged,
+        r#"{
+            "dataset": "vnp09ga",
+            "granule": "g-frag",
+            "bbox": [138.7, -30.0, 152.3, -27.0],
+            "datetime": "2012-01-19T00:00:00Z",
+            "assets": {
+                "nir": "tiny.h5#HDFEOS/GRIDS/TinyGrid/Data Fields/nir",
+                "red": "tiny.h5#HDFEOS/GRIDS/TinyGrid/Data Fields/red"
+            }
+        }"#,
+    )
+    .unwrap();
+    std::fs::rename(&staged, dir.path().join("g-frag.json")).unwrap();
+
+    let event = next(&mut source).await.unwrap().unwrap();
+    let nir = &event.granule.assets["nir"];
+    assert_eq!(nir.kind, AssetKind::VirtualCube);
+    assert_eq!(
+        nir.href.as_str(),
+        "tiny.h5.vmanifest.json#HDFEOS/GRIDS/TinyGrid/Data Fields/nir"
+    );
+    let red = &event.granule.assets["red"];
+    assert_eq!(red.kind, AssetKind::VirtualCube);
+    assert_eq!(
+        red.href.as_str(),
+        "tiny.h5.vmanifest.json#HDFEOS/GRIDS/TinyGrid/Data Fields/red"
+    );
+    // One shared manifest, stored once, alongside the file.
+    assert!(dir.path().join("tiny.h5.vmanifest.json").exists());
+}
+
+#[tokio::test]
 async fn legacy_referencing_end_to_end_registers_the_virtual_granule() {
     // Drop -> manifest generated -> granule registered: the full R1 loop
     // for a legacy granule, against the in-memory catalog.

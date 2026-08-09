@@ -221,6 +221,59 @@ test-referencer:
     SWATH_VNP09GA="$granule" cargo test -q -p swath-referencer --test vnp09ga_real -- --ignored
     echo "test-referencer PASS"
 
+# The gated virtual-serving run (issue #39, joins the test-referencer
+# pattern): reference a REAL VNP09GA granule, render a VIIRS NDVI Web
+# Mercator tile through the virtual-reference RasterSource (chunk-range
+# reads into the original .h5, sinusoidal warp), and perceptually diff it
+# against a GDAL oracle render of the SAME tile from the SAME original
+# file (rasterio opens the HDF5 subdatasets with their sinusoidal SRS —
+# verified). Granule sourcing and skip behavior are identical to
+# test-referencer. PR CI covers the same code paths credential-free via
+# the tiny HDF-EOS fixture (swath-source-virtual's window/describe/render
+# truth tests); this recipe is the real-data gate.
+test-virtual:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="$PWD/target/virtual" && mkdir -p "$dir"
+    granule="${SWATH_VNP09GA:-}"
+    if [ -z "$granule" ]; then
+        for c in target/referencer/VNP09GA*.h5 prototypes/0001-*/data/VNP09GA*.h5; do
+            if [ -f "$c" ]; then granule="$c"; break; fi
+        done
+    fi
+    if [ -z "$granule" ]; then
+        if [ -f "$HOME/.netrc" ] && grep -q "urs.earthdata.nasa.gov" "$HOME/.netrc"; then
+            granule=$(uv run tests/referencer/fetch_vnp09ga.py target/referencer)
+        else
+            echo "SKIP test-virtual: no VNP09GA granule and no Earthdata credentials."
+            echo "  Provide SWATH_VNP09GA=<path>, or add a ~/.netrc entry for"
+            echo "  urs.earthdata.nasa.gov to fetch the pinned granule (~8 MB)."
+            exit 0
+        fi
+    fi
+    granule=$(cd "$(dirname "$granule")" && pwd)/$(basename "$granule")
+    echo "virtual-serving granule: $granule"
+    # Reference it with the production generator (the operator path)...
+    cargo run -q -p swath-cli -- ingest reference "$granule" --output "$dir/real.vmanifest.json"
+    # ...render the NDVI tile through the virtual source (provenance into
+    # the original file asserted inside the test)...
+    SWATH_VNP09GA="$granule" \
+    SWATH_VNP09GA_MANIFEST="$dir/real.vmanifest.json" \
+    SWATH_VIRTUAL_OUT="$dir/swath-ndvi.png" \
+        cargo test -q -p swath-source-virtual --test vnp09ga_real -- --ignored
+    # ...and render the SAME tile from the ORIGINAL file with the GDAL
+    # oracle (z9 x=509 y=302 — the granule's valid-data region; the tile
+    # constants live in tests/vnp09ga_real.rs).
+    m7='HDF5:"'"$granule"'"://HDFEOS/GRIDS/VIIRS_Grid_1km_2D/Data_Fields/SurfReflect_M7_1'
+    m5='HDF5:"'"$granule"'"://HDFEOS/GRIDS/VIIRS_Grid_1km_2D/Data_Fields/SurfReflect_M5_1'
+    uv run tests/oracle/render_reference.py compose 9 509 302 "$dir/oracle-ndvi.png" \
+        --input "$m7" --input "$m5" \
+        --expression "(b1 - b2) / (b1 + b2)" --rescale=-1,1 \
+        --resampling bilinear --no-overviews --exact-grid
+    # Perceptual diff, default policy — the same bar the render goldens meet.
+    cargo run -q -p swath-testkit --bin pdiff -- "$dir/swath-ndvi.png" "$dir/oracle-ndvi.png"
+    echo "test-virtual PASS"
+
 # --- python/ (uv workspace; ingest sidecars only, ADR 0006) ---
 
 # Sync the python workspace (all packages + dev groups).

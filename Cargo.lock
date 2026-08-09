@@ -3093,6 +3093,7 @@ dependencies = [
  "swath-render",
  "swath-reproject-proj4rs",
  "swath-source-cog",
+ "swath-source-virtual",
  "thiserror 2.0.20",
  "tokio",
  "toml",
@@ -3178,6 +3179,23 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "swath-core",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
+name = "swath-source-virtual"
+version = "0.0.0"
+dependencies = [
+ "flate2",
+ "object_store",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "swath-core",
+ "swath-referencer",
+ "swath-render",
+ "swath-reproject-proj4rs",
  "thiserror 2.0.20",
  "tokio",
 ]

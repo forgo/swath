@@ -10,6 +10,7 @@ members = [
     "crates/adapters/swath-events-filedrop",
     "crates/adapters/swath-reproject-proj4rs",
     "crates/adapters/swath-source-cog",
+    "crates/adapters/swath-source-virtual",
     "crates/swath-api",
     "crates/swath-cli",
     "crates/swath-core",
@@ -114,6 +115,11 @@ toml = { version = "0.9.5" }
 tracing = { version = "0.1.41" }
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt"] }
 
+# Chunk decompression for the virtual-reference source (#39): HDF5's
+# deflate filter is a zlib stream; flate2 (rust_backend — the same
+# miniz_oxide already in the tree under png/async-tiff) inflates it. No new
+# supply-chain surface: flate2 1.x was already a vetted transitive dep.
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
 # The production referencer (ADR 0006, issue #40). gribberish: GRIB2 section
 # metadata (offsets/lengths/grids/packing templates) — referencing needs no
 # field decode, so default features stay off. hdf5-metno `static`: builds the

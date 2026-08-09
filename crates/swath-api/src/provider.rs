@@ -30,9 +30,7 @@
 
 use core::future::Future;
 
-use swath_core::catalog::{
-    AssetKind, Catalog, CatalogError, DatasetId, Datetime, Granule, GranuleQuery,
-};
+use swath_core::catalog::{Catalog, CatalogError, DatasetId, Datetime, Granule, GranuleQuery};
 use swath_core::tile::TileCoord;
 use swath_render::TileRequest;
 use swath_render::ir::RenderPlan;
@@ -232,17 +230,10 @@ impl<C: Catalog> LayerProvider for CatalogLayers<C> {
                     band = input.name,
                 ))
             })?;
-            // The tiler reads rasters; virtual-cube manifests need the
-            // virtual source path (#39) and are refused honestly until it
-            // lands, never opened as a COG.
-            if asset.kind != AssetKind::Raster {
-                return Err(ApiError::internal(format!(
-                    "granule `{granule_id}` of dataset `{dataset}`: band `{band}` is a                      virtual-cube asset, which serving cannot read yet (#39)",
-                    granule_id = granule.id,
-                    dataset = entry.dataset,
-                    band = input.name,
-                )));
-            }
+            // Raster assets and virtual-cube assets both resolve to their
+            // href: the binary's composite RasterSource dispatches on the
+            // href shape (#39 replaced the honest 500 that stood here
+            // since #40 — virtual cubes are servable now).
             bands.insert(input.name.clone(), asset.href.clone());
         }
 

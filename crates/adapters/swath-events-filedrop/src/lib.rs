@@ -45,13 +45,24 @@
 //! resolves the URI against its data root (the object-store root the
 //! server serves from — the drop convention's asset keys are store-relative
 //! by design), generates the `VirtualManifest`, writes it **alongside the
-//! source file** as `<asset>.vmanifest.json` (staged + rename, same
+//! source file** as `<file>.vmanifest.json` (staged + rename, same
 //! atomicity discipline as the drop manifests), and announces the granule
 //! with that asset rewritten to point at the manifest, kind
 //! [`AssetKind::VirtualCube`] — so what lands in the catalog is directly
 //! what the serving path (#39) reads. Without a configured referencer
 //! (or for plain `.tif` assets) behavior is exactly as before: opaque
 //! URIs, kind raster, nothing opened.
+//!
+//! Legacy asset URIs may carry an **array fragment** (#39's addressing:
+//! one manifest describes many arrays): a drop manifest maps each band to
+//! `<file>#<array-name>` — e.g. VNP09GA NDVI maps `nir` to
+//! `vnp/granule.h5#HDFEOS/GRIDS/VIIRS_Grid_1km_2D/Data Fields/SurfReflect_M7_1`.
+//! The watcher strips the fragment to locate and reference the file (a
+//! multi-band granule references its shared file **once**) and carries it
+//! onto the rewritten asset — `<file>.vmanifest.json#<array-name>` — which
+//! is exactly what the virtual `RasterSource` reads. A legacy asset with
+//! no fragment still catalogs (the manifest names the whole cube), but is
+//! not band-addressable until one is provided.
 //!
 //! Referencing failures are per-granule [`EventError::Malformed`]s: one
 //! broken legacy granule must not stop the loop (R1). Absolute or
@@ -264,8 +275,16 @@ impl LegacyReferencing {
         let malformed = |detail: String| EventError::Malformed {
             detail: format!("manifest `{}`: {detail}", drop_manifest.display()),
         };
+        // A multi-band legacy granule points many bands at one file (with
+        // per-band `#<array>` fragments): reference each distinct file once.
+        let mut referenced: BTreeSet<String> = BTreeSet::new();
         for (band, asset) in &mut granule.assets {
-            let uri = asset.href.as_str().to_owned();
+            let full_uri = asset.href.as_str().to_owned();
+            // Split #39's array-fragment addressing off the file key.
+            let (uri, fragment) = match full_uri.split_once('#') {
+                Some((file, fragment)) => (file.to_owned(), Some(fragment.to_owned())),
+                None => (full_uri.clone(), None),
+            };
             if !self.generator.handles(Path::new(&uri)) {
                 continue;
             }
@@ -276,6 +295,14 @@ impl LegacyReferencing {
                 return Err(malformed(format!(
                     "legacy asset `{band}` = `{uri}` is not a store-relative key;                      referencing requires a local data root"
                 )));
+            }
+            let key = format!("{uri}.vmanifest.json");
+            if referenced.contains(&key) {
+                *asset = GranuleAsset {
+                    href: rewritten_href(&key, fragment.as_deref()),
+                    kind: AssetKind::VirtualCube,
+                };
+                continue;
             }
             let source = self.data_root.join(&uri);
             let mut manifest = self.generator.generate(&source).map_err(|e| {
@@ -294,7 +321,6 @@ impl LegacyReferencing {
             // Store the manifest alongside the source: staged dot-name
             // first, rename into place (the same atomicity discipline as
             // the drop convention).
-            let key = format!("{uri}.vmanifest.json");
             let target = self.data_root.join(&key);
             let staged = target.with_file_name(format!(
                 ".{}",
@@ -312,12 +338,22 @@ impl LegacyReferencing {
                 source: Box::new(e),
             })?;
 
+            referenced.insert(key.clone());
             *asset = GranuleAsset {
-                href: swath_core::raster::AssetRef::new(key),
+                href: rewritten_href(&key, fragment.as_deref()),
                 kind: AssetKind::VirtualCube,
             };
         }
         Ok(())
+    }
+}
+
+/// The rewritten virtual-cube href: the manifest key, with the asset's
+/// array fragment carried over (`<file>.vmanifest.json#<array-name>`).
+fn rewritten_href(key: &str, fragment: Option<&str>) -> swath_core::raster::AssetRef {
+    match fragment {
+        Some(fragment) => swath_core::raster::AssetRef::new(format!("{key}#{fragment}")),
+        None => swath_core::raster::AssetRef::new(key),
     }
 }
 

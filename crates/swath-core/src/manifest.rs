@@ -105,8 +105,14 @@ pub struct VirtualArray {
     /// Numpy-style dtype string (`int16`, `float64`, `|S32000`, …) — the
     /// vocabulary both generators derive independently (prototype 0001 §3).
     pub dtype: String,
-    /// Codec chain, in decode order, as the shared codec vocabulary strings
-    /// (`zlib:8`, `shuffle`, `grib2:complex-spatial-diff`, …).
+    /// Codec chain, in **filter-pipeline (encode) order** — the order the
+    /// HDF5 pipeline lists its filters (e.g. `["shuffle", "zlib:4"]`), which
+    /// both generators emit identically. Readers decoding a chunk apply the
+    /// chain in *reverse* (inflate, then unshuffle). Vocabulary: the shared
+    /// codec strings (`zlib:8`, `shuffle`, `grib2:complex-spatial-diff`, …).
+    /// (Earlier docs said "decode order"; the committed fixtures and both
+    /// generators have always emitted pipeline order — the wording was
+    /// corrected in #39, the bytes never changed.)
     pub codecs: Vec<String>,
     /// Spatial identity, when the generator could derive one (module docs).
     /// Absent for non-spatial arrays (coordinate vectors, metadata blobs)
@@ -164,6 +170,18 @@ pub enum GeorefCrs {
     Epsg(u32),
     /// A proj-string definition: `{"proj4": "+proj=sinu +R=6371007.181 …"}`.
     Proj4(String),
+}
+
+impl From<&GeorefCrs> for crate::crs::Crs {
+    /// The manifest CRS vocabulary maps losslessly onto the core [`Crs`]
+    /// (which grew its proj-string variant in #39 for exactly this): an
+    /// EPSG code stays a code, a proj string stays a proj string.
+    fn from(crs: &GeorefCrs) -> Self {
+        match crs {
+            GeorefCrs::Epsg(code) => Self::Epsg(*code),
+            GeorefCrs::Proj4(definition) => Self::Proj4(definition.clone()),
+        }
+    }
 }
 
 impl VirtualManifest {

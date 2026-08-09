@@ -46,8 +46,8 @@ def test_sidecar_matches_the_h5py_truth_on_the_tiny_fixture() -> None:
     generated = hdf5_arrays(str(DATA / "tiny.h5"))
     assert _comparable(generated) == _comparable(expected["arrays"])
 
-    # The truth's coverage is pinned: 6 arrays, 13 chunk refs (chunked +
+    # The truth's coverage is pinned: 9 arrays, 24 chunk refs (chunked +
     # ragged + partial + contiguous + unallocated + string scalar).
-    expected_arrays, expected_refs = 6, 13
+    expected_arrays, expected_refs = 9, 24
     assert len(expected["arrays"]) == expected_arrays
     assert sum(len(a["refs"]) for a in expected["arrays"]) == expected_refs

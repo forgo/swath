@@ -27,9 +27,9 @@ use swath_core::catalog::{Catalog as _, CatalogError};
 use swath_core::events::EventSource as _;
 use swath_events_filedrop::FiledropEvents;
 use swath_reproject_proj4rs::Proj4rsReproject;
-use swath_source_cog::CogSource;
 
 use crate::config::{self, CatalogMode, LayerSource, ResolvedConfig};
+use crate::source::CompositeSource;
 
 /// Filedrop scan cadence. A quarter second is well under the noise floor
 /// of the ingest-to-pixel budget while keeping the idle cost negligible
@@ -212,9 +212,13 @@ where
     L: LayerProvider + 'static,
 {
     let store = build_store(&cfg.store_root)?;
+    // The composite source (crate::source): COG assets and virtual-cube
+    // manifests (#39) served from the same store root, dispatched per
+    // asset — legacy granules render from byte ranges into their
+    // original files.
     let state = ApiState::new(
         layers,
-        CogSource::new(store),
+        CompositeSource::new(store),
         Proj4rsReproject,
         &cfg.base_url,
     );
