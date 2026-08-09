@@ -16,6 +16,6 @@ runs:
       with:
         tool: just@1.58.0,cargo-binstall@1.21.1
 
-    - name: Install pinned dev tools
+    - name: Install pinned dev tools (CI set only)
       shell: bash
-      run: just setup
+      run: just setup-ci
