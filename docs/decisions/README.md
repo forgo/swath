@@ -19,3 +19,4 @@ that produced the evidence).
 | 0006 | 2026-08-08 | Legacy referencer: staged Python→Rust behind one manifest port | Accepted (confirmed by prototype 0001) |
 | 0007 | 2026-08-08 | Engineering standards & CI/CD foundation (see `docs/ENGINEERING.md`) | Accepted |
 | 0008 | 2026-08-08 | Legacy-primary dataset: VNP09GA — VNP09 swath is HDF4 (amends 0004) | Accepted |
+| 0009 | 2026-08-09 | Fenced spherical-sinusoidal math (narrow exception to ADR 0002) | Accepted |
