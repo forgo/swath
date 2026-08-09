@@ -4,7 +4,7 @@
 //! Snapshot tests (insta): pin the Render IR's serde JSON shape and a tiny
 //! evaluation's exact RGBA bytes.
 //!
-//! The JSON shape is a contract: the process compiler (issue #34) emits it
+//! The JSON shape is a contract: the process compiler (`swath_render::process`) emits it
 //! and the test suite round-trips it, so an accidental rename or enum
 //! re-tagging must fail loudly here — not in a downstream consumer.
 

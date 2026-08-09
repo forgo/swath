@@ -1,0 +1,32 @@
+{
+  "process_graph": {
+    "load": {
+      "process_id": "load_collection",
+      "arguments": {
+        "id": "hls-s30",
+        "spatial_extent": null,
+        "temporal_extent": null,
+        "bands": ["red", "nir"]
+      }
+    },
+    "ndvi": {
+      "process_id": "ndvi",
+      "arguments": { "data": { "from_node": "load" } }
+    },
+    "scale": {
+      "process_id": "linear_scale_range",
+      "arguments": {
+        "x": { "from_node": "ndvi" },
+        "inputMin": -1,
+        "inputMax": 1,
+        "outputMin": 0,
+        "outputMax": 255
+      }
+    },
+    "save": {
+      "process_id": "save_result",
+      "arguments": { "data": { "from_node": "scale" }, "format": "png" },
+      "result": true
+    }
+  }
+}

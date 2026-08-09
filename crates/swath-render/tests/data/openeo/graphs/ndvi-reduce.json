@@ -1,0 +1,60 @@
+{
+  "process_graph": {
+    "load": {
+      "process_id": "load_collection",
+      "arguments": {
+        "id": "hls-s30",
+        "spatial_extent": null,
+        "temporal_extent": null,
+        "bands": ["nir", "red"]
+      }
+    },
+    "reduce": {
+      "process_id": "reduce_dimension",
+      "arguments": {
+        "data": { "from_node": "load" },
+        "dimension": "bands",
+        "reducer": {
+          "process_graph": {
+            "nir": {
+              "process_id": "array_element",
+              "arguments": { "data": { "from_parameter": "data" }, "label": "nir" }
+            },
+            "red": {
+              "process_id": "array_element",
+              "arguments": { "data": { "from_parameter": "data" }, "label": "red" }
+            },
+            "difference": {
+              "process_id": "subtract",
+              "arguments": { "x": { "from_node": "nir" }, "y": { "from_node": "red" } }
+            },
+            "sum": {
+              "process_id": "add",
+              "arguments": { "x": { "from_node": "nir" }, "y": { "from_node": "red" } }
+            },
+            "ndvi": {
+              "process_id": "divide",
+              "arguments": { "x": { "from_node": "difference" }, "y": { "from_node": "sum" } },
+              "result": true
+            }
+          }
+        }
+      }
+    },
+    "scale": {
+      "process_id": "linear_scale_range",
+      "arguments": {
+        "x": { "from_node": "reduce" },
+        "inputMin": -1,
+        "inputMax": 1,
+        "outputMin": 0,
+        "outputMax": 255
+      }
+    },
+    "save": {
+      "process_id": "save_result",
+      "arguments": { "data": { "from_node": "scale" }, "format": "png" },
+      "result": true
+    }
+  }
+}

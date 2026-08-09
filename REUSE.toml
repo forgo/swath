@@ -43,6 +43,7 @@ path = [
     "crates/adapters/swath-reproject-proj4rs/tests/data/*.json",
     "crates/adapters/swath-source-cog/tests/data/*.json",
     "crates/swath-render/tests/data/*.png",
+    "crates/swath-render/tests/data/openeo/graphs/*.json",
     "crates/swath-render/tests/snapshots/*.snap",
     "tests/fixtures/*.tif",
     "tests/fixtures/SHA256SUMS",
@@ -60,3 +61,13 @@ path = ["crates/swath-api/tests/data/ogc/**/*.json"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "Open Geospatial Consortium"
 SPDX-License-Identifier = "OGC-1.0"
+
+# Official openEO process definitions committed as conformance-test data
+# (provenance: crates/swath-render/tests/data/openeo/README.md). The openEO
+# project's copyright and license, not ours — committed byte-identical to
+# openeo-processes 1.2.0. (Authored graphs live in openeo/graphs/, ours.)
+[[annotations]]
+path = ["crates/swath-render/tests/data/openeo/*.json"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "openEO consortium contributors"
+SPDX-License-Identifier = "Apache-2.0"
