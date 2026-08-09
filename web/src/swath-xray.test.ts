@@ -10,7 +10,10 @@
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import { defineSwathMap, type SwathMap } from "./swath-map.js";
 import {
+  BYTES_BUCKET_COUNT,
+  bytesBucket,
   type EventSourceLike,
+  type PlanTrace,
   type TraceJson,
   tileNorthWest,
   type XRayMapLike,
@@ -409,4 +412,266 @@ test("the toggle control mirrors and flips the xray attribute", async () => {
   expect(button?.getAttribute("aria-pressed")).toBe("false");
   expect(el.querySelector(".swath-xray")).toBeNull();
   expect(factory.opened[0]?.closed).toBe(true);
+});
+
+// --- x-ray v1 (issue #42): why-view, bytes heatmap, live trace feed ---
+
+/** The pinned plan payload (swath-core `trace`/`planner`): an overview
+ * chosen over an inadmissible cache probe and an admissible live read. */
+function makePlan(overrides: Partial<PlanTrace> = {}): PlanTrace {
+  return {
+    chosen: { overview: { factor: 2 } },
+    considered: [
+      { strategy: "cache_hit", estimated_cost_bytes: 0, admissible: false, reason: "cache miss" },
+      {
+        strategy: { overview: { factor: 2 } },
+        estimated_cost_bytes: 128_018,
+        admissible: true,
+        reason: "coarsest overview within the oversample threshold",
+      },
+      {
+        strategy: "live",
+        estimated_cost_bytes: 510_050,
+        admissible: true,
+        reason: "full-resolution read",
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function mountOverlay(capacity?: number): {
+  host: HTMLDivElement;
+  overlay: XRayOverlay;
+  source: FakeEventSource;
+} {
+  const host = mountHost();
+  const factory = fakeFactory();
+  const overlay = new XRayOverlay(host, fakeMap(), {
+    createEventSource: factory.create,
+    ...(capacity === undefined ? {} : { capacity }),
+  });
+  overlay.connect(`${SERVER}/traces`);
+  overlay.setLayer("truecolor");
+  const source = factory.opened[0];
+  if (!source) {
+    throw new Error("no stream opened");
+  }
+  return { host, overlay, source };
+}
+
+test("inspector renders the planner why-view: chosen marked, inadmissible explained", () => {
+  const { host, overlay, source } = mountOverlay();
+  source.emit(
+    "trace",
+    envelope("truecolor", "2/1/1", {
+      decision: { overview: { level: 2 } },
+      plan: makePlan(),
+    }),
+  );
+  overlay.refresh();
+  badges(host)[0]?.click();
+
+  const inspector = host.querySelector<HTMLElement>(".swath-xray-inspector");
+  expect(inspector?.textContent).toContain("planner — chose overview (factor 2)");
+  const table = inspector?.querySelector<HTMLTableElement>("table.swath-xray-plan");
+  expect(table?.getAttribute("aria-label")).toBe("Planner candidates considered");
+  expect([...(table?.querySelectorAll("th") ?? [])].map((th) => th.textContent)).toEqual([
+    "strategy",
+    "est. cost",
+    "ok",
+    "reason",
+  ]);
+  const rows = [...(table?.querySelectorAll<HTMLTableRowElement>("tbody tr") ?? [])];
+  expect(rows).toHaveLength(3);
+  // Fixed evaluation order: cache_hit, overview, live.
+  expect(rows[0]?.textContent).toContain("cache_hit");
+  expect(rows[0]?.dataset.admissible).toBe("false");
+  expect(rows[0]?.textContent).toContain("no");
+  expect(rows[0]?.textContent).toContain("cache miss");
+  // The chosen candidate is marked in data AND text — never color alone.
+  expect(rows[1]?.dataset.chosen).toBe("true");
+  expect(rows[1]?.textContent).toContain("overview (factor 2) ✓ chosen");
+  expect(rows[1]?.textContent).toContain("125 KB"); // human-formatted estimate
+  expect(rows[2]?.dataset.chosen).toBe("false");
+  expect(rows[2]?.textContent).toContain("live");
+  expect(rows[2]?.textContent).toContain("498 KB");
+});
+
+test("null or absent plan: the why-view section is absent, the rest renders", () => {
+  const { host, overlay, source } = mountOverlay();
+  source.emit("trace", envelope("truecolor", "2/1/1", { plan: null }));
+  overlay.refresh();
+  badges(host)[0]?.click();
+  let inspector = host.querySelector<HTMLElement>(".swath-xray-inspector");
+  expect(inspector).not.toBeNull();
+  expect(inspector?.querySelector(".swath-xray-plan")).toBeNull();
+  expect(inspector?.textContent).not.toContain("planner");
+
+  // Pre-#37 emitters omit the field entirely — same absence.
+  source.emit("trace", envelope("truecolor", "2/1/1"));
+  overlay.refresh();
+  badges(host)[0]?.click();
+  inspector = host.querySelector<HTMLElement>(".swath-xray-inspector");
+  expect(inspector?.querySelector(".swath-xray-plan")).toBeNull();
+});
+
+test("bytesBucket: log-spaced buckets, dedicated zero bucket, degenerate range", () => {
+  // Zero is its own bucket regardless of range — cache hits read nothing.
+  expect(bytesBucket(0, 1024, 1_048_576)).toBe(0);
+  // Extremes land in the first and last buckets.
+  expect(bytesBucket(1024, 1024, 1_048_576)).toBe(1);
+  expect(bytesBucket(1_048_576, 1024, 1_048_576)).toBe(BYTES_BUCKET_COUNT);
+  // Log spacing: the geometric midpoint (32 KB over 1 KB..1 MB) sits in
+  // the middle bucket, where a linear scale would put it in bucket 1.
+  expect(bytesBucket(32_768, 1024, 1_048_576)).toBe(3);
+  // Degenerate range: a single value is its own maximum.
+  expect(bytesBucket(4096, 4096, 4096)).toBe(BYTES_BUCKET_COUNT);
+});
+
+test("bytes mode: badges color by bytes bucket, zero is distinct, off clears", () => {
+  const { host, overlay, source } = mountOverlay();
+  source.emit("trace", envelope("truecolor", "2/0/0", { bytes_read: 1024 }));
+  source.emit("trace", envelope("truecolor", "2/1/0", { bytes_read: 1_048_576 }));
+  source.emit(
+    "trace",
+    envelope("truecolor", "2/2/0", { decision: "cache_hit", bytes_read: 0, provenance: [] }),
+  );
+  overlay.refresh();
+
+  // Decision mode paints no bucket data.
+  expect(badges(host).every((badge) => badge.dataset.bytesBucket === undefined)).toBe(true);
+
+  overlay.setDisplayMode("bytes");
+  overlay.refresh();
+  const byKey = new Map(badges(host).map((badge) => [badge.dataset.key, badge]));
+  expect(byKey.get("truecolor/2/0/0")?.dataset.bytesBucket).toBe("1");
+  expect(byKey.get("truecolor/2/1/0")?.dataset.bytesBucket).toBe(String(BYTES_BUCKET_COUNT));
+  const zero = byKey.get("truecolor/2/2/0");
+  expect(zero?.dataset.bytesBucket).toBe("0");
+  expect(zero?.style.borderStyle).toBe("dashed"); // distinct in shape, not just hue
+  // Min and max buckets carry different colors.
+  expect(byKey.get("truecolor/2/0/0")?.style.borderColor).not.toBe(
+    byKey.get("truecolor/2/1/0")?.style.borderColor,
+  );
+
+  // The mode control mirrors the mode.
+  const pressed = [...host.querySelectorAll<HTMLButtonElement>(".swath-xray-modes button")].map(
+    (button) => [button.dataset.mode, button.getAttribute("aria-pressed")],
+  );
+  expect(pressed).toEqual([
+    ["decision", "false"],
+    ["bytes", "true"],
+    ["off", "false"],
+  ]);
+
+  overlay.setDisplayMode("off");
+  overlay.refresh();
+  expect(badges(host)).toHaveLength(0);
+
+  overlay.setDisplayMode("decision");
+  overlay.refresh();
+  expect(badges(host)).toHaveLength(3);
+  expect(badges(host).every((badge) => badge.dataset.bytesBucket === undefined)).toBe(true);
+});
+
+test("heatmap legend shows the store's non-zero min/max and hides off bytes mode", () => {
+  const { host, overlay, source } = mountOverlay();
+  const legend = host.querySelector<HTMLElement>(".swath-xray-scale");
+  expect(legend?.hidden).toBe(true);
+
+  overlay.setDisplayMode("bytes");
+  overlay.refresh();
+  expect(legend?.hidden).toBe(false);
+  expect(legend?.textContent).toContain("—"); // empty store: no range yet
+
+  source.emit("trace", envelope("truecolor", "2/0/0", { bytes_read: 2048 }));
+  source.emit("trace", envelope("truecolor", "2/1/0", { bytes_read: 3_145_728 }));
+  source.emit("trace", envelope("truecolor", "2/2/0", { decision: "cache_hit", bytes_read: 0 }));
+  overlay.refresh();
+  expect(legend?.dataset.min).toBe("2048"); // zero never enters the range
+  expect(legend?.dataset.max).toBe("3145728");
+  expect(legend?.textContent).toContain("2.0 KB – 3.0 MB");
+  expect(legend?.textContent).toContain("0 (cache)");
+
+  overlay.setDisplayMode("decision");
+  overlay.refresh();
+  expect(legend?.hidden).toBe(true);
+});
+
+test("feed lines mirror received traces; clicking one opens the inspector", () => {
+  const { host, overlay, source } = mountOverlay();
+  const toggle = host.querySelector<HTMLButtonElement>(".swath-xray-feed-toggle");
+  const lines = host.querySelector<HTMLOListElement>(".swath-xray-feed-lines");
+  expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+  expect(lines?.hidden).toBe(true); // collapsed by default: never blocks the map
+
+  source.emit("trace", envelope("truecolor", "2/1/1", { plan: makePlan() }));
+  source.emit("trace", envelope("ndvi", "3/2/1", { decision: "cache_hit", bytes_read: 0 }));
+  toggle?.click();
+  expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+  expect(lines?.hidden).toBe(false);
+
+  const items = [...(lines?.querySelectorAll("li > button") ?? [])] as HTMLButtonElement[];
+  expect(items).toHaveLength(2); // every layer's traffic, not just the active layer
+  expect(items[0]?.dataset.key).toBe("truecolor/2/1/1");
+  expect(items[0]?.textContent).toContain("truecolor 2/1/1 live 18ms 128 KB".replace(" KB", "KB"));
+  expect(items[1]?.dataset.key).toBe("ndvi/3/2/1");
+  expect(items[1]?.textContent).toContain("cache_hit");
+
+  overlay.refresh();
+  items[0]?.click();
+  const inspector = host.querySelector<HTMLElement>(".swath-xray-inspector");
+  expect(inspector?.getAttribute("aria-label")).toBe("Trace for tile truecolor/2/1/1");
+  expect(inspector?.textContent).toContain("planner — chose overview (factor 2)");
+});
+
+test("feed is bounded: oldest lines drop with a visible counter", () => {
+  const { host, source } = mountOverlay();
+  for (let i = 0; i < 205; i += 1) {
+    source.emit("trace", envelope("truecolor", `8/${i}/0`));
+  }
+  const lines = host.querySelector<HTMLOListElement>(".swath-xray-feed-lines");
+  expect(lines?.children).toHaveLength(200);
+  const first = lines?.querySelector<HTMLButtonElement>("li > button");
+  expect(first?.dataset.key).toBe("truecolor/8/5/0"); // 0..4 dropped oldest-first
+  const dropped = host.querySelector<HTMLElement>(".swath-xray-feed-dropped");
+  expect(dropped?.hidden).toBe(false);
+  expect(dropped?.textContent).toBe("5 dropped");
+});
+
+test("feed pause freezes content; resume flushes what arrived meanwhile", () => {
+  const { host, source } = mountOverlay();
+  host.querySelector<HTMLButtonElement>(".swath-xray-feed-toggle")?.click();
+  const lines = host.querySelector<HTMLOListElement>(".swath-xray-feed-lines");
+  const pause = host.querySelector<HTMLButtonElement>(".swath-xray-feed-pause");
+  expect(pause?.hidden).toBe(false);
+
+  source.emit("trace", envelope("truecolor", "2/0/0"));
+  pause?.click();
+  expect(pause?.getAttribute("aria-pressed")).toBe("true");
+  expect(pause?.textContent).toBe("resume");
+  source.emit("trace", envelope("truecolor", "2/1/0"));
+  source.emit("trace", envelope("truecolor", "2/2/0"));
+  expect(lines?.children).toHaveLength(1); // held: nothing appended while paused
+
+  pause?.click();
+  expect(pause?.getAttribute("aria-pressed")).toBe("false");
+  expect(lines?.children).toHaveLength(3); // the paused traffic arrives in order
+  const keys = [...(lines?.querySelectorAll("li > button") ?? [])].map(
+    (button) => (button as HTMLButtonElement).dataset.key,
+  );
+  expect(keys).toEqual(["truecolor/2/0/0", "truecolor/2/1/0", "truecolor/2/2/0"]);
+});
+
+test("lagged events surface as inline marker lines in the feed", () => {
+  const { host, source } = mountOverlay();
+  source.emit("trace", envelope("truecolor", "2/0/0"));
+  source.emit("lagged", JSON.stringify({ missed: 4 }));
+  source.emit("trace", envelope("truecolor", "2/1/0"));
+  const lines = host.querySelector<HTMLOListElement>(".swath-xray-feed-lines");
+  expect(lines?.children).toHaveLength(3);
+  const marker = lines?.children[1];
+  expect(marker?.className).toBe("swath-xray-feed-line-lagged");
+  expect(marker?.textContent).toBe("— missed 4 traces —");
 });

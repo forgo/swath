@@ -16,10 +16,12 @@ interface Envelope {
   tile: string;
   layer: string;
   trace: {
-    decision: string | { overview: { level: number } };
+    decision: string | { overview: { level: number } } | { cache_hit: { key: string } };
     bytes_read: number;
     timings: { total_ms: number };
     ingest_to_pixel_ms: number | null;
+    /** The planner's reasoning (#37); null on unplanned traces. */
+    plan?: ReceivedPlan | null;
   };
 }
 
@@ -102,7 +104,14 @@ test("overlay paints decisions matching the traces the test received over SSE", 
         return null;
       }
       const { decision } = envelope.trace;
-      const kind = typeof decision === "string" ? decision : "overview";
+      // Mirror the overlay's decisionKind: keyed cache hits (#36) and
+      // overviews collapse to their flat kind.
+      const kind =
+        typeof decision === "string"
+          ? decision
+          : "cache_hit" in decision
+            ? "cache_hit"
+            : "overview";
       const totalMs = envelope.trace.timings.total_ms;
       if (badge.dataset.decision !== kind) {
         return null;
@@ -152,4 +161,159 @@ test("overlay paints decisions matching the traces the test received over SSE", 
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator("swath-map .swath-xray")).toHaveCount(0);
+});
+
+// --- x-ray v1 (issue #42): the same agreement bar for the new surfaces.
+// One source of truth (the test's own SSE subscription), verified twice:
+// the bytes heatmap buckets, the feed lines, and the why-view table must
+// all match what the stream itself delivered.
+
+/** The plan payload as swath-core pins it (subset the assertions read). */
+interface ReceivedPlan {
+  chosen: string | { overview: { factor: number } };
+  considered: {
+    strategy: string | { overview: { factor: number } };
+    estimated_cost_bytes: number;
+    admissible: boolean;
+    reason: string;
+  }[];
+}
+
+test("v1: heatmap buckets, feed lines, and why-view match the SSE stream", async ({ page }) => {
+  await page.goto("/demo/");
+  await expect(page.locator("swath-map canvas.maplibregl-canvas")).toBeVisible();
+  await subscribeToTraces(page);
+
+  const toggle = page.getByRole("button", { name: "Toggle x-ray overlay" });
+  await toggle.click();
+  await expect(page.locator("swath-map .swath-xray")).toBeAttached();
+  // A view of its OWN (different zoom than the v0 test): when this test
+  // runs after v0 on the same stack, v0's tiles are all cache hits by
+  // now — zero bytes_read across the board. Fresh z13 tiles guarantee
+  // live/overview renders so the heatmap has a non-degenerate range too.
+  await page.evaluate(() => {
+    const el = document.querySelector("swath-map");
+    el?.setAttribute("center", "-105.95,39.25");
+    el?.setAttribute("zoom", "12");
+  });
+  await page.waitForFunction(() => document.querySelectorAll(".swath-xray-badge").length > 0);
+
+  // --- Bytes heatmap: switch modes through the overlay's own control.
+  const modeGroup = page.getByRole("group", { name: "X-ray display mode" });
+  await modeGroup.getByRole("button", { name: "bytes", exact: true }).click();
+  await expect(modeGroup.getByRole("button", { name: "bytes", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.locator(".swath-xray-scale")).toBeVisible();
+
+  // Every painted badge must carry (a) the bytes_read the test itself
+  // received for that tile and (b) the log-scale bucket recomputed here
+  // from that value and the legend's published min/max — the overlay's
+  // scale choice, verified independently.
+  await page.waitForFunction(() => {
+    const BUCKETS = 5;
+    const bucketOf = (bytes: number, min: number, max: number): number => {
+      if (bytes <= 0) return 0;
+      if (!(max > min) || min <= 0) return BUCKETS;
+      const t = (Math.log(bytes) - Math.log(min)) / (Math.log(max) - Math.log(min));
+      return 1 + Math.max(0, Math.min(BUCKETS - 1, Math.floor(t * BUCKETS)));
+    };
+    const received = window.__received ?? [];
+    const latest = new Map<string, Envelope>();
+    for (const envelope of received) {
+      latest.set(`${envelope.layer}/${envelope.tile}`, envelope);
+    }
+    const scale = document.querySelector<HTMLElement>(".swath-xray-scale");
+    const min = Number(scale?.dataset.min);
+    const max = Number(scale?.dataset.max);
+    // No published range is legitimate exactly when the store holds no
+    // non-zero bytes (an all-cache-hit view): then every badge must sit
+    // in the zero bucket. Any non-zero badge without a range just means
+    // the repaint hasn't landed yet — keep polling.
+    const hasRange = Number.isFinite(min) && Number.isFinite(max);
+    const badges = [...document.querySelectorAll<HTMLElement>(".swath-xray-badge")];
+    if (badges.length === 0) {
+      return null;
+    }
+    for (const badge of badges) {
+      const envelope = latest.get(badge.dataset.key ?? "");
+      if (!envelope) {
+        return null;
+      }
+      if (badge.dataset.bytes !== String(envelope.trace.bytes_read)) {
+        return null;
+      }
+      const bytes = envelope.trace.bytes_read;
+      const expected = hasRange ? bucketOf(bytes, min, max) : bytes <= 0 ? 0 : null;
+      if (expected === null || badge.dataset.bytesBucket !== String(expected)) {
+        return null;
+      }
+    }
+    return badges.length;
+  });
+
+  // --- Feed: every line is a trace the test received; the newest line
+  // is the newest envelope (polled — both readers chase the same stream).
+  await page.getByRole("button", { name: "trace feed" }).click();
+  await expect(page.locator(".swath-xray-feed-lines")).toBeVisible();
+  await page.waitForFunction(() => {
+    const received = window.__received ?? [];
+    const lines = [...document.querySelectorAll<HTMLElement>(".swath-xray-feed-lines li > button")];
+    if (lines.length === 0 || received.length === 0) {
+      return null;
+    }
+    if (lines.length > received.length) {
+      return null; // the test subscribed first: its stream is the superset
+    }
+    const keys = new Set(received.map((envelope) => `${envelope.layer}/${envelope.tile}`));
+    if (!lines.every((line) => keys.has(line.dataset.key ?? ""))) {
+      return null;
+    }
+    const last = received[received.length - 1];
+    const lastKey = `${last?.layer}/${last?.tile}`;
+    return lines[lines.length - 1]?.dataset.key === lastKey ? lines.length : null;
+  });
+
+  // --- Why-view: find a badge whose received trace carries a plan, open
+  // its inspector, and check the table against that same payload.
+  const planKey = await page.waitForFunction(() => {
+    const received = window.__received ?? [];
+    const latest = new Map<string, Envelope>();
+    for (const envelope of received) {
+      latest.set(`${envelope.layer}/${envelope.tile}`, envelope);
+    }
+    for (const badge of document.querySelectorAll<HTMLElement>(".swath-xray-badge")) {
+      const envelope = latest.get(badge.dataset.key ?? "");
+      if (envelope?.trace.plan) {
+        return badge.dataset.key ?? null;
+      }
+    }
+    return null;
+  });
+  const key = (await planKey.jsonValue()) as string;
+  await page.locator(`.swath-xray-badge[data-key="${key}"]`).first().click();
+  const inspector = page.locator(".swath-xray-inspector");
+  await expect(inspector).toBeVisible();
+  const received = await page.evaluate(() => window.__received ?? []);
+  const plan = latestByKey(received).get(key)?.trace.plan;
+  expect(plan).toBeTruthy();
+  const rows = inspector.locator(".swath-xray-plan tbody tr");
+  await expect(rows).toHaveCount(plan?.considered.length ?? -1);
+  const chosenLabel =
+    typeof plan?.chosen === "string"
+      ? plan.chosen
+      : `overview (factor ${plan?.chosen.overview.factor})`;
+  await expect(inspector).toContainText(`planner — chose ${chosenLabel}`);
+  await expect(inspector.locator('.swath-xray-plan tr[data-chosen="true"]')).toContainText(
+    "✓ chosen",
+  );
+  for (const candidate of plan?.considered ?? []) {
+    await expect(inspector.locator(".swath-xray-plan")).toContainText(candidate.reason);
+  }
+
+  // --- Off mode clears the badges without tearing the overlay down.
+  await modeGroup.getByRole("button", { name: "off", exact: true }).click();
+  await expect(page.locator(".swath-xray-badge")).toHaveCount(0);
+  await expect(page.locator("swath-map .swath-xray")).toBeAttached();
 });
