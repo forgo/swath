@@ -218,12 +218,15 @@ test-catalog:
 # while the catalog is empty; dropping the fixture granule (5 HLS band COGs +
 # a manifest, bands first, manifest renamed into place last) makes the tile
 # servable automatically; the Trace carries ingest_to_pixel_ms, printed
-# prominently and asserted under a deliberately GENEROUS budget (30s —
-# tightening is #35's job). The served tile is perceptually matched against
-# the committed rio-tiler/GDAL golden (cross-encoder comparison is pdiff at
-# the default policy, exactly like the golden suites; byte-stability is
-# asserted by fetching twice), and a `trace` SSE event is captured. Teardown
-# is trap-based: the stack never outlives the recipe.
+# prominently and asserted under the north-star budget (issue #35). The
+# served tile is perceptually matched against the committed rio-tiler/GDAL
+# golden (cross-encoder comparison is pdiff at the default policy, exactly
+# like the golden suites; byte-stability is asserted by fetching twice).
+# The NDVI layer — CHARTER.md §10 Phase 1's "computed on the fly, not
+# pre-baked" — is exercised on the same path: tile fetched, provenance
+# asserted, matched against ITS committed golden, and the SSE trace's
+# decision:"live" captured as the on-the-fly proof. Teardown is trap-based:
+# the stack never outlives the recipe.
 e2e:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -245,13 +248,19 @@ e2e:
     # the just-ingested granule carries ingest-to-pixel latency.
     i2p=$(sed -n 's/.*"ingest_to_pixel_ms":\([0-9][0-9]*\).*/\1/p' "$dir/tile-headers.txt" | head -1)
     [ -n "$i2p" ] || { echo "FAIL: trace carries no numeric ingest_to_pixel_ms"; exit 1; }
+    # The budget (issue #35): measured 297 ms and 801 ms locally, 535 ms in
+    # CI, so 10000 ms is ~20x headroom over the CI number — tight enough to
+    # catch a real regression (a sleep, a poll interval, an accidental batch
+    # step), loose enough to shrug off runner noise. Tightening it further
+    # is a deliberate, visible act: record new measurements here when you do.
+    budget=10000
     echo ""
     echo "=========================================="
-    echo "   INGEST-TO-PIXEL: $i2p ms"
+    echo "   INGEST-TO-PIXEL: $i2p ms (budget $budget ms)"
     echo "=========================================="
     echo ""
-    [ "$i2p" -lt 30000 ] || { echo "FAIL: ingest-to-pixel $i2p ms exceeds the 30000 ms budget"; exit 1; }
-    echo "swath: ingest-to-pixel is under the generous 30s budget (#35 tightens)"
+    [ "$i2p" -lt "$budget" ] || { echo "FAIL: ingest-to-pixel $i2p ms exceeds the $budget ms budget"; exit 1; }
+    echo "swath: ingest-to-pixel is under the $budget ms north-star budget"
     # Same request, same bytes: the container render is deterministic.
     curl -sf -o "$dir/tile-again.png" "$tile"
     cmp "$dir/tile.png" "$dir/tile-again.png" && echo "swath: tile bytes are stable across requests"
@@ -260,12 +269,27 @@ e2e:
     cargo run --quiet -p swath-testkit --bin pdiff -- \
         "$dir/tile.png" crates/swath-render/tests/data/truecolor-12-848-1561.png
     echo "swath: tile matches the rio-tiler/GDAL golden (default pdiff policy)"
-    # The x-ray stream: subscribe, trigger a render, expect a `trace` event
-    # that also carries the ingest-to-pixel number.
+    # NDVI on the fly (CHARTER.md §10 Phase 1: "NDVI computed on the fly,
+    # not pre-baked"): subscribe to the x-ray stream first, then fetch the
+    # never-yet-rendered NDVI tile — one request proves the whole claim.
+    # HTTP side: 200, trace header, non-empty provenance, and a perceptual
+    # match against the committed NDVI oracle golden (the "correct tile"
+    # half of §3). SSE side: a `trace` event for the ndvi layer whose
+    # decision is "live" — the on-the-fly proof — carrying the same
+    # ingest-to-pixel number.
     curl -sN --max-time 15 "$base/traces" > "$dir/traces.txt" &
     sse=$!
     sleep 1
-    curl -sf -o /dev/null "$base/tilesets/ndvi/tiles/12/1561/848"
+    ndvi="$base/tilesets/ndvi/tiles/12/1561/848"
+    code=$(curl -s -D "$dir/ndvi-headers.txt" -o "$dir/ndvi.png" -w '%{http_code}' "$ndvi")
+    [ "$code" = "200" ] || { echo "FAIL: ndvi tile answered $code"; exit 1; }
+    grep -qi '^x-swath-trace:' "$dir/ndvi-headers.txt" && echo "swath: ndvi X-Swath-Trace header present"
+    nbytes=$(sed -n 's/.*"bytes_read":\([0-9][0-9]*\).*/\1/p' "$dir/ndvi-headers.txt" | head -1)
+    [ -n "$nbytes" ] && [ "$nbytes" -gt 0 ] || { echo "FAIL: ndvi trace reports no bytes read"; exit 1; }
+    echo "swath: ndvi trace provenance is non-empty (bytes_read=$nbytes)"
+    cargo run --quiet -p swath-testkit --bin pdiff -- \
+        "$dir/ndvi.png" crates/swath-render/tests/data/ndvi-12-848-1561.png
+    echo "swath: ndvi tile matches the rio-tiler/GDAL golden (default pdiff policy)"
     for _ in $(seq 1 20); do
         grep -q '^event: trace' "$dir/traces.txt" && break
         sleep 0.5
@@ -273,6 +297,9 @@ e2e:
     kill "$sse" 2>/dev/null || true
     wait "$sse" 2>/dev/null || true
     grep -q '^event: trace' "$dir/traces.txt" && echo "swath: trace SSE event captured"
+    grep '"layer":"ndvi"' "$dir/traces.txt" | grep -q '"decision":"live"' \
+        || { echo "FAIL: no live-decision ndvi trace on the SSE stream"; exit 1; }
+    echo "swath: SSE trace proves ndvi was computed on the fly (decision: live)"
     grep -q '"ingest_to_pixel_ms":[0-9]' "$dir/traces.txt" \
         && echo "swath: SSE trace carries ingest_to_pixel_ms"
     echo "e2e OK"
@@ -291,6 +318,58 @@ e2e-web:
     trap 'docker compose down -v' EXIT
     tests/e2e/stack-up.sh
     cd web && pnpm exec playwright test
+
+# THE stopwatch demo (issue #35, CHARTER.md §10 Phase 1): the same
+# north-star path the e2e asserts forever, run for human eyes. Brings up
+# the full stack (shared tests/e2e/stack-up.sh), serves the viewer, then
+# holds the granule drop behind a countdown so you can watch the honest
+# 404-gray turn into imagery on the map — with the x-ray overlay narrating
+# every tile. Prints the measured ingest-to-pixel number at the end and
+# stays up until ctrl-c (trap-based teardown). Needs `just setup-web`.
+demo countdown="15":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    vite=""
+    teardown() {
+        [ -n "$vite" ] && kill "$vite" 2>/dev/null || true
+        docker compose down -v
+    }
+    trap teardown EXIT
+    mkdir -p target/demo
+    (cd web && exec pnpm exec vite dev --port 5173 --strictPort) \
+        > target/demo/vite.log 2>&1 &
+    vite=$!
+    url="http://localhost:5173/demo/?xray&center=-106.0,39.3&zoom=11"
+    echo ""
+    echo "  Building and starting the stack (the first run takes a while)."
+    echo "  Open NOW and keep it visible:"
+    echo ""
+    echo "      $url"
+    echo ""
+    echo "  The x-ray overlay is already on: every tile is annotated with"
+    echo "  its render decision, and the top-left readout shows ingest->pixel."
+    echo "  The map is gray on purpose — the layer exists, its pixels don't"
+    echo "  (an honest 404). When the countdown ends, the granule drops."
+    echo ""
+    SWATH_DROP_COUNTDOWN={{countdown}} tests/e2e/stack-up.sh
+    i2p=$(sed -n 's/.*"ingest_to_pixel_ms":\([0-9][0-9]*\).*/\1/p' target/e2e/tile-headers.txt | head -1)
+    echo ""
+    echo "  =============================================="
+    echo ""
+    echo "     INGEST-TO-PIXEL: $i2p ms"
+    echo ""
+    echo "     (CI asserts this same path under a 10000 ms"
+    echo "      budget on every commit — forever.)"
+    echo ""
+    echo "  =============================================="
+    echo ""
+    echo "  If the map is still gray, nudge it (drag or zoom) — MapLibre"
+    echo "  won't refetch tiles it already saw 404. Switch the layer control"
+    echo "  to 'HLS NDVI' to watch NDVI computed on the fly (decision: live"
+    echo "  in the x-ray badges — nothing is pre-baked)."
+    echo ""
+    echo "  Ctrl-C to tear everything down."
+    wait "$vite" || true
 
 # The one-command gate: everything CI enforces.
 check: fmt-check lint test deny zizmor reuse
