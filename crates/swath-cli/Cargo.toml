@@ -26,6 +26,7 @@ clap = { workspace = true }
 object_store = { workspace = true, features = ["aws"] }
 serde = { workspace = true }
 swath-api = { path = "../swath-api", version = "0.0.0" }
+swath-cache-objectstore = { path = "../adapters/swath-cache-objectstore", version = "0.0.0" }
 swath-catalog-pgstac = { path = "../adapters/swath-catalog-pgstac", version = "0.0.0" }
 swath-core = { path = "../swath-core", version = "0.0.0" }
 swath-events-filedrop = { path = "../adapters/swath-events-filedrop", version = "0.0.0" }

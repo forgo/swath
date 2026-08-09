@@ -5,6 +5,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/adapters/swath-cache-objectstore",
     "crates/adapters/swath-catalog-pgstac",
     "crates/adapters/swath-events-filedrop",
     "crates/adapters/swath-reproject-proj4rs",
@@ -70,7 +71,11 @@ tokio = { version = "1.49.0", default-features = false }
 # strings calling pgstac functions; compile-time checking would drag a
 # DATABASE_URL into every build).
 sqlx = { version = "0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "json"] }
-# Truth-table pixel-hash comparison in adapter integration tests (dev-only).
+# Was dev-only (truth-table pixel hashes); promoted to a runtime dep of
+# swath-core by the TileCache key (#36): the cache key must be stable
+# across Rust releases and architectures (it names objects in a store), so
+# it is SHA-256, never `DefaultHasher`. Pure computation — no I/O, keeps
+# the core runtime-free. Already licensed/vetted in the tree (MIT/Apache).
 sha2 = { version = "0.10.9" }
 # Projection math is BIND, never build (ADR 0002): pure-Rust proj4 for the
 # common CRS set; PROJ C-bindings feature-gated later for the long tail.

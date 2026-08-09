@@ -1,0 +1,21 @@
+[package]
+name = "swath-cache-objectstore"
+description = "TileCache adapter: encoded-tile cache over object_store (local fs, in-memory, S3), hash-sharded content-derived keys."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+object_store = { workspace = true }
+swath-core = { path = "../../swath-core", version = "0.0.0" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.

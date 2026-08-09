@@ -248,6 +248,17 @@ pub enum TileFormat {
     Png,
 }
 
+impl TileFormat {
+    /// The IANA media type of tiles encoded in this format — what HTTP
+    /// responses and cache entries (#36) record.
+    #[must_use]
+    pub const fn content_type(self) -> &'static str {
+        match self {
+            Self::Png => "image/png",
+        }
+    }
+}
+
 /// What the pipeline emits after the pixel ops run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]

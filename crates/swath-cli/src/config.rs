@@ -3,11 +3,11 @@
 
 //! Layered `serve` configuration: built-in defaults → optional TOML file
 //! (`--config`) → environment/flags (clap's `env` attribute makes
-//! `SWATH_BIND`/`SWATH_BASE_URL`/`SWATH_STORE_ROOT` and their flags one
-//! surface, so both outrank the file).
+//! `SWATH_BIND`/`SWATH_BASE_URL`/`SWATH_STORE_ROOT`/`SWATH_CACHE` and
+//! their flags one surface, so both outrank the file).
 //!
 //! The surface is deliberately small: bind address, base URL, store root,
-//! and layer definitions. Layers are file-only (or `--fixtures`) — a
+//! optional tile-cache root (#36), and layer definitions. Layers are file-only (or `--fixtures`) — a
 //! layer is a structure, not a scalar, and encoding structures in
 //! environment variables is a misfeature. The layer `kind` enum
 //! (`truecolor` | `ndvi`) is the walking-skeleton stand-in the openEO
@@ -121,6 +121,10 @@ pub(crate) struct ResolvedConfig {
     pub(crate) base_url: String,
     /// Object-store root: a local directory or `s3://bucket[/prefix]`.
     pub(crate) store_root: String,
+    /// Tile-cache root (`--cache`/`SWATH_CACHE`/`cache`, issue #36):
+    /// local directory or `s3://bucket[/prefix]`. `None` = no cache —
+    /// serving is byte-for-byte the pre-cache behavior.
+    pub(crate) cache: Option<String>,
     /// Where the layers come from.
     pub(crate) layers: LayerSource,
 }
@@ -161,6 +165,8 @@ struct ConfigFile {
     base_url: Option<String>,
     /// Object-store root: local directory or `s3://bucket[/prefix]`.
     store_root: Option<String>,
+    /// Tile-cache root: local directory or `s3://bucket[/prefix]`.
+    cache: Option<String>,
     /// Postgres URL of a pgstac database — presence selects catalog mode.
     catalog: Option<String>,
     /// Drop directory watched for granule manifests (catalog mode only).
@@ -296,6 +302,7 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
         .or(file.base_url)
         .unwrap_or_else(|| format!("http://localhost:{}", bind.port()));
 
+    let cache = args.cache.clone().or(file.cache);
     let catalog = args.catalog.clone().or(file.catalog);
     let watch_dir = args.watch_dir.clone().or(file.watch_dir);
 
@@ -329,6 +336,7 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
         bind,
         base_url,
         store_root,
+        cache,
         layers,
     })
 }
@@ -599,6 +607,7 @@ mod tests {
             store_root: None,
             catalog: None,
             watch_dir: None,
+            cache: None,
         }
     }
 
@@ -641,6 +650,30 @@ mod tests {
         .expect("resolves");
         assert_eq!(cfg.bind.port(), 7070);
         assert_eq!(cfg.base_url, "http://localhost:7070");
+    }
+
+    /// The tile-cache root (#36) layers exactly like the other scalars:
+    /// absent everywhere = None (no cache), file value used, flag/env
+    /// outranks the file.
+    #[test]
+    fn cache_root_layers_and_defaults_to_none() {
+        let cfg = resolve(&ServeArgs {
+            fixtures: true,
+            ..args()
+        })
+        .expect("resolves");
+        assert!(cfg.cache.is_none(), "no cache unless configured");
+
+        let file: ConfigFile = toml::from_str(r#"cache = "/var/cache/swath""#).expect("parses");
+        assert_eq!(file.cache.as_deref(), Some("/var/cache/swath"));
+
+        let cfg = resolve(&ServeArgs {
+            fixtures: true,
+            cache: Some("s3://tiles/cache".to_owned()),
+            ..args()
+        })
+        .expect("resolves");
+        assert_eq!(cfg.cache.as_deref(), Some("s3://tiles/cache"));
     }
 
     #[test]

@@ -24,6 +24,10 @@ services:
       # Data plane: COG store at /data, drop directory at /data/drop.
       # Read-only — the server only ever reads; writers are outside.
       - ./target/e2e/store:/data:ro
+      # Tile cache (#36): the ONE thing the server writes — kept on its
+      # own mount so the data plane stays read-only. stack-up.sh creates
+      # it world-writable (the container runs as 65534, local-dev-only).
+      - ./target/e2e/cache:/cache
     depends_on:
       pgstac:
         condition: service_healthy

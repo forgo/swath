@@ -305,6 +305,59 @@ mod tests {
         assert_eq!(serde_json::to_value(&envelope).unwrap(), expected);
     }
 
+    /// The cache-hit shape on the wire (#36): `decision` becomes the
+    /// externally tagged `{"cache_hit":{"key":…}}` object and the
+    /// source/provenance fields carry the documented hit semantics (cache
+    /// entry as source, zero source bytes, empty provenance). Pinned so
+    /// the overlay's parser and this stream can never drift apart.
+    #[test]
+    fn cache_hit_envelope_json_is_pinned() {
+        let key = "1d31e53806985ca6ed44e8fe79cc8fc9b9c5b4676bafbf8a4090e5f33fb07b2a";
+        let trace = Trace {
+            decision: Strategy::CacheHit {
+                key: key.to_owned(),
+            },
+            source: AssetRef::new(format!("cache://{key}")),
+            sources: vec![AssetRef::new(format!("cache://{key}"))],
+            crs_from: Crs::WEB_MERCATOR,
+            crs_to: Crs::WEB_MERCATOR,
+            bytes_read: 0,
+            provenance: Vec::new(),
+            timings: Timings {
+                total_ms: 1,
+                ..Timings::default()
+            },
+            ingest_to_pixel_ms: None,
+        };
+        let envelope = Envelope {
+            tile: "12/848/1561",
+            layer: "truecolor",
+            trace: &trace,
+        };
+        let expected = serde_json::json!({
+            "tile": "12/848/1561",
+            "layer": "truecolor",
+            "trace": {
+                "decision": {"cache_hit": {"key": key}},
+                "source": format!("cache://{key}"),
+                "sources": [format!("cache://{key}")],
+                "crs_from": 3857,
+                "crs_to": 3857,
+                "bytes_read": 0,
+                "provenance": [],
+                "timings": {
+                    "read_ms": 0,
+                    "warp_ms": 0,
+                    "pixel_ops_ms": 0,
+                    "encode_ms": 0,
+                    "total_ms": 1,
+                },
+                "ingest_to_pixel_ms": null,
+            },
+        });
+        assert_eq!(serde_json::to_value(&envelope).unwrap(), expected);
+    }
+
     /// Publishing to a bus nobody subscribed to is a no-op, not an error
     /// — the render path must be indifferent to watchers.
     #[test]

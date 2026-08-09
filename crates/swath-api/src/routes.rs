@@ -17,12 +17,13 @@ use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use swath_core::cache::{NoCache, TileCache, TileKey, TileKeyInputs, layer_version};
 use swath_core::crs::Crs;
 use swath_core::reproject::Reproject;
 use swath_core::source::RasterSource;
 use swath_core::tile::{LonLatBounds, TileCoord};
-use swath_core::trace::Trace;
-use swath_render::render_tile;
+use swath_core::trace::{Strategy, Trace};
+use swath_render::{render_tile, render_tile_cached};
 
 use crate::error::ApiError;
 use crate::model::{
@@ -68,15 +69,24 @@ const MAX_TILE_MATRIX: u8 = 24;
 /// reprojection (same idea as the tiler's window boundary sampling).
 const BOUNDS_SAMPLES_PER_EDGE: u32 = 16;
 
+/// Tile matrix set id hashed into cache keys (#36) — the one TMS served.
+const TMS_ID: &str = "WebMercatorQuad";
+
 /// Everything the handlers need, wired once at startup: the layer
-/// provider (static registry or catalog-backed, issue #31) and the two
-/// ports the render path consumes. Generic exactly like [`render_tile`] —
-/// the binary (#29) and the tests pick concrete adapters.
+/// provider (static registry or catalog-backed, issue #31), the two
+/// ports the render path consumes, and — when configured — the tile
+/// cache (#36). Generic exactly like [`render_tile`] — the binary (#29)
+/// and the tests pick concrete adapters. The cache parameter defaults to
+/// [`NoCache`] so cache-less construction ([`ApiState::new`]) names no
+/// cache type; [`ApiState::with_cache`] swaps in a real one.
 #[derive(Debug)]
-pub struct ApiState<S, R, L> {
+pub struct ApiState<S, R, L, C = NoCache> {
     layers: L,
     source: S,
     reproject: R,
+    /// The write-through tile cache; `None` serves exactly as before #36
+    /// (the render path never consults it).
+    cache: Option<C>,
     /// Base URL links are minted under (no trailing slash), e.g.
     /// `http://localhost:8080`.
     base_url: String,
@@ -90,7 +100,8 @@ impl<S, R, L> ApiState<S, R, L> {
     /// [`LayerRegistry`](crate::registry::LayerRegistry), or
     /// [`CatalogLayers`](crate::provider::CatalogLayers) for catalog-backed
     /// serving), the two ports, and the base URL links advertise (trailing
-    /// slash trimmed).
+    /// slash trimmed). No cache: serving is byte-for-byte the pre-#36
+    /// behavior until [`ApiState::with_cache`] adds one.
     pub fn new(layers: L, source: S, reproject: R, base_url: impl Into<String>) -> Self {
         let mut base_url: String = base_url.into();
         while base_url.ends_with('/') {
@@ -100,17 +111,34 @@ impl<S, R, L> ApiState<S, R, L> {
             layers,
             source,
             reproject,
+            cache: None,
             base_url,
             traces: TraceBus::default(),
         }
     }
+}
 
+impl<S, R, L, C> ApiState<S, R, L, C> {
     /// Replaces the default trace bus — the seam tests use to shrink the
     /// subscriber buffer (forcing `lagged`) and the keepalive interval.
     #[must_use]
     pub fn with_trace_bus(mut self, traces: TraceBus) -> Self {
         self.traces = traces;
         self
+    }
+
+    /// Enables the write-through tile cache (#36): the tile handler
+    /// consults it before rendering and writes fresh renders through.
+    #[must_use]
+    pub fn with_cache<C2>(self, cache: C2) -> ApiState<S, R, L, C2> {
+        ApiState {
+            layers: self.layers,
+            source: self.source,
+            reproject: self.reproject,
+            cache: Some(cache),
+            base_url: self.base_url,
+            traces: self.traces,
+        }
     }
 
     /// The trace bus renders are published to. Exposed so tests (and,
@@ -130,11 +158,12 @@ pub struct TraceExtension(pub Arc<Trace>);
 
 /// The OGC API - Tiles router over `state`. Every route is `GET` (axum
 /// answers `HEAD` from the same handlers).
-pub fn router<S, R, L>(state: Arc<ApiState<S, R, L>>) -> axum::Router
+pub fn router<S, R, L, C>(state: Arc<ApiState<S, R, L, C>>) -> axum::Router
 where
     S: RasterSource + 'static,
     R: Reproject + 'static,
     L: LayerProvider + 'static,
+    C: TileCache + 'static,
 {
     axum::Router::new()
         .route("/", get(landing))
@@ -169,11 +198,12 @@ async fn healthz() -> &'static str {
 
 // --- JSON document handlers ---
 
-async fn landing<S, R, L>(State(app): State<Arc<ApiState<S, R, L>>>) -> Json<LandingPage>
+async fn landing<S, R, L, C>(State(app): State<Arc<ApiState<S, R, L, C>>>) -> Json<LandingPage>
 where
     S: RasterSource + 'static,
     R: Reproject + 'static,
     L: LayerProvider + 'static,
+    C: TileCache + 'static,
 {
     let base = &app.base_url;
     Json(LandingPage {
@@ -234,11 +264,12 @@ fn tileset_item(base: &str, layer: &LayerIdentity) -> TileSetItem {
     }
 }
 
-async fn tilesets<S, R, L>(State(app): State<Arc<ApiState<S, R, L>>>) -> Json<TileSetList>
+async fn tilesets<S, R, L, C>(State(app): State<Arc<ApiState<S, R, L, C>>>) -> Json<TileSetList>
 where
     S: RasterSource + 'static,
     R: Reproject + 'static,
     L: LayerProvider + 'static,
+    C: TileCache + 'static,
 {
     Json(TileSetList {
         tilesets: app
@@ -254,14 +285,15 @@ where
 /// assets, so a catalog-backed layer whose dataset has no granules yet is
 /// 404 here (its identity still appears in the tilesets list) — resolution
 /// semantics live with [`LayerProvider::resolve`].
-async fn tileset<S, R, L>(
-    State(app): State<Arc<ApiState<S, R, L>>>,
+async fn tileset<S, R, L, C>(
+    State(app): State<Arc<ApiState<S, R, L, C>>>,
     Path(layer_id): Path<String>,
 ) -> Result<Json<TileSetMetadata>, ApiError>
 where
     S: RasterSource + 'static,
     R: Reproject + 'static,
     L: LayerProvider + 'static,
+    C: TileCache + 'static,
 {
     let identity = app
         .layers
@@ -304,8 +336,8 @@ where
 
 // --- The tile handler ---
 
-async fn tile<S, R, L>(
-    State(app): State<Arc<ApiState<S, R, L>>>,
+async fn tile<S, R, L, C>(
+    State(app): State<Arc<ApiState<S, R, L, C>>>,
     Path((layer_id, tile_matrix, tile_row, tile_col)): Path<(String, String, String, String)>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError>
@@ -313,26 +345,56 @@ where
     S: RasterSource + 'static,
     R: Reproject + 'static,
     L: LayerProvider + 'static,
+    C: TileCache + 'static,
 {
     let coord = parse_tile_path(&tile_matrix, &tile_row, &tile_col)?;
     check_accepts_png(&headers)?;
     let layer = app.layers.resolve(&layer_id).await?;
 
     let request = layer.tile_request(coord);
-    let (encoded, trace) = render_tile(&app.source, &app.reproject, &request)
-        .await
-        .map_err(|err| ApiError::internal(format!("tile render failed: {err}")))?;
+    let render = match &app.cache {
+        // Cache configured (#36): consult it first, write fresh renders
+        // through. The key is computed per request — resolution already
+        // ran, so every input is at hand and no I/O is added; the layer
+        // version is content-derived (granule id + plan hash), which is
+        // the whole invalidation story (swath-core cache module docs).
+        Some(cache) => {
+            let plan_json = serde_json::to_string(&request.plan).map_err(|err| {
+                ApiError::internal(format!("render plan failed to serialize: {err}"))
+            })?;
+            let version = layer_version(layer.granule_id.as_deref(), &plan_json);
+            let key = TileKey::compute(&TileKeyInputs {
+                layer: &layer_id,
+                layer_version: &version,
+                plan_json: &plan_json,
+                tms: TMS_ID,
+                coord,
+                tile_size: request.tile_size,
+            });
+            render_tile_cached(&app.source, &app.reproject, cache, &key, &request).await
+        }
+        None => render_tile(&app.source, &app.reproject, &request).await,
+    };
+    let (encoded, trace) =
+        render.map_err(|err| ApiError::internal(format!("tile render failed: {err}")))?;
 
     // 200 + PNG bytes, with the Trace both summarized in a debug header
     // and attached whole as a response extension (the #28 SSE seam — the
     // handler never discards the Trace). `ingest_to_pixel_ms` joins the
     // header when present: the north-star number must be readable from a
-    // plain curl -D (the e2e gate does exactly that).
+    // plain curl -D (the e2e gate does exactly that). `decision` joined
+    // in #36 so a cache hit is readable the same way (the e2e asserts
+    // `cache_hit` off exactly this header).
     let ingest_to_pixel = trace
         .ingest_to_pixel_ms
         .map_or_else(String::new, |ms| format!(",\"ingest_to_pixel_ms\":{ms}"));
+    let decision = match &trace.decision {
+        Strategy::Live => "live",
+        Strategy::CacheHit { .. } => "cache_hit",
+        Strategy::Overview { .. } => "overview",
+    };
     let debug_header = format!(
-        "{{\"bytes_read\":{},\"total_ms\":{}{ingest_to_pixel}}}",
+        "{{\"decision\":\"{decision}\",\"bytes_read\":{},\"total_ms\":{}{ingest_to_pixel}}}",
         trace.bytes_read, trace.timings.total_ms,
     );
     let mut response = (
@@ -359,11 +421,12 @@ where
 /// `GET /traces` — the x-ray SSE stream (issue #28): `text/event-stream`
 /// of every render published from connection time on. Wire contract and
 /// slow-subscriber semantics live in [`crate::traces`].
-async fn traces<S, R, L>(State(app): State<Arc<ApiState<S, R, L>>>) -> impl IntoResponse
+async fn traces<S, R, L, C>(State(app): State<Arc<ApiState<S, R, L, C>>>) -> impl IntoResponse
 where
     S: RasterSource + 'static,
     R: Reproject + 'static,
     L: LayerProvider + 'static,
+    C: TileCache + 'static,
 {
     app.traces.sse()
 }

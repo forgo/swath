@@ -14,8 +14,11 @@ set -euo pipefail
 
 dir=target/e2e
 granule=hlss30-t13sdd-2024158
-# The mounted data plane must exist (and be empty) before `up`.
-rm -rf "$dir" && mkdir -p "$dir/store/drop"
+# The mounted data plane must exist (and be empty) before `up`. The tile
+# cache (#36) gets its own writable mount — world-writable because the
+# container runs as uid 65534 (local-dev-only bind mount, never real infra).
+rm -rf "$dir" && mkdir -p "$dir/store/drop" "$dir/cache"
+chmod 777 "$dir/cache"
 docker compose build swath
 start=$(date +%s)
 docker compose up -d --wait

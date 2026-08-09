@@ -2769,6 +2769,7 @@ dependencies = [
  "object_store",
  "serde",
  "serde_json",
+ "swath-cache-objectstore",
  "swath-core",
  "swath-render",
  "swath-reproject-proj4rs",
@@ -2777,6 +2778,15 @@ dependencies = [
  "thiserror",
  "tokio",
  "tower",
+]
+
+[[package]]
+name = "swath-cache-objectstore"
+version = "0.0.0"
+dependencies = [
+ "object_store",
+ "swath-core",
+ "tokio",
 ]
 
 [[package]]
@@ -2798,6 +2808,7 @@ dependencies = [
  "object_store",
  "serde",
  "swath-api",
+ "swath-cache-objectstore",
  "swath-catalog-pgstac",
  "swath-core",
  "swath-events-filedrop",
@@ -2819,6 +2830,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror",
 ]
 
@@ -2843,12 +2855,14 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "swath-cache-objectstore",
  "swath-core",
  "swath-reproject-proj4rs",
  "swath-source-cog",
  "swath-testkit",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

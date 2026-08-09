@@ -58,6 +58,6 @@ pub use error::RenderError;
 pub use grid::TargetGrid;
 pub use ir::{RenderPlan, RgbaTile, eval};
 pub use process::{CompileContext, CompileError, CompiledProduct, compile};
-pub use tiler::{EncodedTile, TileError, TileRequest, render_tile};
+pub use tiler::{EncodedTile, TileError, TileRequest, render_tile, render_tile_cached};
 pub use warp::{NodataPolicy, Resampling, WarpedBuffer, warp};
 pub use window::{BOUNDARY_SAMPLES_PER_EDGE, source_window};

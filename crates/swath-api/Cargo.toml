@@ -33,6 +33,7 @@ http-body-util = { workspace = true }
 image = { workspace = true }
 jsonschema = { workspace = true }
 object_store = { workspace = true }
+swath-cache-objectstore = { path = "../adapters/swath-cache-objectstore", version = "0.0.0" }
 swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.0.0" }
 swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.0.0" }
 swath-testkit = { path = "../swath-testkit", version = "0.0.0" }

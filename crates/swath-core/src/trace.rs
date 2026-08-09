@@ -23,15 +23,22 @@ use crate::raster::AssetRef;
 /// (ARCHITECTURE.md §5/§10): serve from cache, from a pre-computed overview,
 /// or render live from full-resolution source reads.
 ///
-/// The ARCHITECTURE.md sketch carries a `TileKey` inside `CacheHit`; the key
-/// type is defined by the cache model (hash of `layer_version` + `render_spec` +
-/// `tile_coord` + tms, §10) and lands with the `TileCache` port — `CacheHit`
-/// grows its key then.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// `CacheHit` carries the [`TileKey`](crate::cache::TileKey) in string
+/// form, exactly as #21 planned ("`CacheHit` grows its key then" — "then"
+/// is #36, the `TileCache` port landing). This is the one deliberate
+/// change to the pinned JSON contract in #36: the wire form moves from the
+/// bare string `"cache_hit"` to `{"cache_hit": {"key": "…"}}` (externally
+/// tagged, like `overview`). The x-ray overlay's decision handling was
+/// updated in lockstep to read both shapes.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Strategy {
     /// The encoded tile was served straight from the tile cache.
-    CacheHit,
+    CacheHit {
+        /// The content-derived cache key the tile was found under
+        /// (lowercase hex — `TileKey::as_str`).
+        key: String,
+    },
     /// Pixels came from a pre-computed overview pyramid level.
     Overview {
         /// Overview level read. The numbering convention (which level is
@@ -114,7 +121,13 @@ pub struct Trace {
     pub crs_from: Crs,
     /// CRS of the rendered tile.
     pub crs_to: Crs,
-    /// Total source bytes read for this render.
+    /// Total **source** bytes read for this render. Deliberately `0` on a
+    /// cache hit (#36, documented decision): no source ranges were
+    /// touched, so `bytes_read` stays honest to its definition and
+    /// [`provenance`](Self::provenance) stays empty — the cached payload's
+    /// size is already on the wire as `Content-Length`, and a hit is
+    /// unmistakable from [`decision`](Self::decision) alone, so no
+    /// cached-bytes field is added to the contract.
     pub bytes_read: u64,
     /// Every byte range / chunk touched, in read order.
     pub provenance: Vec<Provenance>,
@@ -177,13 +190,20 @@ mod tests {
         assert_eq!(json, expected);
     }
 
+    /// `live` stays a bare string; `cache_hit` carries its key (externally
+    /// tagged, like `overview`) since #36 — the deliberate, documented
+    /// contract change that landed with the `TileCache` port (the enum
+    /// docs carry the justification; the x-ray overlay reads both shapes).
     #[test]
-    fn unit_strategies_serialize_as_strings() {
-        assert_eq!(
-            serde_json::to_value(Strategy::CacheHit).unwrap(),
-            "cache_hit"
-        );
+    fn strategy_wire_shapes_are_pinned() {
         assert_eq!(serde_json::to_value(Strategy::Live).unwrap(), "live");
+        assert_eq!(
+            serde_json::to_value(Strategy::CacheHit {
+                key: "0123abcd".to_owned()
+            })
+            .unwrap(),
+            serde_json::json!({"cache_hit": {"key": "0123abcd"}}),
+        );
     }
 
     #[test]

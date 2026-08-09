@@ -261,9 +261,20 @@ e2e:
     echo ""
     [ "$i2p" -lt "$budget" ] || { echo "FAIL: ingest-to-pixel $i2p ms exceeds the $budget ms budget"; exit 1; }
     echo "swath: ingest-to-pixel is under the $budget ms north-star budget"
-    # Same request, same bytes: the container render is deterministic.
-    curl -sf -o "$dir/tile-again.png" "$tile"
+    # The north-star assertion above is honest by construction: the first
+    # 200 (tile-headers.txt) is a fresh, uncached render — the cache is
+    # empty until that render writes through — so ingest-to-pixel is never
+    # measured on a hit. Its decision must say so.
+    grep -q '"decision":"live"' "$dir/tile-headers.txt" \
+        || { echo "FAIL: first tile fetch was not a live render"; exit 1; }
+    echo "swath: north-star tile was a fresh live render (decision: live)"
+    # Same request, same bytes — and now served from the write-through
+    # cache (#36): the repeat's trace must say cache_hit, byte-identical.
+    curl -sf -D "$dir/tile-again-headers.txt" -o "$dir/tile-again.png" "$tile"
     cmp "$dir/tile.png" "$dir/tile-again.png" && echo "swath: tile bytes are stable across requests"
+    grep -q '"decision":"cache_hit"' "$dir/tile-again-headers.txt" \
+        || { echo "FAIL: second fetch of the same tile was not a cache hit"; exit 1; }
+    echo "swath: second fetch served from the tile cache (decision: cache_hit, identical bytes)"
     # Correctness oracle: the catalog-served tile perceptually matches the
     # committed golden — "a CORRECT tile is visible" (§3), not just any tile.
     cargo run --quiet -p swath-testkit --bin pdiff -- \
@@ -290,6 +301,9 @@ e2e:
     cargo run --quiet -p swath-testkit --bin pdiff -- \
         "$dir/ndvi.png" crates/swath-render/tests/data/ndvi-12-848-1561.png
     echo "swath: ndvi tile matches the rio-tiler/GDAL golden (default pdiff policy)"
+    # A cached repeat inside the SSE window: the truecolor tile is cached
+    # by now, so this fetch must surface a keyed cache_hit trace (#36).
+    curl -sf -o /dev/null "$tile"
     for _ in $(seq 1 20); do
         grep -q '^event: trace' "$dir/traces.txt" && break
         sleep 0.5
@@ -300,6 +314,9 @@ e2e:
     grep '"layer":"ndvi"' "$dir/traces.txt" | grep -q '"decision":"live"' \
         || { echo "FAIL: no live-decision ndvi trace on the SSE stream"; exit 1; }
     echo "swath: SSE trace proves ndvi was computed on the fly (decision: live)"
+    grep '"layer":"truecolor"' "$dir/traces.txt" | grep -q '"decision":{"cache_hit":{"key":' \
+        || { echo "FAIL: no cache_hit trace for the repeated truecolor tile on the SSE stream"; exit 1; }
+    echo "swath: SSE trace reports the repeated tile as a keyed cache_hit (#36)"
     grep -q '"ingest_to_pixel_ms":[0-9]' "$dir/traces.txt" \
         && echo "swath: SSE trace carries ingest_to_pixel_ms"
     # Metadata-vs-pixels: the tileset's DECLARED bounds must contain the tile
