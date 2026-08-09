@@ -1,3 +1,7 @@
+# Standalone package: prototypes are never workspace members (root Cargo.toml excludes them);
+# the empty [workspace] table makes that explicit so cargo doesn't climb to the repo root.
+[workspace]
+
 [package]
 name = "swath-referencer-bakeoff"
 version = "0.0.0"
@@ -16,8 +20,9 @@ path = "src/main.rs"
 #   grib  -> gribberish
 #   hdf5  -> hdf5-metno
 [dependencies]
+gribberish = { version = "1.6", optional = true, default-features = false }
 
 [features]
 default = []
-grib = []
+grib = ["dep:gribberish"]
 hdf5 = []

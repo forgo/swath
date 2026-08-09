@@ -47,7 +47,10 @@ impl Json {
 }
 
 pub fn parse(s: &str) -> Result<Json, String> {
-    let mut p = Parser { b: s.as_bytes(), i: 0 };
+    let mut p = Parser {
+        b: s.as_bytes(),
+        i: 0,
+    };
     p.ws();
     let v = p.value()?;
     p.ws();
@@ -113,7 +116,12 @@ impl<'a> Parser<'a> {
                     self.i += 1;
                     break;
                 }
-                c => return Err(format!("expected ',' or '}}' at byte {}, got '{}'", self.i, c as char)),
+                c => {
+                    return Err(format!(
+                        "expected ',' or '}}' at byte {}, got '{}'",
+                        self.i, c as char
+                    ));
+                }
             }
         }
         Ok(Json::Obj(kvs))
@@ -136,7 +144,12 @@ impl<'a> Parser<'a> {
                     self.i += 1;
                     break;
                 }
-                c => return Err(format!("expected ',' or ']' at byte {}, got '{}'", self.i, c as char)),
+                c => {
+                    return Err(format!(
+                        "expected ',' or ']' at byte {}, got '{}'",
+                        self.i, c as char
+                    ));
+                }
             }
         }
         Ok(Json::Arr(a))
@@ -188,11 +201,15 @@ impl<'a> Parser<'a> {
             self.i += 1;
         }
         while self.i < self.b.len()
-            && matches!(self.b[self.i], b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-')
+            && matches!(
+                self.b[self.i],
+                b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-'
+            )
         {
             self.i += 1;
         }
-        let tok = std::str::from_utf8(&self.b[start..self.i]).map_err(|_| "bad number".to_string())?;
+        let tok =
+            std::str::from_utf8(&self.b[start..self.i]).map_err(|_| "bad number".to_string())?;
         tok.parse::<f64>()
             .map(Json::Num)
             .map_err(|_| format!("bad number '{tok}'"))

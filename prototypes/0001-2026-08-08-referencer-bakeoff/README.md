@@ -80,7 +80,27 @@ The manifest is the contract (ADR 0001, ADR 0006): whoever generates it, the ser
 
 *(To be filled in when run, dated. Do not edit prior entries — append.)*
 
-- YYYY-MM-DD — …
+- 2026-08-08 — **GRIB2 (H2): pure-Rust path implemented and equivalent to kerchunk.**
+  - **Sample:** `data/gfs_sample.grib2` (2,706,908 bytes, 3 messages: TMP@850mb, UGRD@10m, PRMSL),
+    assembled by `scripts/fetch_sample.sh` from `gfs.20260801/00/atmos/gfs.t00z.pgrb2.0p25.f000`
+    on the public AWS Open Data bucket (`noaa-gfs-bdp-pds.s3.amazonaws.com`, no auth) — each field
+    byte-ranged out via the `.idx` sidecar, so each range is a complete GRIB2 message.
+  - **Generators:** Rust `gribberish` 1.6.0 (metadata only — no field decode needed for
+    referencing) vs Python sidecar using `kerchunk.grib2.scan_grib` (kerchunk 0.2.10, cfgrib
+    0.9.15.1, eccodes 2.48.0). Grouping model per kerchunk: one single-chunk array per message
+    (key `0.0`), whole-message byte range, cfgrib variable names (`t`, `u10`, `prmsl` — the Rust
+    side carries a small NCEP-abbrev→cfgrib-name table, prototype scope). Codec recorded from
+    section 5 independently on both sides (Rust: template number; Python: eccodes `packingType`);
+    all three messages are `grib2:complex-spatial-diff` (template 3).
+  - **Equivalence (H1-for-GRIB2):** `just compare` → `arrays: A=3 B=3 matched=3`, 0 grid/dtype
+    mismatches, 0 chunk mismatches ⇒ **EQUIVALENT** (per-message offset/length identical).
+  - **Latency** (Apple M2 Max, local file): referencer-rs <1 ms cold and warm; virtualizarr sidecar
+    ~1150 ms cold, ~890–910 ms warm (dominated by Python import + eccodes scan).
+  - **Manifest size:** rs 935 B vs vz 934 B (same schema; trailing-newline difference).
+  - **Verdict on H2:** supported — gribberish exposes message offset/length/grid/packing directly
+    (`read_messages`, `Message::{byte_offset,len,grid_dimensions,data_template_number}`); no custom
+    section walker was needed. Residual risk: variable-name vocabulary (NCEP abbrev vs eccodes
+    shortName) needs a real table for production parity.
 
 ## 8. Decision
 
