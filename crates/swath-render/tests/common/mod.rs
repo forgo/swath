@@ -11,7 +11,7 @@ use object_store::local::LocalFileSystem;
 use swath_core::crs::Crs;
 use swath_core::raster::AssetRef;
 use swath_core::reproject::Reproject as _;
-use swath_core::source::{BandSelection, RasterSource as _};
+use swath_core::source::{BandSelection, RasterSource as _, ReadLevel};
 use swath_core::tile::TileCoord;
 use swath_render::{Resampling, TargetGrid, WarpedBuffer, source_window, warp};
 use swath_reproject_proj4rs::Proj4rsReproject;
@@ -55,12 +55,12 @@ pub(crate) async fn render_warped(
         .expect("window computation")
         .expect("fixture tiles intersect the raster");
     let data = source
-        .read_window(&asset, window, BandSelection::Single(0))
+        .read_window(&asset, window, BandSelection::Single(0), ReadLevel::FullRes)
         .await
         .expect("read window");
 
     let started = std::time::Instant::now();
-    let warped = warp(&data, &info, to_source.as_ref(), &grid, resampling).expect("warp");
+    let warped = warp(&data, to_source.as_ref(), &grid, resampling).expect("warp");
     (warped, info.nodata, started.elapsed())
 }
 

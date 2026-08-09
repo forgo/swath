@@ -56,6 +56,7 @@ fn source(w: u64, h: u64, pixels: Vec<i16>) -> WindowData {
             width: w,
             height: h,
         },
+        raster(w, h),
         PixelBuffer::Int16(pixels),
         Some(f64::from(NODATA)),
         vec![],
@@ -113,7 +114,7 @@ proptest! {
     ) {
         let len = usize::try_from(w * h).expect("small dims");
         let src = source(w, h, vec![NODATA; len]);
-        let out = warp(&src, &raster(w, h), &Identity, &grid, resampling).expect("warp");
+        let out = warp(&src, &Identity, &grid, resampling).expect("warp");
         prop_assert_eq!(out.valid_count(), 0);
         prop_assert!(out.values.iter().all(|v| *v == 0.0));
     }
@@ -125,7 +126,7 @@ proptest! {
         (w, h, pixels, grid, _) in cases()
     ) {
         let src = source(w, h, pixels.clone());
-        let out = warp(&src, &raster(w, h), &Identity, &grid, Resampling::Nearest)
+        let out = warp(&src, &Identity, &grid, Resampling::Nearest)
             .expect("warp");
         for (v, valid) in out.values.iter().zip(&out.valid) {
             if *valid {
@@ -156,13 +157,7 @@ proptest! {
             .collect();
         let src = source(w, h, pixels);
         for policy in [NodataPolicy::ExcludeRenormalize, NodataPolicy::Propagate] {
-            let out = warp(
-                &src,
-                &raster(w, h),
-                &Identity,
-                &grid,
-                Resampling::Bilinear(policy),
-            )
+            let out = warp(&src, &Identity, &grid, Resampling::Bilinear(policy))
             .expect("warp");
             let (lo, hi) = valid_vals
                 .iter()
@@ -189,7 +184,7 @@ proptest! {
     ) {
         let len = usize::try_from(w * h).expect("small dims");
         let src = source(w, h, vec![value; len]);
-        let out = warp(&src, &raster(w, h), &Identity, &grid, resampling).expect("warp");
+        let out = warp(&src, &Identity, &grid, resampling).expect("warp");
         for (v, valid) in out.values.iter().zip(&out.valid) {
             if *valid {
                 prop_assert!(

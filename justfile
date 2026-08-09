@@ -145,6 +145,22 @@ render-goldens:
     # Render-IR goldens (issue #25): multi-file composites via the compose
     # subcommand — true-color BGR->RGB and NDVI band math, both bilinear.
     compose() { uv run tests/oracle/render_reference.py compose "$@"; }
+    # Overview-path goldens (issue #38): the same z11 tile rendered from the
+    # fixtures' x2 overview IFD (--overview-level 0 — GDAL's own selection
+    # serves exactly this overview on rio-tiler's default path at z11,
+    # verified byte-identical; the explicit open pins WHICH bytes while
+    # --exact-grid removes the two-stage read pipeline's point-sampling
+    # artifact, as for the kernel z11 goldens above, which stay untouched:
+    # they pin the decimating warp KERNEL against full-res pixels, a
+    # different question). Rendered via `compose` because its masked-pixel
+    # encoding (transparent black) is the Render IR's documented output —
+    # these goldens are matched by the tiler's Overview strategy end to end.
+    compose 11 424 780 "$D/b04-ov-11-424-780.png" \
+        --input "$F-b04.tif" --expression "b1" --rescale 0,3000 \
+        --resampling bilinear --overview-level 0 --exact-grid
+    compose 11 424 780 "$D/fmask-ov-11-424-780.png" \
+        --input "$F-fmask.tif" --expression "b1" \
+        --resampling nearest --overview-level 0 --exact-grid
     for yy in 1561 1562; do
         compose 12 848 "$yy" "$D/truecolor-12-848-$yy.png" \
             --input "$F-b04.tif" --input "$F-b03.tif" --input "$F-b02.tif" \

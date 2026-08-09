@@ -300,10 +300,18 @@ fn is_nodata(v: f64, nodata: Option<f64>) -> bool {
 
 /// Warps `source` into `target` by inverse mapping: each target pixel
 /// center is mapped through `transform` (**target CRS → source CRS**) and
-/// `info.transform` (the source raster's **full-resolution** geotransform —
-/// `source.window` places the buffer within that grid) and sampled with
-/// `resampling`. `info` also supplies the raster dimensions, from which the
-/// GDAL-equivalent resampling geometry ([`KernelShape`]) is derived.
+/// `source.grid.transform` (the geotransform of the grid the window was
+/// read from — `source.window` places the buffer within that grid) and
+/// sampled with `resampling`. `source.grid` also supplies the raster
+/// dimensions, from which the GDAL-equivalent resampling geometry
+/// ([`KernelShape`]) is derived.
+///
+/// The grid comes from the [`WindowData`] itself (never passed separately),
+/// so overview reads warp correctly by construction: an overview window
+/// carries the overview grid, and every coordinate here — window offsets,
+/// kernel window, raster bounds — is in that grid's pixel space (#38).
+/// GDAL behaves identically when warping from an overview: the same warp
+/// machinery runs against the overview dataset's grid.
 ///
 /// Target pixels that map outside the source window, onto nodata (per the
 /// kernel's policy), or outside the transform's domain come back invalid —
@@ -330,11 +338,11 @@ fn is_nodata(v: f64, nodata: Option<f64>) -> bool {
 )]
 pub fn warp(
     source: &WindowData,
-    info: &RasterInfo,
     transform: &dyn CoordTransform,
     target: &TargetGrid,
     resampling: Resampling,
 ) -> Result<WarpedBuffer, RenderError> {
+    let info: &RasterInfo = &source.grid;
     let win = source.window;
     let expected = win.width * win.height;
     let actual = source.pixels.len() as u64;
@@ -624,6 +632,7 @@ mod tests {
                 width: w,
                 height: h,
             },
+            info(w, h),
             PixelBuffer::Int16(pixels),
             nodata,
             vec![],
@@ -666,14 +675,7 @@ mod tests {
     #[test]
     fn identity_nearest_reproduces_the_source() {
         let src = window(4, 4, (0..16).collect(), None);
-        let out = warp(
-            &src,
-            &info(4, 4),
-            &Identity,
-            &aligned_grid(4, 4),
-            Resampling::Nearest,
-        )
-        .unwrap();
+        let out = warp(&src, &Identity, &aligned_grid(4, 4), Resampling::Nearest).unwrap();
         assert_eq!(out.valid_count(), 16);
         let got: Vec<f64> = out.values.clone();
         assert_eq!(got, (0..16).map(f64::from).collect::<Vec<_>>());
@@ -684,7 +686,6 @@ mod tests {
         let src = window(4, 4, (0..16).collect(), None);
         let out = warp(
             &src,
-            &info(4, 4),
             &Identity,
             &aligned_grid(4, 4),
             Resampling::Bilinear(NodataPolicy::default()),
@@ -711,7 +712,6 @@ mod tests {
         );
         let out = warp(
             &src,
-            &info(2, 1),
             &Identity,
             &target,
             Resampling::Bilinear(NodataPolicy::default()),
@@ -725,14 +725,7 @@ mod tests {
     #[test]
     fn nearest_rejects_nodata_and_out_of_window() {
         let src = window(2, 2, vec![7, -9999, 7, 7], Some(-9999.0));
-        let out = warp(
-            &src,
-            &info(2, 2),
-            &Identity,
-            &aligned_grid(2, 2),
-            Resampling::Nearest,
-        )
-        .unwrap();
+        let out = warp(&src, &Identity, &aligned_grid(2, 2), Resampling::Nearest).unwrap();
         assert_eq!(out.valid, vec![true, false, true, true]);
         assert!(out.values[1].abs() < f64::EPSILON);
     }
@@ -755,7 +748,6 @@ mod tests {
         );
         let out = warp(
             &src,
-            &info(2, 2),
             &Identity,
             &center,
             Resampling::Bilinear(NodataPolicy::ExcludeRenormalize),
@@ -766,7 +758,6 @@ mod tests {
 
         let out = warp(
             &src,
-            &info(2, 2),
             &Identity,
             &center,
             Resampling::Bilinear(NodataPolicy::Propagate),
@@ -794,14 +785,7 @@ mod tests {
             1,
         );
         for policy in [NodataPolicy::ExcludeRenormalize, NodataPolicy::Propagate] {
-            let out = warp(
-                &src,
-                &info(2, 2),
-                &Identity,
-                &over_nodata,
-                Resampling::Bilinear(policy),
-            )
-            .unwrap();
+            let out = warp(&src, &Identity, &over_nodata, Resampling::Bilinear(policy)).unwrap();
             assert_eq!(out.valid, vec![false], "policy {policy:?}");
         }
     }
@@ -812,7 +796,6 @@ mod tests {
         for policy in [NodataPolicy::ExcludeRenormalize, NodataPolicy::Propagate] {
             let out = warp(
                 &src,
-                &info(2, 2),
                 &Identity,
                 &aligned_grid(2, 2),
                 Resampling::Bilinear(policy),
@@ -837,21 +820,15 @@ mod tests {
             4,
             1,
         );
-        let out = warp(&src, &info(4, 1), &RejectWest, &target, Resampling::Nearest).unwrap();
+        let out = warp(&src, &RejectWest, &target, Resampling::Nearest).unwrap();
         assert_eq!(out.valid, vec![false, false, true, true]);
     }
 
     #[test]
     fn shape_mismatch_and_singular_transform_are_errors() {
         let src = window(4, 4, vec![0; 15], None);
-        let err = warp(
-            &src,
-            &info(4, 4),
-            &Identity,
-            &aligned_grid(4, 4),
-            Resampling::Nearest,
-        )
-        .expect_err("shape mismatch");
+        let err = warp(&src, &Identity, &aligned_grid(4, 4), Resampling::Nearest)
+            .expect_err("shape mismatch");
         assert_eq!(
             err,
             RenderError::SourceShape {
@@ -860,17 +837,10 @@ mod tests {
             }
         );
 
-        let src = window(2, 2, vec![0; 4], None);
-        let mut singular = info(2, 2);
-        singular.transform = GeoTransform::north_up(0.0, 0.0, 1.0, 0.0);
+        let mut src = window(2, 2, vec![0; 4], None);
+        src.grid.transform = GeoTransform::north_up(0.0, 0.0, 1.0, 0.0);
         assert!(matches!(
-            warp(
-                &src,
-                &singular,
-                &Identity,
-                &aligned_grid(2, 2),
-                Resampling::Nearest
-            ),
+            warp(&src, &Identity, &aligned_grid(2, 2), Resampling::Nearest),
             Err(RenderError::NonInvertibleTransform { .. })
         ));
     }
@@ -878,14 +848,7 @@ mod tests {
     #[test]
     fn empty_source_window_yields_all_invalid() {
         let src = window(0, 0, vec![], Some(-9999.0));
-        let out = warp(
-            &src,
-            &info(2, 2),
-            &Identity,
-            &aligned_grid(2, 2),
-            Resampling::Nearest,
-        )
-        .unwrap();
+        let out = warp(&src, &Identity, &aligned_grid(2, 2), Resampling::Nearest).unwrap();
         assert_eq!(out.valid_count(), 0);
         assert_eq!(out, WarpedBuffer::empty_invalid(2, 2));
     }
