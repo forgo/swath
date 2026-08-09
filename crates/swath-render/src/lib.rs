@@ -39,12 +39,14 @@
 //!
 //! [`CoordTransform`]: swath_core::reproject::CoordTransform
 
+mod encode;
 mod error;
 mod grid;
 pub mod ir;
 mod warp;
 mod window;
 
+pub use encode::{EncodeError, encode_png};
 pub use error::RenderError;
 pub use grid::TargetGrid;
 pub use ir::{RenderPlan, RgbaTile, eval};
