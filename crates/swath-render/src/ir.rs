@@ -6,7 +6,7 @@
 //!
 //! A [`RenderPlan`] names its input bands, lists the [`PixelOp`]s that turn
 //! warped `f64` planes into an 8-bit RGB image, and states the output
-//! encoding. The plan is **data**: the process compiler (issue #34) lowers
+//! encoding. The plan is **data**: the process compiler ([`crate::process`]) lowers
 //! openEO graphs into it, tests serialize it, and [`eval`] executes it — the
 //! graph is interchange, the IR is ours. Every type here derives serde for
 //! that reason, and the JSON shape is pinned by insta snapshots.
@@ -266,7 +266,7 @@ impl OutputSpec {
 
 /// A complete render plan: named inputs, the op pipeline, the output spec.
 ///
-/// This is the executable IR the process compiler (issue #34) lowers openEO
+/// This is the executable IR the process compiler ([`crate::process`]) lowers openEO
 /// graphs into and [`eval`] runs. It is serde round-trippable; the JSON
 /// shape is pinned by snapshot tests.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
