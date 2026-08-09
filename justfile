@@ -15,8 +15,9 @@ prek_version := "0.4.12"
 default:
     @just --list
 
-# Install pinned dev tools (prefers prebuilt binaries via cargo-binstall).
-setup:
+# Install the pinned tools CI's Rust jobs need (prebuilt via cargo-binstall;
+# --locked so a source-build fallback can't be broken by upstream semver drift).
+setup-ci:
     #!/usr/bin/env bash
     set -euo pipefail
     # --force: we only call install() when the binary is provably absent, but a
@@ -24,7 +25,7 @@ setup:
     # installed") without the binaries — binstall would otherwise skip.
     install() { # name version
         if command -v cargo-binstall >/dev/null; then
-            cargo binstall --no-confirm --force --version "$2" "$1"
+            cargo binstall --no-confirm --force --locked --version "$2" "$1"
         else
             cargo install --locked --force --version "$2" "$1"
         fi
@@ -32,8 +33,21 @@ setup:
     command -v cargo-nextest  >/dev/null || install cargo-nextest  "{{nextest_version}}"
     cargo llvm-cov --version >/dev/null 2>&1 || install cargo-llvm-cov "{{llvm_cov_version}}"
     command -v cargo-deny     >/dev/null || install cargo-deny     "{{deny_version}}"
-    command -v zizmor         >/dev/null || install zizmor         "{{zizmor_version}}"
-    command -v prek           >/dev/null || install prek           "{{prek_version}}"
+    echo "setup-ci complete"
+
+# Full developer setup: CI tools + local-only tools (zizmor, prek) + git hook.
+setup: setup-ci
+    #!/usr/bin/env bash
+    set -euo pipefail
+    install() { # name version
+        if command -v cargo-binstall >/dev/null; then
+            cargo binstall --no-confirm --force --locked --version "$2" "$1"
+        else
+            cargo install --locked --force --version "$2" "$1"
+        fi
+    }
+    command -v zizmor >/dev/null || install zizmor "{{zizmor_version}}"
+    command -v prek   >/dev/null || install prek   "{{prek_version}}"
     # Optional, never mandatory: install the git pre-commit hook.
     prek install 2>/dev/null || true
     echo "setup complete"
