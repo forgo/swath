@@ -1,0 +1,33 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-api"
+description = "Inbound HTTP adapter: the OGC API - Tiles surface (axum) over the tiler engine — standards-shaped routes, no domain logic in handlers."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+swath-core = { path = "../swath-core", version = "0.0.0" }
+swath-render = { path = "../swath-render", version = "0.0.0" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+http-body-util = { workspace = true }
+image = { workspace = true }
+jsonschema = { workspace = true }
+object_store = { workspace = true }
+swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.0.0" }
+swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.0.0" }
+swath-testkit = { path = "../swath-testkit", version = "0.0.0" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower = { workspace = true }
+
+[lints]
+workspace = true
