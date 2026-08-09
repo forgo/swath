@@ -8,11 +8,18 @@
 //!
 //! # What this module fixes, and what it defers
 //!
-//! - **Strategy is always [`Strategy::Live`]** — the materialization
-//!   planner (issue #37) does not exist yet, so every tile renders live
-//!   from full-resolution source reads and the Trace records that honestly.
-//!   When the planner lands it takes over this field; no planner machinery
-//!   is prebuilt here.
+//! - **Strategy is [`Strategy::Live`] or [`Strategy::Overview`]** — the
+//!   materialization planner (issue #37) does not exist yet; until it
+//!   lands, the tiler itself makes exactly one local choice (#38): when a
+//!   band's source carries an embedded overview coarse enough for the
+//!   target resolution (GDAL's selection rule — see
+//!   `window::select_overview`), the read is served from that overview
+//!   IFD and the Trace records `Overview { level }` (the decimation
+//!   factor). The Trace reports `Overview` only when **every** band that
+//!   actually read pixels read the same overview level; any mix (or a
+//!   full-res read anywhere) stays `Live` — one tile, one honest
+//!   decision. This is a deliberately minimal seam: #37's planner will
+//!   own the strategy choice and subsume this per-render selection.
 //! - **The target CRS is fixed to Web Mercator** ([`Crs::WEB_MERCATOR`]):
 //!   `WebMercatorQuad` is the only TMS in Phase 1 (`TileCoord` is defined
 //!   on it). Other target TMSs widen [`TileRequest`] later.
@@ -66,7 +73,7 @@ use swath_core::catalog::Datetime;
 use swath_core::crs::Crs;
 use swath_core::raster::{AssetRef, RasterInfo};
 use swath_core::reproject::{CoordTransform, Reproject, ReprojectError};
-use swath_core::source::{BandSelection, RasterSource, SourceError};
+use swath_core::source::{BandSelection, RasterSource, ReadLevel, SourceError};
 use swath_core::tile::TileCoord;
 use swath_core::trace::{Provenance, Strategy, Timings, Trace};
 
@@ -75,7 +82,7 @@ use crate::error::RenderError;
 use crate::grid::TargetGrid;
 use crate::ir::{PlanError, RenderPlan, TileFormat, eval};
 use crate::warp::{Resampling, WarpedBuffer, warp};
-use crate::window::source_window;
+use crate::window::{clip_to_raster, select_overview, source_extent};
 
 #[cfg(doc)]
 use swath_core::source::WindowData;
@@ -333,32 +340,64 @@ async fn describe_bands<'a, S: RasterSource>(
 /// Windows, reads, and warps one band. A band whose source window misses
 /// the raster entirely yields an all-invalid plane — nothing read, nothing
 /// to explain but the absence itself.
+///
+/// Returns the warped plane plus this band's **level vote** for the
+/// Trace's decision: `None` when nothing was read, `Some(None)` for a
+/// full-resolution read, `Some(Some(factor))` for an overview read.
+///
+/// Overview selection (#38, the pre-planner mini-decision — module docs):
+/// the source extent is traced once; if the source's `overview_levels`
+/// contain a factor eligible under GDAL's rule (`select_overview`), the
+/// read targets that level. The request stays in **full-resolution**
+/// coordinates (the `ReadLevel` port contract) with the resampling margin
+/// scaled by the factor (a margin of N overview pixels spans N x factor
+/// full-res pixels); the adapter returns the overview grid it actually
+/// read inside `WindowData::grid`, and the warp runs off that grid
+/// unchanged — no overview arithmetic here.
 async fn read_and_warp<S: RasterSource>(
     source: &S,
     band: &BandAsset<'_>,
     geometry: &RenderGeometry,
     to_source: &dyn CoordTransform,
     acc: &mut Accounting,
-) -> Result<WarpedBuffer, TileError> {
+) -> Result<(WarpedBuffer, Option<Option<u32>>), TileError> {
     let grid = &geometry.grid;
     let stage = |source| TileError::Warp {
         band: band.name.to_owned(),
         source,
     };
-    let window = source_window(grid, &band.info, to_source, geometry.margin).map_err(stage)?;
-    let Some(window) = window else {
+    let nothing = || {
         let len = grid.width() as usize * grid.height() as usize;
-        return Ok(WarpedBuffer {
+        WarpedBuffer {
             width: grid.width(),
             height: grid.height(),
             values: vec![0.0; len],
             valid: vec![false; len],
-        });
+        }
+    };
+    let Some(extent) = source_extent(grid, &band.info, to_source).map_err(stage)? else {
+        return Ok((nothing(), None));
+    };
+    let factor = select_overview(
+        &band.info.overview_levels,
+        &extent,
+        grid.width(),
+        grid.height(),
+    );
+    let (level, margin) = match factor {
+        Some(f) => (
+            ReadLevel::Overview { factor: f },
+            geometry.margin.saturating_mul(f),
+        ),
+        None => (ReadLevel::FullRes, geometry.margin),
+    };
+    let Some(window) = clip_to_raster(&extent, margin, &band.info) else {
+        return Ok((nothing(), None));
     };
 
     let read_started = Instant::now();
     let data = source
-        .read_window(band.asset, window, BandSelection::Single(0))
+        .read_window(band.asset, window, BandSelection::Single(0), level)
         .await
         .map_err(|source| TileError::Source {
             band: band.name.to_owned(),
@@ -369,9 +408,9 @@ async fn read_and_warp<S: RasterSource>(
     acc.bytes_read += data.bytes_read;
 
     let warp_started = Instant::now();
-    let buffer = warp(&data, &band.info, to_source, grid, geometry.resampling).map_err(stage)?;
+    let buffer = warp(&data, to_source, grid, geometry.resampling).map_err(stage)?;
     acc.warp_time += warp_started.elapsed();
-    Ok(buffer)
+    Ok((buffer, Some(factor)))
 }
 
 /// Renders one tile end-to-end: for each declared band — describe (once
@@ -425,10 +464,17 @@ pub async fn render_tile<S: RasterSource, R: Reproject + ?Sized>(
             source,
         })?;
 
-    // Phase 3: window → read → warp, per band in declaration order.
+    // Phase 3: window → read → warp, per band in declaration order,
+    // collecting each band's level vote for the decision below.
     let mut warped: Vec<WarpedBuffer> = Vec::with_capacity(bands.len());
+    let mut votes: Vec<Option<u32>> = Vec::with_capacity(bands.len());
     for band in &bands {
-        warped.push(read_and_warp(source, band, &geometry, to_source.as_ref(), &mut acc).await?);
+        let (buffer, vote) =
+            read_and_warp(source, band, &geometry, to_source.as_ref(), &mut acc).await?;
+        warped.push(buffer);
+        if let Some(vote) = vote {
+            votes.push(vote);
+        }
     }
 
     // Phase 4: pixel ops, then encode.
@@ -449,10 +495,17 @@ pub async fn render_tile<S: RasterSource, R: Reproject + ?Sized>(
             sources.push(band.asset.clone());
         }
     }
+    // Overview only when every band that read pixels read the same
+    // overview level; anything else is honestly Live (module docs; #37's
+    // planner subsumes this).
+    let decision = match votes.first() {
+        Some(&Some(level)) if votes.iter().all(|&v| v == Some(level)) => {
+            Strategy::Overview { level }
+        }
+        _ => Strategy::Live,
+    };
     let trace = Trace {
-        // Always Live until the materialization planner (#37) exists to
-        // choose otherwise — module docs.
-        decision: Strategy::Live,
+        decision,
         source: first.asset.clone(),
         sources,
         crs_from,

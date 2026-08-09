@@ -27,9 +27,15 @@
 //! Tiled COGs, chunky (pixel-interleaved) planar configuration, single-sample
 //! or multi-sample bands, any compression async-tiff's default decoder
 //! registry handles (deflate, LZW, zstd, JPEG, uncompressed). Reads are
-//! served from the full-resolution IFD; overview *levels* are reported by
-//! `describe` and overview reads land when the port grows a level selector
-//! (planner work, ARCHITECTURE.md §5).
+//! served from the full-resolution IFD or, via
+//! [`ReadLevel::Overview`](swath_core::source::ReadLevel), from any embedded
+//! reduced-resolution IFD (#38): requests stay in full-resolution
+//! coordinates, the adapter covers them onto the overview grid (rounding
+//! contract on `ReadLevel`), and the returned `WindowData::grid` is the
+//! overview grid actually read — real dimensions from the IFD, geotransform
+//! scaled by the exact ratio. Overview tile fetches flow through the same
+//! recording reader, so provenance ranges land inside the overview IFD's
+//! tile data — smaller reads at low zoom, visible in the x-ray.
 //!
 //! [`async-tiff`]: https://docs.rs/async-tiff
 
@@ -46,7 +52,7 @@ use async_tiff::metadata::TiffMetadataReader;
 use object_store::ObjectStore;
 use object_store::path::Path;
 use swath_core::raster::{AssetRef, RasterInfo, WindowRequest};
-use swath_core::source::{BandSelection, RasterSource, SourceError, WindowData};
+use swath_core::source::{BandSelection, RasterSource, ReadLevel, SourceError, WindowData};
 
 use crate::reader::StoreReader;
 
@@ -102,6 +108,7 @@ impl RasterSource for CogSource {
         asset: &AssetRef,
         window: WindowRequest,
         band: BandSelection,
+        level: ReadLevel,
     ) -> Result<WindowData, SourceError> {
         let ifds = self.load_ifds(asset).await?;
         let info = meta::raster_info(asset, &ifds)?;
@@ -121,29 +128,51 @@ impl RasterSource for CogSource {
             });
         }
 
+        // Resolve the level to the IFD to read and the grid it stores.
+        // The full-resolution image is always the first IFD (COG layout).
+        let (ifd, grid) = match level {
+            ReadLevel::FullRes => {
+                let ifd = ifds.first().ok_or_else(|| SourceError::Format {
+                    asset: asset.clone(),
+                    detail: "TIFF contains no IFDs".to_string(),
+                })?;
+                (ifd, info.clone())
+            }
+            ReadLevel::Overview { factor } => {
+                let ifd = meta::overview_ifd(asset, &ifds, info.width, factor)?;
+                let grid = meta::overview_info(&info, ifd);
+                (ifd, grid)
+            }
+        };
+
+        // Map the request (always full-resolution coordinates — the
+        // ReadLevel contract) onto the grid being read: covering
+        // floor/ceil against the exact per-axis ratio, then clip.
+        let request = window::to_grid(&window, &info, &grid);
         let full = WindowRequest {
             col_off: 0,
             row_off: 0,
-            width: info.width,
-            height: info.height,
+            width: grid.width,
+            height: grid.height,
         };
-        let Some(clip) = window.intersection(&full) else {
+        let Some(clip) = request.intersection(&full) else {
             // Nothing to read: an empty window clamped onto the grid, no I/O.
             let empty = WindowRequest {
-                col_off: window.col_off.min(info.width),
-                row_off: window.row_off.min(info.height),
+                col_off: request.col_off.min(grid.width),
+                row_off: request.row_off.min(grid.height),
                 width: 0,
                 height: 0,
             };
             let pixels = window::alloc_pixels(info.dtype, 0);
-            return Ok(WindowData::new(empty, pixels, info.nodata, Vec::new()));
+            return Ok(WindowData::new(
+                empty,
+                grid,
+                pixels,
+                info.nodata,
+                Vec::new(),
+            ));
         };
 
-        // The full-resolution image is always the first IFD (COG layout).
-        let ifd = ifds.first().ok_or_else(|| SourceError::Format {
-            asset: asset.clone(),
-            detail: "TIFF contains no IFDs".to_string(),
-        })?;
         let plan = window::TilePlan::for_window(asset, ifd, clip)?;
 
         // Recorded reader: provenance = exactly the ranges fetched below.
@@ -166,6 +195,7 @@ impl RasterSource for CogSource {
 
         Ok(WindowData::new(
             clip,
+            grid,
             pixels,
             info.nodata,
             recorder.take_provenance(),

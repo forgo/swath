@@ -25,7 +25,7 @@ use std::sync::Arc;
 use object_store::local::LocalFileSystem;
 use swath_core::crs::Crs;
 use swath_core::raster::{AssetRef, RasterInfo, WindowRequest};
-use swath_core::source::{BandSelection, RasterSource, SourceError, WindowData};
+use swath_core::source::{BandSelection, RasterSource, ReadLevel, SourceError, WindowData};
 use swath_core::tile::TileCoord;
 use swath_core::trace::{Strategy, Trace};
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
@@ -180,6 +180,136 @@ async fn ndvi_interior_tile_matches_oracle() {
 #[tokio::test]
 async fn ndvi_swath_edge_tile_matches_oracle() {
     assert_matches_oracle(&ndvi_request(12, 848, 1562), "ndvi-12-848-1562.png").await;
+}
+
+// --- Overview strategy (#38): low-zoom tiles serve the embedded overview ---
+
+const FMASK: &str = "hlss30-t13sdd-2024158-fmask.tif";
+
+/// A single-band grayscale plan mirroring the oracle's `render` subcommand:
+/// optional linear rescale to 0..255, identity colormap, PNG.
+fn singleband_request(
+    fixture: &'static str,
+    rescale: Option<(f64, f64)>,
+    resampling: Resampling,
+    z: u8,
+    x: u32,
+    y: u32,
+) -> TileRequest {
+    // BandMath over the single band is the identity producer the pipeline
+    // needs before transforms can apply.
+    let mut ops = vec![PixelOp::BandMath(Expr::band("b"))];
+    if let Some((min, max)) = rescale {
+        ops.push(PixelOp::Rescale { min, max });
+    }
+    ops.push(PixelOp::Colormap(Colormap::Grayscale));
+    let plan = RenderPlan::new(
+        vec![BandInput::new("b")],
+        ops,
+        OutputSpec::new(TileFormat::Png),
+    );
+    TileRequest::new(
+        bands(&[("b", fixture)]),
+        plan,
+        tile(z, x, y),
+        256,
+        resampling,
+    )
+}
+
+/// A source wrapper that hides the overviews an asset really has, forcing
+/// the tiler's selection back to full resolution — the "what would this
+/// render have cost without overviews?" control for the bytes-read
+/// comparison.
+struct OverviewHider {
+    inner: CogSource,
+}
+
+impl RasterSource for OverviewHider {
+    async fn describe(&self, asset: &AssetRef) -> Result<RasterInfo, SourceError> {
+        let mut info = self.inner.describe(asset).await?;
+        info.overview_levels.clear();
+        Ok(info)
+    }
+
+    async fn read_window(
+        &self,
+        asset: &AssetRef,
+        window: WindowRequest,
+        band: BandSelection,
+        level: ReadLevel,
+    ) -> Result<WindowData, SourceError> {
+        self.inner.read_window(asset, window, band, level).await
+    }
+}
+
+/// The z11 tile decimates (~2x), so the tiler serves the fixtures' x2
+/// overview: the Trace says so, and the tile perceptually matches
+/// rio-tiler's own overview-path render of the same tile (the `-ov-`
+/// goldens, generated WITHOUT `--no-overviews`).
+#[tokio::test]
+async fn b04_z11_renders_through_the_overview_and_matches_the_oracle() {
+    let request = singleband_request(B04, Some((0.0, 3000.0)), BILINEAR, 11, 424, 780);
+    let (_, trace) = render(&request).await;
+    assert_eq!(trace.decision, Strategy::Overview { level: 2 });
+    assert_matches_oracle(&request, "b04-ov-11-424-780.png").await;
+}
+
+#[tokio::test]
+async fn fmask_z11_renders_through_the_overview_and_matches_the_oracle() {
+    let request = singleband_request(FMASK, None, Resampling::Nearest, 11, 424, 780);
+    let (_, trace) = render(&request).await;
+    assert_eq!(trace.decision, Strategy::Overview { level: 2 });
+    assert_matches_oracle(&request, "fmask-ov-11-424-780.png").await;
+}
+
+/// The x-ray evidence the strategy exists for: the overview render reads
+/// far fewer source bytes than the identical render forced to full
+/// resolution (a x2 overview holds a quarter of the pixels; assert a
+/// loose 2x so compression noise can't flake it), and its provenance is
+/// non-empty, real I/O.
+#[allow(clippy::print_stdout, reason = "the reduction is the test's report")]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "byte counts far below 2^52; display only"
+)]
+#[tokio::test]
+async fn overview_render_reads_fewer_bytes_than_full_res() {
+    let request = singleband_request(B04, Some((0.0, 3000.0)), BILINEAR, 11, 424, 780);
+    let (_, overview_trace) = render(&request).await;
+    assert_eq!(overview_trace.decision, Strategy::Overview { level: 2 });
+    assert!(!overview_trace.provenance.is_empty());
+
+    let hidden = OverviewHider {
+        inner: cog_source(),
+    };
+    let (_, live_trace) = render_tile(&hidden, &Proj4rsReproject, &request)
+        .await
+        .expect("full-res control render");
+    assert_eq!(live_trace.decision, Strategy::Live);
+
+    println!(
+        "z11 b04 bytes_read: overview {} vs full-res {} ({:.1}x reduction)",
+        overview_trace.bytes_read,
+        live_trace.bytes_read,
+        live_trace.bytes_read as f64 / overview_trace.bytes_read as f64,
+    );
+    assert!(
+        overview_trace.bytes_read * 2 <= live_trace.bytes_read,
+        "overview render ({}) should cost well under half the full-res \
+         render ({})",
+        overview_trace.bytes_read,
+        live_trace.bytes_read,
+    );
+}
+
+/// The z12 goldens' zoom does not decimate, so the north-star serve path
+/// stays a full-resolution Live render even though the fixtures carry
+/// overviews — the selection rule's other half.
+#[tokio::test]
+async fn z12_tiles_stay_live_full_res() {
+    let (_, trace) = render(&truecolor_request(12, 848, 1561)).await;
+    assert_eq!(trace.decision, Strategy::Live);
 }
 
 // --- Trace assertions: the R4 keystone ---
@@ -413,8 +543,9 @@ impl RasterSource for CrsPatch {
         asset: &AssetRef,
         window: WindowRequest,
         band: BandSelection,
+        level: ReadLevel,
     ) -> Result<WindowData, SourceError> {
-        self.inner.read_window(asset, window, band).await
+        self.inner.read_window(asset, window, band, level).await
     }
 }
 

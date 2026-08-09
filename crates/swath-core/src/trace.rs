@@ -41,10 +41,14 @@ pub enum Strategy {
     },
     /// Pixels came from a pre-computed overview pyramid level.
     Overview {
-        /// Overview level read. The numbering convention (which level is
-        /// coarsest) is source-defined; the trace records the level as the
-        /// adapter reported it.
-        level: u8,
+        /// Overview level read, recorded as the **decimation factor** of
+        /// the overview grid relative to full resolution (2 = half
+        /// resolution, 4 = quarter, …) — exactly the naming
+        /// `RasterInfo::overview_levels` and `ReadLevel::Overview` use,
+        /// so the x-ray shows the same number the port speaks. (Widened
+        /// from `u8` to `u32` when overview reads landed in #38; the JSON
+        /// wire shape — a plain number — is unchanged.)
+        level: u32,
     },
     /// Pixels came from full-resolution source reads.
     Live,

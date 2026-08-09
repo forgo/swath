@@ -36,9 +36,11 @@ Subcommands
 -----------
 * ``synth-cog OUT.tif [--size 512] [--nodata-corner]``
 * ``render COG z x y OUT.png [--bands 1,2,3] [--rescale MIN,MAX]
-  [--resampling nearest|bilinear|cubic] [--no-overviews] [--exact-grid]``
+  [--resampling nearest|bilinear|cubic] [--no-overviews] [--exact-grid]
+  [--overview-level N]``
 * ``compose z x y OUT.png --input COG [--input COG ...] [--expression EXPR]
-  [--rescale MIN,MAX] [--resampling ...] [--no-overviews] [--exact-grid]``
+  [--rescale MIN,MAX] [--resampling ...] [--no-overviews] [--exact-grid]
+  [--overview-level N]``
 
 ``compose`` (issue #25) renders the multi-file pipelines the Render IR
 executes — RGB composites and band-math expressions across single-band
@@ -149,6 +151,7 @@ def render_tile_png(
     resampling: str = "nearest",
     no_overviews: bool = False,
     exact_grid: bool = False,
+    overview_level: int | None = None,
 ) -> bytes:
     """Render one XYZ tile of ``cog`` to PNG bytes via rio-tiler.
 
@@ -184,8 +187,24 @@ def render_tile_png(
     approximation): the approximation is a throughput optimization that
     perturbs sampling coordinates, not part of the kernel semantics under
     test, and Swath transforms every pixel exactly.
+
+    ``overview_level`` (issue #38) opens the COG at that overview IFD
+    (GDAL ``OVERVIEW_LEVEL`` open option, 0 = first overview), so the
+    warp's source pixels are the overview's stored samples. At the zooms
+    where GDAL's own selection picks the overview, rio-tiler's default
+    read path is byte-identical to this explicit open (verified for the
+    committed fixtures at z11); combined with ``--exact-grid`` it yields
+    GDAL's single-stage warp of exactly those overview bytes — the
+    overview-path golden, free of the two-stage read pipeline's
+    point-sampling artifact (same rationale as the full-res z11 kernel
+    goldens above). Mutually exclusive with ``no_overviews``.
     """
-    open_options = {"OVERVIEW_LEVEL": "NONE"} if no_overviews else {}
+    if no_overviews and overview_level is not None:
+        msg = "--no-overviews and --overview-level are mutually exclusive"
+        raise ValueError(msg)
+    open_options: dict[str, object] = {"OVERVIEW_LEVEL": "NONE"} if no_overviews else {}
+    if overview_level is not None:
+        open_options = {"overview_level": overview_level}
     if exact_grid:
         bounds = tile_bounds_3857(z, x, y)
         with rasterio.open(cog, **open_options) as dataset:
@@ -201,7 +220,7 @@ def render_tile_png(
                 data = vrt.read(indexes=bands)
                 mask = vrt.read_masks(bands[0])
         img = ImageData(np.ma.MaskedArray(data, mask=np.broadcast_to(mask == 0, data.shape)))
-    elif no_overviews:
+    elif no_overviews or overview_level is not None:
         with rasterio.open(cog, **open_options) as dataset:
             with Reader(None, dataset=dataset) as reader:
                 img = reader.tile(x, y, z, indexes=bands, reproject_method=resampling)
@@ -221,6 +240,7 @@ def warp_band_f64(
     resampling: str,
     no_overviews: bool,
     exact_grid: bool,
+    overview_level: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Warp band 1 of ``cog`` onto the 256-px tile grid of z/x/y.
 
@@ -228,8 +248,15 @@ def warp_band_f64(
     mask. The read paths mirror ``render_tile_png`` exactly (same WarpedVRT
     settings for ``--exact-grid``, same ``Reader.tile`` call otherwise) so a
     composed golden warps identically to a single-band golden.
+    ``overview_level`` warps the named overview IFD's stored samples, as in
+    ``render_tile_png``.
     """
-    open_options = {"OVERVIEW_LEVEL": "NONE"} if no_overviews else {}
+    if no_overviews and overview_level is not None:
+        msg = "--no-overviews and --overview-level are mutually exclusive"
+        raise ValueError(msg)
+    open_options: dict[str, object] = {"OVERVIEW_LEVEL": "NONE"} if no_overviews else {}
+    if overview_level is not None:
+        open_options = {"overview_level": overview_level}
     if exact_grid:
         bounds = tile_bounds_3857(z, x, y)
         with rasterio.open(cog, **open_options) as dataset:
@@ -245,7 +272,7 @@ def warp_band_f64(
                 data = vrt.read(indexes=(1,))
                 mask = vrt.read_masks(1)
         return data[0].astype(np.float64), mask != 0
-    if no_overviews:
+    if no_overviews or overview_level is not None:
         with rasterio.open(cog, **open_options) as dataset:
             with Reader(None, dataset=dataset) as reader:
                 img = reader.tile(x, y, z, indexes=(1,), reproject_method=resampling)
@@ -267,10 +294,12 @@ def compose_tile_png(
     resampling: str,
     no_overviews: bool,
     exact_grid: bool,
+    overview_level: int | None = None,
 ) -> bytes:
     """Render a composed (multi-file) tile to PNG bytes; see module docs."""
     warped = [
-        warp_band_f64(cog, z, x, y, resampling, no_overviews, exact_grid) for cog in inputs
+        warp_band_f64(cog, z, x, y, resampling, no_overviews, exact_grid, overview_level)
+        for cog in inputs
     ]
     valid = np.logical_and.reduce([v for _, v in warped])
     if expression is not None:
@@ -312,6 +341,7 @@ def cmd_compose(args: argparse.Namespace) -> int:
             args.resampling,
             args.no_overviews,
             args.exact_grid,
+            args.overview_level,
         )
 
     first = render_once()
@@ -348,6 +378,7 @@ def cmd_render(args: argparse.Namespace) -> int:
         args.resampling,
         args.no_overviews,
         args.exact_grid,
+        args.overview_level,
     )
     second = render_tile_png(
         args.cog,
@@ -359,6 +390,7 @@ def cmd_render(args: argparse.Namespace) -> int:
         args.resampling,
         args.no_overviews,
         args.exact_grid,
+        args.overview_level,
     )
     digest = hashlib.sha256(first).hexdigest()
     if hashlib.sha256(second).hexdigest() != digest:
@@ -407,6 +439,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="single-stage warp directly onto the 256-px tile grid (kernel goldens)",
     )
+    p_render.add_argument(
+        "--overview-level",
+        type=int,
+        default=None,
+        metavar="N",
+        help="open the COG at overview IFD N (0 = first overview) so the warp "
+        "reads the overview's stored samples (overview-path goldens)",
+    )
     p_render.set_defaults(func=cmd_render)
 
     p_compose = sub.add_parser(
@@ -437,6 +477,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_compose.add_argument("--no-overviews", action="store_true")
     p_compose.add_argument("--exact-grid", action="store_true")
+    p_compose.add_argument(
+        "--overview-level",
+        type=int,
+        default=None,
+        metavar="N",
+        help="open each COG at overview IFD N (0 = first overview), as in render",
+    )
     p_compose.set_defaults(func=cmd_compose)
 
     args = parser.parse_args(argv)

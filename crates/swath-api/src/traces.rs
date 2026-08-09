@@ -358,6 +358,32 @@ mod tests {
         assert_eq!(serde_json::to_value(&envelope).unwrap(), expected);
     }
 
+    /// The overview shape on the wire (#38): `decision` is the externally
+    /// tagged `{"overview":{"level":…}}` object carrying the decimation
+    /// factor of the overview grid served; everything else is a normal
+    /// live-style render (real source, real provenance — just fewer bytes,
+    /// which is the point). Pinned like the other two decisions so the
+    /// overlay's parser and this stream can never drift apart.
+    #[test]
+    fn overview_envelope_json_is_pinned() {
+        let mut trace = sample_trace();
+        trace.decision = Strategy::Overview { level: 2 };
+        let envelope = Envelope {
+            tile: "11/424/780",
+            layer: "b04",
+            trace: &trace,
+        };
+        let json = serde_json::to_value(&envelope).unwrap();
+        assert_eq!(
+            json["trace"]["decision"],
+            serde_json::json!({"overview": {"level": 2}})
+        );
+        assert_eq!(json["tile"], "11/424/780");
+        // Provenance/bytes stay real-read fields, exactly as in a live
+        // render — nothing else about the envelope changes shape.
+        assert_eq!(json["trace"]["bytes_read"], 131_072);
+    }
+
     /// Publishing to a bus nobody subscribed to is a no-op, not an error
     /// — the render path must be indifferent to watchers.
     #[test]
