@@ -35,24 +35,7 @@ pub(crate) fn raster_info(
     // Overviews: subsequent reduced-resolution IFDs, reported as decimation
     // factors of the full-resolution grid (e.g. a 256-wide overview of a
     // 512-wide image is level 2), ascending.
-    let mut overview_levels: Vec<u32> = ifds[1..]
-        .iter()
-        .filter(|ifd| {
-            ifd.new_subfile_type()
-                .is_some_and(|t| t & FILETYPE_REDUCED_IMAGE != 0)
-        })
-        .map(|ifd| {
-            #[allow(
-                clippy::cast_possible_truncation,
-                clippy::cast_precision_loss,
-                clippy::cast_sign_loss,
-                reason = "decimation factors are tiny (powers of two in practice)"
-            )]
-            {
-                (width as f64 / f64::from(ifd.image_width())).round() as u32
-            }
-        })
-        .collect();
+    let mut overview_levels: Vec<u32> = overview_ifds(ifds, width).map(|(f, _)| f).collect();
     overview_levels.sort_unstable();
 
     Ok(RasterInfo {
@@ -65,6 +48,84 @@ pub(crate) fn raster_info(
         nodata,
         overview_levels,
     })
+}
+
+/// The reduced-resolution IFDs of a COG's chain, each paired with its
+/// decimation factor relative to `full_width` (rounded to the nearest
+/// integer — GDAL's own overview-factor convention).
+fn overview_ifds(
+    ifds: &[ImageFileDirectory],
+    full_width: u64,
+) -> impl Iterator<Item = (u32, &ImageFileDirectory)> {
+    ifds[1..]
+        .iter()
+        .filter(|ifd| {
+            ifd.new_subfile_type()
+                .is_some_and(|t| t & FILETYPE_REDUCED_IMAGE != 0)
+        })
+        .map(move |ifd| {
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_precision_loss,
+                clippy::cast_sign_loss,
+                reason = "decimation factors are tiny (powers of two in practice)"
+            )]
+            let factor = (full_width as f64 / f64::from(ifd.image_width())).round() as u32;
+            (factor, ifd)
+        })
+}
+
+/// Locates the overview IFD with decimation `factor`, or the port's
+/// [`SourceError::OverviewNotFound`] listing what the asset actually has.
+pub(crate) fn overview_ifd<'a>(
+    asset: &AssetRef,
+    ifds: &'a [ImageFileDirectory],
+    full_width: u64,
+    factor: u32,
+) -> Result<&'a ImageFileDirectory, SourceError> {
+    let mut available: Vec<u32> = Vec::new();
+    for (f, ifd) in overview_ifds(ifds, full_width) {
+        if f == factor {
+            return Ok(ifd);
+        }
+        available.push(f);
+    }
+    available.sort_unstable();
+    Err(SourceError::OverviewNotFound {
+        asset: asset.clone(),
+        factor,
+        available,
+    })
+}
+
+/// The grid an overview IFD actually stores, derived from the full-res
+/// `info`: real overview dimensions from the IFD, and the full-res
+/// geotransform with its pixel scale multiplied by the **exact** per-axis
+/// ratio `full_dim / overview_dim` (GDAL's overview-transform convention —
+/// rasterio reports the identical transform for `overview_level=` opens;
+/// the origin is shared, only the pixel size changes). `overview_levels`
+/// is empty: an overview grid is not itself overviewed.
+pub(crate) fn overview_info(info: &RasterInfo, ifd: &ImageFileDirectory) -> RasterInfo {
+    let width = u64::from(ifd.image_width());
+    let height = u64::from(ifd.image_height());
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "raster dims far below 2^52; the ratio is exact for them"
+    )]
+    let (rx, ry) = (
+        info.width as f64 / width as f64,
+        info.height as f64 / height as f64,
+    );
+    let mut transform = info.transform;
+    transform.pixel_width *= rx;
+    transform.pixel_height *= ry;
+    RasterInfo {
+        width,
+        height,
+        transform,
+        overview_levels: vec![],
+        ..info.clone()
+    }
 }
 
 fn dtype(asset: &AssetRef, ifd: &ImageFileDirectory) -> Result<DType, SourceError> {

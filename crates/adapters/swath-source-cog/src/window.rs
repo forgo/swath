@@ -6,8 +6,57 @@
 
 use async_tiff::tags::PlanarConfiguration;
 use async_tiff::{Array, ImageFileDirectory, TypedArray};
-use swath_core::raster::{AssetRef, DType, WindowRequest};
+use swath_core::raster::{AssetRef, DType, RasterInfo, WindowRequest};
 use swath_core::source::{PixelBuffer, SourceError};
+
+/// Maps a request in **full-resolution** pixel coordinates onto `grid`
+/// (the grid actually being read), covering it: start offsets round down,
+/// end offsets round up, against the exact per-axis ratio
+/// `full_dim / grid_dim`. Identity when `grid` *is* the full-res grid
+/// (ratio 1, floor/ceil of integers). Not yet clipped — the caller
+/// intersects with the grid.
+pub(crate) fn to_grid(
+    request: &WindowRequest,
+    full: &RasterInfo,
+    grid: &RasterInfo,
+) -> WindowRequest {
+    if grid.width == full.width && grid.height == full.height {
+        return *request;
+    }
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "raster and window dims far below 2^52"
+    )]
+    let (rx, ry) = (
+        full.width as f64 / grid.width as f64,
+        full.height as f64 / grid.height as f64,
+    );
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "offsets clamped non-negative; dims far below 2^52"
+    )]
+    let scale = |v: u64, r: f64, round_up: bool| -> u64 {
+        let scaled = v as f64 / r;
+        (if round_up {
+            scaled.ceil()
+        } else {
+            scaled.floor()
+        })
+        .max(0.0) as u64
+    };
+    let col_off = scale(request.col_off, rx, false);
+    let row_off = scale(request.row_off, ry, false);
+    let end_col = scale(request.end_col(), rx, true);
+    let end_row = scale(request.end_row(), ry, true);
+    WindowRequest {
+        col_off,
+        row_off,
+        width: end_col.saturating_sub(col_off),
+        height: end_row.saturating_sub(row_off),
+    }
+}
 
 /// Which tiles a clipped window touches, and the geometry needed to place
 /// their pixels.

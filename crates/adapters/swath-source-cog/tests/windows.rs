@@ -14,7 +14,9 @@ mod common;
 
 use sha2::{Digest, Sha256};
 use swath_core::raster::{AssetRef, WindowRequest};
-use swath_core::source::{BandSelection, PixelBuffer, RasterSource, SourceError, WindowData};
+use swath_core::source::{
+    BandSelection, PixelBuffer, RasterSource, ReadLevel, SourceError, WindowData,
+};
 
 #[derive(serde::Deserialize)]
 struct Truth {
@@ -151,6 +153,7 @@ async fn windows_match_gdal_truth_table_exactly() {
                 &AssetRef::new(&case.file),
                 case.requested.into(),
                 BandSelection::Single(case.band),
+                ReadLevel::FullRes,
             )
             .await
             .unwrap_or_else(|e| panic!("{}/{}: {e}", case.file, case.window_name));
@@ -167,11 +170,11 @@ async fn local_and_memory_stores_agree() {
         let asset = AssetRef::new(&case.file);
         let band = BandSelection::Single(case.band);
         let a = local
-            .read_window(&asset, case.requested.into(), band)
+            .read_window(&asset, case.requested.into(), band, ReadLevel::FullRes)
             .await
             .expect("local read");
         let b = memory
-            .read_window(&asset, case.requested.into(), band)
+            .read_window(&asset, case.requested.into(), band, ReadLevel::FullRes)
             .await
             .expect("memory read");
         assert_eq!(
@@ -195,6 +198,7 @@ async fn fully_out_of_bounds_window_reads_nothing() {
                 height: 10,
             },
             BandSelection::Single(0),
+            ReadLevel::FullRes,
         )
         .await
         .expect("out-of-bounds read clips to empty");
@@ -217,6 +221,7 @@ async fn band_out_of_range_is_rejected() {
                 height: 1,
             },
             BandSelection::Single(1),
+            ReadLevel::FullRes,
         )
         .await
         .expect_err("band 1 of a single-band asset must fail");

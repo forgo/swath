@@ -32,6 +32,40 @@ use core::future::Future;
 use crate::raster::{AssetRef, DType, RasterInfo, WindowRequest};
 use crate::trace::Provenance;
 
+/// Which resolution level of an asset a read targets.
+///
+/// # Coordinate-space contract (the invariant: callers never do overview math)
+///
+/// The [`WindowRequest`] passed to [`RasterSource::read_window`] is **always
+/// in full-resolution pixel coordinates**, whatever the level. For an
+/// overview read the adapter maps the request onto the overview grid by
+/// *covering* it — start offsets round down (`floor(off / factor)`), end
+/// offsets round up (`ceil(end / factor)`), using the exact per-axis ratio
+/// `full_dim / overview_dim` — then clips to the overview grid. The returned
+/// [`WindowData::window`] is in **overview-grid coordinates** and
+/// [`WindowData::grid`] describes that grid (its dimensions and scaled
+/// geotransform), so consumers work off the returned grid without ever
+/// scaling coordinates themselves.
+///
+/// Levels are named by their **decimation factor** exactly as
+/// [`RasterInfo::overview_levels`] reports them (2 = half resolution, 4 =
+/// quarter, …) — self-describing, unlike positional indices.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadLevel {
+    /// The full-resolution grid (the default; every asset has one).
+    #[default]
+    FullRes,
+    /// An embedded overview, by decimation factor.
+    Overview {
+        /// The decimation factor, as listed in
+        /// [`RasterInfo::overview_levels`].
+        factor: u32,
+    },
+}
+
 /// Which band(s) of an asset a read targets.
 ///
 /// Band indices are **zero-based** (band 0 is the first band), unlike GDAL's
@@ -137,6 +171,13 @@ impl PixelBuffer {
 /// [`pixels`](Self::pixels) is always `window.width * window.height` (times
 /// one band — multi-band layout is defined when [`BandSelection`] grows).
 ///
+/// [`grid`](Self::grid) describes the raster grid [`window`](Self::window)
+/// indexes into — the grid **actually read**. For a [`ReadLevel::FullRes`]
+/// read it equals what `describe` reports; for an overview read it is the
+/// overview grid (its real dimensions and correspondingly scaled
+/// geotransform), so a consumer warps off the returned grid with no
+/// overview arithmetic of its own (the [`ReadLevel`] contract).
+///
 /// [`provenance`](Self::provenance) records the **actual byte ranges
 /// fetched** from storage to satisfy this read, in fetch order, and
 /// [`bytes_read`](Self::bytes_read) their total length — the raw material of
@@ -145,8 +186,11 @@ impl PixelBuffer {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct WindowData {
-    /// The window actually read, in full-resolution pixel coordinates.
+    /// The window actually read, in the pixel coordinates of
+    /// [`grid`](Self::grid).
     pub window: WindowRequest,
+    /// The raster grid the window and pixels are indexed in (struct docs).
+    pub grid: RasterInfo,
     /// The pixel samples, row-major, dtype-tagged.
     pub pixels: PixelBuffer,
     /// Nodata sentinel (GDAL convention, widened to `f64`), if declared.
@@ -163,6 +207,7 @@ impl WindowData {
     #[must_use]
     pub fn new(
         window: WindowRequest,
+        grid: RasterInfo,
         pixels: PixelBuffer,
         nodata: Option<f64>,
         provenance: Vec<Provenance>,
@@ -170,6 +215,7 @@ impl WindowData {
         let bytes_read = provenance.iter().map(|p| p.length).sum();
         Self {
             window,
+            grid,
             pixels,
             nodata,
             provenance,
@@ -220,6 +266,17 @@ pub enum SourceError {
         detail: String,
     },
 
+    /// A requested overview level the asset does not contain.
+    #[error("overview x{factor} not present in {asset} (available factors: {available:?})")]
+    OverviewNotFound {
+        /// The asset that was read.
+        asset: AssetRef,
+        /// The requested decimation factor.
+        factor: u32,
+        /// The factors the asset actually has (may be empty).
+        available: Vec<u32>,
+    },
+
     /// A band index outside the asset's band range.
     #[error("band {band} out of range for {asset} ({band_count} band(s))")]
     BandOutOfRange {
@@ -259,21 +316,42 @@ pub trait RasterSource: Send + Sync {
         asset: &AssetRef,
     ) -> impl Future<Output = Result<RasterInfo, SourceError>> + Send;
 
-    /// Reads a pixel window from one band of an asset, **clipping** the
-    /// request to the raster grid, and reports the exact byte ranges fetched.
+    /// Reads a pixel window from one band of an asset at `level`,
+    /// **clipping** the request to the raster grid, and reports the exact
+    /// byte ranges fetched.
+    ///
+    /// `window` is **always in full-resolution pixel coordinates**; for an
+    /// overview read the adapter maps it onto the overview grid (rounding
+    /// contract on [`ReadLevel`]) and the returned [`WindowData::window`] /
+    /// [`WindowData::grid`] describe the overview grid actually read.
     fn read_window(
         &self,
         asset: &AssetRef,
         window: WindowRequest,
         band: BandSelection,
+        level: ReadLevel,
     ) -> impl Future<Output = Result<WindowData, SourceError>> + Send;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{BandSelection, PixelBuffer, WindowData};
-    use crate::raster::{DType, WindowRequest};
+    use super::{BandSelection, PixelBuffer, ReadLevel, WindowData};
+    use crate::crs::Crs;
+    use crate::raster::{DType, GeoTransform, RasterInfo, WindowRequest};
     use crate::trace::Provenance;
+
+    fn grid() -> RasterInfo {
+        RasterInfo {
+            crs: Crs::WEB_MERCATOR,
+            width: 4,
+            height: 4,
+            transform: GeoTransform::north_up(0.0, 0.0, 1.0, -1.0),
+            band_count: 1,
+            dtype: DType::UInt8,
+            nodata: Some(255.0),
+            overview_levels: vec![],
+        }
+    }
 
     #[test]
     fn pixel_buffer_dtype_and_len() {
@@ -303,6 +381,7 @@ mod tests {
                 width: 1,
                 height: 1,
             },
+            grid(),
             PixelBuffer::UInt8(vec![0]),
             Some(255.0),
             vec![
@@ -326,5 +405,18 @@ mod tests {
     fn band_selection_serializes_snake_case() {
         let json = serde_json::to_string(&BandSelection::Single(0)).unwrap();
         assert_eq!(json, r#"{"single":0}"#);
+    }
+
+    #[test]
+    fn read_level_serializes_snake_case_and_defaults_to_full_res() {
+        assert_eq!(ReadLevel::default(), ReadLevel::FullRes);
+        assert_eq!(
+            serde_json::to_value(ReadLevel::FullRes).unwrap(),
+            serde_json::json!("full_res")
+        );
+        assert_eq!(
+            serde_json::to_value(ReadLevel::Overview { factor: 2 }).unwrap(),
+            serde_json::json!({"overview": {"factor": 2}})
+        );
     }
 }
