@@ -142,6 +142,17 @@ render-goldens:
     done <<< $'12 848 1561\n12 848 1562\n13 1697 3122'
     render "$F-b04.tif"   11 424 780 "$D/b04-11-424-780.png"   --bands 1 --rescale 0,3000 --resampling bilinear --no-overviews --exact-grid
     render "$F-fmask.tif" 11 424 780 "$D/fmask-11-424-780.png" --bands 1 --resampling nearest --no-overviews --exact-grid
+    # Render-IR goldens (issue #25): multi-file composites via the compose
+    # subcommand — true-color BGR->RGB and NDVI band math, both bilinear.
+    compose() { uv run tests/oracle/render_reference.py compose "$@"; }
+    for yy in 1561 1562; do
+        compose 12 848 "$yy" "$D/truecolor-12-848-$yy.png" \
+            --input "$F-b04.tif" --input "$F-b03.tif" --input "$F-b02.tif" \
+            --rescale 0,3000 --resampling bilinear
+        compose 12 848 "$yy" "$D/ndvi-12-848-$yy.png" \
+            --input "$F-b8a.tif" --input "$F-b04.tif" \
+            --expression "(b1 - b2) / (b1 + b2)" --rescale=-1,1 --resampling bilinear
+    done
 
 # --- tests/fixtures (committed HLS COG subsets, issue #20 / ADR 0004) ---
 

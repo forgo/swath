@@ -37,6 +37,28 @@ Subcommands
 * ``synth-cog OUT.tif [--size 512] [--nodata-corner]``
 * ``render COG z x y OUT.png [--bands 1,2,3] [--rescale MIN,MAX]
   [--resampling nearest|bilinear|cubic] [--no-overviews] [--exact-grid]``
+* ``compose z x y OUT.png --input COG [--input COG ...] [--expression EXPR]
+  [--rescale MIN,MAX] [--resampling ...] [--no-overviews] [--exact-grid]``
+
+``compose`` (issue #25) renders the multi-file pipelines the Render IR
+executes — RGB composites and band-math expressions across single-band
+COGs (one band per file, HLS-style). Each input's band 1 is warped onto
+the tile grid exactly as ``render`` warps it (same rio-tiler read path,
+same flags); the stage under test is what happens *after* the warp.
+Ground truth for ``--expression`` is computed in numpy over the warped
+float arrays (names ``b1``..``bN``, operators ``+ - * /``) rather than
+through rio-tiler's expression plumbing: rio-tiler expressions are
+per-dataset (``Reader.tile(expression=...)``), and composing them across
+files needs a MultiBandReader with a naming convention — dataset-layout
+machinery that is beside the point here. The numpy path evaluates the
+same post-warp arithmetic on the same GDAL-warped pixels, which is
+precisely the semantics the IR's ``BandMath`` defines (warp first, math
+second). Non-finite results (division by zero) and any input's nodata
+mask the output pixel; masked pixels are written as transparent black,
+matching the IR's documented encoding. ``--rescale`` clips then maps
+linearly to 0..255 per channel (numpy ``astype(uint8)`` truncation),
+identical to ``render``'s rescale arithmetic. Determinism is enforced
+the same way as ``render``: two in-process runs must hash identically.
 """
 
 from __future__ import annotations
@@ -191,6 +213,123 @@ def render_tile_png(
     return img.render(img_format="PNG")
 
 
+def warp_band_f64(
+    cog: str,
+    z: int,
+    x: int,
+    y: int,
+    resampling: str,
+    no_overviews: bool,
+    exact_grid: bool,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Warp band 1 of ``cog`` onto the 256-px tile grid of z/x/y.
+
+    Returns ``(values, valid)``: float64 pixel values and a boolean validity
+    mask. The read paths mirror ``render_tile_png`` exactly (same WarpedVRT
+    settings for ``--exact-grid``, same ``Reader.tile`` call otherwise) so a
+    composed golden warps identically to a single-band golden.
+    """
+    open_options = {"OVERVIEW_LEVEL": "NONE"} if no_overviews else {}
+    if exact_grid:
+        bounds = tile_bounds_3857(z, x, y)
+        with rasterio.open(cog, **open_options) as dataset:
+            with WarpedVRT(
+                dataset,
+                crs="EPSG:3857",
+                transform=from_bounds(*bounds, 256, 256),
+                width=256,
+                height=256,
+                resampling=Resampling[resampling],
+                tolerance=1e-6,
+            ) as vrt:
+                data = vrt.read(indexes=(1,))
+                mask = vrt.read_masks(1)
+        return data[0].astype(np.float64), mask != 0
+    if no_overviews:
+        with rasterio.open(cog, **open_options) as dataset:
+            with Reader(None, dataset=dataset) as reader:
+                img = reader.tile(x, y, z, indexes=(1,), reproject_method=resampling)
+    else:
+        with Reader(cog) as reader:
+            img = reader.tile(x, y, z, indexes=(1,), reproject_method=resampling)
+    # ImageData.array is the source of truth for validity (ImageData.mask is
+    # dtype-cast and unreliable for non-uint8 data in rio-tiler 9).
+    return img.data[0].astype(np.float64), ~np.ma.getmaskarray(img.array)[0]
+
+
+def compose_tile_png(
+    inputs: list[str],
+    z: int,
+    x: int,
+    y: int,
+    expression: str | None,
+    rescale: tuple[float, float] | None,
+    resampling: str,
+    no_overviews: bool,
+    exact_grid: bool,
+) -> bytes:
+    """Render a composed (multi-file) tile to PNG bytes; see module docs."""
+    warped = [
+        warp_band_f64(cog, z, x, y, resampling, no_overviews, exact_grid) for cog in inputs
+    ]
+    valid = np.logical_and.reduce([v for _, v in warped])
+    if expression is not None:
+        names = {f"b{i + 1}": values for i, (values, _) in enumerate(warped)}
+        with np.errstate(all="ignore"):
+            # Trusted test-tooling input: names b1..bN, arithmetic only.
+            result = eval(expression, {"__builtins__": {}}, names)  # noqa: S307
+        result = np.asarray(result, dtype=np.float64)
+        valid &= np.isfinite(result)
+        planes = np.stack([result] * 3)
+    else:
+        if len(warped) != 3:
+            msg = f"compose without --expression needs exactly 3 inputs, got {len(warped)}"
+            raise ValueError(msg)
+        planes = np.stack([values for values, _ in warped])
+    if rescale is not None:
+        lo, hi = rescale
+        planes = (np.clip(planes, lo, hi) - lo) / (hi - lo) * 255.0
+    quantized = np.clip(planes, 0.0, 255.0).astype(np.uint8)
+    quantized[:, ~valid] = 0  # masked pixels are transparent black
+    img = ImageData(np.ma.MaskedArray(quantized, mask=np.broadcast_to(~valid, quantized.shape)))
+    return img.render(img_format="PNG")
+
+
+def cmd_compose(args: argparse.Namespace) -> int:
+    """Render a composed tile, verifying in-process determinism first."""
+    rescale: tuple[float, float] | None = None
+    if args.rescale is not None:
+        lo, hi = (float(v) for v in args.rescale.split(","))
+        rescale = (lo, hi)
+    def render_once() -> bytes:
+        return compose_tile_png(
+            args.input,
+            args.z,
+            args.x,
+            args.y,
+            args.expression,
+            rescale,
+            args.resampling,
+            args.no_overviews,
+            args.exact_grid,
+        )
+
+    first = render_once()
+    second = render_once()
+    digest = hashlib.sha256(first).hexdigest()
+    if hashlib.sha256(second).hexdigest() != digest:
+        print("compose: NONDETERMINISTIC — two in-process renders differ", file=sys.stderr)
+        return 1
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(first)
+    print(
+        f"compose: wrote {out} (z={args.z} x={args.x} y={args.y} "
+        f"inputs={len(args.input)} expression={args.expression!r} sha256={digest})"
+    )
+    return 0
+
+
 def cmd_render(args: argparse.Namespace) -> int:
     """Render an XYZ tile, verifying in-process determinism before writing."""
     bands = tuple(int(b) for b in args.bands.split(","))
@@ -269,6 +408,36 @@ def main(argv: list[str] | None = None) -> int:
         help="single-stage warp directly onto the 256-px tile grid (kernel goldens)",
     )
     p_render.set_defaults(func=cmd_render)
+
+    p_compose = sub.add_parser(
+        "compose", help="render a multi-file composite/band-math tile to PNG"
+    )
+    p_compose.add_argument("z", type=int)
+    p_compose.add_argument("x", type=int)
+    p_compose.add_argument("y", type=int)
+    p_compose.add_argument("out")
+    p_compose.add_argument(
+        "--input",
+        action="append",
+        required=True,
+        metavar="COG",
+        help="input COG, band 1 (repeat; order defines b1..bN and R,G,B)",
+    )
+    p_compose.add_argument(
+        "--expression",
+        default=None,
+        help="numpy arithmetic over b1..bN (grayscale output); omit for 3-input RGB",
+    )
+    p_compose.add_argument("--rescale", default=None, metavar="MIN,MAX")
+    p_compose.add_argument(
+        "--resampling",
+        default="nearest",
+        choices=("nearest", "bilinear", "cubic"),
+        help="GDAL warp kernel, as in render",
+    )
+    p_compose.add_argument("--no-overviews", action="store_true")
+    p_compose.add_argument("--exact-grid", action="store_true")
+    p_compose.set_defaults(func=cmd_compose)
 
     args = parser.parse_args(argv)
     return int(args.func(args))

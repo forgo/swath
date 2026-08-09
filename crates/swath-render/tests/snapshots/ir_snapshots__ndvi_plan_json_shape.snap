@@ -1,0 +1,57 @@
+---
+source: crates/swath-render/tests/ir_snapshots.rs
+expression: ndvi_plan()
+---
+{
+  "inputs": [
+    {
+      "name": "nir"
+    },
+    {
+      "name": "red"
+    }
+  ],
+  "ops": [
+    {
+      "BandMath": {
+        "Binary": {
+          "op": "Div",
+          "lhs": {
+            "Binary": {
+              "op": "Sub",
+              "lhs": {
+                "Band": "nir"
+              },
+              "rhs": {
+                "Band": "red"
+              }
+            }
+          },
+          "rhs": {
+            "Binary": {
+              "op": "Add",
+              "lhs": {
+                "Band": "nir"
+              },
+              "rhs": {
+                "Band": "red"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "Rescale": {
+        "min": -1.0,
+        "max": 1.0
+      }
+    },
+    {
+      "Colormap": "Grayscale"
+    }
+  ],
+  "output": {
+    "format": "Png"
+  }
+}
