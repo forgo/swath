@@ -1,0 +1,27 @@
+[package]
+name = "swath-source-cog"
+description = "RasterSource adapter: Cloud-Optimized GeoTIFF over object_store, with byte-range provenance."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+async-tiff = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+object_store = { workspace = true }
+swath-core = { path = "../../swath-core", version = "0.0.0" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

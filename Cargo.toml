@@ -4,7 +4,11 @@
 
 [workspace]
 resolver = "3"
-members = ["crates/swath-core", "crates/swath-testkit"]
+members = [
+    "crates/adapters/swath-source-cog",
+    "crates/swath-core",
+    "crates/swath-testkit",
+]
 # Prototypes are standalone, dated experiments — never workspace members.
 exclude = ["prototypes/*"]
 
@@ -30,6 +34,22 @@ serde_json = { version = "1.0.145" }
 thiserror = { version = "2.0.17" }
 # Property tests (ENGINEERING.md §2 testing stack). Dev-dependency only.
 proptest = { version = "1.8.0" }
+# COG/TIFF reading is ADOPT (ARCHITECTURE.md §3): async-tiff (developmentseed)
+# parses headers/IFDs/GeoKeys and decodes tiles; default features off — we
+# drive it through our own object_store-backed reader (no reqwest, and no
+# coupling to the object_store version async-tiff's optional feature pins).
+async-tiff = { version = "0.3.0", default-features = false }
+# The one storage abstraction (ARCHITECTURE.md §3/§7): local fs + in-memory
+# today, S3/MinIO later behind the same trait.
+object_store = { version = "0.14.1" }
+# async-tiff's AsyncFileReader trait is an #[async_trait] trait; implementing
+# it (the provenance-recording reader) requires the same macro.
+async-trait = { version = "0.1.89" }
+bytes = { version = "1.10.1" }
+# Adapter/test async runtime. NEVER a dependency of swath-core.
+tokio = { version = "1.49.0", default-features = false }
+# Truth-table pixel-hash comparison in adapter integration tests (dev-only).
+sha2 = { version = "0.10.9" }
 
 [workspace.lints.rust]
 unsafe_code = "warn"       # visible and justified; scopes Miri to unsafe-bearing crates
