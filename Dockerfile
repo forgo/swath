@@ -9,6 +9,12 @@
 # future HTTPS object-store roots. The toolchain tag tracks rust-toolchain.toml.
 
 FROM rust:1.97.1-slim-trixie AS build
+# cmake + make: the production referencer statically bundles libhdf5
+# (hdf5-metno-src builds the C library from source — ADR 0006's
+# single-binary story; no system HDF5 in the runtime image).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends cmake make \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
 # --locked: the committed Cargo.lock is the build, exactly as in CI.
