@@ -16,9 +16,9 @@ fetch:
 build:
     cargo build
 
-# Generate a manifest with the VirtualiZarr sidecar.
+# Generate a manifest with the VirtualiZarr sidecar (uses the `just setup` venv).
 vz-gen granule out="out/vz.json":
-    mkdir -p out && cargo run --quiet -- gen --with virtualizarr {{granule}} -o {{out}}
+    mkdir -p out && cargo run --quiet -- gen --with virtualizarr {{granule}} -o {{out}} --python .venv/bin/python3
 
 # Generate a manifest with the pure-Rust generator (format features on).
 rust-gen granule out="out/rs.json":
@@ -30,4 +30,4 @@ compare a b:
 
 # Run both generators on a granule, time them, and compare.
 bakeoff granule:
-    cargo run --quiet --features hdf5,grib -- bakeoff {{granule}}
+    cargo run --quiet --features hdf5,grib -- bakeoff {{granule}} --python .venv/bin/python3

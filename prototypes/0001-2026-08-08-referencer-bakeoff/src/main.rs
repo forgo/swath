@@ -60,7 +60,10 @@ impl Args {
     }
 }
 
-fn timed(r: &dyn IngestReferencer, granule: &Path) -> Result<(manifest::VirtualManifest, u128), String> {
+fn timed(
+    r: &dyn IngestReferencer,
+    granule: &Path,
+) -> Result<(manifest::VirtualManifest, u128), String> {
     let t = Instant::now();
     let m = r.generate(granule)?;
     Ok((m, t.elapsed().as_millis()))
@@ -96,18 +99,28 @@ fn real_main() -> i32 {
                 None => return fail("gen requires -o <out.json>"),
             };
             let python = args.flag_or(&["python"], "python3");
-            let script = PathBuf::from(args.flag_or(&["script"], "sidecar/referencer_virtualizarr.py"));
+            let script =
+                PathBuf::from(args.flag_or(&["script"], "sidecar/referencer_virtualizarr.py"));
             let r: Box<dyn IngestReferencer> = match with.as_str() {
                 "rust" => Box::new(RustReferencer),
                 "virtualizarr" => Box::new(VirtualizarrSidecar { python, script }),
-                other => return fail(&format!("unknown generator '{other}' (use rust|virtualizarr)")),
+                other => {
+                    return fail(&format!(
+                        "unknown generator '{other}' (use rust|virtualizarr)"
+                    ));
+                }
             };
             match timed(r.as_ref(), &granule) {
                 Ok((m, ms)) => {
                     if let Err(e) = std::fs::write(&out, m.to_json_string()) {
                         return fail(&format!("write {}: {e}", out.display()));
                     }
-                    println!("{}: {} arrays in {ms} ms -> {}", r.name(), m.arrays.len(), out.display());
+                    println!(
+                        "{}: {} arrays in {ms} ms -> {}",
+                        r.name(),
+                        m.arrays.len(),
+                        out.display()
+                    );
                     0
                 }
                 Err(e) => fail(&e),
@@ -132,7 +145,8 @@ fn real_main() -> i32 {
                 None => return fail("bakeoff requires a <granule> path"),
             };
             let python = args.flag_or(&["python"], "python3");
-            let script = PathBuf::from(args.flag_or(&["script"], "sidecar/referencer_virtualizarr.py"));
+            let script =
+                PathBuf::from(args.flag_or(&["script"], "sidecar/referencer_virtualizarr.py"));
             println!("== Referencer bake-off on {} ==", granule.display());
             let vz = timed(&VirtualizarrSidecar { python, script }, &granule);
             let rs = timed(&RustReferencer, &granule);
@@ -150,7 +164,9 @@ fn real_main() -> i32 {
                     if let Err(e) = &rs {
                         println!("referencer-rs FAILED: {e}");
                     }
-                    println!("\n(Expected while scaffolding: implement the generators, then re-run.)");
+                    println!(
+                        "\n(Expected while scaffolding: implement the generators, then re-run.)"
+                    );
                     0
                 }
             }
@@ -168,7 +184,10 @@ fn fail(msg: &str) -> i32 {
 }
 
 fn print_report(rep: &manifest::EquivalenceReport) {
-    println!("arrays: A={} B={} matched={}", rep.arrays_a, rep.arrays_b, rep.matched_arrays);
+    println!(
+        "arrays: A={} B={} matched={}",
+        rep.arrays_a, rep.arrays_b, rep.matched_arrays
+    );
     println!("grid/dtype mismatches: {}", rep.grid_mismatches.len());
     for m in &rep.grid_mismatches {
         println!("  - {m}");
@@ -180,5 +199,12 @@ fn print_report(rep: &manifest::EquivalenceReport) {
     if rep.chunk_mismatches.len() > 20 {
         println!("  … {} more", rep.chunk_mismatches.len() - 20);
     }
-    println!("=> {}", if rep.equivalent() { "EQUIVALENT" } else { "NOT equivalent" });
+    println!(
+        "=> {}",
+        if rep.equivalent() {
+            "EQUIVALENT"
+        } else {
+            "NOT equivalent"
+        }
+    );
 }

@@ -4,7 +4,7 @@
 //! equivalence check is the reusable artifact: it is the conformance test that lets us swap reference
 //! generators (Python vs Rust) safely — equivalent manifests ⇒ interchangeable behind the port (ADR 0006).
 
-use crate::json::{parse, Json};
+use crate::json::{Json, parse};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
@@ -40,8 +40,16 @@ impl VirtualManifest {
     }
 
     pub fn from_json(v: &Json) -> Result<VirtualManifest, String> {
-        let generator = v.get("generator").and_then(Json::as_str).unwrap_or("unknown").to_string();
-        let source = v.get("source").and_then(Json::as_str).unwrap_or("").to_string();
+        let generator = v
+            .get("generator")
+            .and_then(Json::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let source = v
+            .get("source")
+            .and_then(Json::as_str)
+            .unwrap_or("")
+            .to_string();
         let arrays_j = v
             .get("arrays")
             .and_then(Json::as_array)
@@ -50,14 +58,26 @@ impl VirtualManifest {
         for a in arrays_j {
             arrays.push(ArrayRef::from_json(a)?);
         }
-        Ok(VirtualManifest { generator, source, arrays })
+        Ok(VirtualManifest {
+            generator,
+            source,
+            arrays,
+        })
     }
 }
 
 impl ArrayRef {
     fn from_json(v: &Json) -> Result<ArrayRef, String> {
-        let name = v.get("name").and_then(Json::as_str).ok_or("array missing 'name'")?.to_string();
-        let dtype = v.get("dtype").and_then(Json::as_str).unwrap_or("").to_string();
+        let name = v
+            .get("name")
+            .and_then(Json::as_str)
+            .ok_or("array missing 'name'")?
+            .to_string();
+        let dtype = v
+            .get("dtype")
+            .and_then(Json::as_str)
+            .unwrap_or("")
+            .to_string();
         let shape = u64_vec(v.get("shape"));
         let chunks = u64_vec(v.get("chunks"));
         let codecs = str_vec(v.get("codecs"));
@@ -65,13 +85,34 @@ impl ArrayRef {
         let mut refs = Vec::with_capacity(refs_j.len());
         for r in refs_j {
             refs.push(ChunkRef {
-                key: r.get("key").and_then(Json::as_str).ok_or("ref missing 'key'")?.to_string(),
-                path: r.get("path").and_then(Json::as_str).unwrap_or("").to_string(),
-                offset: r.get("offset").and_then(Json::as_u64).ok_or("ref missing 'offset'")?,
-                length: r.get("length").and_then(Json::as_u64).ok_or("ref missing 'length'")?,
+                key: r
+                    .get("key")
+                    .and_then(Json::as_str)
+                    .ok_or("ref missing 'key'")?
+                    .to_string(),
+                path: r
+                    .get("path")
+                    .and_then(Json::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                offset: r
+                    .get("offset")
+                    .and_then(Json::as_u64)
+                    .ok_or("ref missing 'offset'")?,
+                length: r
+                    .get("length")
+                    .and_then(Json::as_u64)
+                    .ok_or("ref missing 'length'")?,
             });
         }
-        Ok(ArrayRef { name, shape, chunks, dtype, codecs, refs })
+        Ok(ArrayRef {
+            name,
+            shape,
+            chunks,
+            dtype,
+            codecs,
+            refs,
+        })
     }
 }
 
@@ -82,7 +123,11 @@ fn u64_vec(v: Option<&Json>) -> Vec<u64> {
 }
 fn str_vec(v: Option<&Json>) -> Vec<String> {
     v.and_then(Json::as_array)
-        .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -172,20 +217,25 @@ pub fn compare(a: &VirtualManifest, b: &VirtualManifest) -> EquivalenceReport {
     };
     for arr_a in &a.arrays {
         let Some(arr_b) = b.arrays.iter().find(|x| x.name == arr_a.name) else {
-            r.grid_mismatches.push(format!("array '{}' missing in B", arr_a.name));
+            r.grid_mismatches
+                .push(format!("array '{}' missing in B", arr_a.name));
             continue;
         };
         r.matched_arrays += 1;
-        if arr_a.shape != arr_b.shape || arr_a.chunks != arr_b.chunks || arr_a.dtype != arr_b.dtype {
+        if arr_a.shape != arr_b.shape || arr_a.chunks != arr_b.chunks || arr_a.dtype != arr_b.dtype
+        {
             r.grid_mismatches.push(format!(
                 "array '{}' grid/dtype differs: A(shape={:?},chunks={:?},dtype={}) vs B(shape={:?},chunks={:?},dtype={})",
                 arr_a.name, arr_a.shape, arr_a.chunks, arr_a.dtype, arr_b.shape, arr_b.chunks, arr_b.dtype
             ));
         }
-        let map_b: BTreeMap<&str, &ChunkRef> = arr_b.refs.iter().map(|c| (c.key.as_str(), c)).collect();
+        let map_b: BTreeMap<&str, &ChunkRef> =
+            arr_b.refs.iter().map(|c| (c.key.as_str(), c)).collect();
         for c_a in &arr_a.refs {
             match map_b.get(c_a.key.as_str()) {
-                None => r.chunk_mismatches.push(format!("{}::{} missing in B", arr_a.name, c_a.key)),
+                None => r
+                    .chunk_mismatches
+                    .push(format!("{}::{} missing in B", arr_a.name, c_a.key)),
                 Some(c_b) => {
                     if c_a.offset != c_b.offset || c_a.length != c_b.length {
                         r.chunk_mismatches.push(format!(
