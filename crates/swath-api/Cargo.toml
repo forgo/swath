@@ -17,6 +17,9 @@ axum = { workspace = true, features = ["tokio"] }
 futures-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Content-derived service ids for the openEO surface (ADR 0010): the id of
+# a published service is a hash of its process graph.
+sha2 = { workspace = true }
 swath-core = { path = "../swath-core", version = "0.0.0" }
 swath-render = { path = "../swath-render", version = "0.0.0" }
 thiserror = { workspace = true }
@@ -31,6 +34,9 @@ tokio = { workspace = true, features = ["sync"] }
 axum = { workspace = true, features = ["http1", "tokio"] }
 http-body-util = { workspace = true }
 image = { workspace = true }
+# openEO error-shape snapshots (the #32 diagnostics through the services
+# surface).
+insta = { workspace = true }
 jsonschema = { workspace = true }
 object_store = { workspace = true }
 swath-cache-objectstore = { path = "../adapters/swath-cache-objectstore", version = "0.0.0" }

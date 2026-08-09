@@ -164,7 +164,7 @@ async fn serve(cfg: ResolvedConfig) -> Result<(), ServeError> {
     match layers {
         LayerSource::Static(registry) => {
             let layer_count = registry.identities().len();
-            run_server(&shared, registry, layer_count).await
+            run_server(&shared, registry, layer_count, None).await
         }
         LayerSource::Catalog(mode) => serve_catalog(&shared, mode).await,
     }
@@ -178,13 +178,49 @@ struct Shared {
     cache: Option<String>,
 }
 
-/// Catalog mode: connect, register datasets, start the ingest loop, serve.
-async fn serve_catalog(cfg: &Shared, mode: CatalogMode) -> Result<(), ServeError> {
+/// Catalog mode: connect, register datasets (carrying over any layers the
+/// openEO services surface published in earlier runs), start the ingest
+/// loop, serve — with the openEO authoring router merged in (ADR 0010).
+async fn serve_catalog(cfg: &Shared, mut mode: CatalogMode) -> Result<(), ServeError> {
     let catalog = PgstacCatalog::connect(&mode.url).await?;
     // Register the configured datasets up front: config is the source of
-    // truth for dataset identity + layers, and granules ingested later
-    // require their dataset to pre-exist (swath_core::ingest docs).
-    for dataset in &mode.datasets {
+    // truth for dataset identity + config-defined layers, and granules
+    // ingested later require their dataset to pre-exist
+    // (swath_core::ingest docs). Layers authored through the openEO
+    // services surface (ADR 0010) live only in the catalog — carry them
+    // over before the upsert and recompile them into serving templates,
+    // so published products survive a restart.
+    for dataset in &mut mode.datasets {
+        if let Some(existing) = catalog.get_dataset(&dataset.id).await? {
+            for layer in existing.layers {
+                let is_service = layer.process.is_some();
+                let conflicts = dataset.layers.iter().any(|own| own.id == layer.id);
+                if !is_service || conflicts {
+                    continue;
+                }
+                match swath_api::compile_service_layer(dataset, &layer) {
+                    Ok(template) => {
+                        tracing::info!(
+                            "restored openEO service {id} on dataset {dataset}",
+                            id = layer.id,
+                            dataset = dataset.id,
+                        );
+                        dataset.layers.push(layer);
+                        mode.layers.push(template);
+                    }
+                    // Honest degradation: a graph that no longer compiles
+                    // (e.g. the dataset's band vocabulary changed under
+                    // it) is dropped loudly, not served wrongly or
+                    // crashed on.
+                    Err(err) => tracing::warn!(
+                        "dropping persisted openEO service {id}: its process graph no \
+                         longer compiles against dataset {dataset}: {err}",
+                        id = layer.id,
+                        dataset = dataset.id,
+                    ),
+                }
+            }
+        }
         catalog.upsert_dataset(dataset).await?;
         tracing::info!(
             "registered dataset {id} ({layers} layer(s))",
@@ -216,12 +252,27 @@ async fn serve_catalog(cfg: &Shared, mode: CatalogMode) -> Result<(), ServeError
     }
     let layer_count = mode.layers.len();
     let provider = CatalogLayers::new(catalog, mode.layers);
-    run_server(cfg, provider, layer_count).await
+    // The openEO authoring surface (ADR 0010) over the same provider:
+    // clones share the layer set, so a POSTed service serves on the next
+    // tile request.
+    let openeo = swath_api::openeo_router(Arc::new(swath_api::OpenEoState::new(
+        provider.clone(),
+        &cfg.base_url,
+    )));
+    run_server(cfg, provider, layer_count, Some(openeo)).await
 }
 
 /// The mode-independent tail of `serve`: build the store, assemble the
-/// state, bind, run until SIGINT/SIGTERM.
-async fn run_server<L>(cfg: &Shared, layers: L, layer_count: usize) -> Result<(), ServeError>
+/// state, bind, run until SIGINT/SIGTERM. `extra` merges an additional
+/// router into the OGC one — catalog mode passes the openEO authoring
+/// surface (ADR 0010), which also switches the landing page into its
+/// dual OGC + openEO-capabilities form.
+async fn run_server<L>(
+    cfg: &Shared,
+    layers: L,
+    layer_count: usize,
+    extra: Option<axum::Router>,
+) -> Result<(), ServeError>
 where
     L: LayerProvider + 'static,
 {
@@ -230,12 +281,15 @@ where
     // manifests (#39) served from the same store root, dispatched per
     // asset — legacy granules render from byte ranges into their
     // original files.
-    let state = ApiState::new(
+    let mut state = ApiState::new(
         layers,
         CompositeSource::new(store),
         Proj4rsReproject,
         &cfg.base_url,
     );
+    if extra.is_some() {
+        state = state.with_openeo();
+    }
     // The cache is just another object store (#36): same root grammar,
     // same builder. Wired through `with_cache` so a cache-less config
     // constructs the exact pre-#36 state type and serve path.
@@ -246,6 +300,10 @@ where
             swath_api::router(Arc::new(state.with_cache(cache)))
         }
         None => swath_api::router(Arc::new(state)),
+    };
+    let app = match extra {
+        Some(extra) => app.merge(extra),
+        None => app,
     };
 
     let listener = tokio::net::TcpListener::bind(cfg.bind)
