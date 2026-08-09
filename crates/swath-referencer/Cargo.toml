@@ -1,0 +1,33 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-referencer"
+description = "Production pure-Rust virtual-reference generator (ADR 0006): HDF5/NetCDF4 via hdf5-metno, GRIB2 via gribberish, behind the core IngestReferencer port."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+# The conformance harness's equivalence gate (`just test-referencer`).
+[[bin]]
+name = "vmanifest-compare"
+path = "src/bin/vmanifest_compare.rs"
+
+[dependencies]
+# GRIB2 metadata walk (prototype 0001: message offsets/lengths/grids/packing
+# come straight from the section structs — no field decode, no default
+# features).
+gribberish = { workspace = true }
+# HDF5/NetCDF4 chunk-index walk (prototype 0001: chunks_visit/H5Dchunk_iter,
+# filter pipeline, type descriptors). `static` bundles libhdf5 built from
+# source — no system HDF5 anywhere, keeping the single-binary deployment
+# story (ADR 0006 H4: 4.5 MB binary vs a 273 MB Python env).
+hdf5-metno = { workspace = true }
+serde_json = { workspace = true }
+swath-core = { path = "../swath-core", version = "0.0.0" }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

@@ -22,6 +22,7 @@
 //! not an env-filter DSL, keeping the regex machinery out of the tree.
 
 mod config;
+mod ingest;
 mod serve;
 
 use std::process::ExitCode;
@@ -90,25 +91,35 @@ struct Cli {
     command: Command,
 }
 
-/// Subcommands. `ingest` and `register` arrive with issues #30/#31.
+/// Subcommands. `register` arrives with issue #31's successors.
 #[derive(Subcommand)]
 enum Command {
     /// Serve configured layers over OGC API - Tiles (plus /traces SSE
     /// and the /healthz liveness probe).
     Serve(serve::ServeArgs),
+    /// Ingest utilities (manual/testing): `reference` generates a legacy
+    /// granule's virtual manifest (ADR 0006).
+    Ingest(ingest::IngestArgs),
 }
 
 fn main() -> ExitCode {
     init_tracing();
     let cli = Cli::parse();
     match cli.command {
-        Command::Serve(args) => match serve::run(&args) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(err) => {
-                tracing::error!("{err}");
-                ExitCode::FAILURE
-            }
-        },
+        Command::Serve(args) => report(serve::run(&args)),
+        Command::Ingest(args) => report(ingest::run(&args)),
+    }
+}
+
+/// One exit-code policy for every subcommand: errors are logged, not
+/// panicked.
+fn report<E: std::fmt::Display>(result: Result<(), E>) -> ExitCode {
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            tracing::error!("{err}");
+            ExitCode::FAILURE
+        }
     }
 }
 

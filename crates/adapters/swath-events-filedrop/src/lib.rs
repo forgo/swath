@@ -37,6 +37,29 @@
 //!   catalog upsert is idempotent — but refreshes `ingested_at`. Remove
 //!   manifests (or point the watcher at a fresh directory) to avoid that.
 //!
+//! # The legacy path (ADR 0006, issue #40)
+//!
+//! The same drop convention carries legacy granules: an asset whose URI
+//! names a file the configured [`IngestReferencer`] handles (`.h5`/`.nc`/
+//! `.grib2`/…) triggers **referencing** at announcement time. The watcher
+//! resolves the URI against its data root (the object-store root the
+//! server serves from — the drop convention's asset keys are store-relative
+//! by design), generates the `VirtualManifest`, writes it **alongside the
+//! source file** as `<asset>.vmanifest.json` (staged + rename, same
+//! atomicity discipline as the drop manifests), and announces the granule
+//! with that asset rewritten to point at the manifest, kind
+//! [`AssetKind::VirtualCube`] — so what lands in the catalog is directly
+//! what the serving path (#39) reads. Without a configured referencer
+//! (or for plain `.tif` assets) behavior is exactly as before: opaque
+//! URIs, kind raster, nothing opened.
+//!
+//! Referencing failures are per-granule [`EventError::Malformed`]s: one
+//! broken legacy granule must not stop the loop (R1). Absolute or
+//! scheme-carrying URIs (`s3://…`) on legacy assets are refused —
+//! referencing reads local bytes under the data root; anything else is a
+//! deployment the legacy path does not support yet, and registering the
+//! raw `.h5` as if servable would be a silent lie.
+//!
 //! # Why polling, not inotify/FSEvents
 //!
 //! A poll loop (`read_dir` every [`FiledropEvents::poll_interval`]) over the
@@ -70,10 +93,12 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use std::sync::Arc;
+
 use serde::Deserialize;
-use swath_core::catalog::{Bbox, DatasetId, Datetime, Granule, GranuleId};
+use swath_core::catalog::{AssetKind, Bbox, DatasetId, Datetime, Granule, GranuleAsset, GranuleId};
 use swath_core::events::{EventError, EventSource, GranuleEvent};
-use swath_core::raster::AssetRef;
+use swath_core::ingest::IngestReferencer;
 
 /// The wire shape of a drop manifest (module docs). Unknown fields are
 /// rejected: a manifest carrying fields this version does not understand is
@@ -99,7 +124,6 @@ struct Manifest {
 /// demand (inside `next_event`) and sleeps `poll_interval` between empty
 /// scans. A missing directory is treated as empty — the drop point may be
 /// created (or mounted) after the server starts.
-#[derive(Debug)]
 pub struct FiledropEvents {
     dir: PathBuf,
     poll_interval: Duration,
@@ -108,6 +132,25 @@ pub struct FiledropEvents {
     seen: BTreeSet<OsString>,
     /// Events parsed but not yet pulled (one scan can find several).
     pending: VecDeque<GranuleEvent>,
+    /// The legacy path (module docs), when configured.
+    referencer: Option<LegacyReferencing>,
+}
+
+/// The legacy-path configuration: a generator plus the local root asset
+/// URIs resolve against (the object-store root, for a local store).
+struct LegacyReferencing {
+    generator: Arc<dyn IngestReferencer>,
+    data_root: PathBuf,
+}
+
+impl std::fmt::Debug for FiledropEvents {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FiledropEvents")
+            .field("dir", &self.dir)
+            .field("poll_interval", &self.poll_interval)
+            .field("referencing", &self.referencer.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl FiledropEvents {
@@ -119,7 +162,23 @@ impl FiledropEvents {
             poll_interval,
             seen: BTreeSet::new(),
             pending: VecDeque::new(),
+            referencer: None,
         }
+    }
+
+    /// Enables the legacy path (module docs): assets `generator` handles
+    /// are referenced at announcement time, resolved against `data_root`.
+    #[must_use]
+    pub fn with_referencer(
+        mut self,
+        generator: Arc<dyn IngestReferencer>,
+        data_root: impl Into<PathBuf>,
+    ) -> Self {
+        self.referencer = Some(LegacyReferencing {
+            generator,
+            data_root: data_root.into(),
+        });
+        self
     }
 
     /// The directory being watched.
@@ -164,7 +223,10 @@ impl FiledropEvents {
             self.seen.insert(name.clone());
             let path = self.dir.join(&name);
             let arrived_at = now_utc();
-            let granule = read_manifest(&path)?;
+            let mut granule = read_manifest(&path)?;
+            if let Some(referencing) = &self.referencer {
+                referencing.reference_legacy_assets(&mut granule, &path)?;
+            }
             self.pending.push_back(GranuleEvent {
                 granule,
                 arrived_at,
@@ -187,6 +249,75 @@ impl EventSource for FiledropEvents {
                 tokio::time::sleep(self.poll_interval).await;
             }
         }
+    }
+}
+
+impl LegacyReferencing {
+    /// Rewrites every legacy asset of `granule` (module docs): generate the
+    /// virtual manifest, store it alongside the source file, point the
+    /// asset at it with kind [`AssetKind::VirtualCube`].
+    fn reference_legacy_assets(
+        &self,
+        granule: &mut Granule,
+        drop_manifest: &Path,
+    ) -> Result<(), EventError> {
+        let malformed = |detail: String| EventError::Malformed {
+            detail: format!("manifest `{}`: {detail}", drop_manifest.display()),
+        };
+        for (band, asset) in &mut granule.assets {
+            let uri = asset.href.as_str().to_owned();
+            if !self.generator.handles(Path::new(&uri)) {
+                continue;
+            }
+            // Referencing reads local bytes: only store-relative keys
+            // resolve. A scheme'd/absolute URI on a legacy asset is a
+            // deployment this path does not support — refuse loudly.
+            if Path::new(&uri).is_absolute() || uri.contains("://") {
+                return Err(malformed(format!(
+                    "legacy asset `{band}` = `{uri}` is not a store-relative key;                      referencing requires a local data root"
+                )));
+            }
+            let source = self.data_root.join(&uri);
+            let mut manifest = self.generator.generate(&source).map_err(|e| {
+                malformed(format!("referencing legacy asset `{band}` = `{uri}`: {e}"))
+            })?;
+
+            // The generator names chunks by the path it was given; serving
+            // resolves store-relative keys, so rewrite to the asset's URI.
+            manifest.source.clone_from(&uri);
+            for array in &mut manifest.arrays {
+                for chunk in &mut array.refs {
+                    chunk.path.clone_from(&uri);
+                }
+            }
+
+            // Store the manifest alongside the source: staged dot-name
+            // first, rename into place (the same atomicity discipline as
+            // the drop convention).
+            let key = format!("{uri}.vmanifest.json");
+            let target = self.data_root.join(&key);
+            let staged = target.with_file_name(format!(
+                ".{}",
+                target
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("vmanifest.staged")
+            ));
+            let write = || -> std::io::Result<()> {
+                std::fs::write(&staged, manifest.to_json_string())?;
+                std::fs::rename(&staged, &target)
+            };
+            write().map_err(|e| EventError::Backend {
+                detail: format!("storing virtual manifest `{}`", target.display()),
+                source: Box::new(e),
+            })?;
+
+            *asset = GranuleAsset {
+                href: swath_core::raster::AssetRef::new(key),
+                kind: AssetKind::VirtualCube,
+            };
+        }
+        Ok(())
     }
 }
 
@@ -248,7 +379,7 @@ fn read_manifest(path: &Path) -> Result<Granule, EventError> {
         assets: manifest
             .assets
             .into_iter()
-            .map(|(band, uri)| (band, AssetRef::new(uri)))
+            .map(|(band, uri)| (band, GranuleAsset::raster(uri)))
             .collect(),
         ingested_at: None,
     })

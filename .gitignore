@@ -52,6 +52,9 @@ test-results/
 *.nc
 *.hdf
 *.h5
+# ...but the tiny deliberate referencer fixture is committed (a few KB,
+# known-answer truth for the HDF5 chunk-index walk — see its make script).
+!crates/swath-referencer/tests/data/tiny.h5
 *.zarr/
 *.parquet
 *.grib2

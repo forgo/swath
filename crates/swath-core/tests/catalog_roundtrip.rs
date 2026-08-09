@@ -17,8 +17,8 @@ use swath_core::catalog::stac::{
     granule_to_stac_item,
 };
 use swath_core::catalog::{
-    Bbox, Colormap, Dataset, DatasetId, Datetime, Extent, Granule, GranuleId, Layer, PlanKind,
-    Resampling, Rescale, TimeRange,
+    AssetKind, Bbox, Colormap, Dataset, DatasetId, Datetime, Extent, Granule, GranuleAsset,
+    GranuleId, Layer, PlanKind, Resampling, Rescale, TimeRange,
 };
 use swath_core::raster::AssetRef;
 
@@ -143,13 +143,24 @@ fn dataset() -> impl Strategy<Value = Dataset> {
         )
 }
 
+fn granule_asset() -> impl Strategy<Value = GranuleAsset> {
+    (
+        text(),
+        prop_oneof![Just(AssetKind::Raster), Just(AssetKind::VirtualCube)],
+    )
+        .prop_map(|(uri, kind)| GranuleAsset {
+            href: AssetRef::new(uri),
+            kind,
+        })
+}
+
 fn granule() -> impl Strategy<Value = Granule> {
     (
         identifier(),
         identifier(),
         bbox(),
         datetime(),
-        proptest::collection::btree_map(band_name(), text().prop_map(AssetRef::new), 0..6),
+        proptest::collection::btree_map(band_name(), granule_asset(), 0..6),
         proptest::option::of(datetime()),
     )
         .prop_map(
@@ -263,11 +274,18 @@ fn hls_granule() -> Granule {
         assets: BTreeMap::from([
             (
                 "b04".to_owned(),
-                AssetRef::new("s3://hls/t13sdd/2024158/b04.tif"),
+                GranuleAsset::raster("s3://hls/t13sdd/2024158/b04.tif"),
             ),
             (
                 "b8a".to_owned(),
-                AssetRef::new("s3://hls/t13sdd/2024158/b8a.tif"),
+                GranuleAsset::raster("s3://hls/t13sdd/2024158/b8a.tif"),
+            ),
+            // The virtual-cube kind is part of the pinned contractual shape
+            // (#40): its `swath:kind` emission must show up in any reviewed
+            // snapshot diff.
+            (
+                "cube".to_owned(),
+                GranuleAsset::virtual_cube("vnp09ga/granule.h5.vmanifest.json"),
             ),
         ]),
         // Pinned Some: the persisted `swath:ingested_at` property shape is

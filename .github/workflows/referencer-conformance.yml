@@ -1,0 +1,51 @@
+# The gated referencer conformance run (ADR 0006, issue #40): production
+# Rust generator vs the VirtualiZarr sidecar on a REAL VNP09GA granule,
+# byte-range equivalence asserted (`just test-referencer`).
+#
+# Manual-only (workflow_dispatch), deliberately not in PR CI and not
+# scheduled: the granule download needs NASA Earthdata credentials (an
+# EARTHDATA_NETRC secret) that fork PRs must never see, and an unconfigured
+# schedule would only emit skip-noise. PR CI already exercises both
+# generators credential-free against the tiny committed HDF5 fixture's
+# h5py-derived truth (rust-test known-answer + the python job's sidecar
+# conformance test).
+
+name: Referencer conformance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tools: "none"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.3"
+          enable-cache: true
+          cache-dependency-glob: python/uv.lock
+      - name: Install Earthdata credentials
+        env:
+          EARTHDATA_NETRC: ${{ secrets.EARTHDATA_NETRC }}
+        run: |
+          if [ -n "$EARTHDATA_NETRC" ]; then
+            printf '%s\n' "$EARTHDATA_NETRC" > "$HOME/.netrc"
+            chmod 600 "$HOME/.netrc"
+          else
+            echo "::notice::EARTHDATA_NETRC secret not configured; the run will skip"
+          fi
+      - run: just setup-py
+      - run: just test-referencer

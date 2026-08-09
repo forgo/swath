@@ -1,0 +1,173 @@
+{
+  "manifest_version": 1,
+  "generator": "h5py-truth",
+  "source": "tiny.h5",
+  "arrays": [
+    {
+      "name": "meta",
+      "shape": [],
+      "chunks": [],
+      "dtype": "|S18",
+      "codecs": [],
+      "refs": [
+        {
+          "key": "",
+          "path": "tiny.h5",
+          "offset": 5306,
+          "length": 18
+        }
+      ]
+    },
+    {
+      "name": "aux/contiguous",
+      "shape": [
+        4,
+        4
+      ],
+      "chunks": [
+        4,
+        4
+      ],
+      "dtype": "float64",
+      "codecs": [],
+      "refs": [
+        {
+          "key": "0.0",
+          "path": "tiny.h5",
+          "offset": 5178,
+          "length": 128
+        }
+      ]
+    },
+    {
+      "name": "aux/unallocated",
+      "shape": [
+        3,
+        3
+      ],
+      "chunks": [
+        3,
+        3
+      ],
+      "dtype": "int32",
+      "codecs": [],
+      "refs": []
+    },
+    {
+      "name": "grid/partial",
+      "shape": [
+        8,
+        6
+      ],
+      "chunks": [
+        4,
+        6
+      ],
+      "dtype": "float32",
+      "codecs": [],
+      "refs": [
+        {
+          "key": "0.0",
+          "path": "tiny.h5",
+          "offset": 5422,
+          "length": 96
+        }
+      ]
+    },
+    {
+      "name": "grid/ragged",
+      "shape": [
+        5,
+        7
+      ],
+      "chunks": [
+        4,
+        3
+      ],
+      "dtype": "uint8",
+      "codecs": [
+        "zlib:1"
+      ],
+      "refs": [
+        {
+          "key": "0.0",
+          "path": "tiny.h5",
+          "offset": 5324,
+          "length": 21
+        },
+        {
+          "key": "0.1",
+          "path": "tiny.h5",
+          "offset": 5345,
+          "length": 20
+        },
+        {
+          "key": "0.2",
+          "path": "tiny.h5",
+          "offset": 5365,
+          "length": 20
+        },
+        {
+          "key": "1.0",
+          "path": "tiny.h5",
+          "offset": 5385,
+          "length": 13
+        },
+        {
+          "key": "1.1",
+          "path": "tiny.h5",
+          "offset": 5398,
+          "length": 13
+        },
+        {
+          "key": "1.2",
+          "path": "tiny.h5",
+          "offset": 5411,
+          "length": 11
+        }
+      ]
+    },
+    {
+      "name": "grid/reflectance",
+      "shape": [
+        8,
+        6
+      ],
+      "chunks": [
+        4,
+        3
+      ],
+      "dtype": "int16",
+      "codecs": [
+        "shuffle",
+        "zlib:4"
+      ],
+      "refs": [
+        {
+          "key": "0.0",
+          "path": "tiny.h5",
+          "offset": 5048,
+          "length": 33
+        },
+        {
+          "key": "0.1",
+          "path": "tiny.h5",
+          "offset": 5081,
+          "length": 32
+        },
+        {
+          "key": "1.0",
+          "path": "tiny.h5",
+          "offset": 5113,
+          "length": 32
+        },
+        {
+          "key": "1.1",
+          "path": "tiny.h5",
+          "offset": 5145,
+          "length": 33
+        }
+      ]
+    }
+  ]
+}

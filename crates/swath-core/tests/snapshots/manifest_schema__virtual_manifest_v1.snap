@@ -1,0 +1,104 @@
+---
+source: crates/swath-core/tests/manifest_schema.rs
+expression: value
+---
+{
+  "arrays": [
+    {
+      "chunks": [
+        600,
+        600
+      ],
+      "codecs": [
+        "zlib:8"
+      ],
+      "dtype": "int16",
+      "georef": {
+        "band": "SurfReflect_M1_1",
+        "crs": {
+          "proj4": "+proj=sinu +R=6371007.181 +units=m +no_defs"
+        },
+        "nodata": -28672.0,
+        "transform": {
+          "col_rotation": 0.0,
+          "origin_x": 16679257.796,
+          "origin_y": -3335851.559,
+          "pixel_height": -926.6254330558334,
+          "pixel_width": 926.6254330558334,
+          "row_rotation": 0.0
+        }
+      },
+      "name": "HDFEOS/GRIDS/VIIRS_Grid_1km_2D/Data Fields/SurfReflect_M1_1",
+      "refs": [
+        {
+          "key": "0.0",
+          "length": 812345,
+          "offset": 40381,
+          "path": "VNP09GA.A2012019.h33v12.002.2023122182434.h5"
+        },
+        {
+          "key": "0.1",
+          "length": 630002,
+          "offset": 852726,
+          "path": "VNP09GA.A2012019.h33v12.002.2023122182434.h5"
+        }
+      ],
+      "shape": [
+        1200,
+        1200
+      ]
+    },
+    {
+      "chunks": [
+        512,
+        512
+      ],
+      "codecs": [],
+      "dtype": "uint16",
+      "georef": {
+        "crs": {
+          "epsg": 32613
+        },
+        "transform": {
+          "col_rotation": 0.0,
+          "origin_x": 453720.0,
+          "origin_y": 4353960.0,
+          "pixel_height": -30.0,
+          "pixel_width": 30.0,
+          "row_rotation": 0.0
+        }
+      },
+      "name": "utm_example",
+      "refs": [
+        {
+          "key": "0.0",
+          "length": 524288,
+          "offset": 2048,
+          "path": "granule.h5"
+        }
+      ],
+      "shape": [
+        512,
+        512
+      ]
+    },
+    {
+      "chunks": [],
+      "codecs": [],
+      "dtype": "|S32000",
+      "name": "HDFEOS INFORMATION/StructMetadata.0",
+      "refs": [
+        {
+          "key": "",
+          "length": 32000,
+          "offset": 4096,
+          "path": "granule.h5"
+        }
+      ],
+      "shape": []
+    }
+  ],
+  "generator": "swath-referencer",
+  "manifest_version": 1,
+  "source": "VNP09GA.A2012019.h33v12.002.2023122182434.h5"
+}

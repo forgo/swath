@@ -22,7 +22,10 @@
 
 use serde_json::{Map, Value, json};
 
-use super::{Bbox, Dataset, DatasetId, Datetime, Extent, Granule, GranuleId, Layer, TimeRange};
+use super::{
+    AssetKind, Bbox, Dataset, DatasetId, Datetime, Extent, Granule, GranuleAsset, GranuleId, Layer,
+    TimeRange,
+};
 use crate::raster::AssetRef;
 
 /// The STAC version emitted, and the only one accepted back (design doc §3).
@@ -150,7 +153,8 @@ pub fn dataset_from_stac_collection(doc: &Value) -> Result<Dataset, StacError> {
 /// `geometry` is derived from the granule's bbox (the box's closed
 /// counterclockwise polygon ring) — deterministically, so the round trip
 /// through [`granule_from_stac_item`] (which reads only `bbox`) is exact.
-/// Assets carry only `href`; the asset key is the band name.
+/// Assets carry `href` (plus `swath:kind` for non-raster assets); the asset
+/// key is the band name.
 #[must_use]
 pub fn granule_to_stac_item(granule: &Granule) -> Value {
     let Bbox {
@@ -162,7 +166,20 @@ pub fn granule_to_stac_item(granule: &Granule) -> Value {
     let assets: Map<String, Value> = granule
         .assets
         .iter()
-        .map(|(band, asset)| (band.clone(), json!({ "href": asset.as_str() })))
+        .map(|(band, asset)| {
+            let mut doc = Map::new();
+            doc.insert("href".to_owned(), json!(asset.href.as_str()));
+            if asset.kind != AssetKind::Raster {
+                // Swath-owned asset metadata rides under a namespaced key
+                // (design doc §3); the default kind is omitted so
+                // plain-raster documents keep their pre-#40 bytes.
+                doc.insert(
+                    "swath:kind".to_owned(),
+                    serde_json::to_value(asset.kind).expect("AssetKind serializes"),
+                );
+            }
+            (band.clone(), Value::Object(doc))
+        })
         .collect();
     let mut properties = Map::new();
     properties.insert("datetime".to_owned(), json!(granule.datetime.as_str()));
@@ -196,8 +213,9 @@ pub fn granule_to_stac_item(granule: &Granule) -> Value {
 /// [`granule_to_stac_item`] on documents Swath wrote.
 ///
 /// `geometry` is ignored (`bbox` is the source of truth) and asset fields
-/// beyond `href` are ignored; both are deterministic emissions/no-ops on
-/// swath-written documents, so identity holds (design doc §3).
+/// beyond `href`/`swath:kind` are ignored; both are deterministic
+/// emissions/no-ops on swath-written documents, so identity holds (design
+/// doc §3).
 ///
 /// # Errors
 ///
@@ -247,7 +265,8 @@ pub fn granule_from_stac_item(doc: &Value) -> Result<Granule, StacError> {
     let mut assets = std::collections::BTreeMap::new();
     for (band, asset) in assets_obj {
         let path = format!("assets.{band}");
-        let href = as_object(asset, &path)?
+        let fields = as_object(asset, &path)?;
+        let href = fields
             .get("href")
             .ok_or_else(|| StacError::MissingField {
                 path: format!("{path}.href"),
@@ -257,7 +276,25 @@ pub fn granule_from_stac_item(doc: &Value) -> Result<Granule, StacError> {
                 path: format!("{path}.href"),
                 expected: "string",
             })?;
-        assets.insert(band.clone(), AssetRef::new(href));
+        // Optional swath-owned kind; absent = plain raster, present-but-
+        // unknown = loud error (a kind this version cannot serve correctly
+        // must not be silently degraded to raster).
+        let kind = match fields.get("swath:kind") {
+            None => AssetKind::default(),
+            Some(value) => {
+                serde_json::from_value(value.clone()).map_err(|_| StacError::InvalidValue {
+                    path: format!("{path}.swath:kind"),
+                    detail: format!("`{value}` is not a known asset kind"),
+                })?
+            }
+        };
+        assets.insert(
+            band.clone(),
+            GranuleAsset {
+                href: AssetRef::new(href),
+                kind,
+            },
+        );
     }
 
     Ok(Granule {
@@ -404,14 +441,13 @@ mod tests {
     use serde_json::json;
 
     use super::super::{
-        Bbox, Colormap, Dataset, DatasetId, Datetime, Extent, Granule, GranuleId, Layer, PlanKind,
-        Resampling, Rescale, TimeRange,
+        AssetKind, Bbox, Colormap, Dataset, DatasetId, Datetime, Extent, Granule, GranuleAsset,
+        GranuleId, Layer, PlanKind, Resampling, Rescale, TimeRange,
     };
     use super::{
         StacError, dataset_from_stac_collection, dataset_to_stac_collection,
         granule_from_stac_item, granule_to_stac_item,
     };
-    use crate::raster::AssetRef;
 
     /// The HLS-shaped example the snapshot suite also pins.
     pub(crate) fn hls_dataset() -> Dataset {
@@ -489,11 +525,11 @@ mod tests {
             assets: BTreeMap::from([
                 (
                     "b04".to_owned(),
-                    AssetRef::new("s3://hls/t13sdd/2024158/b04.tif"),
+                    GranuleAsset::raster("s3://hls/t13sdd/2024158/b04.tif"),
                 ),
                 (
                     "b8a".to_owned(),
-                    AssetRef::new("s3://hls/t13sdd/2024158/b8a.tif"),
+                    GranuleAsset::raster("s3://hls/t13sdd/2024158/b8a.tif"),
                 ),
             ]),
             ingested_at: Some(Datetime::new("2024-06-06T18:00:00Z").unwrap()),
@@ -581,6 +617,44 @@ mod tests {
             granule_from_stac_item(&doc).unwrap_err(),
             StacError::WrongType { path, .. } if path == "properties.swath:ingested_at"
         ));
+    }
+
+    #[test]
+    fn asset_kind_is_optional_namespaced_and_validated() {
+        // Raster assets emit exactly the pre-#40 shape: href only.
+        let doc = granule_to_stac_item(&hls_granule());
+        assert_eq!(
+            doc["assets"]["b04"],
+            json!({ "href": "s3://hls/t13sdd/2024158/b04.tif" })
+        );
+
+        // A virtual-cube asset carries the namespaced kind and round-trips.
+        let mut g = hls_granule();
+        g.assets.insert(
+            "cube".to_owned(),
+            GranuleAsset::virtual_cube("vnp09ga/granule.h5.vmanifest.json"),
+        );
+        let doc = granule_to_stac_item(&g);
+        assert_eq!(doc["assets"]["cube"]["swath:kind"], "virtual_cube");
+        assert_eq!(granule_from_stac_item(&doc).unwrap(), g);
+
+        // A kind this version does not know is a loud error, not a silent
+        // raster.
+        let mut doc = granule_to_stac_item(&g);
+        doc["assets"]["cube"]["swath:kind"] = json!("hologram");
+        assert!(matches!(
+            granule_from_stac_item(&doc).unwrap_err(),
+            StacError::InvalidValue { path, .. } if path == "assets.cube.swath:kind"
+        ));
+
+        // Absent kind reads as raster (pre-#40 documents stay valid).
+        let mut doc = granule_to_stac_item(&hls_granule());
+        assert!(doc["assets"]["b04"].get("swath:kind").is_none());
+        let read = granule_from_stac_item(&doc).unwrap();
+        assert_eq!(read.assets["b04"].kind, AssetKind::Raster);
+        // And unknown foreign asset fields are still ignored on read.
+        doc["assets"]["b04"]["title"] = json!("someone else's title");
+        assert!(granule_from_stac_item(&doc).is_ok());
     }
 
     #[test]

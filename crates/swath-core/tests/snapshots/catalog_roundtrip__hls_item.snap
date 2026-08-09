@@ -9,6 +9,10 @@ expression: granule_to_stac_item(&hls_granule())
     },
     "b8a": {
       "href": "s3://hls/t13sdd/2024158/b8a.tif"
+    },
+    "cube": {
+      "href": "vnp09ga/granule.h5.vmanifest.json",
+      "swath:kind": "virtual_cube"
     }
   },
   "bbox": [

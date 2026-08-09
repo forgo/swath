@@ -162,6 +162,49 @@ fixtures-verify:
     cd tests/fixtures && shasum -a 256 -c SHA256SUMS
     uv run tests/fixtures/verify_fixtures.py
 
+# --- tests/referencer (conformance harness, ADR 0006 / issue #40) ---
+
+# The gated generator-equivalence run: production Rust referencer vs the
+# VirtualiZarr sidecar on a REAL VNP09GA granule, byte-range equivalence
+# asserted (promoted from prototype 0001). Needs a granule: $SWATH_VNP09GA,
+# a cached copy under target/referencer or the prototype's data dir, or a
+# NASA Earthdata netrc entry to fetch one (~8 MB) — otherwise it skips with
+# a message. PR CI covers the same code paths credential-free via the tiny
+# committed fixture (Rust known-answer + sidecar test_cli.py against the
+# same h5py-derived truth); this recipe is the real-data gate, run locally
+# or via the manual referencer-conformance workflow.
+test-referencer:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=target/referencer && mkdir -p "$dir"
+    granule="${SWATH_VNP09GA:-}"
+    if [ -z "$granule" ]; then
+        for c in "$dir"/VNP09GA*.h5 prototypes/0001-*/data/VNP09GA*.h5; do
+            if [ -f "$c" ]; then granule="$c"; break; fi
+        done
+    fi
+    if [ -z "$granule" ]; then
+        if [ -f "$HOME/.netrc" ] && grep -q "urs.earthdata.nasa.gov" "$HOME/.netrc"; then
+            granule=$(uv run tests/referencer/fetch_vnp09ga.py "$dir")
+        else
+            echo "SKIP test-referencer: no VNP09GA granule and no Earthdata credentials."
+            echo "  Provide SWATH_VNP09GA=<path>, or add a ~/.netrc entry for"
+            echo "  urs.earthdata.nasa.gov to fetch the pinned granule (~8 MB)."
+            exit 0
+        fi
+    fi
+    granule=$(cd "$(dirname "$granule")" && pwd)/$(basename "$granule")
+    echo "conformance granule: $granule"
+    # Production generator (the exact binary path operators use)...
+    cargo run -q -p swath-cli -- ingest reference "$granule" --output "$dir/rs.vmanifest.json"
+    # ...vs the VirtualiZarr sidecar (the independent reference)...
+    (cd python && uv run swath-referencer "$granule") > "$dir/vz.vmanifest.json"
+    # ...byte-range equivalence, or die.
+    cargo run -q -p swath-referencer --bin vmanifest-compare --         "$dir/rs.vmanifest.json" "$dir/vz.vmanifest.json"
+    # And the gated structural/georef assertions on the real granule.
+    SWATH_VNP09GA="$granule" cargo test -q -p swath-referencer --test vnp09ga_real -- --ignored
+    echo "test-referencer PASS"
+
 # --- python/ (uv workspace; ingest sidecars only, ADR 0006) ---
 
 # Sync the python workspace (all packages + dev groups).

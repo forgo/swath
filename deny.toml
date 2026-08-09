@@ -25,11 +25,24 @@ allow = [
     # data license: use/modify/redistribute freely, no copyleft, no
     # attribution requirement on results.
     "CDLA-Permissive-2.0",
+    # libhdf5's own license (bundled source in hdf5-metno-src for the static
+    # build, #40): a BSD-3-Clause-style permissive license with The HDF
+    # Group's naming/attribution clauses. SPDX id `HDF5`.
+    "HDF5",
 ]
 confidence-threshold = 0.93
 # The allowlist is aspirational until dependencies arrive; don't nag about
 # licenses no current dep uses.
 unused-allowed-license = "allow"
+
+# hdf5-metno-src ships no `license` field in its manifest; the crate is the
+# bundled libhdf5 source tree, whose license text (ext/hdf5/LICENSE) is the
+# HDF5 license (detected at 0.88 confidence — below the threshold, hence the
+# explicit clarification pinned to the file hash).
+[[licenses.clarify]]
+crate = "hdf5-metno-src"
+expression = "HDF5"
+license-files = [{ path = "ext/hdf5/LICENSE", hash = 0x221a80ac }]
 
 [bans]
 # Duplicate versions warn (tightened later); wildcard requirements are forbidden.

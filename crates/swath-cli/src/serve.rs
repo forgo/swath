@@ -180,10 +180,25 @@ async fn serve_catalog(cfg: &Shared, mode: CatalogMode) -> Result<(), ServeError
     }
     if let Some(dir) = &mode.watch_dir {
         tracing::info!("watching {} for granule manifests", dir.display());
-        tokio::spawn(ingest_loop(
-            FiledropEvents::new(dir.clone(), WATCH_POLL),
-            catalog.clone(),
-        ));
+        let mut events = FiledropEvents::new(dir.clone(), WATCH_POLL);
+        // The legacy path (ADR 0006): dropped granules whose assets are
+        // legacy files (.h5/.nc/.grib2) get virtual manifests generated and
+        // stored alongside, automatically. Referencing reads local bytes,
+        // so it lights up only for a local store root; on s3:// the legacy
+        // extensions would be refused per granule (an honest Malformed),
+        // and we say so up front.
+        if cfg.store_root.contains("://") {
+            tracing::warn!(
+                "store root `{root}` is remote: legacy granule referencing                  is disabled (requires a local store root)",
+                root = cfg.store_root,
+            );
+        } else {
+            events = events.with_referencer(
+                std::sync::Arc::new(swath_referencer::SwathReferencer::new()),
+                PathBuf::from(&cfg.store_root),
+            );
+        }
+        tokio::spawn(ingest_loop(events, catalog.clone()));
     }
     let layer_count = mode.layers.len();
     let provider = CatalogLayers::new(catalog, mode.layers);
