@@ -47,3 +47,12 @@ path = [
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Elliott Richerson <elliott.richerson@gmail.com>"
 SPDX-License-Identifier = "Apache-2.0"
+
+# Official OGC JSON schemas committed as conformance-test data (provenance:
+# crates/swath-api/tests/data/ogc/README.md). OGC's copyright and license,
+# not ours — committed byte-identical to schemas.opengis.net.
+[[annotations]]
+path = ["crates/swath-api/tests/data/ogc/**/*.json"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Open Geospatial Consortium"
+SPDX-License-Identifier = "OGC-1.0"
