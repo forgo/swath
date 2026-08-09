@@ -237,6 +237,7 @@ fn sample_trace() -> Trace {
         provenance: vec![],
         timings: Timings::default(),
         ingest_to_pixel_ms: None,
+        plan: None,
     }
 }
 

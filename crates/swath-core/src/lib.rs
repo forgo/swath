@@ -22,6 +22,9 @@
 //!   and the `IngestReferencer` port (ADR 0006)
 //! - [`manifest`] — virtual-reference manifest schema v1, the port contract
 //!   (ADR 0006), plus the generator-equivalence check
+//! - [`planner`] — the cost-aware materialization planner (issue #37):
+//!   `plan()` chooses `CacheHit | Overview | Live` under a per-layer `Budget`
+//!   and records every candidate's estimate for the Trace
 //! - [`tile`] — quadtree tile addressing + `WebMercatorQuad` TMS math
 //! - [`crs`] — CRS identity (EPSG codes; projection math is an adapter concern)
 //! - [`raster`] — raster metadata, pixel windows, asset references
@@ -37,6 +40,7 @@ pub mod error;
 pub mod events;
 pub mod ingest;
 pub mod manifest;
+pub mod planner;
 pub mod raster;
 pub mod reproject;
 pub mod source;

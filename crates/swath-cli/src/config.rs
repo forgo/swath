@@ -7,7 +7,12 @@
 //! their flags one surface, so both outrank the file).
 //!
 //! The surface is deliberately small: bind address, base URL, store root,
-//! optional tile-cache root (#36), and layer definitions. Layers are file-only (or `--fixtures`) — a
+//! optional tile-cache root (#36), optional materialization budgets
+//! (#37: a global `[budget]` default — its scalar knobs also reachable as
+//! `--overview-oversample`/`SWATH_OVERVIEW_OVERSAMPLE` and
+//! `--max-estimated-live-bytes`/`SWATH_MAX_ESTIMATED_LIVE_BYTES` — with
+//! per-layer `[layers.budget]` overrides; see [`BudgetConfig`]), and
+//! layer definitions. Layers are file-only (or `--fixtures`) — a
 //! layer is a structure, not a scalar, and encoding structures in
 //! environment variables is a misfeature. The layer `kind` enum
 //! (`truecolor` | `ndvi`) is the walking-skeleton stand-in the openEO
@@ -24,6 +29,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use swath_api::{CatalogLayer, Layer, LayerRegistry};
 use swath_core::catalog as domain;
+use swath_core::planner::Budget;
 use swath_core::raster::AssetRef;
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
 use swath_render::{NodataPolicy, Resampling};
@@ -171,6 +177,9 @@ struct ConfigFile {
     catalog: Option<String>,
     /// Drop directory watched for granule manifests (catalog mode only).
     watch_dir: Option<PathBuf>,
+    /// Global default materialization budget (issue #37); per-layer
+    /// `[layers.budget]` values override it knob by knob.
+    budget: Option<BudgetConfig>,
     /// Static layer definitions (mutually exclusive with catalog mode).
     #[serde(default)]
     layers: Vec<LayerConfig>,
@@ -225,6 +234,45 @@ struct LayerConfig {
     resampling: ResamplingConfig,
     /// Tile side length in pixels; defaults to 256.
     tile_size: Option<u32>,
+    /// This layer's materialization budget (issue #37): knobs given here
+    /// override the resolved global default knob by knob.
+    budget: Option<BudgetConfig>,
+}
+
+/// The materialization-budget knobs as config spells them (issue #37,
+/// `docs/design/materialization-planner.md` §1). Every knob is optional
+/// at every level; resolution is knob-by-knob with per-layer values
+/// outranking the global default (which is built-in defaults → top-level
+/// `[budget]` → `--overview-oversample`/`--max-estimated-live-bytes`
+/// flags or their `SWATH_*` variables). Env/flags are inherently global —
+/// budgets are per-layer structures, and structures don't belong in
+/// environment variables (module docs) — so an explicit `[layers.budget]`
+/// value, being more specific, wins over them.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct BudgetConfig {
+    /// Consult/fill the tile cache for this layer (default true; only
+    /// effective when a cache is configured at all).
+    cache_enabled: Option<bool>,
+    /// Overview eligibility slack (default 1.2, GDAL's rule).
+    overview_oversample: Option<f64>,
+    /// Refuse live renders estimated over this many bytes (default:
+    /// never refuse). Per-layer values can set or tighten the ceiling,
+    /// not clear a global one (set a huge value to effectively disable).
+    max_estimated_live_bytes: Option<u64>,
+}
+
+impl BudgetConfig {
+    /// `base` with this config's explicit knobs applied on top.
+    fn overlay(self, base: &Budget) -> Budget {
+        Budget {
+            cache_enabled: self.cache_enabled.unwrap_or(base.cache_enabled),
+            overview_oversample: self.overview_oversample.unwrap_or(base.overview_oversample),
+            max_estimated_live_bytes: self
+                .max_estimated_live_bytes
+                .or(base.max_estimated_live_bytes),
+        }
+    }
 }
 
 /// The built-in plan kinds (openEO compiler stand-in, see module docs).
@@ -306,6 +354,19 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
     let catalog = args.catalog.clone().or(file.catalog);
     let watch_dir = args.watch_dir.clone().or(file.watch_dir);
 
+    // The resolved global default budget (#37): built-in defaults →
+    // top-level [budget] → flags/env. Per-layer [layers.budget] overlays
+    // this knob by knob (BudgetConfig docs carry the precedence story).
+    let mut default_budget = file
+        .budget
+        .map_or_else(Budget::default, |b| b.overlay(&Budget::default()));
+    if let Some(oversample) = args.overview_oversample {
+        default_budget.overview_oversample = oversample;
+    }
+    if let Some(limit) = args.max_estimated_live_bytes {
+        default_budget.max_estimated_live_bytes = Some(limit);
+    }
+
     let layers = if let Some(url) = catalog {
         if !file.layers.is_empty() {
             return Err(ConfigError::MixedLayerSources);
@@ -313,13 +374,24 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
         if file.datasets.is_empty() {
             return Err(ConfigError::NoDatasets);
         }
-        LayerSource::Catalog(compile_catalog_mode(url, watch_dir, &file.datasets)?)
+        LayerSource::Catalog(compile_catalog_mode(
+            url,
+            watch_dir,
+            &file.datasets,
+            &default_budget,
+        )?)
     } else if watch_dir.is_some() {
         return Err(ConfigError::WatchDirNeedsCatalog);
     } else if !file.datasets.is_empty() {
         return Err(ConfigError::DatasetsNeedCatalog);
     } else if args.fixtures {
-        LayerSource::Static(LayerRegistry::hls_fixtures())
+        // Fixture layers ship default budgets; the resolved global
+        // default (flags/env) still applies to them.
+        let mut layers: Vec<Layer> = LayerRegistry::hls_fixtures().iter().cloned().collect();
+        for layer in &mut layers {
+            layer.budget = default_budget.clone();
+        }
+        LayerSource::Static(LayerRegistry::new(layers))
     } else {
         if file.layers.is_empty() {
             return Err(ConfigError::NoLayers);
@@ -327,7 +399,7 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
         let layers: Vec<Layer> = file
             .layers
             .iter()
-            .map(LayerConfig::to_layer)
+            .map(|layer| layer.to_layer(&default_budget))
             .collect::<Result<_, _>>()?;
         LayerSource::Static(LayerRegistry::new(layers))
     };
@@ -349,6 +421,7 @@ fn compile_catalog_mode(
     url: String,
     watch_dir: Option<PathBuf>,
     configs: &[DatasetConfig],
+    default_budget: &Budget,
 ) -> Result<CatalogMode, ConfigError> {
     let mut datasets = Vec::with_capacity(configs.len());
     let mut layers = Vec::new();
@@ -369,7 +442,7 @@ fn compile_catalog_mode(
                     layer: layer.id.clone(),
                 });
             }
-            let (template, domain_layer) = layer.to_catalog_layer(&config.id)?;
+            let (template, domain_layer) = layer.to_catalog_layer(&config.id, default_budget)?;
             bands.extend(template.plan.inputs.iter().map(|input| input.name.clone()));
             layers.push(template);
             domain_layers.push(domain_layer);
@@ -420,7 +493,9 @@ fn load_file(path: &Path) -> Result<ConfigFile, ConfigError> {
 impl LayerConfig {
     /// Compiles this entry into a servable [`Layer`], validating that the
     /// declared bands are exactly the set the kind consumes.
-    fn to_layer(&self) -> Result<Layer, ConfigError> {
+    /// `default_budget` is the resolved global default the entry's own
+    /// `[layers.budget]` overlays.
+    fn to_layer(&self, default_budget: &Budget) -> Result<Layer, ConfigError> {
         let expected = self.kind.bands();
         for band in self.bands.keys() {
             if !expected.contains(&band.as_str()) {
@@ -477,6 +552,10 @@ impl LayerConfig {
             plan: RenderPlan::new(inputs, ops, OutputSpec::new(TileFormat::Png)),
             resampling: self.resampling.into(),
             tile_size: self.tile_size.unwrap_or(256),
+            budget: self.budget.map_or_else(
+                || default_budget.clone(),
+                |budget| budget.overlay(default_budget),
+            ),
         })
     }
 
@@ -493,6 +572,7 @@ impl LayerConfig {
     fn to_catalog_layer(
         &self,
         dataset: &str,
+        default_budget: &Budget,
     ) -> Result<(CatalogLayer, domain::Layer), ConfigError> {
         let expected = self.kind.bands();
         for band in self.bands.keys() {
@@ -573,6 +653,10 @@ impl LayerConfig {
             plan: RenderPlan::new(inputs, ops, OutputSpec::new(TileFormat::Png)),
             resampling: self.resampling.into(),
             tile_size,
+            budget: self.budget.map_or_else(
+                || default_budget.clone(),
+                |budget| budget.overlay(default_budget),
+            ),
         };
         let domain_layer = domain::Layer {
             id: self.id.clone(),
@@ -595,6 +679,8 @@ impl LayerConfig {
 mod tests {
     use std::path::{Path, PathBuf};
 
+    use swath_core::planner::Budget;
+
     use super::{ConfigError, ConfigFile, LayerSource, resolve};
     use crate::serve::ServeArgs;
 
@@ -608,6 +694,8 @@ mod tests {
             catalog: None,
             watch_dir: None,
             cache: None,
+            overview_oversample: None,
+            max_estimated_live_bytes: None,
         }
     }
 
@@ -690,7 +778,9 @@ mod tests {
             b = "b02.tif"
         "#;
         let file: ConfigFile = toml::from_str(good).expect("parses");
-        let layer = file.layers[0].to_layer().expect("compiles");
+        let layer = file.layers[0]
+            .to_layer(&Budget::default())
+            .expect("compiles");
         assert_eq!(layer.id, "tc");
         assert_eq!(layer.title, "tc");
         assert_eq!(layer.tile_size, 256);
@@ -705,7 +795,7 @@ mod tests {
         "#;
         let file: ConfigFile = toml::from_str(missing).expect("parses");
         assert!(matches!(
-            file.layers[0].to_layer(),
+            file.layers[0].to_layer(&Budget::default()),
             Err(ConfigError::MissingBand { band: "g", .. })
         ));
 
@@ -720,9 +810,98 @@ mod tests {
         "#;
         let file: ConfigFile = toml::from_str(extra).expect("parses");
         assert!(matches!(
-            file.layers[0].to_layer(),
+            file.layers[0].to_layer(&Budget::default()),
             Err(ConfigError::UnknownBand { .. })
         ));
+    }
+
+    /// The materialization budget (#37) layers as documented: built-in
+    /// defaults, a global `[budget]` default, flags/env over that, and an
+    /// explicit `[layers.budget]` winning knob by knob.
+    #[test]
+    fn budget_layers_knob_by_knob() {
+        // Absent everywhere: pure defaults on every layer.
+        let file: ConfigFile = toml::from_str(
+            r#"
+            store-root = "/data"
+            [[layers]]
+            id = "tc"
+            kind = "truecolor"
+            [layers.bands]
+            r = "b04.tif"
+            g = "b03.tif"
+            b = "b02.tif"
+        "#,
+        )
+        .expect("parses");
+        let layer = file.layers[0]
+            .to_layer(&Budget::default())
+            .expect("compiles");
+        assert_eq!(layer.budget, Budget::default());
+
+        // Global [budget] + per-layer override: the layer's explicit
+        // knob wins, unspecified knobs inherit the global default.
+        let file: ConfigFile = toml::from_str(
+            r#"
+            store-root = "/data"
+            [budget]
+            overview-oversample = 1.5
+            max-estimated-live-bytes = 50000000
+            [[layers]]
+            id = "tc"
+            kind = "truecolor"
+            [layers.bands]
+            r = "b04.tif"
+            g = "b03.tif"
+            b = "b02.tif"
+            [layers.budget]
+            cache-enabled = false
+            overview-oversample = 1.0
+        "#,
+        )
+        .expect("parses");
+        let global = file
+            .budget
+            .expect("global budget parsed")
+            .overlay(&Budget::default());
+        assert!((global.overview_oversample - 1.5).abs() < f64::EPSILON);
+        assert_eq!(global.max_estimated_live_bytes, Some(50_000_000));
+        assert!(global.cache_enabled, "unset knob keeps its default");
+        let layer = file.layers[0].to_layer(&global).expect("compiles");
+        assert!(!layer.budget.cache_enabled);
+        assert!((layer.budget.overview_oversample - 1.0).abs() < f64::EPSILON);
+        assert_eq!(
+            layer.budget.max_estimated_live_bytes,
+            Some(50_000_000),
+            "unset per-layer knob inherits the global default"
+        );
+
+        // Flags/env act as the global default (resolve() wiring): they
+        // override the file's [budget] scalars.
+        let cfg = resolve(&ServeArgs {
+            fixtures: true,
+            overview_oversample: Some(2.0),
+            max_estimated_live_bytes: Some(123),
+            ..args()
+        })
+        .expect("resolves");
+        let LayerSource::Static(registry) = &cfg.layers else {
+            panic!("fixtures mode is static");
+        };
+        let budget = &registry.get("truecolor").expect("layer").budget;
+        assert!((budget.overview_oversample - 2.0).abs() < f64::EPSILON);
+        assert_eq!(budget.max_estimated_live_bytes, Some(123));
+
+        // A typo inside [layers.budget] fails loudly like every other key.
+        assert!(
+            toml::from_str::<ConfigFile>(
+                r"
+                [budget]
+                oversample = 1.5
+            "
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -765,6 +944,7 @@ mod tests {
             file.catalog.clone().unwrap(),
             file.watch_dir.clone(),
             &file.datasets,
+            &Budget::default(),
         )
         .expect("compiles");
 
@@ -835,7 +1015,12 @@ mod tests {
         second.id = "hls-l30".to_owned();
         file.datasets.push(second);
         assert!(matches!(
-            super::compile_catalog_mode("postgres://x".to_owned(), None, &file.datasets),
+            super::compile_catalog_mode(
+                "postgres://x".to_owned(),
+                None,
+                &file.datasets,
+                &Budget::default(),
+            ),
             Err(ConfigError::DuplicateLayer { layer }) if layer == "truecolor"
         ));
     }

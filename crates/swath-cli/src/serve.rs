@@ -90,6 +90,20 @@ pub(crate) struct ServeArgs {
     /// behaves exactly as before.
     #[arg(long, value_name = "ROOT", env = "SWATH_CACHE")]
     pub(crate) cache: Option<String>,
+
+    /// Global default for the planner's overview oversampling slack
+    /// (issue #37): an overview factor is eligible when `factor <=
+    /// desired ratio x this value`. Default 1.2 (GDAL's slack). Per-layer
+    /// `[layers.budget]` values override it.
+    #[arg(long, value_name = "RATIO", env = "SWATH_OVERVIEW_OVERSAMPLE")]
+    pub(crate) overview_oversample: Option<f64>,
+
+    /// Global default for the planner's live-render ceiling (issue #37):
+    /// refuse tiles whose estimated live cost exceeds this many bytes
+    /// when nothing cheaper can serve. Absent, never refuse. Per-layer
+    /// `[layers.budget]` values override it.
+    #[arg(long, value_name = "BYTES", env = "SWATH_MAX_ESTIMATED_LIVE_BYTES")]
+    pub(crate) max_estimated_live_bytes: Option<u64>,
 }
 
 /// Serve-path errors, each phrased for the operator reading the log.

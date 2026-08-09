@@ -8,18 +8,21 @@
 //!
 //! # What this module fixes, and what it defers
 //!
-//! - **Strategy is [`Strategy::Live`] or [`Strategy::Overview`]** — the
-//!   materialization planner (issue #37) does not exist yet; until it
-//!   lands, the tiler itself makes exactly one local choice (#38): when a
-//!   band's source carries an embedded overview coarse enough for the
-//!   target resolution (GDAL's selection rule — see
-//!   `window::select_overview`), the read is served from that overview
-//!   IFD and the Trace records `Overview { level }` (the decimation
-//!   factor). The Trace reports `Overview` only when **every** band that
-//!   actually read pixels read the same overview level; any mix (or a
-//!   full-res read anywhere) stays `Live` — one tile, one honest
-//!   decision. This is a deliberately minimal seam: #37's planner will
-//!   own the strategy choice and subsume this per-render selection.
+//! - **The planner owns the strategy** (issue #37,
+//!   `docs/design/materialization-planner.md`): the render path gathers
+//!   availability (per-band source extents + overview factors, plus the
+//!   cache probe result in [`render_tile_cached`]), calls the pure
+//!   [`swath_core::planner::plan`], and **executes** the choice — every
+//!   band reads at the planned level ([`ReadLevel::Overview`] at the
+//!   common factor, or full resolution), so execution matches the Trace
+//!   by construction. The #38 per-band overview vote is subsumed: the
+//!   planner picks the coarsest factor *every* band can serve (or none)
+//!   — one tile, one honest decision, now decided before any read. The
+//!   Trace carries the whole reasoning as [`Trace::plan`]. A plan that
+//!   refuses (live estimate over the budget's
+//!   `max_estimated_live_bytes` ceiling with nothing cheaper available)
+//!   surfaces as [`TileError::BudgetExceeded`] — an explicit error,
+//!   never an unbounded read.
 //! - **The target CRS is fixed to Web Mercator** ([`Crs::WEB_MERCATOR`]):
 //!   `WebMercatorQuad` is the only TMS in Phase 1 (`TileCoord` is defined
 //!   on it). Other target TMSs widen [`TileRequest`] later.
@@ -71,6 +74,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use swath_core::cache::{TileCache, TileKey};
 use swath_core::catalog::Datetime;
 use swath_core::crs::Crs;
+use swath_core::planner::{Availability, BandWindow, Budget, CacheProbe, Plan, PlanChoice, plan};
 use swath_core::raster::{AssetRef, RasterInfo};
 use swath_core::reproject::{CoordTransform, Reproject, ReprojectError};
 use swath_core::source::{BandSelection, RasterSource, ReadLevel, SourceError};
@@ -82,7 +86,7 @@ use crate::error::RenderError;
 use crate::grid::TargetGrid;
 use crate::ir::{PlanError, RenderPlan, TileFormat, eval};
 use crate::warp::{Resampling, WarpedBuffer, warp};
-use crate::window::{clip_to_raster, select_overview, source_extent};
+use crate::window::{SourceExtent, clip_to_raster, source_extent};
 
 #[cfg(doc)]
 use swath_core::source::WindowData;
@@ -118,6 +122,10 @@ pub struct TileRequest {
     /// ingest-to-pixel timer. `None` (static/fixture layers) leaves
     /// [`Trace::ingest_to_pixel_ms`] unset.
     pub ingested_at: Option<Datetime>,
+    /// The layer's materialization budget (#37) — the planner's knobs.
+    /// Defaults ([`Budget::default`]) reproduce pre-planner behavior
+    /// exactly.
+    pub budget: Budget,
 }
 
 impl TileRequest {
@@ -138,6 +146,7 @@ impl TileRequest {
             tile_size,
             resampling,
             ingested_at: None,
+            budget: Budget::default(),
         }
     }
 
@@ -146,6 +155,14 @@ impl TileRequest {
     #[must_use]
     pub fn with_ingested_at(mut self, ingested_at: Datetime) -> Self {
         self.ingested_at = Some(ingested_at);
+        self
+    }
+
+    /// Renders under this materialization budget (#37) instead of the
+    /// defaults.
+    #[must_use]
+    pub fn with_budget(mut self, budget: Budget) -> Self {
+        self.budget = budget;
         self
     }
 }
@@ -171,6 +188,22 @@ pub enum TileError {
     /// The plan declares no input bands, so there is nothing to render.
     #[error("render plan declares no input bands")]
     NoBands,
+
+    /// The planner refused every strategy (#37): the live estimate
+    /// exceeds the layer budget's `max_estimated_live_bytes` and neither
+    /// cache nor overview can serve. Deliberate and loud — the budget
+    /// exists to protect the latency budget from absurd reads.
+    #[error(
+        "materialization budget exceeded: estimated live render of \
+         {estimated_live_bytes} bytes is over the {limit}-byte ceiling and \
+         no cheaper strategy is available"
+    )]
+    BudgetExceeded {
+        /// The planner's live estimate.
+        estimated_live_bytes: u64,
+        /// The layer's `max_estimated_live_bytes` ceiling.
+        limit: u64,
+    },
 
     /// The plan declares a band input the request maps to no asset.
     #[error("band `{band}` has no asset in the request")]
@@ -337,30 +370,107 @@ async fn describe_bands<'a, S: RasterSource>(
     Ok(bands)
 }
 
-/// Windows, reads, and warps one band. A band whose source window misses
-/// the raster entirely yields an all-invalid plane — nothing read, nothing
+/// The fractional full-res source extent of the tile boundary, per band
+/// in declaration order (`None` when the band's transform domain or
+/// raster misses the tile) — the pure geometry both the planner's
+/// availability and the reads are built from, computed once.
+#[allow(
+    clippy::result_large_err,
+    reason = "TileError is deliberately diagnostic-rich (MixedCrs carries both \
+              CRSs, bands, and assets); these helpers run once per render on \
+              an error path, and boxing would obscure the taxonomy. The async \
+              render fns return the same type; the lint only sees sync fns."
+)]
+fn band_extents(
+    bands: &[BandAsset<'_>],
+    geometry: &RenderGeometry,
+    to_source: &dyn CoordTransform,
+) -> Result<Vec<Option<SourceExtent>>, TileError> {
+    bands
+        .iter()
+        .map(|band| {
+            source_extent(&geometry.grid, &band.info, to_source).map_err(|source| TileError::Warp {
+                band: band.name.to_owned(),
+                source,
+            })
+        })
+        .collect()
+}
+
+/// The overview factor the render executes (`None` = full resolution),
+/// or the refusal as an error. The probe handed to the render engine is
+/// never a hit (`render_tile_cached` serves hits without rendering), so
+/// the planner cannot choose `CacheHit` here.
+#[allow(
+    clippy::result_large_err,
+    reason = "TileError is deliberately diagnostic-rich (MixedCrs carries both \
+              CRSs, bands, and assets); these helpers run once per render on \
+              an error path, and boxing would obscure the taxonomy. The async \
+              render fns return the same type; the lint only sees sync fns."
+)]
+fn planned_factor(planned: &Plan) -> Result<Option<u32>, TileError> {
+    match planned.strategy {
+        PlanChoice::Overview { factor } => Ok(Some(factor)),
+        PlanChoice::Live => Ok(None),
+        PlanChoice::Refuse {
+            estimated_live_bytes,
+            limit,
+        } => Err(TileError::BudgetExceeded {
+            estimated_live_bytes,
+            limit,
+        }),
+        // `_` also covers `#[non_exhaustive]`.
+        PlanChoice::CacheHit | _ => {
+            unreachable!("render_planned is never given a cache hit")
+        }
+    }
+}
+
+/// The planner's [`Availability`] for this render: the cache probe result
+/// plus one [`BandWindow`] per band whose extent intersects its raster.
+fn availability(
+    probe: CacheProbe,
+    tile_size: u32,
+    bands: &[BandAsset<'_>],
+    extents: &[Option<SourceExtent>],
+) -> Availability {
+    let windows = bands
+        .iter()
+        .zip(extents)
+        .filter_map(|(band, extent)| {
+            extent.as_ref().map(|e| {
+                BandWindow::new(
+                    e.max_col - e.min_col,
+                    e.max_row - e.min_row,
+                    band.info.dtype.size_bytes() as u64,
+                    band.info.overview_levels.clone(),
+                )
+            })
+        })
+        .collect();
+    Availability::new(probe, tile_size, windows)
+}
+
+/// Reads and warps one band at the **planned** level. A band whose source
+/// window misses the raster entirely (`extent` is `None`, or the clipped
+/// window is empty) yields an all-invalid plane — nothing read, nothing
 /// to explain but the absence itself.
 ///
-/// Returns the warped plane plus this band's **level vote** for the
-/// Trace's decision: `None` when nothing was read, `Some(None)` for a
-/// full-resolution read, `Some(Some(factor))` for an overview read.
-///
-/// Overview selection (#38, the pre-planner mini-decision — module docs):
-/// the source extent is traced once; if the source's `overview_levels`
-/// contain a factor eligible under GDAL's rule (`select_overview`), the
-/// read targets that level. The request stays in **full-resolution**
-/// coordinates (the `ReadLevel` port contract) with the resampling margin
-/// scaled by the factor (a margin of N overview pixels spans N x factor
-/// full-res pixels); the adapter returns the overview grid it actually
-/// read inside `WindowData::grid`, and the warp runs off that grid
-/// unchanged — no overview arithmetic here.
+/// The request stays in **full-resolution** coordinates (the `ReadLevel`
+/// port contract) with the resampling margin scaled by the factor (a
+/// margin of N overview pixels spans N × factor full-res pixels); the
+/// adapter returns the overview grid it actually read inside
+/// `WindowData::grid`, and the warp runs off that grid unchanged — no
+/// overview arithmetic here.
 async fn read_and_warp<S: RasterSource>(
     source: &S,
     band: &BandAsset<'_>,
+    extent: Option<&SourceExtent>,
+    factor: Option<u32>,
     geometry: &RenderGeometry,
     to_source: &dyn CoordTransform,
     acc: &mut Accounting,
-) -> Result<(WarpedBuffer, Option<Option<u32>>), TileError> {
+) -> Result<WarpedBuffer, TileError> {
     let grid = &geometry.grid;
     let stage = |source| TileError::Warp {
         band: band.name.to_owned(),
@@ -375,15 +485,9 @@ async fn read_and_warp<S: RasterSource>(
             valid: vec![false; len],
         }
     };
-    let Some(extent) = source_extent(grid, &band.info, to_source).map_err(stage)? else {
-        return Ok((nothing(), None));
+    let Some(extent) = extent else {
+        return Ok(nothing());
     };
-    let factor = select_overview(
-        &band.info.overview_levels,
-        &extent,
-        grid.width(),
-        grid.height(),
-    );
     let (level, margin) = match factor {
         Some(f) => (
             ReadLevel::Overview { factor: f },
@@ -391,8 +495,8 @@ async fn read_and_warp<S: RasterSource>(
         ),
         None => (ReadLevel::FullRes, geometry.margin),
     };
-    let Some(window) = clip_to_raster(&extent, margin, &band.info) else {
-        return Ok((nothing(), None));
+    let Some(window) = clip_to_raster(extent, margin, &band.info) else {
+        return Ok(nothing());
     };
 
     let read_started = Instant::now();
@@ -410,12 +514,14 @@ async fn read_and_warp<S: RasterSource>(
     let warp_started = Instant::now();
     let buffer = warp(&data, to_source, grid, geometry.resampling).map_err(stage)?;
     acc.warp_time += warp_started.elapsed();
-    Ok((buffer, Some(factor)))
+    Ok(buffer)
 }
 
 /// Renders one tile end-to-end: for each declared band — describe (once
-/// per distinct asset), compute the source window, read, warp — then run
-/// the plan's pixel ops, encode, and assemble the [`Trace`].
+/// per distinct asset), compute the source window — then **plan** the
+/// materialization strategy (#37), execute it (read at the planned level,
+/// warp), run the plan's pixel ops, encode, and assemble the [`Trace`]
+/// (the planner's full reasoning included as [`Trace::plan`]).
 ///
 /// Generic over the two ports it consumes; no dynamic dispatch is needed
 /// while every caller knows its adapters at compile time.
@@ -424,11 +530,25 @@ async fn read_and_warp<S: RasterSource>(
 ///
 /// Any [`TileError`]; see its variants for the taxonomy. A tile that
 /// simply has no source data where it falls is **not** an error (module
-/// docs).
+/// docs); a tile the budget refuses ([`TileError::BudgetExceeded`]) is.
 pub async fn render_tile<S: RasterSource, R: Reproject + ?Sized>(
     source: &S,
     reproject: &R,
     request: &TileRequest,
+) -> Result<(EncodedTile, Trace), TileError> {
+    render_planned(source, reproject, request, CacheProbe::NotConfigured).await
+}
+
+/// [`render_tile`] with an explicit cache probe result for the planner's
+/// availability — the shared engine of both the plain and the cached
+/// serve paths (`probe` is what the caller learned before rendering:
+/// `NotConfigured`, `Disabled`, or `Miss`; a `Hit` never reaches here —
+/// [`render_tile_cached`] serves it without rendering).
+async fn render_planned<S: RasterSource, R: Reproject + ?Sized>(
+    source: &S,
+    reproject: &R,
+    request: &TileRequest,
+    probe: CacheProbe,
 ) -> Result<(EncodedTile, Trace), TileError> {
     let started = Instant::now();
     let geometry = RenderGeometry {
@@ -464,17 +584,28 @@ pub async fn render_tile<S: RasterSource, R: Reproject + ?Sized>(
             source,
         })?;
 
-    // Phase 3: window → read → warp, per band in declaration order,
-    // collecting each band's level vote for the decision below.
+    // Phase 3: per-band source extents (pure geometry, no I/O) → the
+    // planner's availability → plan (#37) → execute the chosen strategy.
+    let extents = band_extents(&bands, &geometry, to_source.as_ref())?;
+    let planned = plan(
+        &request.budget,
+        &availability(probe, request.tile_size, &bands, &extents),
+    );
+    let factor = planned_factor(&planned)?;
+
     let mut warped: Vec<WarpedBuffer> = Vec::with_capacity(bands.len());
-    let mut votes: Vec<Option<u32>> = Vec::with_capacity(bands.len());
-    for band in &bands {
-        let (buffer, vote) =
-            read_and_warp(source, band, &geometry, to_source.as_ref(), &mut acc).await?;
+    for (band, extent) in bands.iter().zip(&extents) {
+        let buffer = read_and_warp(
+            source,
+            band,
+            extent.as_ref(),
+            factor,
+            &geometry,
+            to_source.as_ref(),
+            &mut acc,
+        )
+        .await?;
         warped.push(buffer);
-        if let Some(vote) = vote {
-            votes.push(vote);
-        }
     }
 
     // Phase 4: pixel ops, then encode.
@@ -495,14 +626,10 @@ pub async fn render_tile<S: RasterSource, R: Reproject + ?Sized>(
             sources.push(band.asset.clone());
         }
     }
-    // Overview only when every band that read pixels read the same
-    // overview level; anything else is honestly Live (module docs; #37's
-    // planner subsumes this).
-    let decision = match votes.first() {
-        Some(&Some(level)) if votes.iter().all(|&v| v == Some(level)) => {
-            Strategy::Overview { level }
-        }
-        _ => Strategy::Live,
+    // The executed strategy is exactly the planned one (module docs).
+    let decision = match factor {
+        Some(level) => Strategy::Overview { level },
+        None => Strategy::Live,
     };
     let trace = Trace {
         decision,
@@ -520,6 +647,7 @@ pub async fn render_tile<S: RasterSource, R: Reproject + ?Sized>(
             total_ms: millis(started.elapsed()),
         },
         ingest_to_pixel_ms: request.ingested_at.as_ref().map(ingest_to_pixel_ms),
+        plan: planned.trace(),
     };
 
     Ok((
@@ -534,8 +662,15 @@ pub async fn render_tile<S: RasterSource, R: Reproject + ?Sized>(
 /// [`render_tile`] behind a write-through [`TileCache`] (#36,
 /// ARCHITECTURE.md §8's `write-through cache?` box): consult the cache
 /// under `key` first — a hit serves the stored bytes with a
-/// [`Strategy::CacheHit`] Trace; a miss renders live exactly as
-/// [`render_tile`] does, then writes the encoded tile through.
+/// [`Strategy::CacheHit`] Trace (the planner's terminal cache choice,
+/// #37); a miss renders exactly as [`render_tile`] does (the planner
+/// seeing `CacheProbe::Miss`), then writes the encoded tile through. A
+/// budget with `cache_enabled = false` skips both the probe and the
+/// write-through — the layer opts out of cache storage entirely.
+///
+/// Write-through policy deliberately stays here, not in the planner
+/// (spec §4): what to do with a fresh render is a serving concern; a
+/// budget-aware write policy is recorded future work.
 ///
 /// # Cache-failure policy (the port leaves it to this caller)
 ///
@@ -583,9 +718,37 @@ where
 {
     let started = Instant::now();
     let content_type = request.plan.output.format.content_type();
+
+    // The budget's cache knob (#37): a layer with `cache_enabled = false`
+    // opts out entirely — no probe, no write-through; the planner sees
+    // `Disabled` and the Trace says so.
+    if !request.budget.cache_enabled {
+        return render_planned(source, reproject, request, CacheProbe::Disabled).await;
+    }
+
     match cache.get(key).await {
         Ok(Some(entry)) if entry.content_type == content_type => {
-            return Ok(cache_hit(key, request, entry.bytes, started.elapsed()));
+            // The probe result is the planner's cache availability; the
+            // plan is the (terminal) cache-hit choice with the full
+            // candidate record for the x-ray (#37).
+            let planned = plan(
+                &request.budget,
+                &Availability::new(
+                    CacheProbe::Hit {
+                        payload_bytes: entry.bytes.len() as u64,
+                    },
+                    request.tile_size,
+                    Vec::new(),
+                ),
+            );
+            debug_assert_eq!(planned.strategy, PlanChoice::CacheHit);
+            return Ok(cache_hit(
+                key,
+                request,
+                entry.bytes,
+                started.elapsed(),
+                &planned,
+            ));
         }
         Ok(Some(entry)) => {
             // The key binds the plan and the plan fixes the format, so a
@@ -604,7 +767,7 @@ where
         }
     }
 
-    let (encoded, trace) = render_tile(source, reproject, request).await?;
+    let (encoded, trace) = render_planned(source, reproject, request, CacheProbe::Miss).await?;
     if let Err(err) = cache.put(key, &encoded.bytes, content_type).await {
         tracing::warn!(
             key = %key,
@@ -622,6 +785,7 @@ fn cache_hit(
     request: &TileRequest,
     bytes: Vec<u8>,
     total: Duration,
+    planned: &Plan,
 ) -> (EncodedTile, Trace) {
     let entry = AssetRef::new(format!("cache://{key}"));
     let trace = Trace {
@@ -639,6 +803,7 @@ fn cache_hit(
             ..Timings::default()
         },
         ingest_to_pixel_ms: None,
+        plan: planned.trace(),
     };
     (
         EncodedTile {

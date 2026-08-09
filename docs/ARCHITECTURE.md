@@ -345,6 +345,11 @@ replicas) + managed Postgres + bucket. The pure-Rust core keeps the image tiny a
    semantics: the `swath-core` `cache` module docs.)*
 4. **Planner budget semantics.** Per-layer policy knobs vs. a global cost model that learns from Trace
    history. How much of Phase 1 does the planner actually need (MVP could be "always Live" + Trace)?
+   *(Resolved for v1 by [`docs/design/materialization-planner.md`](design/materialization-planner.md)
+   (issue #37): **explicit per-layer knobs + transparent cost estimates** — `cache_enabled`,
+   `overview_oversample`, `max_estimated_live_bytes` — with a documented, calibratable byte model and
+   every candidate's estimate recorded in the Trace (`plan.considered`). A learned cost model fitted
+   from Trace history is recorded there as future work; the Trace already carries its training pairs.)*
 5. **Control-plane domain model.** Exact `Dataset`/`Layer` schema that cleanly hides STAC yet round-trips
    to it losslessly. This is the "make STAC disappear" contract and deserves its own mini-spec.
    *(Resolved by [`docs/design/catalog-domain.md`](design/catalog-domain.md): `Dataset`/`Granule`/`Layer`

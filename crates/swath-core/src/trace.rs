@@ -17,6 +17,7 @@
 //!   changing it is a deliberate, reviewed act.
 
 use crate::crs::Crs;
+use crate::planner::{CandidateTrace, PlannedStrategy};
 use crate::raster::AssetRef;
 
 /// The materialization strategy the planner chose for a tile
@@ -88,6 +89,22 @@ pub struct Timings {
     pub total_ms: u64,
 }
 
+/// The planner's reasoning for one tile (issue #37,
+/// `docs/design/materialization-planner.md`): the chosen strategy and
+/// **every** candidate weighed, each with its cost estimate,
+/// admissibility, and reason — the x-ray answer to "why did it decide
+/// that?" (CHARTER.md §6). [`Trace::decision`] stays the *executed*
+/// strategy; this field explains the choice against its alternatives.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PlanTrace {
+    /// The strategy the planner chose (candidate shape — the executed
+    /// form, key included for cache hits, is [`Trace::decision`]).
+    pub chosen: PlannedStrategy,
+    /// Every candidate, in the fixed evaluation order `cache_hit`,
+    /// `overview`, `live`.
+    pub considered: Vec<CandidateTrace>,
+}
+
 /// The structured explanation of one rendered tile — what happened, from
 /// where, and how long it took.
 ///
@@ -140,13 +157,46 @@ pub struct Trace {
     /// Ingest-to-pixel latency, present when this tile is the first render
     /// reflecting a just-ingested granule (the north-star timer).
     pub ingest_to_pixel_ms: Option<u64>,
+    /// The planner's reasoning (#37): chosen strategy + every candidate
+    /// with estimates. Present on every planned render; `None` only for
+    /// traces predating the planner (or synthetic ones).
+    pub plan: Option<PlanTrace>,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Provenance, Strategy, Timings, Trace};
+    use std::borrow::Cow;
+
+    use super::{PlanTrace, Provenance, Strategy, Timings, Trace};
     use crate::crs::Crs;
+    use crate::planner::{CandidateTrace, PlannedStrategy};
     use crate::raster::AssetRef;
+
+    fn sample_plan() -> PlanTrace {
+        PlanTrace {
+            chosen: PlannedStrategy::Overview { factor: 2 },
+            considered: vec![
+                CandidateTrace {
+                    strategy: PlannedStrategy::CacheHit,
+                    estimated_cost_bytes: 0,
+                    admissible: false,
+                    reason: Cow::Borrowed("cache miss"),
+                },
+                CandidateTrace {
+                    strategy: PlannedStrategy::Overview { factor: 2 },
+                    estimated_cost_bytes: 128_018,
+                    admissible: true,
+                    reason: Cow::Borrowed("coarsest overview within the oversample threshold"),
+                },
+                CandidateTrace {
+                    strategy: PlannedStrategy::Live,
+                    estimated_cost_bytes: 510_050,
+                    admissible: true,
+                    reason: Cow::Borrowed("full-resolution read"),
+                },
+            ],
+        }
+    }
 
     fn sample() -> Trace {
         Trace {
@@ -172,11 +222,20 @@ mod tests {
                 total_ms: 18,
             },
             ingest_to_pixel_ms: Some(950),
+            plan: Some(sample_plan()),
         }
     }
 
     /// The serialized field names and enum tags are a contract (SSE stream +
     /// tests); this pins the exact JSON so drift is a visible diff.
+    ///
+    /// The one deliberate change in #37: the Trace gains `plan` — the
+    /// planner's chosen strategy plus every weighed candidate (estimate,
+    /// admissibility, reason). This is the x-ray "why did it decide
+    /// that?" payload the charter promises (§6); candidates reuse the
+    /// `Strategy` tag vocabulary (`cache_hit`/`overview`/`live`, factor
+    /// instead of key) so the overlay parses one vocabulary. `plan` is
+    /// `null` only on traces that never went through the planner.
     #[test]
     fn json_shape_is_pinned() {
         let json = serde_json::to_value(sample()).unwrap();
@@ -190,6 +249,29 @@ mod tests {
             "provenance": [{"path": "granule/B04.tif", "offset": 4096, "length": 131_072}],
             "timings": {"read_ms": 12, "warp_ms": 3, "pixel_ops_ms": 1, "encode_ms": 2, "total_ms": 18},
             "ingest_to_pixel_ms": 950,
+            "plan": {
+                "chosen": {"overview": {"factor": 2}},
+                "considered": [
+                    {
+                        "strategy": "cache_hit",
+                        "estimated_cost_bytes": 0,
+                        "admissible": false,
+                        "reason": "cache miss",
+                    },
+                    {
+                        "strategy": {"overview": {"factor": 2}},
+                        "estimated_cost_bytes": 128_018,
+                        "admissible": true,
+                        "reason": "coarsest overview within the oversample threshold",
+                    },
+                    {
+                        "strategy": "live",
+                        "estimated_cost_bytes": 510_050,
+                        "admissible": true,
+                        "reason": "full-resolution read",
+                    },
+                ],
+            },
         });
         assert_eq!(json, expected);
     }
