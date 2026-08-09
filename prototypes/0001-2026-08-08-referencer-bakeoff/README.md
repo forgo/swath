@@ -1,6 +1,6 @@
 # Prototype 0001 — Referencer Bake-Off (Python VirtualiZarr vs pure-Rust)
 
-**Started:** 2026-08-08 · **Status:** In progress · **Settles:** ADR 0006
+**Started:** 2026-08-08 · **Status:** Concluded 2026-08-08 (immutable) · **Settles:** ADR 0006 · **Spawned:** ADR 0008
 
 ## 1. Question
 
@@ -142,12 +142,43 @@ The manifest is the contract (ADR 0001, ADR 0006): whoever generates it, the ser
     VirtualiZarr's private `ManifestStore._group` because no public API exposes the raw manifest
     tree.
 
+- 2026-08-08 — **Footprint (H4) + reproducibility pinning; bake-off concluded.**
+  - **Deployment footprint:** `cargo build --release --features grib,hdf5` → a **4,514,064-byte
+    (4.5 MB)** self-contained binary (libhdf5 2.2.0 statically bundled, no system deps) vs the
+    sidecar's **273 MB** virtualenv (32 packages) — **~60× smaller**, no interpreter, no env
+    management. H4 supported.
+  - **Reproducibility:** `sidecar/requirements.txt` now pins the exact versions these results were
+    produced with (virtualizarr 2.7.3, h5py 3.16.0, kerchunk 0.2.10, cfgrib 0.9.15.1,
+    eccodes 2.47.0, xarray 2026.7.0, numpy 2.5.1). Rust side pinned via Cargo (gribberish 1.6.0,
+    hdf5-metno 0.14.0).
+  - **Hypothesis scorecard:** H1 ✅ (67/67 arrays, 1,551/1,551 chunk refs byte-identical on VIIRS
+    HDF5), H2 ✅ (GRIB2 equivalent with <1 ms generation), H3 ✅ (Rust ≤ sidecar: ~40× warm on
+    HDF5, ~1000× on GRIB2), H4 ✅ (~60× footprint).
+
 ## 8. Decision
 
-*(To be recorded here and promoted to / reconciled with ADR 0006 when concluded.)*
+*Concluded 2026-08-08; recorded in ADR 0006 (status updated) and ADR 0008 (dataset correction).
+This prototype is now immutable.*
 
-- Provisional (pre-run): stage Python-first, build Rust behind the same port, sunset per-format as Rust
-  reaches parity. This prototype produces the per-format evidence for that plan.
+**Build the pure-Rust referencer as the primary generator for GRIB2 and HDF5/NetCDF4; retain the
+VirtualiZarr sidecar as the conformance reference and long-tail fallback.** Per-format evidence:
+
+- **GRIB2 → Rust-primary, immediately.** gribberish 1.6 exposes everything referencing needs;
+  equivalence exact; generation effectively free (<1 ms). The provisional "Python-first, Rust
+  later" staging is unnecessary for this format.
+- **HDF5/NetCDF4 → Rust-primary, immediately.** `hdf5-metno` (`chunks_visit`/H5Dchunk_iter,
+  bundled static libhdf5) delivers exact chunk-index equivalence on a real VIIRS granule with
+  deflate compression, ~40× faster, in a 4.5 MB binary. The sidecar remains the cross-check in
+  the conformance harness and the fallback for cases the prototype could not exercise: nonzero
+  per-chunk `filter_mask`, exotic/big-endian dtypes (deliberate hard error in the Rust path),
+  and any container h5py accepts that hdf5-metno rejects.
+- **HDF4 / HDF-EOS2 (true MODIS-heritage containers, incl. swath VNP09) → neither path today.**
+  Discovered during validation: VNP09 c002 is HDF4, which libhdf5/h5py cannot read at all — so
+  this isn't a Rust-maturity gap but an ecosystem one, consistent with ADR 0004's decision to
+  defer MODIS/HDF4 as a stretch. The legacy-primary dataset becomes **VNP09GA** (ADR 0008).
+- **Production port unchanged:** the VirtualManifest stays the contract; the equivalence harness
+  built here is promoted into the production conformance suite when `swath-source-virtual` and
+  the ingest referencer land (M3, issues #39-40).
 
 ## 9. How to run
 

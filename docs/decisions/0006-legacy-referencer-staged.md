@@ -1,6 +1,9 @@
 # ADR 0006 — Legacy referencer: staged Python→Rust behind one manifest port
 
-**Status:** Accepted (pending evidence from prototype 0001) · **Date:** 2026-08-08
+**Status:** Accepted (confirmed by prototype 0001, concluded 2026-08-08 — evidence exceeded the
+plan: Rust is primary for GRIB2 *and* HDF5 immediately, sidecar retained as conformance
+reference/fallback; see the prototype's §7-8 and ADR 0008 for the VNP09GA dataset correction) ·
+**Date:** 2026-08-08
 
 ## Context
 
