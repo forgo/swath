@@ -27,6 +27,15 @@ pub enum Error {
         y: u32,
     },
 
+    /// A timestamp that is not RFC 3339 UTC (`Z`-suffixed) — the only
+    /// datetime form the catalog domain accepts
+    /// (see [`Datetime`](crate::catalog::Datetime)).
+    #[error("invalid datetime `{value}`: expected RFC 3339 UTC, e.g. 2024-06-06T17:54:00Z")]
+    InvalidDatetime {
+        /// The rejected string.
+        value: String,
+    },
+
     /// A [`GeoTransform`](crate::raster::GeoTransform) whose linear part is
     /// singular (determinant ~0), so CRS→pixel inversion is undefined.
     #[error("geotransform is not invertible (determinant {determinant})")]

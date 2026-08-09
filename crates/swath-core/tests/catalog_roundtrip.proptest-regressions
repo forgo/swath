@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 88046e870485e951872e5c0d3953b096992e2d08ac01f45876fd4d619a9d9fbf # shrinks to g = Granule { id: GranuleId("a"), dataset: DatasetId("0"), bbox: Bbox { west: 0.0, south: 0.0, east: 99.78121764843607, north: 0.0 }, datetime: Datetime("1970-01-01T00:00:00Z"), assets: {} }
+cc 38cc4931b0d61351b7308939594d22650ce93cbace07c72c79c08bd408642180 # shrinks to d = Dataset { id: DatasetId("a"), title: "", description: "", license: "a", extent: Extent { bbox: Bbox { west: 0.0, south: 0.0, east: 0.0, north: -12.367617161236007 }, interval: TimeRange { start: None, end: None } }, bands: {}, layers: [] }

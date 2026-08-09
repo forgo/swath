@@ -1,0 +1,76 @@
+---
+source: crates/swath-core/tests/catalog_roundtrip.rs
+expression: dataset_to_stac_collection(&hls_dataset())
+---
+{
+  "description": "Harmonized Landsat Sentinel-2, S30 product.",
+  "extent": {
+    "spatial": {
+      "bbox": [
+        [
+          -106.1,
+          39.2,
+          -105.9,
+          39.4
+        ]
+      ]
+    },
+    "temporal": {
+      "interval": [
+        [
+          "2024-06-01T00:00:00Z",
+          null
+        ]
+      ]
+    }
+  },
+  "id": "hls-s30",
+  "license": "CC0-1.0",
+  "links": [],
+  "stac_version": "1.1.0",
+  "swath:bands": [
+    "b02",
+    "b03",
+    "b04",
+    "b8a"
+  ],
+  "swath:layers": [
+    {
+      "description": "B04/B03/B02 composite.",
+      "id": "truecolor",
+      "plan": {
+        "composite": {
+          "b": "b02",
+          "g": "b03",
+          "r": "b04"
+        }
+      },
+      "resampling": "bilinear",
+      "rescale": {
+        "max": 3000.0,
+        "min": 0.0
+      },
+      "tile_size": 256,
+      "title": "HLS true color"
+    },
+    {
+      "colormap": "grayscale",
+      "description": "(B8A - B04) / (B8A + B04), grayscale.",
+      "id": "ndvi",
+      "plan": {
+        "band_math": {
+          "expression": "(b8a - b04) / (b8a + b04)"
+        }
+      },
+      "resampling": "bilinear",
+      "rescale": {
+        "max": 1.0,
+        "min": -1.0
+      },
+      "tile_size": 256,
+      "title": "HLS NDVI"
+    }
+  ],
+  "title": "HLS Sentinel-2 (S30)",
+  "type": "Collection"
+}

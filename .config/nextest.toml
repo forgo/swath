@@ -1,0 +1,12 @@
+# nextest configuration (checked by `cargo nextest`; see ENGINEERING.md §2).
+
+# The pgstac integration suite must run serially: pgstac maintains one
+# partition of `items` per collection, and concurrent collection
+# create/delete/upsert races its partition DDL ("relation _items_N does not
+# exist"). Each test owning its collection is not enough — the DDL itself is
+# the shared resource. `threads-required = "num-test-threads"` makes every
+# test in the package occupy the whole run slot, i.e. serial execution,
+# without slowing any other package down.
+[[profile.default.overrides]]
+filter = 'package(swath-catalog-pgstac)'
+threads-required = "num-test-threads"

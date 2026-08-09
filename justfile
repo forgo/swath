@@ -195,6 +195,22 @@ lint-web:
 test-web:
     cd web && pnpm run test
 
+# The pgstac catalog integration suite (issue #30): the adapter's live tests
+# are #[ignore] by default (they need a real pgstac); this recipe brings up
+# the compose pgstac service (reusing one that is already running), runs them
+# (serially — see .config/nextest.toml), and tears down only what it started.
+test-catalog:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    started=0
+    if [ -z "$(docker compose ps -q --status running pgstac)" ]; then
+        docker compose up -d --wait pgstac
+        started=1
+    fi
+    teardown() { if [ "$started" = 1 ]; then docker compose rm -sfv pgstac; fi; }
+    trap teardown EXIT
+    cargo nextest run -p swath-catalog-pgstac --run-ignored all
+
 # The compose-stack e2e (issues #15/#29, REQUIREMENTS.md R8): build the swath
 # image, bring up the full local stack (swath + pgstac + MinIO), verify infra
 # health, then exercise the binary end to end — landing page, a served tile

@@ -341,6 +341,10 @@ replicas) + managed Postgres + bucket. The pure-Rust core keeps the image tiny a
    history. How much of Phase 1 does the planner actually need (MVP could be "always Live" + Trace)?
 5. **Control-plane domain model.** Exact `Dataset`/`Layer` schema that cleanly hides STAC yet round-trips
    to it losslessly. This is the "make STAC disappear" contract and deserves its own mini-spec.
+   *(Resolved by [`docs/design/catalog-domain.md`](design/catalog-domain.md): `Dataset`/`Granule`/`Layer`
+   map to STAC Collection/Item with swath-owned fields under a `swath:` prefix — `Layer`s stored as
+   `swath:layers` on the Collection — and a proptest-enforced domain→STAC→domain identity. The `Catalog`
+   port is domain-shaped, refining the §6 sketch: STAC types appear only inside adapters.)*
 6. **Extension mechanism (§14).** Commit to compile-time features for v1 and defer WASM? Confirm.
 7. **Async vs blocking render boundary.** `spawn_blocking` + `rayon` vs a dedicated render threadpool with a
    work-stealing queue and admission control (matters under load and for the latency budget).

@@ -1,0 +1,54 @@
+---
+source: crates/swath-core/tests/catalog_roundtrip.rs
+expression: granule_to_stac_item(&hls_granule())
+---
+{
+  "assets": {
+    "b04": {
+      "href": "s3://hls/t13sdd/2024158/b04.tif"
+    },
+    "b8a": {
+      "href": "s3://hls/t13sdd/2024158/b8a.tif"
+    }
+  },
+  "bbox": [
+    -106.1,
+    39.2,
+    -105.9,
+    39.4
+  ],
+  "collection": "hls-s30",
+  "geometry": {
+    "coordinates": [
+      [
+        [
+          -106.1,
+          39.2
+        ],
+        [
+          -105.9,
+          39.2
+        ],
+        [
+          -105.9,
+          39.4
+        ],
+        [
+          -106.1,
+          39.4
+        ],
+        [
+          -106.1,
+          39.2
+        ]
+      ]
+    ],
+    "type": "Polygon"
+  },
+  "id": "hlss30-t13sdd-2024158",
+  "properties": {
+    "datetime": "2024-06-06T17:54:00Z"
+  },
+  "stac_version": "1.1.0",
+  "type": "Feature"
+}

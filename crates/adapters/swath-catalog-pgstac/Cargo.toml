@@ -1,0 +1,21 @@
+[package]
+name = "swath-catalog-pgstac"
+description = "Catalog adapter: Datasets/Granules persisted as STAC Collections/Items via pgstac's SQL functions."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+swath-core = { path = "../../swath-core", version = "0.0.0" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
