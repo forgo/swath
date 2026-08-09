@@ -28,7 +28,8 @@ use crate::error::ApiError;
 use crate::model::{
     BoundingBox2D, Conformance, LandingPage, Link, TileSetItem, TileSetList, TileSetMetadata,
 };
-use crate::registry::{Layer, LayerRegistry};
+use crate::provider::{LayerIdentity, LayerProvider};
+use crate::registry::Layer;
 use crate::traces::TraceBus;
 
 /// The OGC API - Tiles 1.0 (OGC 20-057) conformance classes this surface
@@ -68,12 +69,12 @@ const MAX_TILE_MATRIX: u8 = 24;
 const BOUNDS_SAMPLES_PER_EDGE: u32 = 16;
 
 /// Everything the handlers need, wired once at startup: the layer
-/// registry and the two ports the render path consumes. Generic exactly
-/// like [`render_tile`] — the binary (#29) and the tests pick concrete
-/// adapters.
+/// provider (static registry or catalog-backed, issue #31) and the two
+/// ports the render path consumes. Generic exactly like [`render_tile`] —
+/// the binary (#29) and the tests pick concrete adapters.
 #[derive(Debug)]
-pub struct ApiState<S, R> {
-    registry: LayerRegistry,
+pub struct ApiState<S, R, L> {
+    layers: L,
     source: S,
     reproject: R,
     /// Base URL links are minted under (no trailing slash), e.g.
@@ -84,21 +85,19 @@ pub struct ApiState<S, R> {
     traces: TraceBus,
 }
 
-impl<S, R> ApiState<S, R> {
-    /// Wires the API over a registry, the two ports, and the base URL
-    /// links advertise (trailing slash trimmed).
-    pub fn new(
-        registry: LayerRegistry,
-        source: S,
-        reproject: R,
-        base_url: impl Into<String>,
-    ) -> Self {
+impl<S, R, L> ApiState<S, R, L> {
+    /// Wires the API over a layer provider (a
+    /// [`LayerRegistry`](crate::registry::LayerRegistry), or
+    /// [`CatalogLayers`](crate::provider::CatalogLayers) for catalog-backed
+    /// serving), the two ports, and the base URL links advertise (trailing
+    /// slash trimmed).
+    pub fn new(layers: L, source: S, reproject: R, base_url: impl Into<String>) -> Self {
         let mut base_url: String = base_url.into();
         while base_url.ends_with('/') {
             base_url.pop();
         }
         Self {
-            registry,
+            layers,
             source,
             reproject,
             base_url,
@@ -131,10 +130,11 @@ pub struct TraceExtension(pub Arc<Trace>);
 
 /// The OGC API - Tiles router over `state`. Every route is `GET` (axum
 /// answers `HEAD` from the same handlers).
-pub fn router<S, R>(state: Arc<ApiState<S, R>>) -> axum::Router
+pub fn router<S, R, L>(state: Arc<ApiState<S, R, L>>) -> axum::Router
 where
     S: RasterSource + 'static,
     R: Reproject + 'static,
+    L: LayerProvider + 'static,
 {
     axum::Router::new()
         .route("/", get(landing))
@@ -169,10 +169,11 @@ async fn healthz() -> &'static str {
 
 // --- JSON document handlers ---
 
-async fn landing<S, R>(State(app): State<Arc<ApiState<S, R>>>) -> Json<LandingPage>
+async fn landing<S, R, L>(State(app): State<Arc<ApiState<S, R, L>>>) -> Json<LandingPage>
 where
     S: RasterSource + 'static,
     R: Reproject + 'static,
+    L: LayerProvider + 'static,
 {
     let base = &app.base_url;
     Json(LandingPage {
@@ -213,7 +214,7 @@ async fn conformance() -> Json<Conformance> {
 /// The list-item subset of a layer's tileset metadata
 /// (`/req/tilesets-list/tileset-links`: `dataType`, `crs`,
 /// `tileMatrixSetURI`, self + tiling-scheme links).
-fn tileset_item(base: &str, layer: &Layer) -> TileSetItem {
+fn tileset_item(base: &str, layer: &LayerIdentity) -> TileSetItem {
     TileSetItem {
         title: layer.title.clone(),
         data_type: "map".to_owned(),
@@ -233,31 +234,42 @@ fn tileset_item(base: &str, layer: &Layer) -> TileSetItem {
     }
 }
 
-async fn tilesets<S, R>(State(app): State<Arc<ApiState<S, R>>>) -> Json<TileSetList>
+async fn tilesets<S, R, L>(State(app): State<Arc<ApiState<S, R, L>>>) -> Json<TileSetList>
 where
     S: RasterSource + 'static,
     R: Reproject + 'static,
+    L: LayerProvider + 'static,
 {
     Json(TileSetList {
         tilesets: app
-            .registry
+            .layers
+            .identities()
             .iter()
             .map(|layer| tileset_item(&app.base_url, layer))
             .collect(),
     })
 }
 
-async fn tileset<S, R>(
-    State(app): State<Arc<ApiState<S, R>>>,
+/// Tileset metadata. The bounding box derives from the layer's *resolved*
+/// assets, so a catalog-backed layer whose dataset has no granules yet is
+/// 404 here (its identity still appears in the tilesets list) — resolution
+/// semantics live with [`LayerProvider::resolve`].
+async fn tileset<S, R, L>(
+    State(app): State<Arc<ApiState<S, R, L>>>,
     Path(layer_id): Path<String>,
 ) -> Result<Json<TileSetMetadata>, ApiError>
 where
     S: RasterSource + 'static,
     R: Reproject + 'static,
+    L: LayerProvider + 'static,
 {
-    let layer = lookup(&app.registry, &layer_id)?;
-    let bounds = layer_bounds(&app.source, &app.reproject, layer).await?;
-    let item = tileset_item(&app.base_url, layer);
+    let identity = app
+        .layers
+        .identity(&layer_id)
+        .ok_or_else(|| ApiError::not_found(format!("no layer `{layer_id}`")))?;
+    let resolved = app.layers.resolve(&layer_id).await?;
+    let bounds = layer_bounds(&app.source, &app.reproject, &resolved.layer).await?;
+    let item = tileset_item(&app.base_url, &identity);
 
     let mut links = item.links;
     links.push(
@@ -265,18 +277,18 @@ where
             format!(
                 "{base}/tilesets/{id}/tiles/{{tileMatrix}}/{{tileRow}}/{{tileCol}}",
                 base = app.base_url,
-                id = layer.id,
+                id = identity.id,
             ),
             "item",
         )
         .media_type("image/png")
-        .title(format!("{} tiles (PNG)", layer.title))
+        .title(format!("{} tiles (PNG)", identity.title))
         .templated(),
     );
 
     Ok(Json(TileSetMetadata {
         title: item.title,
-        description: layer.description.clone(),
+        description: identity.description.clone(),
         data_type: item.data_type,
         crs: item.crs,
         tile_matrix_set_uri: item.tile_matrix_set_uri,
@@ -292,18 +304,19 @@ where
 
 // --- The tile handler ---
 
-async fn tile<S, R>(
-    State(app): State<Arc<ApiState<S, R>>>,
+async fn tile<S, R, L>(
+    State(app): State<Arc<ApiState<S, R, L>>>,
     Path((layer_id, tile_matrix, tile_row, tile_col)): Path<(String, String, String, String)>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError>
 where
     S: RasterSource + 'static,
     R: Reproject + 'static,
+    L: LayerProvider + 'static,
 {
-    let layer = lookup(&app.registry, &layer_id)?;
     let coord = parse_tile_path(&tile_matrix, &tile_row, &tile_col)?;
     check_accepts_png(&headers)?;
+    let layer = app.layers.resolve(&layer_id).await?;
 
     let request = layer.tile_request(coord);
     let (encoded, trace) = render_tile(&app.source, &app.reproject, &request)
@@ -312,9 +325,14 @@ where
 
     // 200 + PNG bytes, with the Trace both summarized in a debug header
     // and attached whole as a response extension (the #28 SSE seam — the
-    // handler never discards the Trace).
+    // handler never discards the Trace). `ingest_to_pixel_ms` joins the
+    // header when present: the north-star number must be readable from a
+    // plain curl -D (the e2e gate does exactly that).
+    let ingest_to_pixel = trace
+        .ingest_to_pixel_ms
+        .map_or_else(String::new, |ms| format!(",\"ingest_to_pixel_ms\":{ms}"));
     let debug_header = format!(
-        "{{\"bytes_read\":{},\"total_ms\":{}}}",
+        "{{\"bytes_read\":{},\"total_ms\":{}{ingest_to_pixel}}}",
         trace.bytes_read, trace.timings.total_ms,
     );
     let mut response = (
@@ -334,28 +352,23 @@ where
     // assembled, so stream fan-out can never skew served-tile timing.
     // `publish` is non-blocking by construction — a slow x-ray subscriber
     // loses events (reported as `lagged`), never delays a tile.
-    app.traces.publish(&layer.id, coord, trace);
+    app.traces.publish(&layer.layer.id, coord, trace);
     Ok(response)
 }
 
 /// `GET /traces` — the x-ray SSE stream (issue #28): `text/event-stream`
 /// of every render published from connection time on. Wire contract and
 /// slow-subscriber semantics live in [`crate::traces`].
-async fn traces<S, R>(State(app): State<Arc<ApiState<S, R>>>) -> impl IntoResponse
+async fn traces<S, R, L>(State(app): State<Arc<ApiState<S, R, L>>>) -> impl IntoResponse
 where
     S: RasterSource + 'static,
     R: Reproject + 'static,
+    L: LayerProvider + 'static,
 {
     app.traces.sse()
 }
 
-// --- Translation helpers (parsing and lookup only — no domain logic) ---
-
-fn lookup<'a>(registry: &'a LayerRegistry, layer_id: &str) -> Result<&'a Layer, ApiError> {
-    registry
-        .get(layer_id)
-        .ok_or_else(|| ApiError::not_found(format!("no layer `{layer_id}`")))
-}
+// --- Translation helpers (parsing only — no domain logic) ---
 
 /// Parses `{tileMatrix}/{tileRow}/{tileCol}` — the **OGC order**, z/y/x —
 /// into a [`TileCoord`] (whose fields are XYZ-named: `y` = row, `x` =

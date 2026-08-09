@@ -42,15 +42,26 @@
 //!   covers all source I/O (`describe` + `read_window`); `total_ms` is
 //!   recorded, not derived, so parts need not sum to it once stages overlap
 //!   under future concurrency.
-//! - [`Trace::ingest_to_pixel_ms`] is `None` until ingest lands (#31).
+//! - [`Trace::ingest_to_pixel_ms`] is the north-star number (REQUIREMENTS.md
+//!   §3): when the request carries [`TileRequest::ingested_at`] (its assets
+//!   were resolved from a catalog granule), the Trace records
+//!   `render_completed_wall_clock − ingested_at`, computed **here at Trace
+//!   assembly** — this crate already owns the render's clocks (`Instant`
+//!   timings above; wall clock via `SystemTime` for this one subtraction),
+//!   the core stays clock-free (`Datetime::to_unix_millis` is pure calendar
+//!   math), and the API layer stays translation-only. Every render of a
+//!   granule-backed layer carries the number (elapsed-since-ingest keeps
+//!   being true); the *first* render after ingest is the reported metric.
+//!   Clock skew that would make it negative clamps to 0.
 //!
 //! A tile whose footprint misses every source raster is **not an error**:
 //! it renders as a fully transparent tile with empty provenance and zero
 //! `bytes_read` — a served empty tile is still explained (R4).
 
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use swath_core::catalog::Datetime;
 use swath_core::crs::Crs;
 use swath_core::raster::{AssetRef, RasterInfo};
 use swath_core::reproject::{CoordTransform, Reproject, ReprojectError};
@@ -94,6 +105,11 @@ pub struct TileRequest {
     /// data, nearest for categorical). Per-band kernels are a later
     /// widening if a mixed plan ever needs one.
     pub resampling: Resampling,
+    /// When the granule backing this request's assets was ingested, if the
+    /// caller resolved them from the catalog — the zero point of the
+    /// ingest-to-pixel timer. `None` (static/fixture layers) leaves
+    /// [`Trace::ingest_to_pixel_ms`] unset.
+    pub ingested_at: Option<Datetime>,
 }
 
 impl TileRequest {
@@ -113,7 +129,16 @@ impl TileRequest {
             coord,
             tile_size,
             resampling,
+            ingested_at: None,
         }
+    }
+
+    /// This request's assets came from a granule ingested at `ingested_at`:
+    /// the rendered tile's Trace will carry the ingest-to-pixel latency.
+    #[must_use]
+    pub fn with_ingested_at(mut self, ingested_at: Datetime) -> Self {
+        self.ingested_at = Some(ingested_at);
+        self
     }
 }
 
@@ -226,6 +251,16 @@ const fn window_margin(resampling: Resampling) -> u32 {
 /// `u64::MAX` ms; the conversion is total anyway).
 fn millis(d: Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Wall-clock milliseconds elapsed since `ingested` — the ingest-to-pixel
+/// number, taken at Trace assembly (module docs). Clamped at 0: clock skew
+/// must never produce a nonsensical negative latency.
+fn ingest_to_pixel_ms(ingested: &Datetime) -> u64 {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    u64::try_from(now_ms.saturating_sub(ingested.to_unix_millis())).unwrap_or(0)
 }
 
 /// One band's resolved inputs after the describe phase.
@@ -430,7 +465,7 @@ pub async fn render_tile<S: RasterSource, R: Reproject + ?Sized>(
             encode_ms: millis(encode_time),
             total_ms: millis(started.elapsed()),
         },
-        ingest_to_pixel_ms: None, // ingest lands with #31
+        ingest_to_pixel_ms: request.ingested_at.as_ref().map(ingest_to_pixel_ms),
     };
 
     Ok((

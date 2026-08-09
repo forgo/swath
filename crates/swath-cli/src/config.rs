@@ -17,12 +17,13 @@
 //! two optional scalars per field is an `or()` chain, and figment's extra
 //! dependency tree is deny/supply-chain surface with no work left to do.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use swath_api::{Layer, LayerRegistry};
+use swath_api::{CatalogLayer, Layer, LayerRegistry};
+use swath_core::catalog as domain;
 use swath_core::raster::AssetRef;
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
 use swath_render::{NodataPolicy, Resampling};
@@ -84,6 +85,32 @@ pub(crate) enum ConfigError {
         /// The unexpected band name.
         band: String,
     },
+    /// Catalog mode was requested without any datasets to serve.
+    #[error("catalog mode needs at least one [[datasets]] entry (layers are defined per dataset)")]
+    NoDatasets,
+    /// `[[datasets]]` requires a catalog to live in.
+    #[error("[[datasets]] requires catalog mode (config `catalog`, --catalog, or SWATH_CATALOG)")]
+    DatasetsNeedCatalog,
+    /// A watch directory without a catalog has nowhere to register granules.
+    #[error("watch-dir requires catalog mode (config `catalog`, --catalog, or SWATH_CATALOG)")]
+    WatchDirNeedsCatalog,
+    /// Static `[[layers]]` and catalog mode are mutually exclusive.
+    #[error(
+        "catalog mode and static [[layers]] are mutually exclusive: define [[datasets.layers]]"
+    )]
+    MixedLayerSources,
+    /// Two layers (across all datasets) share an id — URLs would collide.
+    #[error("duplicate layer id `{layer}` across [[datasets]]")]
+    DuplicateLayer {
+        /// The colliding layer id.
+        layer: String,
+    },
+    /// A dataset id appears twice.
+    #[error("duplicate dataset id `{dataset}`")]
+    DuplicateDataset {
+        /// The colliding dataset id.
+        dataset: String,
+    },
 }
 
 /// The fully resolved `serve` configuration the server runs from.
@@ -94,8 +121,33 @@ pub(crate) struct ResolvedConfig {
     pub(crate) base_url: String,
     /// Object-store root: a local directory or `s3://bucket[/prefix]`.
     pub(crate) store_root: String,
-    /// The layers to serve.
-    pub(crate) registry: LayerRegistry,
+    /// Where the layers come from.
+    pub(crate) layers: LayerSource,
+}
+
+/// The two serving modes: a static in-memory registry (fixtures or
+/// `[[layers]]` — the walking-skeleton path, unchanged), or catalog-backed
+/// resolution over pgstac (issue #31).
+pub(crate) enum LayerSource {
+    /// Fixtures / `[[layers]]`: assets fixed at startup.
+    Static(LayerRegistry),
+    /// `catalog` + `[[datasets]]`: assets resolved per tile from each
+    /// dataset's latest granule; optionally with a filedrop ingest loop.
+    Catalog(CatalogMode),
+}
+
+/// Everything catalog mode needs at startup.
+pub(crate) struct CatalogMode {
+    /// Postgres URL of the pgstac database.
+    pub(crate) url: String,
+    /// Drop directory to watch for granule manifests (`None` = serve-only).
+    pub(crate) watch_dir: Option<PathBuf>,
+    /// The datasets to register (upsert) at startup — config is the source
+    /// of truth for dataset identity + serving layers (R2: operators write
+    /// TOML, never STAC).
+    pub(crate) datasets: Vec<domain::Dataset>,
+    /// The compiled serving templates, one per `[[datasets.layers]]`.
+    pub(crate) layers: Vec<CatalogLayer>,
 }
 
 /// The TOML config file schema (kebab-case keys, unknown keys rejected —
@@ -109,7 +161,37 @@ struct ConfigFile {
     base_url: Option<String>,
     /// Object-store root: local directory or `s3://bucket[/prefix]`.
     store_root: Option<String>,
-    /// Layer definitions.
+    /// Postgres URL of a pgstac database — presence selects catalog mode.
+    catalog: Option<String>,
+    /// Drop directory watched for granule manifests (catalog mode only).
+    watch_dir: Option<PathBuf>,
+    /// Static layer definitions (mutually exclusive with catalog mode).
+    #[serde(default)]
+    layers: Vec<LayerConfig>,
+    /// Dataset definitions (catalog mode only).
+    #[serde(default)]
+    datasets: Vec<DatasetConfig>,
+}
+
+/// One `[[datasets]]` entry: dataset identity plus its serving layers. The
+/// dataset is upserted into the catalog at startup; granules arrive later
+/// via ingest (the dataset-must-pre-exist contract,
+/// `swath_core::ingest`).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct DatasetConfig {
+    /// Dataset identifier (the catalog collection id).
+    id: String,
+    /// Human-readable title; defaults to the id.
+    title: Option<String>,
+    /// Narrative description; defaults to empty.
+    description: Option<String>,
+    /// Data license (SPDX id); defaults to `other`.
+    license: Option<String>,
+    /// Serving layers over this dataset. Unlike static `[[layers]]`, the
+    /// `bands` values name **dataset bands** (granule asset keys, e.g.
+    /// `r = "b04"`), not asset URIs — assets are resolved per tile from
+    /// the latest ingested granule.
     #[serde(default)]
     layers: Vec<LayerConfig>,
 }
@@ -214,8 +296,23 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
         .or(file.base_url)
         .unwrap_or_else(|| format!("http://localhost:{}", bind.port()));
 
-    let registry = if args.fixtures {
-        LayerRegistry::hls_fixtures()
+    let catalog = args.catalog.clone().or(file.catalog);
+    let watch_dir = args.watch_dir.clone().or(file.watch_dir);
+
+    let layers = if let Some(url) = catalog {
+        if !file.layers.is_empty() {
+            return Err(ConfigError::MixedLayerSources);
+        }
+        if file.datasets.is_empty() {
+            return Err(ConfigError::NoDatasets);
+        }
+        LayerSource::Catalog(compile_catalog_mode(url, watch_dir, &file.datasets)?)
+    } else if watch_dir.is_some() {
+        return Err(ConfigError::WatchDirNeedsCatalog);
+    } else if !file.datasets.is_empty() {
+        return Err(ConfigError::DatasetsNeedCatalog);
+    } else if args.fixtures {
+        LayerSource::Static(LayerRegistry::hls_fixtures())
     } else {
         if file.layers.is_empty() {
             return Err(ConfigError::NoLayers);
@@ -225,14 +322,78 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
             .iter()
             .map(LayerConfig::to_layer)
             .collect::<Result<_, _>>()?;
-        LayerRegistry::new(layers)
+        LayerSource::Static(LayerRegistry::new(layers))
     };
 
     Ok(ResolvedConfig {
         bind,
         base_url,
         store_root,
-        registry,
+        layers,
+    })
+}
+
+/// Compiles `[[datasets]]` into the domain datasets the server registers at
+/// startup and the serving templates the catalog-backed provider resolves
+/// per tile — one config, two synchronized views (the persisted
+/// `swath:layers` and the compiled `RenderPlan` come from the same entry).
+fn compile_catalog_mode(
+    url: String,
+    watch_dir: Option<PathBuf>,
+    configs: &[DatasetConfig],
+) -> Result<CatalogMode, ConfigError> {
+    let mut datasets = Vec::with_capacity(configs.len());
+    let mut layers = Vec::new();
+    let mut dataset_ids = BTreeSet::new();
+    let mut layer_ids = BTreeSet::new();
+
+    for config in configs {
+        if !dataset_ids.insert(config.id.clone()) {
+            return Err(ConfigError::DuplicateDataset {
+                dataset: config.id.clone(),
+            });
+        }
+        let mut bands = BTreeSet::new();
+        let mut domain_layers = Vec::with_capacity(config.layers.len());
+        for layer in &config.layers {
+            if !layer_ids.insert(layer.id.clone()) {
+                return Err(ConfigError::DuplicateLayer {
+                    layer: layer.id.clone(),
+                });
+            }
+            let (template, domain_layer) = layer.to_catalog_layer(&config.id)?;
+            bands.extend(template.plan.inputs.iter().map(|input| input.name.clone()));
+            layers.push(template);
+            domain_layers.push(domain_layer);
+        }
+        datasets.push(domain::Dataset {
+            id: domain::DatasetId::new(config.id.clone()),
+            title: config.title.clone().unwrap_or_else(|| config.id.clone()),
+            description: config.description.clone().unwrap_or_default(),
+            license: config.license.clone().unwrap_or_else(|| "other".to_owned()),
+            // A whole-world, open-ended placeholder extent: honest for a
+            // dataset whose coverage is defined by whatever granules
+            // arrive. Deriving/maintaining real extents from ingested
+            // granules is deliberate future work (noted, not built).
+            extent: domain::Extent {
+                bbox: domain::Bbox {
+                    west: -180.0,
+                    south: -90.0,
+                    east: 180.0,
+                    north: 90.0,
+                },
+                interval: domain::TimeRange::default(),
+            },
+            bands,
+            layers: domain_layers,
+        });
+    }
+
+    Ok(CatalogMode {
+        url,
+        watch_dir,
+        datasets,
+        layers,
     })
 }
 
@@ -310,11 +471,123 @@ impl LayerConfig {
             tile_size: self.tile_size.unwrap_or(256),
         })
     }
+
+    /// Compiles a `[[datasets.layers]]` entry, where `bands` values name
+    /// **dataset bands** rather than asset URIs, into the serving template
+    /// (plan inputs = dataset band names, resolved against granule assets
+    /// per tile) *and* the domain [`domain::Layer`] persisted on the
+    /// dataset's catalog document — same entry, both views.
+    ///
+    /// Unlike static mode, the rescale always materializes (default
+    /// `[0, 255]` for truecolor, `[-1, 1]` for ndvi): the persisted
+    /// `PlanKind` + `Rescale` and the compiled pixel ops must describe the
+    /// same rendering.
+    fn to_catalog_layer(
+        &self,
+        dataset: &str,
+    ) -> Result<(CatalogLayer, domain::Layer), ConfigError> {
+        let expected = self.kind.bands();
+        for band in self.bands.keys() {
+            if !expected.contains(&band.as_str()) {
+                return Err(ConfigError::UnknownBand {
+                    layer: self.id.clone(),
+                    kind: self.kind.name(),
+                    expected,
+                    band: band.clone(),
+                });
+            }
+        }
+        // Role (`r`/`g`/`b`/`nir`/`red`) -> dataset band name.
+        let mut role = BTreeMap::new();
+        for name in expected {
+            let band = self
+                .bands
+                .get(*name)
+                .ok_or_else(|| ConfigError::MissingBand {
+                    layer: self.id.clone(),
+                    kind: self.kind.name(),
+                    band: name,
+                })?;
+            role.insert(*name, band.clone());
+        }
+
+        let inputs = expected
+            .iter()
+            .map(|name| BandInput::new(&role[name]))
+            .collect();
+        let mut ops = Vec::new();
+        let (plan_kind, rescale, colormap) = match self.kind {
+            LayerKind::Truecolor => {
+                ops.push(PixelOp::Composite {
+                    r: role["r"].clone(),
+                    g: role["g"].clone(),
+                    b: role["b"].clone(),
+                });
+                let [min, max] = self.rescale.unwrap_or([0.0, 255.0]);
+                ops.push(PixelOp::Rescale { min, max });
+                (
+                    domain::PlanKind::Composite {
+                        r: role["r"].clone(),
+                        g: role["g"].clone(),
+                        b: role["b"].clone(),
+                    },
+                    domain::Rescale { min, max },
+                    None,
+                )
+            }
+            LayerKind::Ndvi => {
+                let (nir, red) = (&role["nir"], &role["red"]);
+                ops.push(PixelOp::BandMath(
+                    (Expr::band(nir.clone()) - Expr::band(red.clone()))
+                        / (Expr::band(nir.clone()) + Expr::band(red.clone())),
+                ));
+                let [min, max] = self.rescale.unwrap_or([-1.0, 1.0]);
+                ops.push(PixelOp::Rescale { min, max });
+                ops.push(PixelOp::Colormap(Colormap::Grayscale));
+                (
+                    domain::PlanKind::BandMath {
+                        expression: format!("({nir} - {red}) / ({nir} + {red})"),
+                    },
+                    domain::Rescale { min, max },
+                    Some(domain::Colormap::Grayscale),
+                )
+            }
+        };
+
+        let title = self.title.clone().unwrap_or_else(|| self.id.clone());
+        let description = self.description.clone().unwrap_or_default();
+        let tile_size = self.tile_size.unwrap_or(256);
+        let template = CatalogLayer {
+            id: self.id.clone(),
+            title: title.clone(),
+            description: description.clone(),
+            dataset: domain::DatasetId::new(dataset),
+            plan: RenderPlan::new(inputs, ops, OutputSpec::new(TileFormat::Png)),
+            resampling: self.resampling.into(),
+            tile_size,
+        };
+        let domain_layer = domain::Layer {
+            id: self.id.clone(),
+            title,
+            description,
+            plan: plan_kind,
+            rescale,
+            colormap,
+            resampling: match self.resampling {
+                ResamplingConfig::Bilinear => domain::Resampling::Bilinear,
+                ResamplingConfig::Nearest => domain::Resampling::Nearest,
+            },
+            tile_size,
+        };
+        Ok((template, domain_layer))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfigError, ConfigFile, resolve};
+    use std::path::{Path, PathBuf};
+
+    use super::{ConfigError, ConfigFile, LayerSource, resolve};
     use crate::serve::ServeArgs;
 
     fn args() -> ServeArgs {
@@ -324,6 +597,8 @@ mod tests {
             bind: None,
             base_url: None,
             store_root: None,
+            catalog: None,
+            watch_dir: None,
         }
     }
 
@@ -337,7 +612,9 @@ mod tests {
         assert_eq!(cfg.bind.to_string(), "127.0.0.1:8080");
         assert_eq!(cfg.base_url, "http://localhost:8080");
         assert_eq!(cfg.store_root, "./tests/fixtures");
-        assert_eq!(cfg.registry.iter().count(), 2);
+        assert!(
+            matches!(&cfg.layers, LayerSource::Static(registry) if registry.iter().count() == 2)
+        );
     }
 
     #[test]
@@ -418,5 +695,115 @@ mod tests {
     #[test]
     fn unknown_keys_are_rejected_not_defaulted() {
         assert!(toml::from_str::<ConfigFile>("bindd = \"127.0.0.1:1\"").is_err());
+    }
+
+    /// The catalog-mode config of the compose stack, in miniature.
+    const CATALOG_TOML: &str = r#"
+        store-root = "/data"
+        catalog = "postgres://swath@localhost/swath"
+        watch-dir = "/data/drop"
+
+        [[datasets]]
+        id = "hls-s30"
+        title = "HLS S30"
+        license = "CC0-1.0"
+
+        [[datasets.layers]]
+        id = "truecolor"
+        kind = "truecolor"
+        rescale = [0.0, 3000.0]
+        [datasets.layers.bands]
+        r = "b04"
+        g = "b03"
+        b = "b02"
+
+        [[datasets.layers]]
+        id = "ndvi"
+        kind = "ndvi"
+        [datasets.layers.bands]
+        nir = "b8a"
+        red = "b04"
+    "#;
+
+    #[test]
+    fn catalog_mode_compiles_datasets_and_serving_templates() {
+        let file: ConfigFile = toml::from_str(CATALOG_TOML).expect("parses");
+        let mode = super::compile_catalog_mode(
+            file.catalog.clone().unwrap(),
+            file.watch_dir.clone(),
+            &file.datasets,
+        )
+        .expect("compiles");
+
+        // The domain dataset: band vocabulary is the union of layer bands,
+        // layers persist as PlanKind over dataset band names.
+        assert_eq!(mode.datasets.len(), 1);
+        let dataset = &mode.datasets[0];
+        assert_eq!(dataset.id.as_str(), "hls-s30");
+        assert_eq!(dataset.license, "CC0-1.0");
+        let bands: Vec<&str> = dataset.bands.iter().map(String::as_str).collect();
+        assert_eq!(bands, ["b02", "b03", "b04", "b8a"]);
+        assert_eq!(dataset.layers.len(), 2);
+        assert!(matches!(
+            &dataset.layers[0].plan,
+            super::domain::PlanKind::Composite { r, g, b }
+                if r == "b04" && g == "b03" && b == "b02"
+        ));
+        assert!(matches!(
+            &dataset.layers[1].plan,
+            super::domain::PlanKind::BandMath { expression }
+                if expression == "(b8a - b04) / (b8a + b04)"
+        ));
+
+        // The serving templates: plan inputs name dataset bands, so
+        // resolution maps granule assets key-for-key.
+        assert_eq!(mode.layers.len(), 2);
+        let truecolor = &mode.layers[0];
+        assert_eq!(truecolor.id, "truecolor");
+        assert_eq!(truecolor.dataset.as_str(), "hls-s30");
+        let inputs: Vec<&str> = truecolor
+            .plan
+            .inputs
+            .iter()
+            .map(|i| i.name.as_str())
+            .collect();
+        assert_eq!(inputs, ["b04", "b03", "b02"]);
+        assert_eq!(mode.watch_dir.as_deref(), Some(Path::new("/data/drop")));
+    }
+
+    #[test]
+    fn catalog_mode_validation_fails_loudly() {
+        // Catalog without datasets.
+        let with_catalog = ServeArgs {
+            catalog: Some("postgres://x".to_owned()),
+            store_root: Some("/data".to_owned()),
+            ..args()
+        };
+        assert!(matches!(
+            resolve(&with_catalog),
+            Err(ConfigError::NoDatasets)
+        ));
+
+        // Watch dir without catalog.
+        let watch_only = ServeArgs {
+            watch_dir: Some(PathBuf::from("/drop")),
+            store_root: Some("/data".to_owned()),
+            ..args()
+        };
+        assert!(matches!(
+            resolve(&watch_only),
+            Err(ConfigError::WatchDirNeedsCatalog)
+        ));
+
+        // Duplicate layer ids across datasets collide in URL space.
+        let mut file: ConfigFile = toml::from_str(CATALOG_TOML).expect("parses");
+        let mut clash: ConfigFile = toml::from_str(CATALOG_TOML).expect("parses");
+        let mut second = clash.datasets.pop().unwrap();
+        second.id = "hls-l30".to_owned();
+        file.datasets.push(second);
+        assert!(matches!(
+            super::compile_catalog_mode("postgres://x".to_owned(), None, &file.datasets),
+            Err(ConfigError::DuplicateLayer { layer }) if layer == "truecolor"
+        ));
     }
 }

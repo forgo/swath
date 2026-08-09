@@ -44,7 +44,7 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// A keepalive interval no test waits for (the keepalive test overrides).
 const QUIET_KEEPALIVE: Duration = Duration::from_mins(10);
 
-type FixtureState = ApiState<CogSource, Proj4rsReproject>;
+type FixtureState = ApiState<CogSource, Proj4rsReproject, LayerRegistry>;
 
 /// The fixture-wired app with an explicit trace bus, plus the state
 /// handle tests publish through directly.

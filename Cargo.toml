@@ -6,6 +6,7 @@
 resolver = "3"
 members = [
     "crates/adapters/swath-catalog-pgstac",
+    "crates/adapters/swath-events-filedrop",
     "crates/adapters/swath-reproject-proj4rs",
     "crates/adapters/swath-source-cog",
     "crates/swath-api",

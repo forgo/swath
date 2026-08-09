@@ -229,8 +229,42 @@ async fn trace_explains_the_true_color_render() {
     // equality (parts need not sum to total once stages overlap).
     assert!(trace.timings.total_ms > 0, "a real render takes time");
 
-    // Ingest-to-pixel arrives with ingest (#31).
+    // Ingest-to-pixel only exists for granule-backed requests (#31): a
+    // plain request leaves it unset.
     assert_eq!(trace.ingest_to_pixel_ms, None);
+}
+
+/// The north-star timer (#31): a request carrying `ingested_at` yields a
+/// Trace whose `ingest_to_pixel_ms` is elapsed-since-ingest — bounded below
+/// by the known offset and sane above; a future `ingested_at` (clock skew)
+/// clamps to 0 rather than going negative.
+#[tokio::test]
+async fn trace_carries_ingest_to_pixel_for_granule_backed_requests() {
+    use swath_core::catalog::Datetime;
+
+    let now_ms = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("present after epoch")
+            .as_millis(),
+    )
+    .expect("fits i64");
+
+    // Ingested 10 seconds "ago": the number must be >= that offset.
+    let ingested = Datetime::from_unix_millis(now_ms - 10_000).expect("in range");
+    let request = truecolor_request(12, 848, 1561).with_ingested_at(ingested);
+    let (_, trace) = render(&request).await;
+    let i2p = trace.ingest_to_pixel_ms.expect("granule-backed => timed");
+    assert!(
+        (10_000..600_000).contains(&i2p),
+        "elapsed-since-ingest should be >= the 10s offset and sane, got {i2p}"
+    );
+
+    // Skew guard: an ingest stamp in the future clamps to 0.
+    let future = Datetime::from_unix_millis(now_ms + 3_600_000).expect("in range");
+    let request = truecolor_request(12, 848, 1561).with_ingested_at(future);
+    let (_, trace) = render(&request).await;
+    assert_eq!(trace.ingest_to_pixel_ms, Some(0));
 }
 
 /// The serialized Trace is the SSE/UI contract: assert the *schema* (key

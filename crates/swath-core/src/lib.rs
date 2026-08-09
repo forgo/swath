@@ -15,6 +15,8 @@
 //!
 //! - [`catalog`] — Dataset/Granule/Layer domain, the `Catalog` port, and the
 //!   lossless STAC converters (REQUIREMENTS.md R2/R5)
+//! - [`events`] — the `EventSource` port: granule-arrival announcements
+//! - [`ingest`] — the ingest orchestrator's registration step (REQUIREMENTS.md R1)
 //! - [`tile`] — quadtree tile addressing + `WebMercatorQuad` TMS math
 //! - [`crs`] — CRS identity (EPSG codes; projection math is an adapter concern)
 //! - [`raster`] — raster metadata, pixel windows, asset references
@@ -26,6 +28,8 @@
 pub mod catalog;
 pub mod crs;
 pub mod error;
+pub mod events;
+pub mod ingest;
 pub mod raster;
 pub mod reproject;
 pub mod source;

@@ -122,6 +122,9 @@ fn granule(dataset: &str, id: &str, bbox: Bbox, datetime: &str) -> Granule {
                 AssetRef::new(format!("s3://hls/{id}/b8a.tif")),
             ),
         ]),
+        // Some on purpose: every live round-trip assertion then also covers
+        // the ingest-timestamp property (#31).
+        ingested_at: Some(Datetime::new("2024-06-06T18:00:00Z").unwrap()),
     }
 }
 
@@ -393,6 +396,8 @@ async fn plain_stac_clients_see_a_valid_catalog() {
     assert!(item["bbox"].as_array().is_some_and(|b| b.len() == 4));
     assert!(item["properties"]["datetime"].is_string());
     assert!(item["assets"]["b04"]["href"].is_string());
+    // Granule-level swath-owned state rides along namespaced (#31).
+    assert!(item["properties"]["swath:ingested_at"].is_string());
 
     reset(&catalog, id).await;
 }

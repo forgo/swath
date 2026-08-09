@@ -64,6 +64,7 @@ STAC type exists in any port signature.
 | `bbox` | `Bbox` (WGS84 lon/lat) | footprint; geometry is *derived* (see §3) |
 | `datetime` | `Datetime` (RFC 3339 UTC, `Z`-suffixed, validated newtype) | acquisition time |
 | `assets` | `BTreeMap<String, AssetRef>` | band name → asset URI; the map the tiler's `bands` template resolves against |
+| `ingested_at` | `Option<Datetime>` | when Swath ingested the granule — the ingest-to-pixel zero point (#31); stamped by the ingest orchestrator, `None` for granules registered outside the event path |
 
 ### Layer
 
@@ -116,10 +117,11 @@ database are detected and rejected loudly instead of half-converted.
 | `bbox` (derived) | `geometry`: the bbox's closed CCW polygon ring | **ignored on read** — `bbox` is the source of truth; the derivation is deterministic, so the round trip is exact |
 | `datetime` | `properties.datetime` | read back |
 | `assets` | `assets` — `{ "<band>": { "href": "<uri>" } }` | `href` read back; other asset keys ignored (Swath writes only `href`, so its own documents round-trip exactly) |
+| `ingested_at` | `properties."swath:ingested_at"` (omitted when `None`) | read back when present; **present-but-invalid ⇒ error** (missing is fine — plain STAC Items are valid swath granules without an ingest stamp) |
 
-No separate `swath:` fields are needed on Items today: the band → URI map *is* the STAC assets
-map, key for key. When granule-level swath-owned metadata appears (e.g. per-granule ingest
-provenance), it goes under `properties."swath:…"`.
+The band → URI map *is* the STAC assets map, key for key. Granule-level swath-owned metadata goes
+under `properties."swath:…"`, as reserved here from the start — `swath:ingested_at` (#31, the
+ingest-to-pixel zero point) is the first such field.
 
 ### Layers on the Collection, not separate documents (decision)
 

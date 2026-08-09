@@ -2798,7 +2798,9 @@ dependencies = [
  "object_store",
  "serde",
  "swath-api",
+ "swath-catalog-pgstac",
  "swath-core",
+ "swath-events-filedrop",
  "swath-render",
  "swath-reproject-proj4rs",
  "swath-source-cog",
@@ -2818,6 +2820,17 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "swath-events-filedrop"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "swath-core",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
