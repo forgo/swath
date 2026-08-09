@@ -13,6 +13,8 @@
 //! signatures; it depends on no executor
 //! ([ARCHITECTURE.md §5–6, §9](https://github.com/forgo/swath/blob/main/docs/ARCHITECTURE.md)).
 //!
+//! - [`catalog`] — Dataset/Granule/Layer domain, the `Catalog` port, and the
+//!   lossless STAC converters (REQUIREMENTS.md R2/R5)
 //! - [`tile`] — quadtree tile addressing + `WebMercatorQuad` TMS math
 //! - [`crs`] — CRS identity (EPSG codes; projection math is an adapter concern)
 //! - [`raster`] — raster metadata, pixel windows, asset references
@@ -21,6 +23,7 @@
 //! - [`trace`] — the per-render x-ray record (REQUIREMENTS.md R4)
 //! - [`error`] — the crate's small invariant-violation taxonomy
 
+pub mod catalog;
 pub mod crs;
 pub mod error;
 pub mod raster;

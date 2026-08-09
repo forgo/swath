@@ -33,7 +33,10 @@ image = { version = "0.25.8", default-features = false, features = ["png"] }
 # Trace model serialization (ARCHITECTURE.md §9): the SSE stream and the test
 # suite both consume the same JSON shape.
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = { version = "1.0.145" }
+# float_roundtrip: the catalog's lossless STAC round trip (issue #30) is a
+# contract on exact f64 identity through JSON text; serde_json's default float
+# parser is the fast path that can be off by 1 ulp.
+serde_json = { version = "1.0.145", features = ["float_roundtrip"] }
 # Error taxonomy derive (ENGINEERING.md adopt list).
 thiserror = { version = "2.0.17" }
 # Property tests (ENGINEERING.md §2 testing stack). Dev-dependency only.
