@@ -164,6 +164,13 @@ pub fn granule_to_stac_item(granule: &Granule) -> Value {
         .iter()
         .map(|(band, asset)| (band.clone(), json!({ "href": asset.as_str() })))
         .collect();
+    let mut properties = Map::new();
+    properties.insert("datetime".to_owned(), json!(granule.datetime.as_str()));
+    if let Some(ingested_at) = &granule.ingested_at {
+        // Granule-level swath-owned metadata rides under a namespaced
+        // property, exactly as the design doc reserved (§3).
+        properties.insert("swath:ingested_at".to_owned(), json!(ingested_at.as_str()));
+    }
     json!({
         "type": "Feature",
         "stac_version": STAC_VERSION,
@@ -180,7 +187,7 @@ pub fn granule_to_stac_item(granule: &Granule) -> Value {
             ]],
         },
         "bbox": granule.bbox.to_array(),
-        "properties": { "datetime": granule.datetime.as_str() },
+        "properties": properties,
         "assets": assets,
     })
 }
@@ -220,6 +227,22 @@ pub fn granule_from_stac_item(doc: &Value) -> Result<Granule, StacError> {
         detail: format!("`{datetime_str}` is not an RFC 3339 UTC (Z) timestamp"),
     })?;
 
+    // Optional swath-owned ingest timestamp; when present it must be valid.
+    let ingested_at = properties
+        .get("swath:ingested_at")
+        .map(|value| {
+            let path = "properties.swath:ingested_at";
+            let text = value.as_str().ok_or(StacError::WrongType {
+                path: path.to_owned(),
+                expected: "string",
+            })?;
+            Datetime::new(text).map_err(|_| StacError::InvalidValue {
+                path: path.to_owned(),
+                detail: format!("`{text}` is not an RFC 3339 UTC (Z) timestamp"),
+            })
+        })
+        .transpose()?;
+
     let assets_obj = as_object(get(obj, "assets")?, "assets")?;
     let mut assets = std::collections::BTreeMap::new();
     for (band, asset) in assets_obj {
@@ -243,6 +266,7 @@ pub fn granule_from_stac_item(doc: &Value) -> Result<Granule, StacError> {
         bbox,
         datetime,
         assets,
+        ingested_at,
     })
 }
 
@@ -472,6 +496,7 @@ mod tests {
                     AssetRef::new("s3://hls/t13sdd/2024158/b8a.tif"),
                 ),
             ]),
+            ingested_at: Some(Datetime::new("2024-06-06T18:00:00Z").unwrap()),
         }
     }
 
@@ -518,6 +543,44 @@ mod tests {
         // The derived geometry ring is closed.
         let ring = &doc["geometry"]["coordinates"][0];
         assert_eq!(ring[0], ring[4]);
+    }
+
+    #[test]
+    fn ingested_at_is_optional_and_validated() {
+        // Absent in the domain -> absent in the document (a plain STAC Item).
+        let mut g = hls_granule();
+        g.ingested_at = None;
+        let doc = granule_to_stac_item(&g);
+        assert!(
+            doc["properties"]
+                .as_object()
+                .unwrap()
+                .get("swath:ingested_at")
+                .is_none()
+        );
+        assert_eq!(granule_from_stac_item(&doc).unwrap(), g);
+
+        // Present -> namespaced property, and round-trips.
+        let doc = granule_to_stac_item(&hls_granule());
+        assert_eq!(
+            doc["properties"]["swath:ingested_at"],
+            "2024-06-06T18:00:00Z"
+        );
+        assert_eq!(granule_from_stac_item(&doc).unwrap(), hls_granule());
+
+        // Malformed values are rejected loudly, naming the path.
+        let mut doc = granule_to_stac_item(&hls_granule());
+        doc["properties"]["swath:ingested_at"] = json!("yesterday");
+        assert!(matches!(
+            granule_from_stac_item(&doc).unwrap_err(),
+            StacError::InvalidValue { path, .. } if path == "properties.swath:ingested_at"
+        ));
+        let mut doc = granule_to_stac_item(&hls_granule());
+        doc["properties"]["swath:ingested_at"] = json!(12);
+        assert!(matches!(
+            granule_from_stac_item(&doc).unwrap_err(),
+            StacError::WrongType { path, .. } if path == "properties.swath:ingested_at"
+        ));
     }
 
     #[test]

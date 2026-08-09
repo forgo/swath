@@ -157,6 +157,91 @@ impl Datetime {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Milliseconds since the Unix epoch (1970-01-01T00:00:00Z), fractional
+    /// seconds truncated to millisecond precision.
+    ///
+    /// Pure calendar arithmetic (proleptic Gregorian, days-from-civil) — no
+    /// clock is read, so this stays within the core's no-I/O contract. The
+    /// ingest-to-pixel timer subtracts two of these; the truncation makes
+    /// the metric's resolution 1 ms, which is far below its noise floor.
+    #[must_use]
+    pub fn to_unix_millis(&self) -> i64 {
+        let b = self.0.as_bytes();
+        // Validated at construction: fixed "YYYY-MM-DDThh:mm:ss" prefix.
+        let num = |range: core::ops::Range<usize>| -> i64 {
+            b[range]
+                .iter()
+                .fold(0, |n, &c| n * 10 + i64::from(c - b'0'))
+        };
+        let days = days_from_civil(num(0..4), num(5..7), num(8..10));
+        let seconds = num(11..13) * 3600 + num(14..16) * 60 + num(17..19);
+        // Optional fraction between the fixed prefix and the trailing 'Z':
+        // take the first three digits (zero-padded) as milliseconds.
+        let fraction = &b[19..b.len() - 1];
+        let mut millis = 0;
+        for i in 0..3 {
+            let digit = fraction.get(1 + i).map_or(0, |&c| i64::from(c - b'0'));
+            millis = millis * 10 + digit;
+        }
+        (days * 86_400 + seconds) * 1000 + millis
+    }
+
+    /// The timestamp `millis` milliseconds after the Unix epoch, rendered
+    /// RFC 3339 UTC (`.mmm` fraction only when non-zero).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidDatetime`] when the instant falls outside the
+    /// four-digit-year range (0000..=9999) this format can express.
+    pub fn from_unix_millis(millis: i64) -> Result<Self, Error> {
+        let days = millis.div_euclid(86_400_000);
+        let of_day = millis.rem_euclid(86_400_000);
+        let (year, month, day) = civil_from_days(days);
+        if !(0..=9999).contains(&year) {
+            return Err(Error::InvalidDatetime {
+                value: format!("{millis} ms since epoch (year out of 0000..=9999)"),
+            });
+        }
+        let (second_of_day, ms) = (of_day / 1000, of_day % 1000);
+        let (hour, minute, second) = (
+            second_of_day / 3600,
+            second_of_day % 3600 / 60,
+            second_of_day % 60,
+        );
+        let mut text = format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}");
+        if ms != 0 {
+            text.push_str(&format!(".{ms:03}"));
+        }
+        text.push('Z');
+        Self::new(text)
+    }
+}
+
+/// Days since 1970-01-01 of a proleptic-Gregorian civil date (Howard
+/// Hinnant's `days_from_civil`).
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// Civil date of a days-since-epoch count — the exact inverse of
+/// [`days_from_civil`] (Hinnant's `civil_from_days`).
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if month <= 2 { y + 1 } else { y }, month, day)
 }
 
 impl fmt::Display for Datetime {
@@ -386,6 +471,12 @@ pub struct Granule {
     pub datetime: Datetime,
     /// Band name → asset URI, the map a layer's plan resolves bands against.
     pub assets: BTreeMap<String, AssetRef>,
+    /// When Swath ingested this granule — the zero point of the
+    /// ingest-to-pixel metric (REQUIREMENTS.md §3), stamped by the ingest
+    /// orchestrator from the event's arrival time and persisted as
+    /// `properties."swath:ingested_at"` on the STAC Item. `None` for
+    /// granules registered outside the event path.
+    pub ingested_at: Option<Datetime>,
 }
 
 /// The granule filter [`Catalog::find_granules`] takes: optional bbox
@@ -510,6 +601,47 @@ mod tests {
         assert_eq!(ok.unwrap().as_str(), "2024-06-06T17:54:00Z");
         let bad: Result<Datetime, _> = serde_json::from_str(r#""yesterday""#);
         assert!(bad.is_err());
+    }
+
+    #[test]
+    fn unix_millis_known_vectors() {
+        let ms = |s: &str| Datetime::new(s).unwrap().to_unix_millis();
+        assert_eq!(ms("1970-01-01T00:00:00Z"), 0);
+        assert_eq!(ms("2024-06-06T17:54:00Z"), 1_717_696_440_000);
+        // Leap day, and pre-epoch negativity.
+        assert_eq!(ms("2024-02-29T00:00:00Z"), 1_709_164_800_000);
+        assert_eq!(ms("1969-12-31T23:59:59Z"), -1000);
+        // Fractions: padded, truncated beyond milliseconds.
+        assert_eq!(ms("1970-01-01T00:00:00.5Z"), 500);
+        assert_eq!(ms("1970-01-01T00:00:00.123456Z"), 123);
+    }
+
+    #[test]
+    fn unix_millis_round_trips_through_from() {
+        for ms in [
+            0,
+            1,
+            999,
+            1_717_696_440_000,
+            1_709_164_800_000,
+            -1000,
+            -62_167_219_200_000, // 0000-01-01T00:00:00Z
+            253_402_300_799_999, // 9999-12-31T23:59:59.999Z
+        ] {
+            let dt = Datetime::from_unix_millis(ms).expect("in range");
+            assert_eq!(dt.to_unix_millis(), ms, "via {dt}");
+        }
+        assert!(Datetime::from_unix_millis(-62_167_219_200_001).is_err());
+        assert!(Datetime::from_unix_millis(253_402_300_800_000).is_err());
+    }
+
+    #[test]
+    fn from_unix_millis_renders_canonical_text() {
+        let dt = |ms: i64| Datetime::from_unix_millis(ms).unwrap();
+        assert_eq!(dt(0).as_str(), "1970-01-01T00:00:00Z");
+        assert_eq!(dt(1_717_696_440_000).as_str(), "2024-06-06T17:54:00Z");
+        assert_eq!(dt(500).as_str(), "1970-01-01T00:00:00.500Z");
+        assert_eq!(dt(7).as_str(), "1970-01-01T00:00:00.007Z");
     }
 
     #[test]

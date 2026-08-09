@@ -150,14 +150,18 @@ fn granule() -> impl Strategy<Value = Granule> {
         bbox(),
         datetime(),
         proptest::collection::btree_map(band_name(), text().prop_map(AssetRef::new), 0..6),
+        proptest::option::of(datetime()),
     )
-        .prop_map(|(id, dataset, bbox, datetime, assets)| Granule {
-            id: GranuleId::new(id),
-            dataset: DatasetId::new(dataset),
-            bbox,
-            datetime,
-            assets: BTreeMap::from_iter(assets),
-        })
+        .prop_map(
+            |(id, dataset, bbox, datetime, assets, ingested_at)| Granule {
+                id: GranuleId::new(id),
+                dataset: DatasetId::new(dataset),
+                bbox,
+                datetime,
+                assets: BTreeMap::from_iter(assets),
+                ingested_at,
+            },
+        )
 }
 
 // --- the normative property ---
@@ -266,6 +270,9 @@ fn hls_granule() -> Granule {
                 AssetRef::new("s3://hls/t13sdd/2024158/b8a.tif"),
             ),
         ]),
+        // Pinned Some: the persisted `swath:ingested_at` property shape is
+        // part of the contractual document (issue #31).
+        ingested_at: Some(Datetime::new("2024-06-06T18:00:00Z").unwrap()),
     }
 }
 

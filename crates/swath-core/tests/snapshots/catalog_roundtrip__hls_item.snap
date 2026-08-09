@@ -47,7 +47,8 @@ expression: granule_to_stac_item(&hls_granule())
   },
   "id": "hlss30-t13sdd-2024158",
   "properties": {
-    "datetime": "2024-06-06T17:54:00Z"
+    "datetime": "2024-06-06T17:54:00Z",
+    "swath:ingested_at": "2024-06-06T18:00:00Z"
   },
   "stac_version": "1.1.0",
   "type": "Feature"
