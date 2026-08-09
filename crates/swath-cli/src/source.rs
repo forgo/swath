@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use object_store::ObjectStore;
 use swath_core::raster::{AssetRef, RasterInfo, WindowRequest};
-use swath_core::source::{BandSelection, RasterSource, SourceError, WindowData};
+use swath_core::source::{BandSelection, RasterSource, ReadLevel, SourceError, WindowData};
 use swath_source_cog::CogSource;
 use swath_source_virtual::VirtualSource;
 
@@ -57,11 +57,14 @@ impl RasterSource for CompositeSource {
         asset: &AssetRef,
         window: WindowRequest,
         band: BandSelection,
+        level: ReadLevel,
     ) -> Result<WindowData, SourceError> {
         if VirtualSource::handles(asset) {
-            self.virtual_cube.read_window(asset, window, band).await
+            self.virtual_cube
+                .read_window(asset, window, band, level)
+                .await
         } else {
-            self.cog.read_window(asset, window, band).await
+            self.cog.read_window(asset, window, band, level).await
         }
     }
 }

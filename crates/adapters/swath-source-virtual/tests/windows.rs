@@ -17,7 +17,9 @@ mod common;
 
 use sha2::{Digest, Sha256};
 use swath_core::raster::WindowRequest;
-use swath_core::source::{BandSelection, PixelBuffer, RasterSource, SourceError, WindowData};
+use swath_core::source::{
+    BandSelection, PixelBuffer, RasterSource, ReadLevel, SourceError, WindowData,
+};
 
 #[derive(serde::Deserialize)]
 struct Truth {
@@ -111,6 +113,7 @@ async fn windows_match_h5py_truth_exactly() {
                 &common::asset(&case.array),
                 case.requested.into(),
                 BandSelection::Single(0),
+                ReadLevel::FullRes,
             )
             .await
             .unwrap_or_else(|e| panic!("{}/{}: {e}", case.array, case.window_name));
@@ -133,6 +136,7 @@ async fn provenance_ranges_are_manifest_chunk_refs_into_the_original_file() {
                 &common::asset(&case.array),
                 case.requested.into(),
                 BandSelection::Single(0),
+                ReadLevel::FullRes,
             )
             .await
             .unwrap();
@@ -191,6 +195,7 @@ async fn only_needed_chunks_are_fetched() {
                 height: 1,
             },
             BandSelection::Single(0),
+            ReadLevel::FullRes,
         )
         .await
         .unwrap();
@@ -203,7 +208,12 @@ async fn only_needed_chunks_are_fetched() {
         height: 8,
     };
     let nir = source
-        .read_window(&common::asset(common::NIR), full, BandSelection::Single(0))
+        .read_window(
+            &common::asset(common::NIR),
+            full,
+            BandSelection::Single(0),
+            ReadLevel::FullRes,
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -212,7 +222,12 @@ async fn only_needed_chunks_are_fetched() {
         "nir: 3x2 chunk grid fully allocated"
     );
     let red = source
-        .read_window(&common::asset(common::RED), full, BandSelection::Single(0))
+        .read_window(
+            &common::asset(common::RED),
+            full,
+            BandSelection::Single(0),
+            ReadLevel::FullRes,
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -235,6 +250,7 @@ async fn off_grid_windows_clip_to_empty_and_bad_bands_error() {
                 height: 4,
             },
             BandSelection::Single(0),
+            ReadLevel::FullRes,
         )
         .await
         .unwrap();
@@ -253,6 +269,7 @@ async fn off_grid_windows_clip_to_empty_and_bad_bands_error() {
                 height: 1,
             },
             BandSelection::Single(1),
+            ReadLevel::FullRes,
         )
         .await
         .unwrap_err();
@@ -264,4 +281,33 @@ async fn off_grid_windows_clip_to_empty_and_bad_bands_error() {
             ..
         }
     ));
+}
+
+/// Virtual cubes have no overview pyramids: an overview-level read is the
+/// port's `OverviewNotFound` error (with an empty available list), never a
+/// silent full-resolution serve.
+#[tokio::test]
+async fn overview_reads_error_cleanly() {
+    let source = common::memory_source().await;
+    let err = source
+        .read_window(
+            &common::asset(common::NIR),
+            WindowRequest {
+                col_off: 0,
+                row_off: 0,
+                width: 1,
+                height: 1,
+            },
+            BandSelection::Single(0),
+            ReadLevel::Overview { factor: 2 },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            SourceError::OverviewNotFound { factor: 2, available, .. } if available.is_empty()
+        ),
+        "{err}"
+    );
 }

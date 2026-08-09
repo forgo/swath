@@ -70,7 +70,9 @@ use object_store::path::Path;
 use object_store::{ObjectStore, ObjectStoreExt as _};
 use swath_core::manifest::{ChunkRef, Georef, VirtualArray, VirtualManifest};
 use swath_core::raster::{AssetRef, DType, RasterInfo, WindowRequest};
-use swath_core::source::{BandSelection, PixelBuffer, RasterSource, SourceError, WindowData};
+use swath_core::source::{
+    BandSelection, PixelBuffer, RasterSource, ReadLevel, SourceError, WindowData,
+};
 use swath_core::trace::Provenance;
 
 /// A [`RasterSource`] serving virtual-reference manifests from an
@@ -177,9 +179,20 @@ impl RasterSource for VirtualSource {
         asset: &AssetRef,
         window: WindowRequest,
         band: BandSelection,
+        level: ReadLevel,
     ) -> Result<WindowData, SourceError> {
         let (array, georef) = self.load_array(asset).await?;
         let info = raster_info(asset, &array, &georef)?;
+        // Virtual cubes carry no overview pyramids (`describe` reports the
+        // empty list); an overview request is a caller bug surfaced with
+        // the port's own error, never silently served at full resolution.
+        if let ReadLevel::Overview { factor } = level {
+            return Err(SourceError::OverviewNotFound {
+                asset: asset.clone(),
+                factor,
+                available: Vec::new(),
+            });
+        }
         // BandSelection is non_exhaustive: new selection kinds must be
         // adopted here explicitly, not silently misread.
         let BandSelection::Single(band_index) = band else {
@@ -212,14 +225,16 @@ impl RasterSource for VirtualSource {
             };
             return Ok(WindowData::new(
                 empty,
+                info.clone(),
                 pixels_from_le_bytes(info.dtype, &[]),
                 info.nodata,
                 Vec::new(),
             ));
         };
 
-        let reader = ChunkReader::new(asset, &array, info.dtype)?;
-        let mut out = WindowBytes::new(&clip, info.dtype, info.nodata);
+        let dtype = info.dtype;
+        let reader = ChunkReader::new(asset, &array, dtype)?;
+        let mut out = WindowBytes::new(&clip, dtype, info.nodata);
         let mut provenance = Vec::new();
         for (chunk_row, chunk_col) in reader.chunks_touching(&clip) {
             let Some(chunk_ref) = reader.chunk_ref(chunk_row, chunk_col) else {
@@ -243,10 +258,12 @@ impl RasterSource for VirtualSource {
             out.copy_chunk(&decoded, &reader, chunk_row, chunk_col);
         }
 
+        let nodata = info.nodata;
         Ok(WindowData::new(
             clip,
-            pixels_from_le_bytes(info.dtype, &out.bytes),
-            info.nodata,
+            info,
+            pixels_from_le_bytes(dtype, &out.bytes),
+            nodata,
             provenance,
         ))
     }
