@@ -1,0 +1,269 @@
+{
+  "cases": [
+    {
+      "array": "HDFEOS/GRIDS/TinyGrid/Data Fields/nir",
+      "window_name": "full",
+      "requested": {
+        "col_off": 0,
+        "row_off": 0,
+        "width": 7,
+        "height": 8
+      },
+      "clipped": {
+        "col_off": 0,
+        "row_off": 0,
+        "width": 7,
+        "height": 8
+      },
+      "dtype": "int16",
+      "nodata": -28672.0,
+      "nodata_count": 6,
+      "valid_sum": 228136,
+      "first8": [
+        -28672,
+        -28672,
+        -28672,
+        2426,
+        5073,
+        1804,
+        4085,
+        -28672
+      ],
+      "last8": [
+        7669,
+        1120,
+        1832,
+        4506,
+        5621,
+        7610,
+        6182,
+        1050
+      ],
+      "sha256_le": "dc6f063aad9176de16ee86081486e5162e1907301cfec27b2bd3727597d9d394"
+    },
+    {
+      "array": "HDFEOS/GRIDS/TinyGrid/Data Fields/nir",
+      "window_name": "interior",
+      "requested": {
+        "col_off": 2,
+        "row_off": 1,
+        "width": 4,
+        "height": 5
+      },
+      "clipped": {
+        "col_off": 2,
+        "row_off": 1,
+        "width": 4,
+        "height": 5
+      },
+      "dtype": "int16",
+      "nodata": -28672.0,
+      "nodata_count": 1,
+      "valid_sum": 91372,
+      "first8": [
+        -28672,
+        8029,
+        2272,
+        4179,
+        9497,
+        7046,
+        4483,
+        536
+      ],
+      "last8": [
+        1201,
+        8134,
+        1763,
+        1900,
+        3274,
+        5347,
+        3517,
+        8192
+      ],
+      "sha256_le": "1092d80cf20a3d7dcc2911f401af76b0dcc667e1d95e2ccc75da676d7c2bd601"
+    },
+    {
+      "array": "HDFEOS/GRIDS/TinyGrid/Data Fields/nir",
+      "window_name": "one_pixel",
+      "requested": {
+        "col_off": 3,
+        "row_off": 4,
+        "width": 1,
+        "height": 1
+      },
+      "clipped": {
+        "col_off": 3,
+        "row_off": 4,
+        "width": 1,
+        "height": 1
+      },
+      "dtype": "int16",
+      "nodata": -28672.0,
+      "nodata_count": 0,
+      "valid_sum": 8134,
+      "first8": [
+        8134
+      ],
+      "last8": [
+        8134
+      ],
+      "sha256_le": "57e0f35d388c2e1dbdbab38b689abd30370471c0797650774e5f47628ca45367"
+    },
+    {
+      "array": "HDFEOS/GRIDS/TinyGrid/Data Fields/nir",
+      "window_name": "oob_clipped",
+      "requested": {
+        "col_off": 5,
+        "row_off": 6,
+        "width": 4,
+        "height": 4
+      },
+      "clipped": {
+        "col_off": 5,
+        "row_off": 6,
+        "width": 2,
+        "height": 2
+      },
+      "dtype": "int16",
+      "nodata": -28672.0,
+      "nodata_count": 0,
+      "valid_sum": 23937,
+      "first8": [
+        9036,
+        7669,
+        6182,
+        1050
+      ],
+      "last8": [
+        9036,
+        7669,
+        6182,
+        1050
+      ],
+      "sha256_le": "7409c88d6599050164e9f4a649f2380813bb32c0399f2cd4bac473bc4d2badfe"
+    },
+    {
+      "array": "HDFEOS/GRIDS/TinyGrid/Data Fields/nir",
+      "window_name": "nodata_block",
+      "requested": {
+        "col_off": 0,
+        "row_off": 0,
+        "width": 4,
+        "height": 3
+      },
+      "clipped": {
+        "col_off": 0,
+        "row_off": 0,
+        "width": 4,
+        "height": 3
+      },
+      "dtype": "int16",
+      "nodata": -28672.0,
+      "nodata_count": 6,
+      "valid_sum": 34459,
+      "first8": [
+        -28672,
+        -28672,
+        -28672,
+        2426,
+        -28672,
+        -28672,
+        -28672,
+        8029
+      ],
+      "last8": [
+        -28672,
+        -28672,
+        -28672,
+        8029,
+        2923,
+        4538,
+        9497,
+        7046
+      ],
+      "sha256_le": "2997d9ac89fceec46c55dda4b086769e7a75741e5532abfb08e8b90859bd7437"
+    },
+    {
+      "array": "HDFEOS/GRIDS/TinyGrid/Data Fields/red",
+      "window_name": "full",
+      "requested": {
+        "col_off": 0,
+        "row_off": 0,
+        "width": 7,
+        "height": 8
+      },
+      "clipped": {
+        "col_off": 0,
+        "row_off": 0,
+        "width": 7,
+        "height": 8
+      },
+      "dtype": "int16",
+      "nodata": -28672.0,
+      "nodata_count": 14,
+      "valid_sum": 217805,
+      "first8": [
+        2388,
+        4697,
+        6224,
+        1628,
+        9949,
+        2836,
+        6311,
+        535
+      ],
+      "last8": [
+        -28672,
+        -28672,
+        -28672,
+        -28672,
+        -28672,
+        -28672,
+        -28672,
+        -28672
+      ],
+      "sha256_le": "13a572b4a48b0999430af4863c6734480a7ace753caf79b74566f0b8d7a0d0d8"
+    },
+    {
+      "array": "HDFEOS/GRIDS/TinyGrid/Data Fields/red",
+      "window_name": "missing_chunks",
+      "requested": {
+        "col_off": 0,
+        "row_off": 5,
+        "width": 7,
+        "height": 3
+      },
+      "clipped": {
+        "col_off": 0,
+        "row_off": 5,
+        "width": 7,
+        "height": 3
+      },
+      "dtype": "int16",
+      "nodata": -28672.0,
+      "nodata_count": 14,
+      "valid_sum": 43724,
+      "first8": [
+        6265,
+        6752,
+        4975,
+        4256,
+        5839,
+        6299,
+        9338,
+        -28672
+      ],
+      "last8": [
+        -28672,
+        -28672,
+        -28672,
+        -28672,
+        -28672,
+        -28672,
+        -28672,
+        -28672
+      ],
+      "sha256_le": "b909435b4f0565b146a1167d6cac6707a0b56bc3483efbcdd14163a9e4f48e7f"
+    }
+  ]
+}

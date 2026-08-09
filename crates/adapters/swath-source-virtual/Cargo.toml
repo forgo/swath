@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "swath-source-virtual"
+description = "RasterSource adapter: virtual-reference manifests over object_store — legacy granules served as byte-ranges into the original file."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+flate2 = { workspace = true }
+object_store = { workspace = true }
+swath-core = { path = "../../swath-core", version = "0.0.0" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+swath-referencer = { path = "../../swath-referencer", version = "0.0.0" }
+swath-render = { path = "../../swath-render", version = "0.0.0" }
+swath-reproject-proj4rs = { path = "../swath-reproject-proj4rs", version = "0.0.0" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

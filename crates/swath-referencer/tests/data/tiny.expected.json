@@ -19,6 +19,146 @@
       ]
     },
     {
+      "name": "HDFEOS/GRIDS/TinyGrid/Data Fields/nir",
+      "shape": [
+        8,
+        7
+      ],
+      "chunks": [
+        3,
+        4
+      ],
+      "dtype": "int16",
+      "codecs": [
+        "shuffle",
+        "zlib:4"
+      ],
+      "refs": [
+        {
+          "key": "0.0",
+          "path": "tiny.h5",
+          "offset": 5914,
+          "length": 31
+        },
+        {
+          "key": "0.1",
+          "path": "tiny.h5",
+          "offset": 5945,
+          "length": 32
+        },
+        {
+          "key": "1.0",
+          "path": "tiny.h5",
+          "offset": 5977,
+          "length": 33
+        },
+        {
+          "key": "1.1",
+          "path": "tiny.h5",
+          "offset": 6010,
+          "length": 33
+        },
+        {
+          "key": "2.0",
+          "path": "tiny.h5",
+          "offset": 6043,
+          "length": 29
+        },
+        {
+          "key": "2.1",
+          "path": "tiny.h5",
+          "offset": 6072,
+          "length": 27
+        }
+      ],
+      "georef": {
+        "crs": {
+          "proj4": "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +R=6371007.181 +units=m +no_defs"
+        },
+        "transform": {
+          "origin_x": 16679257.795,
+          "pixel_width": 926.6254330000708,
+          "row_rotation": 0.0,
+          "origin_y": -3335851.559,
+          "col_rotation": 0.0,
+          "pixel_height": -926.6254330000374
+        },
+        "nodata": -28672.0,
+        "band": "nir"
+      }
+    },
+    {
+      "name": "HDFEOS/GRIDS/TinyGrid/Data Fields/red",
+      "shape": [
+        8,
+        7
+      ],
+      "chunks": [
+        3,
+        4
+      ],
+      "dtype": "int16",
+      "codecs": [
+        "zlib:2"
+      ],
+      "refs": [
+        {
+          "key": "0.0",
+          "path": "tiny.h5",
+          "offset": 6099,
+          "length": 32
+        },
+        {
+          "key": "0.1",
+          "path": "tiny.h5",
+          "offset": 6131,
+          "length": 33
+        },
+        {
+          "key": "1.0",
+          "path": "tiny.h5",
+          "offset": 6164,
+          "length": 32
+        },
+        {
+          "key": "1.1",
+          "path": "tiny.h5",
+          "offset": 6196,
+          "length": 32
+        }
+      ],
+      "georef": {
+        "crs": {
+          "proj4": "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +R=6371007.181 +units=m +no_defs"
+        },
+        "transform": {
+          "origin_x": 16679257.795,
+          "pixel_width": 926.6254330000708,
+          "row_rotation": 0.0,
+          "origin_y": -3335851.559,
+          "col_rotation": 0.0,
+          "pixel_height": -926.6254330000374
+        },
+        "nodata": -28672.0,
+        "band": "red"
+      }
+    },
+    {
+      "name": "HDFEOS INFORMATION/StructMetadata.0",
+      "shape": [],
+      "chunks": [],
+      "dtype": "|S396",
+      "codecs": [],
+      "refs": [
+        {
+          "key": "",
+          "path": "tiny.h5",
+          "offset": 5324,
+          "length": 396
+        }
+      ]
+    },
+    {
       "name": "aux/contiguous",
       "shape": [
         4,
@@ -69,7 +209,7 @@
         {
           "key": "0.0",
           "path": "tiny.h5",
-          "offset": 5422,
+          "offset": 5818,
           "length": 96
         }
       ]
@@ -92,37 +232,37 @@
         {
           "key": "0.0",
           "path": "tiny.h5",
-          "offset": 5324,
+          "offset": 5720,
           "length": 21
         },
         {
           "key": "0.1",
           "path": "tiny.h5",
-          "offset": 5345,
+          "offset": 5741,
           "length": 20
         },
         {
           "key": "0.2",
           "path": "tiny.h5",
-          "offset": 5365,
+          "offset": 5761,
           "length": 20
         },
         {
           "key": "1.0",
           "path": "tiny.h5",
-          "offset": 5385,
+          "offset": 5781,
           "length": 13
         },
         {
           "key": "1.1",
           "path": "tiny.h5",
-          "offset": 5398,
+          "offset": 5794,
           "length": 13
         },
         {
           "key": "1.2",
           "path": "tiny.h5",
-          "offset": 5411,
+          "offset": 5807,
           "length": 11
         }
       ]
