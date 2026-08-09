@@ -5,6 +5,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/adapters/swath-catalog-pgstac",
     "crates/adapters/swath-reproject-proj4rs",
     "crates/adapters/swath-source-cog",
     "crates/swath-api",
@@ -58,6 +59,16 @@ async-trait = { version = "0.1.89" }
 bytes = { version = "1.10.1" }
 # Adapter/test async runtime. NEVER a dependency of swath-core.
 tokio = { version = "1.49.0", default-features = false }
+# Postgres driver for the pgstac catalog adapter (#30). sqlx over
+# tokio-postgres: the pooled, typed-bind, one-crate surface (PgPool + jsonb
+# binds via the json feature) versus hand-rolling pooling/TLS/typed binds on
+# tokio-postgres + deadpool — two more deps for less. Feature-trimmed hard:
+# postgres + runtime-tokio + json only; no TLS backend compiled (local/dev
+# and in-cluster plaintext for now — a tls-* feature is a deliberate later
+# addition), no macros/migrate/derive (queries here are three static SQL
+# strings calling pgstac functions; compile-time checking would drag a
+# DATABASE_URL into every build).
+sqlx = { version = "0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "json"] }
 # Truth-table pixel-hash comparison in adapter integration tests (dev-only).
 sha2 = { version = "0.10.9" }
 # Projection math is BIND, never build (ADR 0002): pure-Rust proj4 for the
