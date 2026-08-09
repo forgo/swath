@@ -1,0 +1,87 @@
+{
+  "hlss30-t13sdd-2024158-b02.tif": {
+    "band": "B02",
+    "count": 1,
+    "crs": "EPSG:32613",
+    "dtype": "int16",
+    "height": 512,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      453720.0,
+      0.0,
+      -30.0,
+      4353960.0
+    ],
+    "width": 512
+  },
+  "hlss30-t13sdd-2024158-b03.tif": {
+    "band": "B03",
+    "count": 1,
+    "crs": "EPSG:32613",
+    "dtype": "int16",
+    "height": 512,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      453720.0,
+      0.0,
+      -30.0,
+      4353960.0
+    ],
+    "width": 512
+  },
+  "hlss30-t13sdd-2024158-b04.tif": {
+    "band": "B04",
+    "count": 1,
+    "crs": "EPSG:32613",
+    "dtype": "int16",
+    "height": 512,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      453720.0,
+      0.0,
+      -30.0,
+      4353960.0
+    ],
+    "width": 512
+  },
+  "hlss30-t13sdd-2024158-b8a.tif": {
+    "band": "B8A",
+    "count": 1,
+    "crs": "EPSG:32613",
+    "dtype": "int16",
+    "height": 512,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      453720.0,
+      0.0,
+      -30.0,
+      4353960.0
+    ],
+    "width": 512
+  },
+  "hlss30-t13sdd-2024158-fmask.tif": {
+    "band": "Fmask",
+    "count": 1,
+    "crs": "EPSG:32613",
+    "dtype": "uint8",
+    "height": 512,
+    "nodata": 255.0,
+    "transform": [
+      30.0,
+      0.0,
+      453720.0,
+      0.0,
+      -30.0,
+      4353960.0
+    ],
+    "width": 512
+  }
+}

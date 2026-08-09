@@ -125,6 +125,14 @@ oracle-verify:
     echo "seeded error caught at tolerance 0"
     echo "oracle-verify PASS"
 
+# --- tests/fixtures (committed HLS COG subsets, issue #20 / ADR 0004) ---
+
+# Fixture integrity gate: checksums + offline rasterio sanity load against
+# manifest.json. Fixtures are immutable once committed (tests/fixtures/README.md).
+fixtures-verify:
+    cd tests/fixtures && shasum -a 256 -c SHA256SUMS
+    uv run tests/fixtures/verify_fixtures.py
+
 # --- python/ (uv workspace; ingest sidecars only, ADR 0006) ---
 
 # Sync the python workspace (all packages + dev groups).
