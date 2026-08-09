@@ -14,6 +14,7 @@ path = [
     "NOTICE",
     ".gitignore",
     "**/.gitignore",
+    ".dockerignore",
     ".pre-commit-config.yaml",
     "docker-compose.yml",
     "codecov.yml",

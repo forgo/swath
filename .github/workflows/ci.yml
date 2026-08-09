@@ -59,6 +59,13 @@ jobs:
               - '.github/**'
             stack:
               - 'docker-compose.yml'
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'tests/fixtures/**'
               - 'justfile'
               - '.github/**'
             web:
@@ -235,8 +242,10 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run test
 
-  # Local-stack smoke: compose up (pgstac + MinIO), health + migration checks,
-  # teardown. Grows into the real e2e harness as the binary/viewer land.
+  # The compose-stack e2e (R8): builds the swath image, brings up the full
+  # stack (swath + pgstac + MinIO), and exercises the binary end to end —
+  # landing page, golden-tile oracle match (pdiff), trace header + SSE.
+  # setup-rust is here for the pdiff comparator (`cargo run -p swath-testkit`).
   e2e:
     needs: changes
     if: needs.changes.outputs.stack == 'true'
@@ -245,9 +254,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+      - uses: ./.github/actions/setup-rust
         with:
-          tool: just@1.58.0
+          tools: "none"
       - run: just e2e
 
   # REUSE/SPDX compliance: the open-core license boundary stays machine-checkable.

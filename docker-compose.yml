@@ -1,9 +1,29 @@
-# Swath local stack (ARCHITECTURE.md §15, issue #15): the ONLY required infra
-# is Postgres+pgstac and an S3-compatible object store. The `swath` service
-# joins this file once the binary exists (issue #29). `just e2e` is the smoke
-# gate. Credentials here are local-dev-only values, never real secrets.
+# Swath local stack (ARCHITECTURE.md §15, issues #15/#29): the single `swath`
+# binary plus the ONLY required infra — Postgres+pgstac and an S3-compatible
+# object store. `just e2e` is the smoke gate. Credentials here are
+# local-dev-only values, never real secrets.
 
 services:
+  # The single self-contained deployable (issue #29), in `--fixtures` demo
+  # mode: serves the baked-in HLS fixture layers from the image, no external
+  # data. Honesty note: `serve` does not consume pgstac or minio yet — the
+  # catalog (#30) and S3-store (#31) wiring land next. The depends_on
+  # healthy-gating exists to pin the §15 topology and prove startup ordering
+  # against real dependencies from day one.
+  swath:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      pgstac:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
   pgstac:
     image: ghcr.io/stac-utils/pgstac:v0.9.10
     environment:

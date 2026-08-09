@@ -195,17 +195,55 @@ lint-web:
 test-web:
     cd web && pnpm run test
 
-# Bring up the local stack (pgstac + MinIO), smoke-check it, tear it down.
-# Grows into the real e2e harness as the binary and viewer land (issues #29+).
+# The compose-stack e2e (issues #15/#29, REQUIREMENTS.md R8): build the swath
+# image, bring up the full local stack (swath + pgstac + MinIO), verify infra
+# health, then exercise the binary end to end — landing page, a served tile
+# perceptually matched against the committed rio-tiler/GDAL golden (byte
+# identity is only defined against swath's own encoder, so the cross-encoder
+# oracle comparison is pdiff at the default policy, exactly like the golden
+# suites; byte-stability is asserted by fetching the tile twice), the
+# X-Swath-Trace header, and a captured `trace` SSE event. Teardown is
+# trap-based: the stack never outlives the recipe.
 e2e:
     #!/usr/bin/env bash
     set -euo pipefail
     trap 'docker compose down -v' EXIT
+    docker compose build swath
+    start=$(date +%s)
     docker compose up -d --wait
+    echo "stack healthy in $(( $(date +%s) - start ))s (pull/start -> all healthchecks green)"
     docker compose exec -T pgstac psql -qtA -c "select pgstac.get_version();" | grep -E '^[0-9.]+' \
         && echo "pgstac: migrations present"
     curl -sf http://localhost:9000/minio/health/live && echo "minio: live"
-    echo "e2e smoke OK"
+    base=http://localhost:8080
+    dir=target/e2e
+    rm -rf "$dir" && mkdir -p "$dir"
+    # Landing page (OGC API root) answers with the Swath document.
+    curl -sf "$base/" | grep -q '"title":"Swath"' && echo "swath: landing page OK"
+    # A truecolor tile (OGC path order z/row/col), with headers captured.
+    tile="$base/tilesets/truecolor/tiles/12/1561/848"
+    curl -sf -D "$dir/tile-headers.txt" -o "$dir/tile.png" "$tile"
+    grep -qi '^x-swath-trace:' "$dir/tile-headers.txt" && echo "swath: X-Swath-Trace header present"
+    # Same request, same bytes: the container render is deterministic.
+    curl -sf -o "$dir/tile-again.png" "$tile"
+    cmp "$dir/tile.png" "$dir/tile-again.png" && echo "swath: tile bytes are stable across requests"
+    # Correctness oracle: perceptual match against the committed golden.
+    cargo run --quiet -p swath-testkit --bin pdiff -- \
+        "$dir/tile.png" crates/swath-render/tests/data/truecolor-12-848-1561.png
+    echo "swath: tile matches the rio-tiler/GDAL golden (default pdiff policy)"
+    # The x-ray stream: subscribe, trigger a render, expect a `trace` event.
+    curl -sN --max-time 15 "$base/traces" > "$dir/traces.txt" &
+    sse=$!
+    sleep 1
+    curl -sf -o /dev/null "$base/tilesets/ndvi/tiles/12/1561/848"
+    for _ in $(seq 1 20); do
+        grep -q '^event: trace' "$dir/traces.txt" && break
+        sleep 0.5
+    done
+    kill "$sse" 2>/dev/null || true
+    wait "$sse" 2>/dev/null || true
+    grep -q '^event: trace' "$dir/traces.txt" && echo "swath: trace SSE event captured"
+    echo "e2e OK"
 
 # The one-command gate: everything CI enforces.
 check: fmt-check lint test deny zizmor reuse
