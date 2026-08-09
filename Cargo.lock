@@ -3093,6 +3093,7 @@ dependencies = [
  "swath-render",
  "swath-reproject-proj4rs",
  "swath-source-cog",
+ "swath-source-virtual",
  "thiserror 2.0.20",
  "tokio",
  "toml",
