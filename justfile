@@ -431,6 +431,28 @@ e2e:
     echo "swath: SSE trace reports the repeated tile as a keyed cache_hit (#36)"
     grep -q '"ingest_to_pixel_ms":[0-9]' "$dir/traces.txt" \
         && echo "swath: SSE trace carries ingest_to_pixel_ms"
+    # The openEO authoring loop (issue #41, ADR 0010, R3): publish an NDVI
+    # process graph as an XYZ secondary service against the live stack,
+    # fetch a tile from the returned service URL, and require it
+    # byte-identical to the built-in NDVI tile just proven against the
+    # golden — same compiler, same serve path, zero manual steps. (The
+    # north-star assertion above is untouched; this step runs after it.)
+    svc=$(curl -sf -X POST "$base/services" -H 'content-type: application/json' \
+        -d '{"type":"xyz","title":"NDVI (authored)","process":{"process_graph":{
+              "load":{"process_id":"load_collection","arguments":{"id":"hls-s30","spatial_extent":null,"temporal_extent":null,"bands":["b8a","b04"]}},
+              "ndvi":{"process_id":"ndvi","arguments":{"data":{"from_node":"load"},"nir":"b8a","red":"b04"}},
+              "scale":{"process_id":"linear_scale_range","arguments":{"x":{"from_node":"ndvi"},"inputMin":-1,"inputMax":1,"outputMin":0,"outputMax":255}},
+              "save":{"process_id":"save_result","arguments":{"data":{"from_node":"scale"},"format":"png"},"result":true}}}}' \
+        -D "$dir/service-headers.txt" -o /dev/null -w '%{http_code}')
+    [ "$svc" = "201" ] || { echo "FAIL: POST /services answered $svc"; exit 1; }
+    sid=$(tr -d '\r' < "$dir/service-headers.txt" | sed -n 's/^[Oo]pen[Ee][Oo]-[Ii]dentifier: //p' | head -1)
+    [ -n "$sid" ] || { echo "FAIL: 201 carried no OpenEO-Identifier header"; exit 1; }
+    echo "swath: openEO service published ($sid)"
+    code=$(curl -s -o "$dir/service.png" -w '%{http_code}' "$base/tilesets/$sid/tiles/12/1561/848")
+    [ "$code" = "200" ] || { echo "FAIL: authored service tile answered $code"; exit 1; }
+    cmp "$dir/service.png" "$dir/ndvi.png" \
+        || { echo "FAIL: authored NDVI tile differs from the built-in NDVI tile"; exit 1; }
+    echo "swath: authored service tile is byte-identical to the built-in NDVI (graph in, live XYZ out)"
     # Metadata-vs-pixels: the tileset's DECLARED bounds must contain the tile
     # we just proved correct (12/848/1561, center -105.4248, 39.27). A wrong
     # granule bbox once put the demo viewport 48 km from the imagery while
