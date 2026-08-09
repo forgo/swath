@@ -211,19 +211,27 @@ test-catalog:
     trap teardown EXIT
     cargo nextest run -p swath-catalog-pgstac --run-ignored all
 
-# The compose-stack e2e (issues #15/#29, REQUIREMENTS.md R8): build the swath
-# image, bring up the full local stack (swath + pgstac + MinIO), verify infra
-# health, then exercise the binary end to end — landing page, a served tile
-# perceptually matched against the committed rio-tiler/GDAL golden (byte
-# identity is only defined against swath's own encoder, so the cross-encoder
-# oracle comparison is pdiff at the default policy, exactly like the golden
-# suites; byte-stability is asserted by fetching the tile twice), the
-# X-Swath-Trace header, and a captured `trace` SSE event. Teardown is
-# trap-based: the stack never outlives the recipe.
+# The compose-stack e2e — now THE north-star demo path (issues #15/#29/#31,
+# REQUIREMENTS.md R1/R8 + §3): build the swath image, bring up the full local
+# stack (swath in catalog mode + pgstac + MinIO), verify infra health, then
+# drive granule-to-live-tile end to end with zero manual steps: the layer 404s
+# while the catalog is empty; dropping the fixture granule (5 HLS band COGs +
+# a manifest, bands first, manifest renamed into place last) makes the tile
+# servable automatically; the Trace carries ingest_to_pixel_ms, printed
+# prominently and asserted under a deliberately GENEROUS budget (30s —
+# tightening is #35's job). The served tile is perceptually matched against
+# the committed rio-tiler/GDAL golden (cross-encoder comparison is pdiff at
+# the default policy, exactly like the golden suites; byte-stability is
+# asserted by fetching twice), and a `trace` SSE event is captured. Teardown
+# is trap-based: the stack never outlives the recipe.
 e2e:
     #!/usr/bin/env bash
     set -euo pipefail
     trap 'docker compose down -v' EXIT
+    dir=target/e2e
+    granule=hlss30-t13sdd-2024158
+    # The mounted data plane must exist (and be empty) before `up`.
+    rm -rf "$dir" && mkdir -p "$dir/store/drop"
     docker compose build swath
     start=$(date +%s)
     docker compose up -d --wait
@@ -232,22 +240,75 @@ e2e:
         && echo "pgstac: migrations present"
     curl -sf http://localhost:9000/minio/health/live && echo "minio: live"
     base=http://localhost:8080
-    dir=target/e2e
-    rm -rf "$dir" && mkdir -p "$dir"
     # Landing page (OGC API root) answers with the Swath document.
     curl -sf "$base/" | grep -q '"title":"Swath"' && echo "swath: landing page OK"
-    # A truecolor tile (OGC path order z/row/col), with headers captured.
+    # The catalog-backed dataset registered at startup: visible to a plain
+    # STAC client (R5) before any granule exists.
+    docker compose exec -T pgstac psql -qtA -c \
+        "select pgstac.get_collection('hls-s30') is not null;" | grep -qx t \
+        && echo "pgstac: hls-s30 dataset registered (plain STAC visibility)"
+    # R1 pre-condition: the layer exists, its pixels don't — a tile of the
+    # empty catalog is an honest 404.
     tile="$base/tilesets/truecolor/tiles/12/1561/848"
-    curl -sf -D "$dir/tile-headers.txt" -o "$dir/tile.png" "$tile"
+    code=$(curl -s -o /dev/null -w '%{http_code}' "$tile")
+    [ "$code" = "404" ] || { echo "FAIL: expected 404 before any granule, got $code"; exit 1; }
+    echo "swath: tile is 404 before ingest (catalog empty)"
+    # THE DROP (the manual step count for everything below: zero). Per the
+    # filedrop convention: band COGs land first, the manifest is staged
+    # under an ignored dotfile name and renamed into place last.
+    cp tests/fixtures/$granule-*.tif "$dir/store/"
+    printf '%s\n' \
+      '{' \
+      '  "dataset": "hls-s30",' \
+      "  \"granule\": \"$granule\"," \
+      '  "bbox": [-106.1, 39.2, -105.9, 39.4],' \
+      '  "datetime": "2024-06-06T17:54:00Z",' \
+      '  "assets": {' \
+      "    \"b02\": \"$granule-b02.tif\"," \
+      "    \"b03\": \"$granule-b03.tif\"," \
+      "    \"b04\": \"$granule-b04.tif\"," \
+      "    \"b8a\": \"$granule-b8a.tif\"," \
+      "    \"fmask\": \"$granule-fmask.tif\"" \
+      '  }' \
+      '}' > "$dir/store/drop/.$granule.json"
+    mv "$dir/store/drop/.$granule.json" "$dir/store/drop/$granule.json"
+    echo "swath: granule dropped at $(date -u '+%H:%M:%S') UTC"
+    # Arrive -> catalog -> serve, automatically: poll until the tile is live.
+    code=000
+    for _ in $(seq 1 120); do
+        code=$(curl -s -D "$dir/tile-headers.txt" -o "$dir/tile.png" -w '%{http_code}' "$tile")
+        [ "$code" = "200" ] && break
+        sleep 0.5
+    done
+    [ "$code" = "200" ] || { echo "FAIL: tile not servable within 60s of the drop (last: $code)"; exit 1; }
+    echo "swath: tile went live with zero manual steps (R1)"
+    # The Trace explains the served tile: header present, provenance
+    # non-empty (real bytes were read for this granule's pixels).
     grep -qi '^x-swath-trace:' "$dir/tile-headers.txt" && echo "swath: X-Swath-Trace header present"
+    bytes=$(sed -n 's/.*"bytes_read":\([0-9][0-9]*\).*/\1/p' "$dir/tile-headers.txt" | head -1)
+    [ -n "$bytes" ] && [ "$bytes" -gt 0 ] || { echo "FAIL: trace reports no bytes read"; exit 1; }
+    echo "swath: trace provenance is non-empty (bytes_read=$bytes)"
+    # THE NORTH-STAR NUMBER (REQUIREMENTS.md §3): the first tile reflecting
+    # the just-ingested granule carries ingest-to-pixel latency.
+    i2p=$(sed -n 's/.*"ingest_to_pixel_ms":\([0-9][0-9]*\).*/\1/p' "$dir/tile-headers.txt" | head -1)
+    [ -n "$i2p" ] || { echo "FAIL: trace carries no numeric ingest_to_pixel_ms"; exit 1; }
+    echo ""
+    echo "=========================================="
+    echo "   INGEST-TO-PIXEL: $i2p ms"
+    echo "=========================================="
+    echo ""
+    [ "$i2p" -lt 30000 ] || { echo "FAIL: ingest-to-pixel $i2p ms exceeds the 30000 ms budget"; exit 1; }
+    echo "swath: ingest-to-pixel is under the generous 30s budget (#35 tightens)"
     # Same request, same bytes: the container render is deterministic.
     curl -sf -o "$dir/tile-again.png" "$tile"
     cmp "$dir/tile.png" "$dir/tile-again.png" && echo "swath: tile bytes are stable across requests"
-    # Correctness oracle: perceptual match against the committed golden.
+    # Correctness oracle: the catalog-served tile perceptually matches the
+    # committed golden — "a CORRECT tile is visible" (§3), not just any tile.
     cargo run --quiet -p swath-testkit --bin pdiff -- \
         "$dir/tile.png" crates/swath-render/tests/data/truecolor-12-848-1561.png
     echo "swath: tile matches the rio-tiler/GDAL golden (default pdiff policy)"
-    # The x-ray stream: subscribe, trigger a render, expect a `trace` event.
+    # The x-ray stream: subscribe, trigger a render, expect a `trace` event
+    # that also carries the ingest-to-pixel number.
     curl -sN --max-time 15 "$base/traces" > "$dir/traces.txt" &
     sse=$!
     sleep 1
@@ -259,6 +320,8 @@ e2e:
     kill "$sse" 2>/dev/null || true
     wait "$sse" 2>/dev/null || true
     grep -q '^event: trace' "$dir/traces.txt" && echo "swath: trace SSE event captured"
+    grep -q '"ingest_to_pixel_ms":[0-9]' "$dir/traces.txt" \
+        && echo "swath: SSE trace carries ingest_to_pixel_ms"
     echo "e2e OK"
 
 # The one-command gate: everything CI enforces.

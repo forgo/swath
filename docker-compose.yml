@@ -4,16 +4,26 @@
 # local-dev-only values, never real secrets.
 
 services:
-  # The single self-contained deployable (issue #29), in `--fixtures` demo
-  # mode: serves the baked-in HLS fixture layers from the image, no external
-  # data. Honesty note: `serve` does not consume pgstac or minio yet — the
-  # catalog (#30) and S3-store (#31) wiring land next. The depends_on
-  # healthy-gating exists to pin the §15 topology and prove startup ordering
-  # against real dependencies from day one.
+  # The single self-contained deployable (issue #29), in catalog mode
+  # (issue #31): layers are defined over the hls-s30 dataset in the mounted
+  # config, registered into pgstac at startup, and served from the dataset's
+  # latest ingested granule. The filedrop watcher ingests any
+  # `<granule-id>.json` manifest appearing under ./target/e2e/store/drop
+  # (mounted at /data/drop) — drop a granule, watch it go live; `just e2e`
+  # does exactly that and reads the ingest-to-pixel number off the Trace.
+  # Honesty note: minio is topology (§15) — the store root here is the local
+  # bind mount; pointing store-root at s3:// is exercised elsewhere.
   swath:
     build: .
+    command:
+      ["serve", "--config", "/app/config/swath.toml"]
     ports:
       - "8080:8080"
+    volumes:
+      - ./tests/e2e/swath-catalog.toml:/app/config/swath.toml:ro
+      # Data plane: COG store at /data, drop directory at /data/drop.
+      # Read-only — the server only ever reads; writers are outside.
+      - ./target/e2e/store:/data:ro
     depends_on:
       pgstac:
         condition: service_healthy

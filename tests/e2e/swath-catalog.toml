@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+# Catalog-mode serve config for the compose stack (issue #31): pgstac-backed
+# layers over the HLS demo dataset, with the filedrop ingest loop watching
+# /data/drop. Mounted read-only into the swath container by
+# docker-compose.yml; `just e2e` drops the fixture granule into the watched
+# directory and measures ingest-to-pixel.
+#
+# The layer definitions mirror the built-in `--fixtures` demo registry
+# (truecolor, ndvi) so a served tile stays byte-comparable to the committed
+# GDAL/rio-tiler goldens — but here their band assets resolve per tile from
+# the dataset's latest ingested granule.
+
+bind = "0.0.0.0:8080"
+base-url = "http://localhost:8080"
+store-root = "/data"
+catalog = "postgres://swath:swath-local-dev@pgstac:5432/swath"
+watch-dir = "/data/drop"
+
+[[datasets]]
+id = "hls-s30"
+title = "HLS Sentinel-2 (S30)"
+description = "Harmonized Landsat Sentinel-2, S30 product."
+license = "CC0-1.0"
+
+[[datasets.layers]]
+id = "truecolor"
+title = "HLS true color"
+description = "B04/B03/B02 composite, reflectance rescaled 0..3000."
+kind = "truecolor"
+rescale = [0.0, 3000.0]
+[datasets.layers.bands]
+r = "b04"
+g = "b03"
+b = "b02"
+
+[[datasets.layers]]
+id = "ndvi"
+title = "HLS NDVI"
+description = "(B8A - B04) / (B8A + B04), rescaled -1..1, grayscale."
+kind = "ndvi"
+[datasets.layers.bands]
+nir = "b8a"
+red = "b04"
