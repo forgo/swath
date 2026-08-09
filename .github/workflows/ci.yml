@@ -183,8 +183,11 @@ jobs:
         with:
           version: "0.12.3"
           enable-cache: true
-          cache-dependency-glob: tests/oracle/render_reference.py
+          cache-dependency-glob: |
+            tests/oracle/render_reference.py
+            tests/fixtures/verify_fixtures.py
       - run: just oracle-verify
+      - run: just fixtures-verify
 
   python:
     needs: changes

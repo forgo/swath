@@ -44,9 +44,10 @@ test-results/
 *.key
 *.p12
 
-# ---- Data & artifacts (never commit imagery/cubes; tiny test fixtures live
-#      under tests/fixtures/ and are force-added deliberately) ----
+# ---- Data & artifacts (never commit imagery/cubes; the tiny deliberate test
+#      fixtures under tests/fixtures/ are exempted by the negation below) ----
 *.tif
+!tests/fixtures/*.tif
 *.tiff
 *.nc
 *.hdf

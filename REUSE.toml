@@ -35,6 +35,9 @@ path = [
     "REUSE.toml",
     ".claude/settings.json",
     ".github/**",
+    "tests/fixtures/*.tif",
+    "tests/fixtures/SHA256SUMS",
+    "tests/fixtures/manifest.json",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Elliott Richerson <elliott.richerson@gmail.com>"
