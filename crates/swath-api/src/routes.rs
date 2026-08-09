@@ -29,6 +29,7 @@ use crate::model::{
     BoundingBox2D, Conformance, LandingPage, Link, TileSetItem, TileSetList, TileSetMetadata,
 };
 use crate::registry::{Layer, LayerRegistry};
+use crate::traces::TraceBus;
 
 /// The OGC API - Tiles 1.0 (OGC 20-057) conformance classes this surface
 /// implements — exactly the set `/conformance` declares. Kept honest by
@@ -78,6 +79,9 @@ pub struct ApiState<S, R> {
     /// Base URL links are minted under (no trailing slash), e.g.
     /// `http://localhost:8080`.
     base_url: String,
+    /// The trace bus: the tile handler publishes every render, the
+    /// `GET /traces` SSE stream (issue #28) fans them out.
+    traces: TraceBus,
 }
 
 impl<S, R> ApiState<S, R> {
@@ -98,7 +102,22 @@ impl<S, R> ApiState<S, R> {
             source,
             reproject,
             base_url,
+            traces: TraceBus::default(),
         }
+    }
+
+    /// Replaces the default trace bus — the seam tests use to shrink the
+    /// subscriber buffer (forcing `lagged`) and the keepalive interval.
+    #[must_use]
+    pub fn with_trace_bus(mut self, traces: TraceBus) -> Self {
+        self.traces = traces;
+        self
+    }
+
+    /// The trace bus renders are published to. Exposed so tests (and,
+    /// later, non-tile render paths) can publish and observe directly.
+    pub fn trace_bus(&self) -> &TraceBus {
+        &self.traces
     }
 }
 
@@ -132,6 +151,8 @@ where
             "/tilesets/{layerId}/tiles/{tileMatrix}/{tileRow}/{tileCol}",
             get(tile),
         )
+        // The x-ray Trace stream (issue #28) — control-plane, not OGC.
+        .route("/traces", get(traces))
         .with_state(state)
 }
 
@@ -294,10 +315,27 @@ where
     if let Ok(value) = HeaderValue::from_str(&debug_header) {
         response.headers_mut().insert("x-swath-trace", value);
     }
+    let trace = Arc::new(trace);
     response
         .extensions_mut()
-        .insert(TraceExtension(Arc::new(trace)));
+        .insert(TraceExtension(Arc::clone(&trace)));
+    // Published to the SSE bus (#28) only after the response is fully
+    // assembled, so stream fan-out can never skew served-tile timing.
+    // `publish` is non-blocking by construction — a slow x-ray subscriber
+    // loses events (reported as `lagged`), never delays a tile.
+    app.traces.publish(&layer.id, coord, trace);
     Ok(response)
+}
+
+/// `GET /traces` — the x-ray SSE stream (issue #28): `text/event-stream`
+/// of every render published from connection time on. Wire contract and
+/// slow-subscriber semantics live in [`crate::traces`].
+async fn traces<S, R>(State(app): State<Arc<ApiState<S, R>>>) -> impl IntoResponse
+where
+    S: RasterSource + 'static,
+    R: Reproject + 'static,
+{
+    app.traces.sse()
 }
 
 // --- Translation helpers (parsing and lookup only — no domain logic) ---
