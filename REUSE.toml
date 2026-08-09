@@ -38,6 +38,7 @@ path = [
     "crates/swath-core/tests/data/*.json",
     "crates/adapters/swath-reproject-proj4rs/tests/data/*.json",
     "crates/adapters/swath-source-cog/tests/data/*.json",
+    "crates/swath-render/tests/data/*.png",
     "tests/fixtures/*.tif",
     "tests/fixtures/SHA256SUMS",
     "tests/fixtures/manifest.json",

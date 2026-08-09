@@ -125,6 +125,24 @@ oracle-verify:
     echo "seeded error caught at tolerance 0"
     echo "oracle-verify PASS"
 
+# Regenerate swath-render's committed golden tiles (crates/swath-render/tests/data)
+# from the HLS fixtures via the pinned oracle. z12/z13 goldens use rio-tiler's
+# serving path; the decimating z11 goldens use --exact-grid (single-stage warp on
+# the tile grid, exact transformer — see render_reference.py for why). The oracle
+# is deterministic, so a rerun must reproduce the committed bytes exactly.
+render-goldens:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    F=tests/fixtures/hlss30-t13sdd-2024158
+    D=crates/swath-render/tests/data
+    render() { uv run tests/oracle/render_reference.py render "$@"; }
+    while read -r z x y; do
+        render "$F-b04.tif"   "$z" "$x" "$y" "$D/b04-$z-$x-$y.png"   --bands 1 --rescale 0,3000 --resampling bilinear
+        render "$F-fmask.tif" "$z" "$x" "$y" "$D/fmask-$z-$x-$y.png" --bands 1 --resampling nearest
+    done <<< $'12 848 1561\n12 848 1562\n13 1697 3122'
+    render "$F-b04.tif"   11 424 780 "$D/b04-11-424-780.png"   --bands 1 --rescale 0,3000 --resampling bilinear --no-overviews --exact-grid
+    render "$F-fmask.tif" 11 424 780 "$D/fmask-11-424-780.png" --bands 1 --resampling nearest --no-overviews --exact-grid
+
 # --- tests/fixtures (committed HLS COG subsets, issue #20 / ADR 0004) ---
 
 # Fixture integrity gate: checksums + offline rasterio sanity load against
