@@ -6,10 +6,19 @@ latency**, the north-star metric (REQUIREMENTS.md §3).
 
 ## What you'll see
 
+**Scale expectations first:** the demo granule is a deliberately tiny CI-sized fixture — a
+**512×512-pixel (≈15×15 km) subset** of one HLS scene over the Rockies southwest of Denver
+(mountains around the Platte River valley), not a whole-Earth archive. At the demo's zoom it
+fills the viewport; zoom out and it's a small imagery patch on the world basemap — which is the
+honest picture: this is one granule, freshly ingested, exactly the size the manifest declares.
+The platform serves any number of real-size granules the same way; the fixture is small so the
+demo (and CI, forever) runs in seconds from a clean checkout.
+
 1. The full local stack comes up with one command: Swath (catalog mode) + pgstac + MinIO.
-2. The viewer opens on the demo layer's footprint. The map is **gray on purpose** — the layer
-   exists, its pixels don't yet, and a tile of the empty catalog is an honest 404 (no placeholder,
-   no pre-bake).
+2. The viewer opens over the granule's true footprint, on a light world basemap (MapLibre's demo
+   tiles — context only; Swath serves the imagery). The footprint area is **empty on purpose** —
+   the layer exists, its pixels don't yet, and a tile of the empty catalog is an honest 404 (no
+   placeholder, no pre-bake).
 3. A countdown ends and the granule drops: five HLS band COGs land in the watched directory, the
    manifest is renamed into place last (the filedrop convention). Nobody touches anything after
    that.
@@ -25,7 +34,7 @@ just setup-web   # once: web deps
 just demo        # bring-up, countdown, drop, number; ctrl-c tears down
 ```
 
-The recipe prints the URL to open (`http://localhost:5173/demo/?xray&center=-106.0,39.3&zoom=11`)
+The recipe prints the URL to open (`http://localhost:5173/demo/?xray&basemap=demo&layer=truecolor&center=-105.4475,39.2650&zoom=12`)
 while the stack builds. Open it before the countdown ends. If tiles stay gray after the drop,
 nudge the map (drag or zoom) — MapLibre doesn't refetch tiles it already saw 404.
 

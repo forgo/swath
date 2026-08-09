@@ -75,6 +75,17 @@ function stubSwathApi(): { requests: string[] } {
         new Response(TINY_PNG.slice().buffer, { headers: { "content-type": "image/png" } }),
       );
     }
+    if (url.endsWith("/basemap-style.json")) {
+      return Promise.resolve(
+        json({
+          version: 8,
+          sources: {
+            base: { type: "raster", tiles: ["https://basemap.example/{z}/{x}/{y}.png"] },
+          },
+          layers: [{ id: "base", type: "raster", source: "base" }],
+        }),
+      );
+    }
     return Promise.reject(new Error(`unstubbed fetch: ${url}`));
   });
   return { requests };
@@ -213,6 +224,34 @@ test("built-in switcher renders accessible buttons with aria-pressed", async () 
     (button) => button.getAttribute("aria-pressed"),
   );
   expect(pressed).toEqual(["false", "true"]);
+});
+
+test("basemap style merges with the swath raster layer painted on top", async () => {
+  // The demo-page fix (post-#35): without a basemap, everything outside the
+  // fixture footprint is blank void; with one, the imagery gets a world for
+  // context. The merge must keep our raster LAST (on top) and untouched.
+  stubSwathApi();
+  const el = mount({
+    server: SERVER,
+    layer: "truecolor",
+    basemap: `${SERVER}/basemap-style.json`,
+  });
+  await el.ready;
+  const style = el.map?.getStyle();
+  expect(style?.layers.map((l) => l.id)).toEqual(["base", "swath"]);
+  expect(Object.keys(style?.sources ?? {})).toEqual(expect.arrayContaining(["base", "swath"]));
+  expect(tileTemplates(el)).toContain(`${SERVER}/tilesets/truecolor/tiles/{z}/{y}/{x}`);
+});
+
+test("basemap fetch failure degrades to the bare style, never blocks imagery", async () => {
+  stubSwathApi();
+  const el = mount({
+    server: SERVER,
+    layer: "truecolor",
+    basemap: `${SERVER}/no-such-style.json`,
+  });
+  await el.ready;
+  expect(el.map?.getStyle().layers.map((l) => l.id)).toEqual(["swath"]);
 });
 
 test("a failing server rejects ready and fires a swath-error event", async () => {

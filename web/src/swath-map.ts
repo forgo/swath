@@ -64,13 +64,42 @@ interface OgcTileSetItem {
 
 const SOURCE_ID = "swath";
 const RASTER_LAYER_ID = "swath";
+
+/**
+ * The `basemap="demo"` shorthand: MapLibre's own demo world tiles — a light
+ * vector world map hosted by maplibre.org for exactly this kind of demo use.
+ * Any other non-empty `basemap` value is treated as a style-JSON URL. Without
+ * a basemap, tiles outside the layer footprint are transparent over the page
+ * background — geographically honest, but disorienting; the basemap gives the
+ * imagery a world for context. Fetched once per URL and cached; a fetch
+ * failure falls back to the bare style (the imagery must never be hostage to
+ * a third-party host, so e2e/CI runs keep basemap off).
+ */
+const DEMO_BASEMAP_URL = "https://demotiles.maplibre.org/style.json";
+const basemapCache = new Map<string, Promise<Record<string, unknown> | undefined>>();
+
+function fetchBasemapStyle(url: string): Promise<Record<string, unknown> | undefined> {
+  let cached = basemapCache.get(url);
+  if (!cached) {
+    cached = fetch(url)
+      .then((r) => (r.ok ? (r.json() as Promise<Record<string, unknown>>) : undefined))
+      .catch(() => undefined);
+    basemapCache.set(url, cached);
+  }
+  return cached;
+}
 const STYLE_ELEMENT_ID = "swath-map-styles";
 
 /** Component chrome on top of MapLibre's stylesheet: a block host with a
  * usable default height (consumer CSS overrides both), plus the minimal
  * layer-switcher skin. */
 const COMPONENT_CSS = `
-swath-map { display: block; height: 400px; position: relative; }
+swath-map { display: block; position: relative; }
+/* Zero-specificity default height: the injected sheet lands AFTER consumer
+ * styles in <head>, so at normal specificity this fallback would BEAT an
+ * equally-specific consumer rule (it silently squashed the full-viewport
+ * demo to a 400px strip). :where() keeps it losing to any consumer CSS. */
+:where(swath-map) { height: 400px; }
 swath-map .swath-map-container { width: 100%; height: 100%; }
 swath-map .swath-map-switcher button {
   width: auto;
@@ -226,7 +255,7 @@ export class SwathMap extends HTMLElement {
   static readonly tagName = "swath-map";
 
   static get observedAttributes(): readonly string[] {
-    return ["server", "layer", "center", "zoom", "xray"];
+    return ["server", "layer", "center", "zoom", "xray", "basemap"];
   }
 
   #map: MapLibreMap | undefined;
@@ -310,6 +339,7 @@ export class SwathMap extends HTMLElement {
     switch (name) {
       case "server":
       case "layer":
+      case "basemap":
         this.#startApply();
         break;
       case "center": {
@@ -420,24 +450,46 @@ export class SwathMap extends HTMLElement {
     // data" — read its geographic bounds off the tileset metadata.
     const fit = this.getAttribute("center") === null && this.getAttribute("zoom") === null;
     const bounds = fit ? await this.#layerBounds(layerId) : undefined;
+
+    // Optional basemap under the imagery: fetch (cached) and merge our raster
+    // source/layer ON TOP of its sources/layers. Failure → bare style.
+    const basemapAttr = this.getAttribute("basemap");
+    const basemapUrl =
+      basemapAttr === null || basemapAttr === ""
+        ? undefined
+        : basemapAttr === "demo"
+          ? DEMO_BASEMAP_URL
+          : basemapAttr;
+    const basemap = basemapUrl ? await fetchBasemapStyle(basemapUrl) : undefined;
     if (epoch !== this.#epoch || !this.#map) {
       return;
     }
 
+    const swathSource = {
+      type: "raster",
+      tiles: [this.#tileTemplate(layerId)],
+      tileSize: 256,
+    };
+    const swathLayer = { id: RASTER_LAYER_ID, type: "raster", source: SOURCE_ID };
     const applied = new Promise<void>((resolve) => {
       map.once("styledata", () => resolve());
     });
-    map.setStyle({
-      version: 8,
-      sources: {
-        [SOURCE_ID]: {
-          type: "raster",
-          tiles: [this.#tileTemplate(layerId)],
-          tileSize: 256,
-        },
-      },
-      layers: [{ id: RASTER_LAYER_ID, type: "raster", source: SOURCE_ID }],
-    });
+    map.setStyle(
+      basemap
+        ? ({
+            ...basemap,
+            sources: {
+              ...(basemap["sources"] as Record<string, unknown>),
+              [SOURCE_ID]: swathSource,
+            },
+            layers: [...(basemap["layers"] as unknown[]), swathLayer],
+          } as never)
+        : {
+            version: 8,
+            sources: { [SOURCE_ID]: swathSource as never },
+            layers: [swathLayer as never],
+          },
+    );
     await applied;
     if (epoch !== this.#epoch) {
       return;

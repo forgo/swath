@@ -13,7 +13,7 @@ const params = new URLSearchParams(location.search);
 if (params.has("xray")) {
   map?.setAttribute("xray", "");
 }
-for (const name of ["center", "zoom"]) {
+for (const name of ["center", "zoom", "basemap", "layer"]) {
   const value = params.get(name);
   if (value !== null) {
     map?.setAttribute(name, value);
