@@ -2780,6 +2780,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "swath-cache-objectstore"
+version = "0.0.0"
+dependencies = [
+ "object_store",
+ "swath-core",
+ "tokio",
+]
+
+[[package]]
 name = "swath-catalog-pgstac"
 version = "0.0.0"
 dependencies = [
