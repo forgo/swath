@@ -25,7 +25,7 @@ defaults:
 jobs:
   # Path filtering applies to PRs only. On push to main everything runs: it's
   # the post-squash re-verification, and paths-filter's push-mode git diff
-  # can't fetch on a credential-less checkout in a private repo anyway.
+  # can't fetch on a credential-less checkout (persist-credentials: false).
   changes:
     runs-on: ubuntu-latest
     permissions:
@@ -44,9 +44,11 @@ jobs:
           persist-credentials: false
       - if: github.event_name == 'pull_request'
         id: filter
-        # dorny (original), not the step-security fork: the fork requires a paid
-        # subscription on private repos. Revisit when the repo goes public.
-        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        # step-security fork of dorny/paths-filter (free now that the repo is
+        # public): same action, plus StepSecurity's maintenance/review pipeline
+        # — the maintained-fork preference of ENGINEERING.md §5. May trail
+        # dorny's releases slightly; Renovate keeps the pin fresh.
+        uses: step-security/paths-filter@9098a7821b83402dbe267c0c801e7d580ce74f92 # v4.0.2
         with:
           filters: |
             rust:
@@ -269,10 +271,14 @@ jobs:
       - uses: fsfe/reuse-action@676e2d560c9a403aa252096d99fcab3e1132b0f5 # v6.0.0
 
   # Workflow static analysis. Cheap, so it runs unconditionally — it audits the
-  # very file that defines it. Plain output for now: SARIF upload to code
-  # scanning requires a public repo or GHAS; switch when the repo goes public.
+  # very file that defines it. Findings go to code scanning as SARIF AND fail
+  # this job (so ci-ok stays the gate): the exit code is captured, the SARIF is
+  # uploaded, then the job fails if zizmor found anything.
   zizmor:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # SARIF upload to code scanning
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -280,7 +286,25 @@ jobs:
       - uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
         with:
           tool: zizmor@1.29.0
-      - run: zizmor .github
+      - name: Run zizmor (SARIF)
+        id: zizmor
+        run: |
+          set +e
+          zizmor --format=sarif .github > zizmor.sarif
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+      # Fork PRs get a read-only token that can't upload SARIF; the hard gate
+      # below still applies to them.
+      - name: Upload to code scanning
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        uses: github/codeql-action/upload-sarif@9e3211c9a3b9311dfe05da2ed48eea3386f042dd # v4.37.6
+        with:
+          sarif_file: zizmor.sarif
+          category: zizmor
+      - name: Fail on findings
+        if: steps.zizmor.outputs.exit != '0'
+        run: |
+          zizmor .github || true
+          exit 1
 
   # The single required status check. Green iff every needed job succeeded or
   # was skipped by the path filter; red on any failure, cancellation, or a

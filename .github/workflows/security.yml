@@ -2,9 +2,10 @@
 # Nightly RustSec advisories via cargo-deny; a failure files/updates a pinned
 # issue so it can't scroll past unnoticed. Manual dispatch for validation.
 #
-# Deferred until the repo is public (or GHAS): OpenSSF Scorecard, CodeQL (Rust),
-# dependency-review-action on PRs, zizmor SARIF upload — tracked in a dedicated
-# issue; none of them run on a private repo without a paid plan.
+# The rest of the §5 posture lives in sibling workflows: scorecard.yml (weekly
+# OpenSSF Scorecard), codeql.yml (weekly Rust CodeQL), dependency-review.yml
+# (per-PR), and ci.yml's zizmor job (SARIF + hard gate) — enabled by issue #50
+# when the repo went public.
 
 name: Security
 
