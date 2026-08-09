@@ -1,0 +1,391 @@
+// SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * `<swath-map>` — the Swath viewer: MapLibre GL over a Swath OGC API -
+ * Tiles surface (ADR 0005, issue #33).
+ *
+ * Plain Custom Element, light DOM, `observedAttributes` reactivity, no
+ * framework. MapLibre GL is the single production dependency; its CSS is
+ * injected into the document once by the component, so consumers need
+ * zero setup beyond defining the element.
+ *
+ * Attributes (all observed and reactive):
+ * - `server` — base URL of a Swath API (default: same origin).
+ * - `layer`  — initial layer id (default: first entry of `/tilesets`).
+ * - `center` — `"lon,lat"` initial view center.
+ * - `zoom`   — initial zoom.
+ *
+ * When neither `center` nor `zoom` is given, the view fits the layer's
+ * geographic bounds from `/tilesets/{id}` metadata — a bare
+ * `<swath-map>` against a live server is a working demo.
+ *
+ * Tile addressing (the #27 mirror): the Swath API serves OGC order
+ * `/tiles/{tileMatrix}/{tileRow}/{tileCol}` = z/y/x, while MapLibre
+ * raster templates are XYZ-named — so the template's middle segment must
+ * be `{y}` (row): `/tiles/{z}/{y}/{x}`.
+ */
+
+import { type IControl, Map as MapLibreMap } from "maplibre-gl";
+import maplibreCss from "maplibre-gl/dist/maplibre-gl.css?inline";
+
+/** One entry of the server's tilesets list, as `layers()` returns it. */
+export interface SwathLayer {
+  /** Layer id — the `{layerId}` path segment of the tile URL. */
+  id: string;
+  /** Human-readable title from the tileset metadata. */
+  title: string;
+}
+
+/** Geographic bounds from tileset metadata (CRS84 lon/lat degrees). */
+interface LonLatBounds {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
+/** Subset of an OGC link object the component reads. */
+interface OgcLink {
+  href?: string;
+  rel?: string;
+}
+
+/** Subset of a tilesets-list item the component reads. */
+interface OgcTileSetItem {
+  title?: string;
+  links?: OgcLink[];
+}
+
+const SOURCE_ID = "swath";
+const RASTER_LAYER_ID = "swath";
+const STYLE_ELEMENT_ID = "swath-map-styles";
+
+/** Component chrome on top of MapLibre's stylesheet: a block host with a
+ * usable default height (consumer CSS overrides both), plus the minimal
+ * layer-switcher skin. */
+const COMPONENT_CSS = `
+swath-map { display: block; height: 400px; position: relative; }
+swath-map .swath-map-container { width: 100%; height: 100%; }
+swath-map .swath-map-switcher button {
+  width: auto;
+  padding: 0 8px;
+  font: 12px/29px system-ui, sans-serif;
+}
+swath-map .swath-map-switcher button[aria-pressed="true"] {
+  font-weight: 700;
+  background: rgb(0 0 0 / 8%);
+}
+`;
+
+/** Injects MapLibre's CSS + the component chrome once per document. */
+function injectStyles(doc: Document): void {
+  if (doc.getElementById(STYLE_ELEMENT_ID)) {
+    return;
+  }
+  const style = doc.createElement("style");
+  style.id = STYLE_ELEMENT_ID;
+  style.textContent = `${maplibreCss}\n${COMPONENT_CSS}`;
+  doc.head.append(style);
+}
+
+/** Parses a `"lon,lat"` attribute; undefined when absent or malformed. */
+function parseCenter(value: string | null): [number, number] | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  const parts = value.split(",").map((part) => Number(part.trim()));
+  const [lon, lat] = parts;
+  if (parts.length !== 2 || lon === undefined || lat === undefined) {
+    return undefined;
+  }
+  return Number.isFinite(lon) && Number.isFinite(lat) ? [lon, lat] : undefined;
+}
+
+/** Parses a numeric attribute; undefined when absent or malformed. */
+function parseNumber(value: string | null): number | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/** The layer id is the last path segment of a tileset's `self` link (the
+ * OGC list item carries no bare id field). */
+function layerIdFromSelfLink(item: OgcTileSetItem): string | undefined {
+  const self = item.links?.find((link) => link.rel === "self")?.href;
+  return self?.split("/").filter(Boolean).pop();
+}
+
+/** The built-in layer switcher: a MapLibre control of real `<button>`s
+ * (accessible: `aria-pressed` marks the active layer). Deliberately
+ * minimal — the control-plane UI is later work. */
+class LayerSwitcherControl implements IControl {
+  readonly #host: SwathMap;
+  #container: HTMLElement | undefined;
+  #layers: readonly SwathLayer[] = [];
+  #active = "";
+
+  constructor(host: SwathMap) {
+    this.#host = host;
+  }
+
+  onAdd(): HTMLElement {
+    const container = document.createElement("div");
+    container.className = "maplibregl-ctrl maplibregl-ctrl-group swath-map-switcher";
+    container.setAttribute("role", "group");
+    container.setAttribute("aria-label", "Layers");
+    this.#container = container;
+    this.#render();
+    return container;
+  }
+
+  onRemove(): void {
+    this.#container?.remove();
+    this.#container = undefined;
+  }
+
+  update(layers: readonly SwathLayer[], active: string): void {
+    this.#layers = layers;
+    this.#active = active;
+    this.#render();
+  }
+
+  #render(): void {
+    const container = this.#container;
+    if (!container) {
+      return;
+    }
+    container.replaceChildren();
+    for (const layer of this.#layers) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = layer.title;
+      button.setAttribute("aria-pressed", String(layer.id === this.#active));
+      button.addEventListener("click", () => {
+        void this.#host.setLayer(layer.id);
+      });
+      container.append(button);
+    }
+  }
+}
+
+export class SwathMap extends HTMLElement {
+  static readonly tagName = "swath-map";
+
+  static get observedAttributes(): readonly string[] {
+    return ["server", "layer", "center", "zoom"];
+  }
+
+  #map: MapLibreMap | undefined;
+  #switcher: LayerSwitcherControl | undefined;
+  /** Monotonic token: only the latest async apply may touch the map. */
+  #epoch = 0;
+  #ready: Promise<void> = Promise.resolve();
+
+  /**
+   * The underlying MapLibre `Map` instance (undefined until connected).
+   *
+   * Escape hatch, explicitly UNSTABLE: reaching through it couples the
+   * consumer to MapLibre's API and this component's internal style
+   * (source/layer ids may change without notice).
+   */
+  get map(): MapLibreMap | undefined {
+    return this.#map;
+  }
+
+  /** Settles when the last attribute-driven update has been applied —
+   * `await el.ready` before inspecting the map. Rejects on fetch/apply
+   * failure (also reported via a bubbling `swath-error` event). */
+  get ready(): Promise<void> {
+    return this.#ready;
+  }
+
+  /** Base URL of the Swath API (no trailing slash); same origin when the
+   * `server` attribute is absent. */
+  get server(): string {
+    return (this.getAttribute("server") ?? "").replace(/\/+$/, "");
+  }
+
+  connectedCallback(): void {
+    injectStyles(this.ownerDocument);
+    const container = document.createElement("div");
+    container.className = "swath-map-container";
+    this.replaceChildren(container);
+
+    const center = parseCenter(this.getAttribute("center"));
+    const zoom = parseNumber(this.getAttribute("zoom"));
+    this.#map = new MapLibreMap({
+      container,
+      style: { version: 8, sources: {}, layers: [] },
+      center: center ?? [0, 0],
+      zoom: zoom ?? 1,
+    });
+    this.#switcher = new LayerSwitcherControl(this);
+    this.#map.addControl(this.#switcher, "top-right");
+    this.#startApply();
+  }
+
+  disconnectedCallback(): void {
+    this.#epoch += 1;
+    this.#map?.remove();
+    this.#map = undefined;
+    this.#switcher = undefined;
+    this.replaceChildren();
+  }
+
+  attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void {
+    if (!this.#map || oldValue === newValue) {
+      return;
+    }
+    switch (name) {
+      case "server":
+      case "layer":
+        this.#startApply();
+        break;
+      case "center": {
+        const center = parseCenter(newValue);
+        if (center) {
+          this.#map.jumpTo({ center });
+        }
+        break;
+      }
+      case "zoom": {
+        const zoom = parseNumber(newValue);
+        if (zoom !== undefined) {
+          this.#map.jumpTo({ zoom });
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  /** Fetches the server's available layers from `/tilesets`. */
+  async layers(): Promise<SwathLayer[]> {
+    const response = await fetch(`${this.server}/tilesets`, {
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) {
+      throw new Error(`GET ${this.server}/tilesets failed: ${response.status}`);
+    }
+    const body = (await response.json()) as { tilesets?: OgcTileSetItem[] };
+    const layers: SwathLayer[] = [];
+    for (const item of body.tilesets ?? []) {
+      const id = layerIdFromSelfLink(item);
+      if (id !== undefined) {
+        layers.push({ id, title: item.title ?? id });
+      }
+    }
+    return layers;
+  }
+
+  /** Switches the displayed layer (reflects the `layer` attribute) and
+   * settles once the map style has been updated. */
+  async setLayer(id: string): Promise<void> {
+    this.setAttribute("layer", id);
+    await this.#ready;
+  }
+
+  /** OGC `{tileMatrix}/{tileRow}/{tileCol}` is z/y/x, so MapLibre's
+   * XYZ-named template must carry `{y}` (row) in the middle segment. */
+  #tileTemplate(layerId: string): string {
+    return `${this.server}/tilesets/${layerId}/tiles/{z}/{y}/{x}`;
+  }
+
+  /** Kicks off an async (re)apply of server+layer; `ready` tracks it. */
+  #startApply(): void {
+    const ready = this.#applyLayer();
+    this.#ready = ready;
+    ready.catch((error: unknown) => {
+      // Namespaced (not `error`): a bubbling `error` event would reach
+      // `window` and read as an unhandled page error to host tooling.
+      this.dispatchEvent(new CustomEvent("swath-error", { detail: { error }, bubbles: true }));
+    });
+  }
+
+  async #applyLayer(): Promise<void> {
+    const map = this.#map;
+    if (!map) {
+      return;
+    }
+    const epoch = ++this.#epoch;
+    const available = await this.layers();
+    const requested = this.getAttribute("layer");
+    const layerId = requested ?? available[0]?.id;
+    if (epoch !== this.#epoch || layerId === undefined) {
+      return;
+    }
+
+    // Zero-config view: no explicit center/zoom means "fit the layer's
+    // data" — read its geographic bounds off the tileset metadata.
+    const fit = this.getAttribute("center") === null && this.getAttribute("zoom") === null;
+    const bounds = fit ? await this.#layerBounds(layerId) : undefined;
+    if (epoch !== this.#epoch || !this.#map) {
+      return;
+    }
+
+    const applied = new Promise<void>((resolve) => {
+      map.once("styledata", () => resolve());
+    });
+    map.setStyle({
+      version: 8,
+      sources: {
+        [SOURCE_ID]: {
+          type: "raster",
+          tiles: [this.#tileTemplate(layerId)],
+          tileSize: 256,
+        },
+      },
+      layers: [{ id: RASTER_LAYER_ID, type: "raster", source: SOURCE_ID }],
+    });
+    await applied;
+    if (epoch !== this.#epoch) {
+      return;
+    }
+    if (bounds) {
+      map.fitBounds(
+        [
+          [bounds.west, bounds.south],
+          [bounds.east, bounds.north],
+        ],
+        { duration: 0, padding: 16 },
+      );
+    }
+    this.#switcher?.update(available, layerId);
+    this.dispatchEvent(
+      new CustomEvent("layerchange", { detail: { layer: layerId }, bubbles: true }),
+    );
+  }
+
+  /** Geographic bounds from `/tilesets/{id}` metadata; undefined when the
+   * layer is not resolvable yet (e.g. empty catalog: an honest 404). */
+  async #layerBounds(layerId: string): Promise<LonLatBounds | undefined> {
+    const response = await fetch(`${this.server}/tilesets/${layerId}`, {
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) {
+      return undefined;
+    }
+    const body = (await response.json()) as {
+      boundingBox?: { lowerLeft?: number[]; upperRight?: number[] };
+    };
+    const lower = body.boundingBox?.lowerLeft;
+    const upper = body.boundingBox?.upperRight;
+    const [west, south] = lower ?? [];
+    const [east, north] = upper ?? [];
+    if (west === undefined || south === undefined || east === undefined || north === undefined) {
+      return undefined;
+    }
+    return { west, south, east, north };
+  }
+}
+
+/** Registers `<swath-map>`; safe to call more than once. */
+export function defineSwathMap(): void {
+  if (!customElements.get(SwathMap.tagName)) {
+    customElements.define(SwathMap.tagName, SwathMap);
+  }
+}

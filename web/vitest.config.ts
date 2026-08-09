@@ -8,6 +8,9 @@ import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // MapLibre spawns its worker from a sibling module the dep optimizer
+  // doesn't crawl; excluding it avoids a missing-file warning per run.
+  optimizeDeps: { exclude: ["maplibre-gl"] },
   test: {
     browser: {
       enabled: true,
