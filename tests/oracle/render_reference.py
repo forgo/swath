@@ -35,7 +35,8 @@ Determinism contract
 Subcommands
 -----------
 * ``synth-cog OUT.tif [--size 512] [--nodata-corner]``
-* ``render COG z x y OUT.png [--bands 1,2,3] [--rescale MIN,MAX]``
+* ``render COG z x y OUT.png [--bands 1,2,3] [--rescale MIN,MAX]
+  [--resampling nearest|bilinear|cubic] [--no-overviews] [--exact-grid]``
 """
 
 from __future__ import annotations
@@ -47,8 +48,11 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
+from rasterio.enums import Resampling
 from rasterio.transform import from_bounds
+from rasterio.vrt import WarpedVRT
 from rio_tiler.io import Reader
+from rio_tiler.models import ImageData
 
 # WebMercator (EPSG:3857) half-world extent in metres.
 WEB_MERCATOR_HALF_WORLD = 20037508.342789244
@@ -114,11 +118,74 @@ def cmd_synth_cog(args: argparse.Namespace) -> int:
 
 
 def render_tile_png(
-    cog: str, z: int, x: int, y: int, bands: tuple[int, ...], rescale: tuple[float, float] | None
+    cog: str,
+    z: int,
+    x: int,
+    y: int,
+    bands: tuple[int, ...],
+    rescale: tuple[float, float] | None,
+    resampling: str = "nearest",
+    no_overviews: bool = False,
+    exact_grid: bool = False,
 ) -> bytes:
-    """Render one XYZ tile of ``cog`` to PNG bytes via rio-tiler."""
-    with Reader(cog) as reader:
-        img = reader.tile(x, y, z, indexes=bands)
+    """Render one XYZ tile of ``cog`` to PNG bytes via rio-tiler.
+
+    ``resampling`` selects the GDAL warp kernel (rio-tiler's
+    ``reproject_method``; default ``nearest``, rio-tiler's own default, so
+    pre-existing renders are byte-identical). Added for issue #24: the Swath
+    warp kernels are validated per-kernel against the oracle, so the oracle
+    must be able to warp with the same kernel under test (bilinear for
+    continuous bands, nearest for categorical).
+
+    ``no_overviews`` hides the COG's embedded overviews (GTiff open option
+    ``OVERVIEW_LEVEL=NONE``), forcing GDAL to warp from the full-resolution
+    grid. Also issue #24: at decimating zooms GDAL otherwise resamples from
+    an overview level, so a kernel-vs-kernel comparison would silently
+    compare against *average-decimated* pixels. Swath's overview selection
+    is a separate, planner-level decision (ARCHITECTURE.md §5) validated on
+    its own; kernel goldens must be renders of the same source pixels the
+    kernel under test consumed.
+
+    ``exact_grid`` warps in a single stage directly onto the 256-px tile grid
+    (a ``WarpedVRT`` whose transform IS the tile grid), instead of rio-tiler's
+    read pipeline (warp to a VRT near dataset resolution, then a decimated
+    ``nearest`` read). The two are byte-identical when the tile does not
+    decimate the source (verified for the committed fixtures at z12/z13),
+    but at decimating zooms the two-stage pipeline point-samples the warped
+    grid — an artifact of the *read* path, not of GDAL's warp kernel. Kernel
+    goldens for decimating zooms use this flag so the reference is GDAL's
+    warp semantics (anti-aliased scaled kernel), the semantics Swath's
+    kernels implement.
+
+    Exact-grid mode also uses an (effectively) exact coordinate transformer
+    (``tolerance=1e-6`` source pixels instead of GDAL's default 0.125-px
+    approximation): the approximation is a throughput optimization that
+    perturbs sampling coordinates, not part of the kernel semantics under
+    test, and Swath transforms every pixel exactly.
+    """
+    open_options = {"OVERVIEW_LEVEL": "NONE"} if no_overviews else {}
+    if exact_grid:
+        bounds = tile_bounds_3857(z, x, y)
+        with rasterio.open(cog, **open_options) as dataset:
+            with WarpedVRT(
+                dataset,
+                crs="EPSG:3857",
+                transform=from_bounds(*bounds, 256, 256),
+                width=256,
+                height=256,
+                resampling=Resampling[resampling],
+                tolerance=1e-6,
+            ) as vrt:
+                data = vrt.read(indexes=bands)
+                mask = vrt.read_masks(bands[0])
+        img = ImageData(np.ma.MaskedArray(data, mask=np.broadcast_to(mask == 0, data.shape)))
+    elif no_overviews:
+        with rasterio.open(cog, **open_options) as dataset:
+            with Reader(None, dataset=dataset) as reader:
+                img = reader.tile(x, y, z, indexes=bands, reproject_method=resampling)
+    else:
+        with Reader(cog) as reader:
+            img = reader.tile(x, y, z, indexes=bands, reproject_method=resampling)
     if rescale is not None:
         img.rescale(in_range=(rescale,) * len(bands))
     return img.render(img_format="PNG")
@@ -132,8 +199,28 @@ def cmd_render(args: argparse.Namespace) -> int:
         lo, hi = (float(v) for v in args.rescale.split(","))
         rescale = (lo, hi)
 
-    first = render_tile_png(args.cog, args.z, args.x, args.y, bands, rescale)
-    second = render_tile_png(args.cog, args.z, args.x, args.y, bands, rescale)
+    first = render_tile_png(
+        args.cog,
+        args.z,
+        args.x,
+        args.y,
+        bands,
+        rescale,
+        args.resampling,
+        args.no_overviews,
+        args.exact_grid,
+    )
+    second = render_tile_png(
+        args.cog,
+        args.z,
+        args.x,
+        args.y,
+        bands,
+        rescale,
+        args.resampling,
+        args.no_overviews,
+        args.exact_grid,
+    )
     digest = hashlib.sha256(first).hexdigest()
     if hashlib.sha256(second).hexdigest() != digest:
         print("render: NONDETERMINISTIC — two in-process renders differ", file=sys.stderr)
@@ -165,6 +252,22 @@ def main(argv: list[str] | None = None) -> int:
     p_render.add_argument("out")
     p_render.add_argument("--bands", default="1,2,3")
     p_render.add_argument("--rescale", default=None, metavar="MIN,MAX")
+    p_render.add_argument(
+        "--resampling",
+        default="nearest",
+        choices=("nearest", "bilinear", "cubic"),
+        help="GDAL warp kernel (rio-tiler reproject_method); default matches rio-tiler",
+    )
+    p_render.add_argument(
+        "--no-overviews",
+        action="store_true",
+        help="hide COG overviews so GDAL warps from the full-resolution grid",
+    )
+    p_render.add_argument(
+        "--exact-grid",
+        action="store_true",
+        help="single-stage warp directly onto the 256-px tile grid (kernel goldens)",
+    )
     p_render.set_defaults(func=cmd_render)
 
     args = parser.parse_args(argv)
