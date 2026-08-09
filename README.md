@@ -41,7 +41,9 @@ Read in this order:
    component model, data flows.
 4. [`docs/ENGINEERING.md`](docs/ENGINEERING.md) — repo standards: toolchains, linting, testing,
    CI/CD, release, security posture.
-5. [`docs/decisions/`](docs/decisions/) — dated, immutable ADRs recording *why* Swath is shaped
+5. [`docs/DEMO.md`](docs/DEMO.md) — the stopwatch demo: `just demo`, what the x-ray overlay
+   shows, the measured ingest-to-pixel numbers, and how CI asserts the same path forever.
+6. [`docs/decisions/`](docs/decisions/) — dated, immutable ADRs recording *why* Swath is shaped
    this way; [`prototypes/`](prototypes/) holds the dated experiments that produced the evidence.
 
 ## License
