@@ -247,11 +247,12 @@ Decided since v0.1 (see `docs/decisions/`):
 - ~~**Rust in the hot path**~~ → superseded by the **pure-Rust core** decision (ADR 0002); the question
   is no longer "when to add Rust" but "what to adopt vs build vs bind."
 - ~~**Legacy dataset for the Phase-2 proof**~~ → **VIIRS primary, MODIS stretch** (ADR 0004).
+- ~~**openEO surface**~~ → **native openEO API at a bounded profile** (ADR 0010): capabilities,
+  collections, processes, and XYZ secondary services over the process compiler — real openEO
+  clients author against Swath; jobs/batch/auth deferred until demanded.
 
 Still open:
 
-- **openEO surface:** adopt an existing openEO backend / Processes engine vs. implement a minimal Processes
-  subset first. Bias toward composing.
 - **Embedding model for the frontier:** Clay vs. Prithvi vs. AlphaEarth-style — decide when Phase 4 nears.
 - **Extension mechanism** beyond compile-time features (WASM plug-ins vs sidecar RPC) — see
   `ARCHITECTURE.md` §14/§16.
