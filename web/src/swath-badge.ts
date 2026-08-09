@@ -6,8 +6,9 @@
  *
  * Deliberately trivial, but it exercises the real conventions every Swath
  * component follows (ADR 0005, forgo-auth lineage): plain Custom Element,
- * light DOM, `observedAttributes` reactivity, no framework. `<swath-map>`
- * replaces this as the first real component (issue #33).
+ * light DOM, `observedAttributes` reactivity, no framework. It stays as
+ * the conventions exemplar; `<swath-map>` (swath-map.ts, issue #33) is
+ * the first real component.
  */
 export class SwathBadge extends HTMLElement {
   static readonly tagName = "swath-badge";

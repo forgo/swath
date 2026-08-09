@@ -2,7 +2,7 @@
   "name": "@swath/web",
   "version": "0.0.0",
   "private": true,
-  "description": "Swath frontend: vanilla Web Components + MapLibre GL (ADR 0005). No framework.",
+  "description": "Swath frontend: vanilla Web Components + MapLibre GL (ADR 0005), no framework. <swath-map> is the viewer; demo/ drives it against the compose stack.",
   "license": "Apache-2.0",
   "type": "module",
   "packageManager": "pnpm@11.20.0",
@@ -21,9 +21,15 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
+    "@playwright/test": "1.62.1",
+    "@types/node": "26.2.0",
     "@vitest/browser-playwright": "4.1.10",
     "playwright": "1.62.1",
     "typescript": "7.0.2",
+    "vite": "8.2.1",
     "vitest": "4.1.10"
+  },
+  "dependencies": {
+    "maplibre-gl": "6.2.0"
   }
 }
