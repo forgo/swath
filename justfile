@@ -89,6 +89,35 @@ zizmor:
 reuse:
     git ls-files -z | xargs -0 uvx --from 'reuse[charset-normalizer]' reuse lint-file
 
+# --- tests/oracle (GDAL/rio-tiler correctness oracle, ADR 0002 / issue #19) ---
+
+# Passthrough to the reference renderer (PEP 723 script; uv resolves the pins).
+oracle-render *ARGS:
+    uv run tests/oracle/render_reference.py {{ARGS}}
+
+# Issue #19 validation gate: reference renders are byte-stable and the
+# perceptual diff catches a seeded single-pixel error at tolerance 0.
+oracle-verify:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=target/oracle
+    rm -rf "$dir" && mkdir -p "$dir"
+    uv run tests/oracle/render_reference.py synth-cog "$dir/synth.tif" --nodata-corner
+    uv run tests/oracle/render_reference.py render "$dir/synth.tif" 6 10 24 "$dir/a.png"
+    uv run tests/oracle/render_reference.py render "$dir/synth.tif" 6 10 24 "$dir/b.png"
+    sha_a=$(openssl dgst -sha256 -r "$dir/a.png" | cut -d' ' -f1)
+    sha_b=$(openssl dgst -sha256 -r "$dir/b.png" | cut -d' ' -f1)
+    echo "render 1 sha256: $sha_a"
+    echo "render 2 sha256: $sha_b"
+    [ "$sha_a" = "$sha_b" ] || { echo "FAIL: renders are not byte-stable"; exit 1; }
+    cargo run --quiet -p swath-testkit --bin pdiff -- "$dir/a.png" "$dir/b.png"
+    cargo run --quiet -p swath-testkit --bin pdiff -- --corrupt "$dir/a.png" "$dir/corrupt.png"
+    if cargo run --quiet -p swath-testkit --bin pdiff -- --tolerance 0 --max-bad-frac 0 "$dir/a.png" "$dir/corrupt.png"; then
+        echo "FAIL: pdiff missed the seeded single-pixel error"; exit 1
+    fi
+    echo "seeded error caught at tolerance 0"
+    echo "oracle-verify PASS"
+
 # --- python/ (uv workspace; ingest sidecars only, ADR 0006) ---
 
 # Sync the python workspace (all packages + dev groups).

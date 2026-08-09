@@ -1,0 +1,17 @@
+# Codecov policy (ENGINEERING.md §2, ADR 0007): coverage is an INFORMATIONAL
+# signal until a meaningful baseline exists — no hard gate. Without this file,
+# Codecov auto-targets compare every PR against main's coverage, which on a
+# young codebase (a handful of trivial lines at 100%) fails any real PR — the
+# statuses went red on PR #66 exactly that way. Revisit thresholds when the
+# render path lands and the baseline is meaningful.
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+comment:
+  layout: "condensed_header, diff, files"
+  behavior: default

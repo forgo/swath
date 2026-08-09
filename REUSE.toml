@@ -16,6 +16,7 @@ path = [
     "**/.gitignore",
     ".pre-commit-config.yaml",
     "docker-compose.yml",
+    "codecov.yml",
     "web/*.json",
     "web/pnpm-lock.yaml",
     "python/**/pyproject.toml",
