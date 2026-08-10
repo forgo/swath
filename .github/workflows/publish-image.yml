@@ -1,0 +1,154 @@
+# GHCR image publishing (ENGINEERING.md §6, issue #104).
+# Main-only (CI wall-time respected): build the image once with buildx +
+# GHA layer cache, SMOKE-TEST IT BEFORE PUSHING (the forgo-auth pattern —
+# run the README install one-liner against the freshly built image, assert
+# /healthz, a truecolor tile, and the embedded UI), then push `latest` +
+# `main` + an immutable `sha-<shortsha>` tag. linux/amd64 only: the release
+# build compiles libhdf5 from source (cmake) plus a full Rust release
+# profile, which under QEMU emulation blows far past the ~15 min budget;
+# arm64 waits for a native-arm runner + manifest-merge design (recorded in
+# PR #104's thread).
+
+name: Publish image
+
+on:
+  push:
+    branches: [main]
+    # The image-relevant set: everything COPY'd into the build context plus
+    # the build definition itself. Docs-only pushes don't cut an image.
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "web/**"
+      - "tests/fixtures/**"
+      - ".github/workflows/publish-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One publish at a time, never cancelled mid-push: a half-updated tag set
+# (`latest` moved, `main` not) is worse than a queued run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # GHCR push; scoped to this job only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      # Tags: `latest` + `main` (moving, default branch only) and
+      # `sha-<shortsha>` (immutable). `latest` exists so the README's bare
+      # `ghcr.io/forgo/swath` one-liner resolves. OCI annotations
+      # (source/revision/licenses/description) ride along as image labels.
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.description=Swath — cloud-native geospatial tiles: serve the committed HLS fixtures and the embedded viewer with `docker run -p 8080:8080 ghcr.io/forgo/swath serve --fixtures`
+            org.opencontainers.image.licenses=Apache-2.0
+
+      # Build for the local docker engine first — nothing is pushed until
+      # the smoke test below has passed against this exact image.
+      - name: Build (local, not yet pushed)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: ghcr.io/${{ github.repository }}:latest
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The README install one-liner, verbatim (`-d --name` added only so CI
+      # can tail logs and tear down). Asserts the three things a fresh user
+      # sees: liveness, a real rendered tile, and the embedded UI (#103).
+      - name: Smoke-test the one-liner
+        env:
+          ONE_LINER: docker run -p 8080:8080 ghcr.io/forgo/swath serve --fixtures
+        run: |
+          set -euo pipefail
+          eval "${ONE_LINER/docker run/docker run -d --name swath-smoke}"
+          trap 'docker logs swath-smoke; docker rm -f swath-smoke' EXIT
+
+          # 1. /healthz answers 200 within 30s.
+          ok=""
+          for _ in $(seq 1 60); do
+            if [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/healthz)" = "200" ]; then
+              ok=1; break
+            fi
+            sleep 0.5
+          done
+          [ -n "$ok" ] || { echo "::error::/healthz never answered 200"; exit 1; }
+          echo "healthz: 200"
+
+          # 2. A truecolor tile over the fixture footprint: 200, image/png,
+          #    non-empty body that really is a PNG.
+          code=$(curl -s -D headers.txt -o tile.png -w '%{http_code}' \
+            http://localhost:8080/tilesets/truecolor/tiles/12/1561/848)
+          [ "$code" = "200" ] || { echo "::error::tile returned $code"; exit 1; }
+          grep -i '^content-type: image/png' headers.txt \
+            || { echo "::error::tile content-type is not image/png"; cat headers.txt; exit 1; }
+          [ -s tile.png ] || { echo "::error::tile body is empty"; exit 1; }
+          [ "$(head -c 8 tile.png | xxd -p)" = "89504e470d0a1a0a" ] \
+            || { echo "::error::tile body is not a PNG"; exit 1; }
+          echo "tile: 200 image/png ($(wc -c < tile.png) bytes)"
+
+          # 3. The embedded UI (#103): a browser-shaped GET / serves the
+          #    viewer's index.html.
+          code=$(curl -s -H 'Accept: text/html' -D ui-headers.txt -o ui.html \
+            -w '%{http_code}' http://localhost:8080/)
+          [ "$code" = "200" ] || { echo "::error::UI returned $code"; exit 1; }
+          grep -i '^content-type: text/html' ui-headers.txt \
+            || { echo "::error::UI content-type is not text/html"; cat ui-headers.txt; exit 1; }
+          grep -q 'swath-map' ui.html \
+            || { echo "::error::UI index.html does not mount <swath-map>"; exit 1; }
+          echo "ui: 200 text/html ($(wc -c < ui.html) bytes)"
+
+      - name: Record image size
+        run: |
+          set -euo pipefail
+          size=$(docker image inspect --format '{{.Size}}' ghcr.io/forgo/swath:latest)
+          printf 'Image size: %d bytes (%d MB)\n' "$size" "$((size / 1000000))" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same context and platform — every layer comes out of the buildx
+      # cache, so this is a push of the exact image that passed the smoke.
+      - name: Push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
