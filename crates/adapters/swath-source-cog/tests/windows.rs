@@ -12,102 +12,32 @@
 
 mod common;
 
-use sha2::{Digest, Sha256};
 use swath_core::raster::{AssetRef, WindowRequest};
-use swath_core::source::{
-    BandSelection, PixelBuffer, RasterSource, ReadLevel, SourceError, WindowData,
-};
+use swath_core::source::{BandSelection, RasterSource, ReadLevel, SourceError, WindowData};
+use swath_testsupport::truth::{self, PixelCase, Truth};
 
-#[derive(serde::Deserialize)]
-struct Truth {
-    cases: Vec<Case>,
-}
-
+/// Per-source keys on top of the shared pixel-identity block.
 #[derive(serde::Deserialize)]
 struct Case {
     file: String,
     band: u32,
-    window_name: String,
-    requested: Win,
-    clipped: Win,
-    dtype: String,
-    nodata: f64,
-    nodata_count: u64,
-    valid_sum: i64,
-    first8: Vec<i64>,
-    last8: Vec<i64>,
-    sha256_le: String,
+    #[serde(flatten)]
+    px: PixelCase,
 }
 
-#[derive(serde::Deserialize, PartialEq, Eq, Debug, Clone, Copy)]
-struct Win {
-    col_off: u64,
-    row_off: u64,
-    width: u64,
-    height: u64,
+fn truth() -> Truth<Case> {
+    truth::load(include_str!("data/window_truth.json"))
 }
 
-impl From<Win> for WindowRequest {
-    fn from(w: Win) -> Self {
-        Self {
-            col_off: w.col_off,
-            row_off: w.row_off,
-            width: w.width,
-            height: w.height,
-        }
-    }
-}
-
-fn truth() -> Truth {
-    let raw = include_str!("data/window_truth.json");
-    serde_json::from_str(raw).expect("window_truth.json parses")
-}
-
-/// Samples widened to i64 for sum/first/last comparisons (both fixture
-/// dtypes are integral; the truth table stores them as JSON integers).
-fn widened(pixels: &PixelBuffer) -> Vec<i64> {
-    match pixels {
-        PixelBuffer::UInt8(v) => v.iter().map(|&s| i64::from(s)).collect(),
-        PixelBuffer::Int16(v) => v.iter().map(|&s| i64::from(s)).collect(),
-        other => panic!("unexpected pixel dtype in fixtures: {:?}", other.dtype()),
-    }
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "nodata sentinels are exact small integers"
-)]
 fn check_case(case: &Case, wd: &WindowData) {
-    let name = format!("{}/{}", case.file, case.window_name);
+    let name = format!("{}/{}", case.file, case.px.window_name);
 
-    assert_eq!(wd.window, case.clipped.into(), "{name}: clipped window");
     assert_eq!(
         wd.dtype(),
-        common::dtype_from_str(&case.dtype),
+        common::dtype_from_str(&case.px.dtype),
         "{name}: dtype"
     );
-    assert_eq!(wd.nodata, Some(case.nodata), "{name}: nodata sentinel");
-    let expected_len = usize::try_from(wd.window.width * wd.window.height).unwrap();
-    assert_eq!(wd.pixels.len(), expected_len, "{name}: pixel count");
-
-    // EXACT pixel equality with GDAL: hash of raw little-endian bytes.
-    let hash = format!("{:x}", Sha256::digest(wd.pixels.to_le_bytes()));
-    assert_eq!(hash, case.sha256_le, "{name}: pixel bytes differ from GDAL");
-
-    // Redundant with the hash, but failure output is far more diagnostic.
-    let samples = widened(&wd.pixels);
-    let sentinel = case.nodata as i64;
-    let nodata_count = samples.iter().filter(|&&s| s == sentinel).count() as u64;
-    let valid_sum: i64 = samples.iter().filter(|&&s| s != sentinel).sum();
-    assert_eq!(nodata_count, case.nodata_count, "{name}: nodata count");
-    assert_eq!(valid_sum, case.valid_sum, "{name}: valid-pixel sum");
-    let take8 = samples.len().min(8);
-    assert_eq!(&samples[..take8], &case.first8[..], "{name}: first pixels");
-    assert_eq!(
-        &samples[samples.len() - take8..],
-        &case.last8[..],
-        "{name}: last pixels"
-    );
+    truth::assert_pixels_match(&name, &case.px, wd);
 
     // Provenance is real I/O: non-empty, in-bounds, and bytes_read is the sum.
     let file_len = common::file_len(&case.file);
@@ -131,7 +61,7 @@ fn check_case(case: &Case, wd: &WindowData) {
     // Tile-touch geometry (256px internal tiles, 512px grid): the full
     // window covers all four tiles, the interior window crosses both seams
     // (four tiles), and the 1px window touches exactly one.
-    match case.window_name.as_str() {
+    match case.px.window_name.as_str() {
         "full" | "interior" => {
             assert_eq!(wd.provenance.len(), 4, "{name}: expected all four tiles");
         }
@@ -151,12 +81,12 @@ async fn windows_match_gdal_truth_table_exactly() {
         let wd = source
             .read_window(
                 &AssetRef::new(&case.file),
-                case.requested.into(),
+                case.px.requested.into(),
                 BandSelection::Single(case.band),
                 ReadLevel::FullRes,
             )
             .await
-            .unwrap_or_else(|e| panic!("{}/{}: {e}", case.file, case.window_name));
+            .unwrap_or_else(|e| panic!("{}/{}: {e}", case.file, case.px.window_name));
         check_case(case, &wd);
     }
 }
@@ -170,17 +100,17 @@ async fn local_and_memory_stores_agree() {
         let asset = AssetRef::new(&case.file);
         let band = BandSelection::Single(case.band);
         let a = local
-            .read_window(&asset, case.requested.into(), band, ReadLevel::FullRes)
+            .read_window(&asset, case.px.requested.into(), band, ReadLevel::FullRes)
             .await
             .expect("local read");
         let b = memory
-            .read_window(&asset, case.requested.into(), band, ReadLevel::FullRes)
+            .read_window(&asset, case.px.requested.into(), band, ReadLevel::FullRes)
             .await
             .expect("memory read");
         assert_eq!(
             a, b,
             "{}/{}: local-file and in-memory reads disagree",
-            case.file, case.window_name
+            case.file, case.px.window_name
         );
     }
 }

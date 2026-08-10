@@ -3167,6 +3167,7 @@ version = "0.0.0"
 dependencies = [
  "object_store",
  "swath-core",
+ "swath-testsupport",
  "tokio",
 ]
 
@@ -3226,6 +3227,7 @@ dependencies = [
  "serde_json",
  "swath-core",
  "swath-referencer",
+ "swath-testsupport",
  "thiserror 2.0.20",
  "tokio",
 ]
@@ -3238,6 +3240,7 @@ dependencies = [
  "hdf5-metno",
  "serde_json",
  "swath-core",
+ "swath-testsupport",
  "thiserror 2.0.20",
 ]
 
@@ -3256,6 +3259,7 @@ dependencies = [
  "swath-reproject-proj4rs",
  "swath-source-cog",
  "swath-testkit",
+ "swath-testsupport",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -3282,8 +3286,8 @@ dependencies = [
  "object_store",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "swath-core",
+ "swath-testsupport",
  "thiserror 2.0.20",
  "tokio",
 ]
@@ -3295,12 +3299,11 @@ dependencies = [
  "flate2",
  "object_store",
  "serde",
- "serde_json",
- "sha2 0.10.9",
  "swath-core",
  "swath-referencer",
  "swath-render",
  "swath-reproject-proj4rs",
+ "swath-testsupport",
  "thiserror 2.0.20",
  "tokio",
 ]
@@ -3310,6 +3313,17 @@ name = "swath-testkit"
 version = "0.0.0"
 dependencies = [
  "image",
+ "swath-testsupport",
+]
+
+[[package]]
+name = "swath-testsupport"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "swath-core",
 ]
 
 [[package]]

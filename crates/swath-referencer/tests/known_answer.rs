@@ -126,8 +126,7 @@ fn non_hdf5_bytes_are_a_malformed_error() {
 
     // Right extension, not an HDF5 container -> Malformed. (Copy the JSON
     // to a .h5 name in a temp dir.)
-    let dir = std::env::temp_dir().join("swath-referencer-test");
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = swath_testsupport::TempDir::new("referencer-malformed");
     let fake = dir.join("fake.h5");
     std::fs::copy(data("tiny.expected.json"), &fake).unwrap();
     let err = SwathReferencer::new().generate(&fake).unwrap_err();

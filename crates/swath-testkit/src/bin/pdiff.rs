@@ -134,6 +134,7 @@ mod tests {
     use std::path::PathBuf;
 
     use swath_testkit::RgbaImage;
+    use swath_testsupport::TempDir;
 
     use super::{parse_compare_args, run};
 
@@ -141,9 +142,9 @@ mod tests {
         list.iter().map(ToString::to_string).collect()
     }
 
-    /// A per-test scratch PNG under the target-managed temp dir.
-    fn scratch_png(name: &str, image: &RgbaImage) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("swath-pdiff-{}-{name}", std::process::id()));
+    /// A scratch PNG inside the test's self-deleting temp dir.
+    fn scratch_png(dir: &TempDir, name: &str, image: &RgbaImage) -> PathBuf {
+        let path = dir.join(name);
         image
             .save_with_format(&path, image::ImageFormat::Png)
             .expect("write scratch png");
@@ -184,10 +185,10 @@ mod tests {
 
     #[test]
     fn identical_files_pass_and_corruption_fails_at_zero_tolerance() {
-        let a = scratch_png("id-a.png", &flat_image(128));
-        let b = scratch_png("id-b.png", &flat_image(128));
-        let corrupted =
-            std::env::temp_dir().join(format!("swath-pdiff-{}-id-corrupt.png", std::process::id()));
+        let dir = TempDir::new("pdiff-id");
+        let a = scratch_png(&dir, "id-a.png", &flat_image(128));
+        let b = scratch_png(&dir, "id-b.png", &flat_image(128));
+        let corrupted = dir.join("id-corrupt.png");
         let (a_s, b_s, c_s) = (
             a.display().to_string(),
             b.display().to_string(),
@@ -209,44 +210,32 @@ mod tests {
         );
         // The seeded error is exactly 1, so the default tolerance (2) absorbs it.
         assert_eq!(run(&args(&[&a_s, &c_s])), Ok(0));
-
-        for path in [a, b, corrupted] {
-            let _ = std::fs::remove_file(path);
-        }
     }
 
     #[test]
     fn missing_file_and_dimension_mismatch_are_errors() {
         assert!(run(&args(&["/nonexistent-a.png", "/nonexistent-b.png"])).is_err());
 
-        let a = scratch_png("dim-a.png", &flat_image(10));
+        let dir = TempDir::new("pdiff-dim");
+        let a = scratch_png(&dir, "dim-a.png", &flat_image(10));
         let b = scratch_png(
+            &dir,
             "dim-b.png",
             &RgbaImage::from_pixel(8, 16, image::Rgba([10, 10, 10, 255])),
         );
         let result = run(&args(&[&a.display().to_string(), &b.display().to_string()]));
         assert!(result.is_err_and(|message| message.contains("dimension mismatch")));
-
-        for path in [a, b] {
-            let _ = std::fs::remove_file(path);
-        }
     }
 
     #[test]
     fn corrupt_perturbs_a_saturated_channel_downward() {
-        let a = scratch_png("sat-a.png", &flat_image(255));
-        let out = std::env::temp_dir().join(format!(
-            "swath-pdiff-{}-sat-corrupt.png",
-            std::process::id()
-        ));
+        let dir = TempDir::new("pdiff-sat");
+        let a = scratch_png(&dir, "sat-a.png", &flat_image(255));
+        let out = dir.join("sat-corrupt.png");
         let (a_s, out_s) = (a.display().to_string(), out.display().to_string());
         assert_eq!(run(&args(&["--corrupt", &a_s, &out_s])), Ok(0));
         let corrupted = swath_testkit::load_png(&out).expect("readable output");
         assert_eq!(corrupted.get_pixel(0, 0).0[0], 254);
         assert_eq!(run(&args(&["--corrupt"])), Err(super::USAGE.to_string()));
-
-        for path in [a, out] {
-            let _ = std::fs::remove_file(path);
-        }
     }
 }

@@ -48,9 +48,14 @@ const Y: u32 = 302;
     reason = "one linear gated scenario: stage, render, assert, emit"
 )]
 async fn real_vnp09ga_ndvi_tile_renders_from_original_bytes() {
-    let granule = std::env::var("SWATH_VNP09GA").expect("SWATH_VNP09GA set (just test-virtual)");
-    let manifest_path =
-        std::env::var("SWATH_VNP09GA_MANIFEST").expect("SWATH_VNP09GA_MANIFEST set");
+    // Belt and braces: even under --ignored, an absent granule skips
+    // cleanly (never panics) — `just test-virtual` provides both variables.
+    let Some(granule) = swath_testsupport::gated_var("SWATH_VNP09GA") else {
+        return;
+    };
+    let Some(manifest_path) = swath_testsupport::gated_var("SWATH_VNP09GA_MANIFEST") else {
+        return;
+    };
     let out = std::env::var("SWATH_VIRTUAL_OUT")
         .unwrap_or_else(|_| "target/virtual/swath-ndvi.png".to_owned());
 

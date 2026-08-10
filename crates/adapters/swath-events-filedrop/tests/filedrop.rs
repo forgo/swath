@@ -17,35 +17,7 @@ use swath_core::catalog::{
 use swath_core::events::{EventError, EventSource as _, GranuleEvent};
 use swath_core::ingest::ingest_granule;
 use swath_events_filedrop::FiledropEvents;
-
-/// A fresh, self-deleting temp directory per test (no tempfile dep — the
-/// supply-chain gate stays untouched).
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "swath-filedrop-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        Self(dir)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.0).ok();
-    }
-}
+use swath_testsupport::TempDir;
 
 /// Fast-polling watcher over `dir` (tests should not wait real cadences).
 fn watcher(dir: &Path) -> FiledropEvents {
@@ -82,7 +54,7 @@ async fn next(source: &mut FiledropEvents) -> Result<Option<GranuleEvent>, Event
 
 #[tokio::test]
 async fn manifest_appearance_becomes_a_granule_event() {
-    let dir = TempDir::new("basic");
+    let dir = TempDir::new("filedrop-basic");
     let mut source = watcher(dir.path());
 
     let before = Datetime::from_unix_millis(now_millis()).unwrap();
@@ -108,7 +80,7 @@ async fn manifest_appearance_becomes_a_granule_event() {
 
 #[tokio::test]
 async fn watcher_survives_a_directory_created_after_start() {
-    let dir = TempDir::new("late-dir");
+    let dir = TempDir::new("filedrop-late-dir");
     let missing = dir.path().join("drop");
     let mut source = watcher(&missing);
 
@@ -124,7 +96,7 @@ async fn watcher_survives_a_directory_created_after_start() {
 
 #[tokio::test]
 async fn each_manifest_is_announced_once_in_name_order() {
-    let dir = TempDir::new("once");
+    let dir = TempDir::new("filedrop-once");
     // Both present before the first scan: yielded in name order.
     drop_manifest(dir.path(), "hls-s30", "a-first");
     drop_manifest(dir.path(), "hls-s30", "b-second");
@@ -149,7 +121,7 @@ async fn each_manifest_is_announced_once_in_name_order() {
 
 #[tokio::test]
 async fn non_manifests_and_staging_files_are_ignored() {
-    let dir = TempDir::new("ignore");
+    let dir = TempDir::new("filedrop-ignore");
     std::fs::write(dir.path().join("band-b04.tif"), b"not a manifest").unwrap();
     std::fs::write(dir.path().join(".staged.json"), b"{").unwrap();
     std::fs::write(dir.path().join("notes.txt"), b"hello").unwrap();
@@ -165,7 +137,7 @@ async fn non_manifests_and_staging_files_are_ignored() {
 
 #[tokio::test]
 async fn malformed_manifests_error_once_then_stop_reporting() {
-    let dir = TempDir::new("malformed");
+    let dir = TempDir::new("filedrop-malformed");
     std::fs::write(dir.path().join("broken.json"), b"{ not json").unwrap();
     let mut source = watcher(dir.path());
 
@@ -184,7 +156,7 @@ async fn malformed_manifests_error_once_then_stop_reporting() {
 
 #[tokio::test]
 async fn name_mismatch_and_empty_assets_are_malformed() {
-    let dir = TempDir::new("invalid");
+    let dir = TempDir::new("filedrop-invalid");
     std::fs::write(
         dir.path().join("wrong-name.json"),
         manifest_json("hls-s30", "other-id"),
@@ -292,7 +264,7 @@ fn hls_dataset() -> Dataset {
 
 #[tokio::test]
 async fn dropped_granule_lands_in_the_catalog_with_ingested_at() {
-    let dir = TempDir::new("orchestrated");
+    let dir = TempDir::new("filedrop-orchestrated");
     let catalog = MemoryCatalog::default();
     catalog.upsert_dataset(&hls_dataset()).await.unwrap();
 
@@ -312,7 +284,7 @@ async fn dropped_granule_lands_in_the_catalog_with_ingested_at() {
 
 #[tokio::test]
 async fn dropped_granule_of_unknown_dataset_fails_loudly() {
-    let dir = TempDir::new("unknown-dataset");
+    let dir = TempDir::new("filedrop-unknown-dataset");
     let catalog = MemoryCatalog::default();
 
     let mut source = watcher(dir.path());
@@ -364,7 +336,7 @@ fn drop_legacy_granule(dir: &Path, dataset: &str, granule: &str, asset_uri: &str
 
 #[tokio::test]
 async fn legacy_asset_is_referenced_stored_and_rewritten() {
-    let dir = TempDir::new("legacy");
+    let dir = TempDir::new("filedrop-legacy");
     // Bands-first discipline: the granule file lands before its manifest.
     std::fs::copy(tiny_fixture(), dir.path().join("tiny.h5")).unwrap();
     let mut source = legacy_watcher(dir.path());
@@ -402,7 +374,7 @@ async fn legacy_asset_fragments_select_arrays_and_share_one_manifest() {
     // `<file>#<array-name>`. The watcher references the shared file ONCE
     // and rewrites each band to `<file>.vmanifest.json#<array-name>` —
     // exactly what the virtual RasterSource reads.
-    let dir = TempDir::new("legacy-fragments");
+    let dir = TempDir::new("filedrop-legacy-fragments");
     std::fs::copy(tiny_fixture(), dir.path().join("tiny.h5")).unwrap();
     let mut source = legacy_watcher(dir.path());
     let staged = dir.path().join(".g-frag.json");
@@ -443,7 +415,7 @@ async fn legacy_asset_fragments_select_arrays_and_share_one_manifest() {
 async fn legacy_referencing_end_to_end_registers_the_virtual_granule() {
     // Drop -> manifest generated -> granule registered: the full R1 loop
     // for a legacy granule, against the in-memory catalog.
-    let dir = TempDir::new("legacy-e2e");
+    let dir = TempDir::new("filedrop-legacy-e2e");
     std::fs::copy(tiny_fixture(), dir.path().join("tiny.h5")).unwrap();
     let catalog = MemoryCatalog::default();
     let mut vnp = hls_dataset();
@@ -466,7 +438,7 @@ async fn legacy_referencing_end_to_end_registers_the_virtual_granule() {
 
 #[tokio::test]
 async fn broken_legacy_granule_is_malformed_and_does_not_stop_the_loop() {
-    let dir = TempDir::new("legacy-broken");
+    let dir = TempDir::new("filedrop-legacy-broken");
     // A .h5 asset that is not an HDF5 file at all.
     std::fs::write(dir.path().join("junk.h5"), b"not hdf5").unwrap();
     let mut source = legacy_watcher(dir.path());
@@ -490,7 +462,7 @@ async fn broken_legacy_granule_is_malformed_and_does_not_stop_the_loop() {
 
 #[tokio::test]
 async fn absolute_or_remote_legacy_assets_are_refused() {
-    let dir = TempDir::new("legacy-remote");
+    let dir = TempDir::new("filedrop-legacy-remote");
     let mut source = legacy_watcher(dir.path());
     drop_legacy_granule(dir.path(), "vnp09ga", "g-remote", "s3://bucket/granule.h5");
     let err = next(&mut source).await.unwrap_err();
@@ -502,7 +474,7 @@ async fn absolute_or_remote_legacy_assets_are_refused() {
 async fn without_a_referencer_legacy_assets_pass_through_untouched() {
     // The pre-#40 behavior is preserved when no referencer is configured:
     // opaque URIs, kind raster, nothing opened.
-    let dir = TempDir::new("legacy-off");
+    let dir = TempDir::new("filedrop-legacy-off");
     let mut source = watcher(dir.path());
     drop_legacy_granule(dir.path(), "vnp09ga", "g-off", "tiny.h5");
     let event = next(&mut source).await.unwrap().unwrap();
@@ -527,7 +499,7 @@ async fn seen_before_start_is_still_announced() {
     // A manifest already present when the watcher starts is an arrival too:
     // restart-safety (module docs) means the directory's current contents
     // are announced, idempotently re-upserted downstream.
-    let dir = TempDir::new("preexisting");
+    let dir = TempDir::new("filedrop-preexisting");
     drop_manifest(dir.path(), "hls-s30", "old");
     let mut source = watcher(dir.path());
     let event = next(&mut source).await.unwrap().unwrap();

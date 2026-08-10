@@ -20,11 +20,10 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 serde = { workspace = true }
-serde_json = { workspace = true }
-sha2 = { workspace = true }
 swath-referencer = { path = "../../swath-referencer", version = "0.0.0" }
 swath-render = { path = "../../swath-render", version = "0.0.0" }
 swath-reproject-proj4rs = { path = "../swath-reproject-proj4rs", version = "0.0.0" }
+swath-testsupport = { path = "../../swath-testsupport", version = "0.0.0" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
