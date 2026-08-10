@@ -154,6 +154,12 @@ async fn truecolor_swath_edge_nodata_tile_z12() {
 }
 
 // --- NDVI band math (b8a/b04, rescale -1..1, grayscale) ---
+//
+// These two tests are level 1 of the two-level NDVI golden scheme (issue
+// #94): the GDAL/rio-tiler oracle renders grayscale, so the grayscale
+// plan keeps pinning the NDVI *values* against it. Level 2
+// (`ndvi_rdylgn_colormap_two_level_golden` below) pins the colormapped
+// presentation on top of those oracle-validated values.
 
 #[tokio::test]
 async fn ndvi_interior_tile_z12() {
@@ -179,4 +185,87 @@ async fn ndvi_swath_edge_nodata_tile_z12() {
         1562,
     )
     .await;
+}
+
+// --- NDVI colormapped (issue #94): the two-level golden scheme ---
+
+/// The colormapped NDVI plan the built-in `ndvi` layer now serves:
+/// same band math and rescale as [`ndvi_plan`], `RdYlGn` instead of gray.
+fn ndvi_rdylgn_plan() -> RenderPlan {
+    RenderPlan::new(
+        vec![BandInput::new("b8a"), BandInput::new("b04")],
+        vec![
+            PixelOp::BandMath(
+                (Expr::band("b8a") - Expr::band("b04")) / (Expr::band("b8a") + Expr::band("b04")),
+            ),
+            PixelOp::Rescale {
+                min: -1.0,
+                max: 1.0,
+            },
+            PixelOp::Colormap(Colormap::RdYlGn),
+        ],
+        OutputSpec::new(TileFormat::Png),
+    )
+}
+
+/// **The two-level NDVI golden scheme.** The GDAL/rio-tiler oracle
+/// (`render_reference.py compose --expression`) renders grayscale; the
+/// colormap is Swath's own post-processing, so no external oracle exists
+/// for the colored bytes. The honest decomposition:
+///
+/// 1. **Values** — the grayscale render is pinned against the GDAL
+///    oracle golden (`ndvi_interior_tile_z12` above, unchanged), and this
+///    test asserts *mechanically* that every colormapped pixel is exactly
+///    `lut[q(gray)]` of that same grayscale render (same quantization,
+///    same alpha). The colors are therefore anchored to oracle-validated
+///    values, not to themselves.
+/// 2. **Bytes** — the colormapped tile is pinned byte-for-byte against a
+///    committed golden produced by this very pipeline (regenerate with
+///    `SWATH_BLESS=1`), after proving the render + encode are
+///    double-run byte-stable. This is a self-golden and says nothing an
+///    oracle would; its job is to freeze the served bytes for `just e2e`
+///    and catch silent drift.
+#[allow(clippy::print_stdout, reason = "bless mode reports what it wrote")]
+#[tokio::test]
+async fn ndvi_rdylgn_colormap_two_level_golden() {
+    let warped = warp_bands(&[B8A, B04], 12, 848, 1561).await;
+    let gray = eval(&ndvi_plan(), &warped).expect("grayscale plan evaluates");
+    let colored = eval(&ndvi_rdylgn_plan(), &warped).expect("colormapped plan evaluates");
+
+    // Level 1: every colormapped pixel is the LUT row of its
+    // oracle-validated gray value; alpha (validity) is untouched.
+    let lut = swath_render::colormaps::lut(Colormap::RdYlGn).expect("RdYlGn has a LUT");
+    assert_eq!(gray.pixels.len(), colored.pixels.len());
+    for (g_px, c_px) in gray
+        .pixels
+        .chunks_exact(4)
+        .zip(colored.pixels.chunks_exact(4))
+    {
+        assert_eq!(c_px[3], g_px[3], "alpha must come from validity alone");
+        if g_px[3] == 0 {
+            assert_eq!(c_px, [0, 0, 0, 0], "invalid stays transparent black");
+        } else {
+            assert_eq!(&c_px[0..3], &lut[usize::from(g_px[0])], "lut[q(gray)]");
+        }
+    }
+
+    // Byte stability: double render + double encode, identical bytes.
+    let again = eval(&ndvi_rdylgn_plan(), &warped).expect("re-evaluates");
+    assert_eq!(colored.pixels, again.pixels, "eval must be deterministic");
+    let png_a = encode_png(&colored).expect("encodes");
+    let png_b = encode_png(&again).expect("encodes");
+    assert_eq!(png_a, png_b, "PNG encode must be deterministic");
+
+    // Level 2: the committed self-golden pins the served bytes.
+    let golden_path = common::goldens_dir().join("ndvi-rdylgn-12-848-1561.png");
+    if std::env::var_os("SWATH_BLESS").is_some() {
+        std::fs::write(&golden_path, &png_a).expect("golden written");
+        println!("blessed {}", golden_path.display());
+    }
+    let committed = std::fs::read(&golden_path).expect("committed colormapped golden exists");
+    assert_eq!(
+        png_a, committed,
+        "colormapped NDVI bytes drifted from the committed golden \
+         (regenerate deliberately with SWATH_BLESS=1 and inspect the diff)"
+    );
 }

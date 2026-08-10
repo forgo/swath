@@ -44,7 +44,13 @@
 //!   dropped; the result is gray). Lowers to the same
 //!   `(nir - red) / (nir + red)` expression as the reduce idiom.
 //! * **`save_result`** — the required result node; `format` must be PNG
-//!   (case-insensitive, per the spec) and `options` empty.
+//!   (case-insensitive, per the spec). `options` accepts exactly one
+//!   optional key, `colormap` (`"grayscale"` | `"viridis"` | `"magma"` |
+//!   `"rdylgn"`) — Swath's format option naming the palette applied to a
+//!   gray result (openEO has no colormap process; the palette is
+//!   post-eval presentation, so it rides the save node). It is rejected
+//!   on a multi-band (composite) result: a LUT maps one gray value per
+//!   pixel. Absent, gray results default to `"grayscale"`.
 //!
 //! Anything else is [`CompileError::UnsupportedProcess`], whose message
 //! lists this set. Structural validation — exactly one `result: true` node
@@ -53,7 +59,8 @@
 //! errors naming the offending node.
 //!
 //! A gray result (from `reduce_dimension` or `ndvi`) compiles to
-//! `BandMath → [Rescale] → Colormap(Grayscale)`; a multi-band result must
+//! `BandMath → [Rescale] → Colormap(...)` (the `save_result` colormap
+//! option, `Grayscale` when absent); a multi-band result must
 //! have exactly three bands and compiles to `Composite → [Rescale]` in
 //! loaded-band order. The compiled plan's inputs are only the bands the
 //! ops actually reference (first-reference order), so serving fetches
@@ -287,6 +294,9 @@ struct Cube {
     kind: CubeKind,
     /// A pending `linear_scale_range`, at most one in v0.
     rescale: Option<(f64, f64)>,
+    /// The palette requested by `save_result`'s `colormap` option
+    /// (gray results only; `None` = grayscale).
+    colormap: Option<Colormap>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -605,6 +615,7 @@ impl<'a> Compiler<'a> {
         Ok(Value::Cube(Cube {
             kind: CubeKind::Multi(loaded),
             rescale: None,
+            colormap: None,
         }))
     }
 
@@ -651,6 +662,7 @@ impl<'a> Compiler<'a> {
             Value::Scalar(expr) => Ok(Value::Cube(Cube {
                 kind: CubeKind::Gray(expr),
                 rescale: None,
+                colormap: None,
             })),
             other => Err(CompileError::TypeMismatch {
                 node: node.into(),
@@ -699,6 +711,7 @@ impl<'a> Compiler<'a> {
         Ok(Value::Cube(Cube {
             kind: CubeKind::Gray(expr),
             rescale: None,
+            colormap: None,
         }))
     }
 
@@ -770,17 +783,59 @@ impl<'a> Compiler<'a> {
             });
         }
         let n = &scope.graph.nodes[node];
-        if let Some(options) = Self::arg(n, "options")
-            && options.as_object().is_none_or(|o| !o.is_empty())
-        {
-            return Err(CompileError::InvalidArgument {
-                node: node.into(),
-                process: "save_result".into(),
-                argument: "options".into(),
-                detail: format!("no format options are supported in v0, got {options}"),
-            });
+        let mut cube = cube;
+        if let Some(options) = Self::arg(n, "options") {
+            cube.colormap = Self::save_options(options, &cube, node)?;
         }
         Ok(Value::Cube(cube))
+    }
+
+    /// Parses `save_result`'s `options`: only `colormap` is supported
+    /// (module docs), and only on a gray result.
+    fn save_options(
+        options: &Json,
+        cube: &Cube,
+        node: &'a str,
+    ) -> Result<Option<Colormap>, CompileError> {
+        let invalid = |detail: String| CompileError::InvalidArgument {
+            node: node.into(),
+            process: "save_result".into(),
+            argument: "options".into(),
+            detail,
+        };
+        let object = options.as_object().ok_or_else(|| {
+            invalid(format!(
+                "the only supported format option is \"colormap\", got {options}"
+            ))
+        })?;
+        if let Some(key) = object.keys().find(|key| key.as_str() != "colormap") {
+            return Err(invalid(format!(
+                "the only supported format option is \"colormap\", got key \"{key}\""
+            )));
+        }
+        let Some(requested) = object.get("colormap") else {
+            return Ok(None);
+        };
+        let colormap = match requested.as_str() {
+            Some("grayscale") => Colormap::Grayscale,
+            Some("viridis") => Colormap::Viridis,
+            Some("magma") => Colormap::Magma,
+            Some("rdylgn") => Colormap::RdYlGn,
+            _ => {
+                return Err(invalid(format!(
+                    "unknown colormap {requested}: expected one of \"grayscale\", \
+                     \"viridis\", \"magma\", \"rdylgn\""
+                )));
+            }
+        };
+        if matches!(cube.kind, CubeKind::Multi(_)) {
+            return Err(invalid(
+                "a colormap maps one gray value per pixel; it cannot apply to a \
+                 multi-band (composite) result — reduce to gray first"
+                    .into(),
+            ));
+        }
+        Ok(Some(colormap))
     }
 
     fn array_element(&self, scope: &mut Scope<'a>, node: &'a str) -> Result<Value, CompileError> {
@@ -996,7 +1051,9 @@ pub fn compile(graph: &Json, ctx: &CompileContext) -> Result<CompiledProduct, Co
             if let Some((min, max)) = cube.rescale {
                 ops.push(PixelOp::Rescale { min, max });
             }
-            ops.push(PixelOp::Colormap(Colormap::Grayscale));
+            ops.push(PixelOp::Colormap(
+                cube.colormap.unwrap_or(Colormap::Grayscale),
+            ));
             (bands, ops)
         }
         CubeKind::Multi(loaded) => {

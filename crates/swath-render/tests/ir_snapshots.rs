@@ -11,7 +11,8 @@
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
 use swath_render::{WarpedBuffer, eval};
 
-/// The canonical NDVI plan: band math, rescale, grayscale colormap.
+/// The canonical NDVI plan: band math, rescale, and — since issue #94 —
+/// the diverging `RdYlGn` colormap the built-in NDVI layer defaults to.
 fn ndvi_plan() -> RenderPlan {
     RenderPlan::new(
         vec![BandInput::new("nir"), BandInput::new("red")],
@@ -23,7 +24,7 @@ fn ndvi_plan() -> RenderPlan {
                 min: -1.0,
                 max: 1.0,
             },
-            PixelOp::Colormap(Colormap::Grayscale),
+            PixelOp::Colormap(Colormap::RdYlGn),
         ],
         OutputSpec::new(TileFormat::Png),
     )
