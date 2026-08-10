@@ -410,9 +410,18 @@ e2e:
     nbytes=$(sed -n 's/.*"bytes_read":\([0-9][0-9]*\).*/\1/p' "$dir/ndvi-headers.txt" | head -1)
     [ -n "$nbytes" ] && [ "$nbytes" -gt 0 ] || { echo "FAIL: ndvi trace reports no bytes read"; exit 1; }
     echo "swath: ndvi trace provenance is non-empty (bytes_read=$nbytes)"
-    cargo run --quiet -p swath-testkit --bin pdiff -- \
-        "$dir/ndvi.png" crates/swath-render/tests/data/ndvi-12-848-1561.png
-    echo "swath: ndvi tile matches the rio-tiler/GDAL golden (default pdiff policy)"
+    # Two-level NDVI golden scheme (issue #94): the GDAL/rio-tiler oracle
+    # renders grayscale, and the RdYlGn colormap is Swath's own
+    # post-processing, so the colormapped bytes have no external oracle.
+    # Level 2 here: the served (colormapped) tile is byte-identical to the
+    # committed self-golden produced by our own pipeline (double-render
+    # byte-stable + lut[q(gray)] relation proven in golden_ir.rs; bless
+    # with SWATH_BLESS=1). Level 1 — the VALUES against the grayscale GDAL
+    # oracle golden — is asserted below via an authored grayscale service
+    # over the exact same serve path.
+    cmp "$dir/ndvi.png" crates/swath-render/tests/data/ndvi-rdylgn-12-848-1561.png \
+        || { echo "FAIL: colormapped ndvi tile differs from the committed golden"; exit 1; }
+    echo "swath: ndvi tile is byte-identical to the committed colormapped golden (#94, level 2)"
     # A cached repeat inside the SSE window: the truecolor tile is cached
     # by now, so this fetch must surface a keyed cache_hit trace (#36).
     curl -sf -o /dev/null "$tile"
@@ -434,15 +443,18 @@ e2e:
     # The openEO authoring loop (issue #41, ADR 0010, R3): publish an NDVI
     # process graph as an XYZ secondary service against the live stack,
     # fetch a tile from the returned service URL, and require it
-    # byte-identical to the built-in NDVI tile just proven against the
-    # golden — same compiler, same serve path, zero manual steps. (The
+    # byte-identical to the built-in NDVI tile just pinned against the
+    # colormapped golden — same compiler, same serve path, zero manual
+    # steps. The graph names the colormap through the openEO
+    # representation (save_result options, issue #94), so this also proves
+    # colormap selection survives the graph round trip end to end. (The
     # north-star assertion above is untouched; this step runs after it.)
     svc=$(curl -sf -X POST "$base/services" -H 'content-type: application/json' \
         -d '{"type":"xyz","title":"NDVI (authored)","process":{"process_graph":{
               "load":{"process_id":"load_collection","arguments":{"id":"hls-s30","spatial_extent":null,"temporal_extent":null,"bands":["b8a","b04"]}},
               "ndvi":{"process_id":"ndvi","arguments":{"data":{"from_node":"load"},"nir":"b8a","red":"b04"}},
               "scale":{"process_id":"linear_scale_range","arguments":{"x":{"from_node":"ndvi"},"inputMin":-1,"inputMax":1,"outputMin":0,"outputMax":255}},
-              "save":{"process_id":"save_result","arguments":{"data":{"from_node":"scale"},"format":"png"},"result":true}}}}' \
+              "save":{"process_id":"save_result","arguments":{"data":{"from_node":"scale"},"format":"png","options":{"colormap":"rdylgn"}},"result":true}}}}' \
         -D "$dir/service-headers.txt" -o /dev/null -w '%{http_code}')
     [ "$svc" = "201" ] || { echo "FAIL: POST /services answered $svc"; exit 1; }
     sid=$(tr -d '\r' < "$dir/service-headers.txt" | sed -n 's/^[Oo]pen[Ee][Oo]-[Ii]dentifier: //p' | head -1)
@@ -453,6 +465,27 @@ e2e:
     cmp "$dir/service.png" "$dir/ndvi.png" \
         || { echo "FAIL: authored NDVI tile differs from the built-in NDVI tile"; exit 1; }
     echo "swath: authored service tile is byte-identical to the built-in NDVI (graph in, live XYZ out)"
+    # Level 1 of the #94 two-level scheme: the same graph with a grayscale
+    # colormap, published over the same serve path, must still match the
+    # grayscale GDAL/rio-tiler oracle golden — the colormapped tile above
+    # is therefore a palette over oracle-validated VALUES, not unchecked
+    # pixels. The GDAL comparison is weakened nowhere: it moved one layer
+    # down, to the values the colormap indexes by.
+    gsvc=$(curl -sf -X POST "$base/services" -H 'content-type: application/json' \
+        -d '{"type":"xyz","title":"NDVI (authored, grayscale)","process":{"process_graph":{
+              "load":{"process_id":"load_collection","arguments":{"id":"hls-s30","spatial_extent":null,"temporal_extent":null,"bands":["b8a","b04"]}},
+              "ndvi":{"process_id":"ndvi","arguments":{"data":{"from_node":"load"},"nir":"b8a","red":"b04"}},
+              "scale":{"process_id":"linear_scale_range","arguments":{"x":{"from_node":"ndvi"},"inputMin":-1,"inputMax":1,"outputMin":0,"outputMax":255}},
+              "save":{"process_id":"save_result","arguments":{"data":{"from_node":"scale"},"format":"png","options":{"colormap":"grayscale"}},"result":true}}}}' \
+        -D "$dir/gray-service-headers.txt" -o /dev/null -w '%{http_code}')
+    [ "$gsvc" = "201" ] || { echo "FAIL: POST /services (grayscale) answered $gsvc"; exit 1; }
+    gsid=$(tr -d '\r' < "$dir/gray-service-headers.txt" | sed -n 's/^[Oo]pen[Ee][Oo]-[Ii]dentifier: //p' | head -1)
+    [ -n "$gsid" ] || { echo "FAIL: grayscale 201 carried no OpenEO-Identifier header"; exit 1; }
+    code=$(curl -s -o "$dir/gray-service.png" -w '%{http_code}' "$base/tilesets/$gsid/tiles/12/1561/848")
+    [ "$code" = "200" ] || { echo "FAIL: grayscale service tile answered $code"; exit 1; }
+    cargo run --quiet -p swath-testkit --bin pdiff -- \
+        "$dir/gray-service.png" crates/swath-render/tests/data/ndvi-12-848-1561.png
+    echo "swath: ndvi values match the rio-tiler/GDAL golden (#94, level 1: grayscale service, default pdiff policy)"
     # Metadata-vs-pixels: the tileset's DECLARED bounds must contain the tile
     # we just proved correct (12/848/1561, center -105.4248, 39.27). A wrong
     # granule bbox once put the demo viewport 48 km from the imagery while

@@ -5,7 +5,9 @@
 //! openEO process graph as an XYZ service → 201 with the tile URL →
 //! fetch a tile from it → **byte-identical** to the built-in layer
 //! compiled from the same math (same compiler, same serve path), and
-//! perceptually identical to the committed GDAL/rio-tiler golden. Plus
+//! held to the two-level NDVI golden scheme of issue #94: colormapped
+//! bytes pinned against the committed self-golden, values still proven
+//! against the grayscale GDAL/rio-tiler oracle golden. Plus
 //! the persistence contract (`swath:layers` carries the graph verbatim),
 //! idempotent re-creation, deletion, and the snapshot-pinned openEO error
 //! shapes for every documented failure path.
@@ -23,8 +25,14 @@ use swath_testkit::{DiffPolicy, diff, load_png};
 
 /// The NDVI process graph, authored the way an openEO client would:
 /// dataset band names, the `ndvi` convenience process, the -1..1 → 0..255
-/// scale of the built-in layer.
+/// scale of the built-in layer, and — matching the built-in layer since
+/// issue #94 — the `RdYlGn` colormap named as a `save_result` option.
 fn ndvi_request() -> Value {
+    ndvi_request_with_save_options(&json!({ "colormap": "rdylgn" }))
+}
+
+/// [`ndvi_request`] with explicit `save_result` `options`.
+fn ndvi_request_with_save_options(options: &Value) -> Value {
     json!({
         "type": "xyz",
         "title": "NDVI (authored)",
@@ -43,6 +51,7 @@ fn ndvi_request() -> Value {
             }},
             "save": { "process_id": "save_result", "arguments": {
                 "data": { "from_node": "scale" }, "format": "png",
+                "options": options,
             }, "result": true },
         }},
     })
@@ -57,6 +66,10 @@ async fn tile_bytes(app: &axum::Router, path: &str) -> Vec<u8> {
 
 /// THE loop (R3 proven end-to-end): graph in, live XYZ out, pixels
 /// byte-identical to the built-in NDVI layer — same compiler, same path.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear story: publish, serve, two-level goldens, persist, rehydrate"
+)]
 #[tokio::test]
 async fn post_service_serves_tiles_byte_identical_to_the_builtin_ndvi() {
     let (app, catalog) = common::openeo_app();
@@ -80,15 +93,35 @@ async fn post_service_serves_tiles_byte_identical_to_the_builtin_ndvi() {
         service_tile, builtin_tile,
         "authored NDVI must be byte-identical to the built-in NDVI layer"
     );
+    // Two-level golden scheme (issue #94, see golden_ir.rs): the GDAL
+    // oracle is grayscale, so (2) the colormapped bytes are pinned
+    // against the committed self-golden our own pipeline produced...
+    let colormapped_golden =
+        std::fs::read(common::render_goldens_dir().join("ndvi-rdylgn-12-848-1561.png"))
+            .expect("colormapped golden loads");
+    assert_eq!(
+        service_tile, colormapped_golden,
+        "authored NDVI must serve exactly the committed colormapped golden bytes"
+    );
+    // ...and (1) the *values* stay oracle-validated: the same graph with
+    // a grayscale colormap must still match the GDAL/rio-tiler golden.
+    let gray_request = ndvi_request_with_save_options(&json!({ "colormap": "grayscale" }));
+    let response = common::request_on(&app, "POST", "/services", Some(gray_request)).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let gray_id = response.headers()["openeo-identifier"]
+        .to_str()
+        .expect("identifier")
+        .to_owned();
+    let gray_tile = tile_bytes(&app, &format!("/tilesets/{gray_id}/tiles/12/1561/848")).await;
     let golden =
         load_png(&common::render_goldens_dir().join("ndvi-12-848-1561.png")).expect("golden loads");
-    let served = image::load_from_memory(&service_tile)
+    let served = image::load_from_memory(&gray_tile)
         .expect("PNG decodes")
         .into_rgba8();
     let report = diff(&served, &golden).expect("dimensions match");
     assert!(
         report.passes(&DiffPolicy::default()),
-        "authored NDVI fails the oracle policy: max |diff| {}",
+        "authored grayscale NDVI fails the oracle policy: max |diff| {}",
         report.max_abs_channel_diff
     );
 
@@ -122,7 +155,11 @@ async fn post_service_serves_tiles_byte_identical_to_the_builtin_ndvi() {
         }
     );
     assert_eq!((layer.rescale.min, layer.rescale.max), (-1.0, 1.0));
-    assert!(layer.colormap.is_some());
+    assert_eq!(
+        layer.colormap,
+        Some(swath_core::catalog::Colormap::RdYlGn),
+        "the graph's colormap option persists variant-for-variant"
+    );
 
     // Rehydration parity: recompiling the persisted layer (what `swath
     // serve` does at startup) reproduces the built-in NDVI plan exactly.
