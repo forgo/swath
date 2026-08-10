@@ -15,10 +15,10 @@ import {
   type EventSourceLike,
   type PlanTrace,
   type TraceJson,
-  tileNorthWest,
   type XRayMapLike,
   XRayOverlay,
 } from "./swath-xray.js";
+import { tileNorthWest } from "./tms.js";
 
 const SERVER = "https://swath.test";
 

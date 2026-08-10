@@ -204,6 +204,13 @@ render-goldens:
             --expression "(b1 - b2) / (b1 + b2)" --rescale=-1,1 --resampling bilinear
     done
 
+# Regenerate the web TMS truth table (web/src/tms_truth.json) from the pinned
+# morecantile oracle (issue #106; the TS twin of the swath-core table). The
+# committed JSON is what CI asserts against (web/src/tms.test.ts) — review the
+# diff before committing a regeneration.
+tms-truth-web:
+    uv run tests/oracle/tms_truth_web.py > web/src/tms_truth.json
+
 # --- tests/fixtures (committed HLS COG subsets, issue #20 / ADR 0004) ---
 
 # Fixture integrity gate: checksums + offline rasterio sanity load against

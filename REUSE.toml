@@ -19,6 +19,7 @@ path = [
     "docker-compose.yml",
     "codecov.yml",
     "web/*.json",
+    "web/src/tms_truth.json",
     "web/pnpm-lock.yaml",
     "python/**/pyproject.toml",
     "python/pyproject.toml",
