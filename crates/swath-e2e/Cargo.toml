@@ -1,0 +1,20 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-e2e"
+description = "Compose-stack e2e harness (issue #98, never shipped): the typed Rust assertions `just e2e` runs against the live stack."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+swath-core = { path = "../swath-core", version = "0.0.0" }
+swath-testkit = { path = "../swath-testkit", version = "0.0.0" }
+
+[lints]
+workspace = true

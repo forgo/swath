@@ -3222,6 +3222,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "swath-e2e"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "swath-core",
+ "swath-testkit",
+]
+
+[[package]]
 name = "swath-events-filedrop"
 version = "0.0.0"
 dependencies = [

@@ -325,174 +325,22 @@ test-catalog:
 
 # The compose-stack e2e — now THE north-star demo path (issues #15/#29/#31,
 # REQUIREMENTS.md R1/R8 + §3): build the swath image, bring up the full local
-# stack (swath in catalog mode + pgstac + MinIO), verify infra health, then
-# drive granule-to-live-tile end to end with zero manual steps: the layer 404s
-# while the catalog is empty; dropping the fixture granule (5 HLS band COGs +
-# a manifest, bands first, manifest renamed into place last) makes the tile
-# servable automatically; the Trace carries ingest_to_pixel_ms, printed
-# prominently and asserted under the north-star budget (issue #35). The
-# served tile is perceptually matched against the committed rio-tiler/GDAL
-# golden (cross-encoder comparison is pdiff at the default policy, exactly
-# like the golden suites; byte-stability is asserted by fetching twice).
-# The NDVI layer — CHARTER.md §10 Phase 1's "computed on the fly, not
-# pre-baked" — is exercised on the same path: tile fetched, provenance
-# asserted, matched against ITS committed golden, and the SSE trace's
-# decision:"live" captured as the on-the-fly proof. Teardown is trap-based:
-# the stack never outlives the recipe.
+# stack (swath in catalog mode + pgstac + MinIO, via tests/e2e/stack-up.sh —
+# lifecycle only), then hand over to the typed Rust harness (issue #98,
+# crates/swath-e2e), which drives granule-to-live-tile end to end with zero
+# manual steps: honest 404 while the catalog is empty, the granule drop,
+# poll-to-live, ingest_to_pixel_ms under the north-star budget (emitted as a
+# machine-readable JSON line + target/e2e/metrics.json), cache-hit byte
+# stability, pdiff golden matches, typed SSE trace assertions, the openEO
+# authoring round trip, and the declared-bounds check. Every check is named;
+# failures name endpoint/expected/actual. Teardown is trap-based: the stack
+# never outlives the recipe.
 e2e:
     #!/usr/bin/env bash
     set -euo pipefail
     trap 'docker compose down -v' EXIT
-    # Stack bring-up + granule drop + poll-to-live: shared with `just
-    # e2e-web` (issue #33) via tests/e2e/stack-up.sh, which leaves
-    # $dir/tile.png and $dir/tile-headers.txt for the assertions below.
-    tests/e2e/stack-up.sh
-    dir=target/e2e
-    base=http://localhost:8080
-    tile="$base/tilesets/truecolor/tiles/12/1561/848"
-    # The Trace explains the served tile: header present, provenance
-    # non-empty (real bytes were read for this granule's pixels).
-    grep -qi '^x-swath-trace:' "$dir/tile-headers.txt" && echo "swath: X-Swath-Trace header present"
-    bytes=$(sed -n 's/.*"bytes_read":\([0-9][0-9]*\).*/\1/p' "$dir/tile-headers.txt" | head -1)
-    [ -n "$bytes" ] && [ "$bytes" -gt 0 ] || { echo "FAIL: trace reports no bytes read"; exit 1; }
-    echo "swath: trace provenance is non-empty (bytes_read=$bytes)"
-    # THE NORTH-STAR NUMBER (REQUIREMENTS.md §3): the first tile reflecting
-    # the just-ingested granule carries ingest-to-pixel latency.
-    i2p=$(sed -n 's/.*"ingest_to_pixel_ms":\([0-9][0-9]*\).*/\1/p' "$dir/tile-headers.txt" | head -1)
-    [ -n "$i2p" ] || { echo "FAIL: trace carries no numeric ingest_to_pixel_ms"; exit 1; }
-    # The budget (issue #35): measured 297 ms and 801 ms locally, 535 ms in
-    # CI, so 10000 ms is ~20x headroom over the CI number — tight enough to
-    # catch a real regression (a sleep, a poll interval, an accidental batch
-    # step), loose enough to shrug off runner noise. Tightening it further
-    # is a deliberate, visible act: record new measurements here when you do.
-    budget=10000
-    echo ""
-    echo "=========================================="
-    echo "   INGEST-TO-PIXEL: $i2p ms (budget $budget ms)"
-    echo "=========================================="
-    echo ""
-    [ "$i2p" -lt "$budget" ] || { echo "FAIL: ingest-to-pixel $i2p ms exceeds the $budget ms budget"; exit 1; }
-    echo "swath: ingest-to-pixel is under the $budget ms north-star budget"
-    # The north-star assertion above is honest by construction: the first
-    # 200 (tile-headers.txt) is a fresh, uncached render — the cache is
-    # empty until that render writes through — so ingest-to-pixel is never
-    # measured on a hit. Its decision must say so.
-    grep -q '"decision":"live"' "$dir/tile-headers.txt" \
-        || { echo "FAIL: first tile fetch was not a live render"; exit 1; }
-    echo "swath: north-star tile was a fresh live render (decision: live)"
-    # Same request, same bytes — and now served from the write-through
-    # cache (#36): the repeat's trace must say cache_hit, byte-identical.
-    curl -sf -D "$dir/tile-again-headers.txt" -o "$dir/tile-again.png" "$tile"
-    cmp "$dir/tile.png" "$dir/tile-again.png" && echo "swath: tile bytes are stable across requests"
-    grep -q '"decision":"cache_hit"' "$dir/tile-again-headers.txt" \
-        || { echo "FAIL: second fetch of the same tile was not a cache hit"; exit 1; }
-    echo "swath: second fetch served from the tile cache (decision: cache_hit, identical bytes)"
-    # Correctness oracle: the catalog-served tile perceptually matches the
-    # committed golden — "a CORRECT tile is visible" (§3), not just any tile.
-    cargo run --quiet -p swath-testkit --bin pdiff -- \
-        "$dir/tile.png" crates/swath-render/tests/data/truecolor-12-848-1561.png
-    echo "swath: tile matches the rio-tiler/GDAL golden (default pdiff policy)"
-    # NDVI on the fly (CHARTER.md §10 Phase 1: "NDVI computed on the fly,
-    # not pre-baked"): subscribe to the x-ray stream first, then fetch the
-    # never-yet-rendered NDVI tile — one request proves the whole claim.
-    # HTTP side: 200, trace header, non-empty provenance, and a perceptual
-    # match against the committed NDVI oracle golden (the "correct tile"
-    # half of §3). SSE side: a `trace` event for the ndvi layer whose
-    # decision is "live" — the on-the-fly proof — carrying the same
-    # ingest-to-pixel number.
-    curl -sN --max-time 15 "$base/traces" > "$dir/traces.txt" &
-    sse=$!
-    sleep 1
-    ndvi="$base/tilesets/ndvi/tiles/12/1561/848"
-    code=$(curl -s -D "$dir/ndvi-headers.txt" -o "$dir/ndvi.png" -w '%{http_code}' "$ndvi")
-    [ "$code" = "200" ] || { echo "FAIL: ndvi tile answered $code"; exit 1; }
-    grep -qi '^x-swath-trace:' "$dir/ndvi-headers.txt" && echo "swath: ndvi X-Swath-Trace header present"
-    nbytes=$(sed -n 's/.*"bytes_read":\([0-9][0-9]*\).*/\1/p' "$dir/ndvi-headers.txt" | head -1)
-    [ -n "$nbytes" ] && [ "$nbytes" -gt 0 ] || { echo "FAIL: ndvi trace reports no bytes read"; exit 1; }
-    echo "swath: ndvi trace provenance is non-empty (bytes_read=$nbytes)"
-    # Two-level NDVI golden scheme (issue #94): the GDAL/rio-tiler oracle
-    # renders grayscale, and the RdYlGn colormap is Swath's own
-    # post-processing, so the colormapped bytes have no external oracle.
-    # Level 2 here: the served (colormapped) tile is byte-identical to the
-    # committed self-golden produced by our own pipeline (double-render
-    # byte-stable + lut[q(gray)] relation proven in golden_ir.rs; bless
-    # with SWATH_BLESS=1). Level 1 — the VALUES against the grayscale GDAL
-    # oracle golden — is asserted below via an authored grayscale service
-    # over the exact same serve path.
-    cmp "$dir/ndvi.png" crates/swath-render/tests/data/ndvi-rdylgn-12-848-1561.png \
-        || { echo "FAIL: colormapped ndvi tile differs from the committed golden"; exit 1; }
-    echo "swath: ndvi tile is byte-identical to the committed colormapped golden (#94, level 2)"
-    # A cached repeat inside the SSE window: the truecolor tile is cached
-    # by now, so this fetch must surface a keyed cache_hit trace (#36).
-    curl -sf -o /dev/null "$tile"
-    for _ in $(seq 1 20); do
-        grep -q '^event: trace' "$dir/traces.txt" && break
-        sleep 0.5
-    done
-    kill "$sse" 2>/dev/null || true
-    wait "$sse" 2>/dev/null || true
-    grep -q '^event: trace' "$dir/traces.txt" && echo "swath: trace SSE event captured"
-    grep '"layer":"ndvi"' "$dir/traces.txt" | grep -q '"decision":"live"' \
-        || { echo "FAIL: no live-decision ndvi trace on the SSE stream"; exit 1; }
-    echo "swath: SSE trace proves ndvi was computed on the fly (decision: live)"
-    grep '"layer":"truecolor"' "$dir/traces.txt" | grep -q '"decision":{"cache_hit":{"key":' \
-        || { echo "FAIL: no cache_hit trace for the repeated truecolor tile on the SSE stream"; exit 1; }
-    echo "swath: SSE trace reports the repeated tile as a keyed cache_hit (#36)"
-    grep -q '"ingest_to_pixel_ms":[0-9]' "$dir/traces.txt" \
-        && echo "swath: SSE trace carries ingest_to_pixel_ms"
-    # The openEO authoring loop (issue #41, ADR 0010, R3): publish an NDVI
-    # process graph as an XYZ secondary service against the live stack,
-    # fetch a tile from the returned service URL, and require it
-    # byte-identical to the built-in NDVI tile just pinned against the
-    # colormapped golden — same compiler, same serve path, zero manual
-    # steps. The graph names the colormap through the openEO
-    # representation (save_result options, issue #94), so this also proves
-    # colormap selection survives the graph round trip end to end. (The
-    # north-star assertion above is untouched; this step runs after it.)
-    svc=$(curl -sf -X POST "$base/services" -H 'content-type: application/json' \
-        -d '{"type":"xyz","title":"NDVI (authored)","process":{"process_graph":{
-              "load":{"process_id":"load_collection","arguments":{"id":"hls-s30","spatial_extent":null,"temporal_extent":null,"bands":["b8a","b04"]}},
-              "ndvi":{"process_id":"ndvi","arguments":{"data":{"from_node":"load"},"nir":"b8a","red":"b04"}},
-              "scale":{"process_id":"linear_scale_range","arguments":{"x":{"from_node":"ndvi"},"inputMin":-1,"inputMax":1,"outputMin":0,"outputMax":255}},
-              "save":{"process_id":"save_result","arguments":{"data":{"from_node":"scale"},"format":"png","options":{"colormap":"rdylgn"}},"result":true}}}}' \
-        -D "$dir/service-headers.txt" -o /dev/null -w '%{http_code}')
-    [ "$svc" = "201" ] || { echo "FAIL: POST /services answered $svc"; exit 1; }
-    sid=$(tr -d '\r' < "$dir/service-headers.txt" | sed -n 's/^[Oo]pen[Ee][Oo]-[Ii]dentifier: //p' | head -1)
-    [ -n "$sid" ] || { echo "FAIL: 201 carried no OpenEO-Identifier header"; exit 1; }
-    echo "swath: openEO service published ($sid)"
-    code=$(curl -s -o "$dir/service.png" -w '%{http_code}' "$base/tilesets/$sid/tiles/12/1561/848")
-    [ "$code" = "200" ] || { echo "FAIL: authored service tile answered $code"; exit 1; }
-    cmp "$dir/service.png" "$dir/ndvi.png" \
-        || { echo "FAIL: authored NDVI tile differs from the built-in NDVI tile"; exit 1; }
-    echo "swath: authored service tile is byte-identical to the built-in NDVI (graph in, live XYZ out)"
-    # Level 1 of the #94 two-level scheme: the same graph with a grayscale
-    # colormap, published over the same serve path, must still match the
-    # grayscale GDAL/rio-tiler oracle golden — the colormapped tile above
-    # is therefore a palette over oracle-validated VALUES, not unchecked
-    # pixels. The GDAL comparison is weakened nowhere: it moved one layer
-    # down, to the values the colormap indexes by.
-    gsvc=$(curl -sf -X POST "$base/services" -H 'content-type: application/json' \
-        -d '{"type":"xyz","title":"NDVI (authored, grayscale)","process":{"process_graph":{
-              "load":{"process_id":"load_collection","arguments":{"id":"hls-s30","spatial_extent":null,"temporal_extent":null,"bands":["b8a","b04"]}},
-              "ndvi":{"process_id":"ndvi","arguments":{"data":{"from_node":"load"},"nir":"b8a","red":"b04"}},
-              "scale":{"process_id":"linear_scale_range","arguments":{"x":{"from_node":"ndvi"},"inputMin":-1,"inputMax":1,"outputMin":0,"outputMax":255}},
-              "save":{"process_id":"save_result","arguments":{"data":{"from_node":"scale"},"format":"png","options":{"colormap":"grayscale"}},"result":true}}}}' \
-        -D "$dir/gray-service-headers.txt" -o /dev/null -w '%{http_code}')
-    [ "$gsvc" = "201" ] || { echo "FAIL: POST /services (grayscale) answered $gsvc"; exit 1; }
-    gsid=$(tr -d '\r' < "$dir/gray-service-headers.txt" | sed -n 's/^[Oo]pen[Ee][Oo]-[Ii]dentifier: //p' | head -1)
-    [ -n "$gsid" ] || { echo "FAIL: grayscale 201 carried no OpenEO-Identifier header"; exit 1; }
-    code=$(curl -s -o "$dir/gray-service.png" -w '%{http_code}' "$base/tilesets/$gsid/tiles/12/1561/848")
-    [ "$code" = "200" ] || { echo "FAIL: grayscale service tile answered $code"; exit 1; }
-    cargo run --quiet -p swath-testkit --bin pdiff -- \
-        "$dir/gray-service.png" crates/swath-render/tests/data/ndvi-12-848-1561.png
-    echo "swath: ndvi values match the rio-tiler/GDAL golden (#94, level 1: grayscale service, default pdiff policy)"
-    # Metadata-vs-pixels: the tileset's DECLARED bounds must contain the tile
-    # we just proved correct (12/848/1561, center -105.4248, 39.27). A wrong
-    # granule bbox once put the demo viewport 48 km from the imagery while
-    # every pixel test stayed green — declared geography is now asserted too.
-    curl -sf "$base/tilesets/ndvi" \
-        | python3 -c 'import json,sys; bb=json.load(sys.stdin)["boundingBox"]; (w,s),(e,n)=bb["lowerLeft"],bb["upperRight"]; ok=w<=-105.4248<=e and s<=39.27<=n; print(f"swath: declared tileset bounds contain the proven tile ({[w,s,e,n]})" if ok else f"FAIL: tileset bbox {[w,s,e,n]} does not contain the proven tile"); sys.exit(0 if ok else 1)'
-    echo "e2e OK"
+    SWATH_STACK_UP_ONLY=1 tests/e2e/stack-up.sh
+    cargo run --quiet -p swath-e2e
 
 # The viewer e2e (issue #33): the same stack bring-up + granule drop as
 # `just e2e` (shared, tests/e2e/stack-up.sh — no duplicated drop logic),
