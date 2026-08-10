@@ -6,7 +6,6 @@
 //! misses on absent keys, and honest errors from a store that cannot be
 //! written (the read-only-directory failure the serve path must survive).
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use object_store::local::LocalFileSystem;
@@ -18,28 +17,7 @@ use swath_cache_objectstore::ObjectStoreTileCache;
 use swath_core::cache::CacheError;
 use swath_core::cache::{TileCache, TileKey, TileKeyInputs};
 use swath_core::tile::TileCoord;
-
-/// A fresh, self-deleting temp directory per test (no tempfile dep —
-/// same pattern as the filedrop adapter's tests).
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "swath-cache-{tag}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id(),
-        ));
-        std::fs::create_dir_all(&dir).expect("temp dir creates");
-        Self(dir)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
+use swath_testsupport::TempDir;
 
 fn key(layer: &str, version: &str) -> TileKey {
     TileKey::compute(&TileKeyInputs {
@@ -88,15 +66,15 @@ fn key2_of_other_version() -> TileKey {
 
 #[tokio::test]
 async fn round_trips_on_the_local_filesystem() {
-    let dir = TempDir::new("fs");
-    let store = LocalFileSystem::new_with_prefix(&dir.0).expect("store opens");
+    let dir = TempDir::new("cache-fs");
+    let store = LocalFileSystem::new_with_prefix(dir.path()).expect("store opens");
     let cache = ObjectStoreTileCache::new(Arc::new(store));
     round_trip(&cache).await;
 
     // The on-disk layout is the documented sharded scheme.
     let hex = key("truecolor", "g-1@aa").as_str().to_owned();
     let object = dir
-        .0
+        .path()
         .join("tiles")
         .join(&hex[..2])
         .join(&hex[2..4])
@@ -117,12 +95,12 @@ async fn round_trips_in_memory() {
 async fn put_into_a_read_only_directory_is_an_io_error() {
     use std::os::unix::fs::PermissionsExt;
 
-    let dir = TempDir::new("ro");
-    let mut perms = std::fs::metadata(&dir.0).expect("stat").permissions();
+    let dir = TempDir::new("cache-ro");
+    let mut perms = std::fs::metadata(dir.path()).expect("stat").permissions();
     perms.set_mode(0o555);
-    std::fs::set_permissions(&dir.0, perms.clone()).expect("chmod");
+    std::fs::set_permissions(dir.path(), perms.clone()).expect("chmod");
 
-    let store = LocalFileSystem::new_with_prefix(&dir.0).expect("store opens");
+    let store = LocalFileSystem::new_with_prefix(dir.path()).expect("store opens");
     let cache = ObjectStoreTileCache::new(Arc::new(store));
     let err = cache
         .put(&key("truecolor", "g-1@aa"), b"png", "image/png")
@@ -132,5 +110,5 @@ async fn put_into_a_read_only_directory_is_an_io_error() {
 
     // Restore write permission so TempDir::drop can clean up.
     perms.set_mode(0o755);
-    std::fs::set_permissions(&dir.0, perms).expect("chmod back");
+    std::fs::set_permissions(dir.path(), perms).expect("chmod back");
 }

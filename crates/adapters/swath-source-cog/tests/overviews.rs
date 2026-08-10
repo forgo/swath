@@ -18,41 +18,19 @@
 
 mod common;
 
-use sha2::{Digest, Sha256};
 use swath_core::raster::{AssetRef, WindowRequest};
-use swath_core::source::{
-    BandSelection, PixelBuffer, RasterSource, ReadLevel, SourceError, WindowData,
-};
+use swath_core::source::{BandSelection, RasterSource, ReadLevel, SourceError, WindowData};
+use swath_testsupport::truth::{self, PixelCase, Truth};
 
-#[derive(serde::Deserialize)]
-struct Truth {
-    cases: Vec<Case>,
-}
-
+/// Per-source keys on top of the shared pixel-identity block.
 #[derive(serde::Deserialize)]
 struct Case {
     file: String,
     band: u32,
     factor: u32,
-    window_name: String,
-    requested: Win,
-    clipped: Win,
     grid: Grid,
-    dtype: String,
-    nodata: f64,
-    nodata_count: u64,
-    valid_sum: i64,
-    first8: Vec<i64>,
-    last8: Vec<i64>,
-    sha256_le: String,
-}
-
-#[derive(serde::Deserialize, PartialEq, Eq, Debug, Clone, Copy)]
-struct Win {
-    col_off: u64,
-    row_off: u64,
-    width: u64,
-    height: u64,
+    #[serde(flatten)]
+    px: PixelCase,
 }
 
 /// The overview grid rasterio reports for an `overview_level=` open:
@@ -64,41 +42,13 @@ struct Grid {
     transform: [f64; 6],
 }
 
-impl From<Win> for WindowRequest {
-    fn from(w: Win) -> Self {
-        Self {
-            col_off: w.col_off,
-            row_off: w.row_off,
-            width: w.width,
-            height: w.height,
-        }
-    }
+fn truth() -> Truth<Case> {
+    truth::load(include_str!("data/overview_truth.json"))
 }
 
-fn truth() -> Truth {
-    let raw = include_str!("data/overview_truth.json");
-    serde_json::from_str(raw).expect("overview_truth.json parses")
-}
-
-fn widened(pixels: &PixelBuffer) -> Vec<i64> {
-    match pixels {
-        PixelBuffer::UInt8(v) => v.iter().map(|&s| i64::from(s)).collect(),
-        PixelBuffer::Int16(v) => v.iter().map(|&s| i64::from(s)).collect(),
-        other => panic!("unexpected pixel dtype in fixtures: {:?}", other.dtype()),
-    }
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "nodata sentinels are exact small integers"
-)]
 #[allow(clippy::float_cmp, reason = "grid transform round-trip must be exact")]
 fn check_case(case: &Case, wd: &WindowData) {
-    let name = format!("{}/{}", case.file, case.window_name);
-
-    // The rounding contract: full-res request covered onto the overview
-    // grid, clipped — the returned window is in overview coordinates.
-    assert_eq!(wd.window, case.clipped.into(), "{name}: clipped window");
+    let name = format!("{}/{}", case.file, case.px.window_name);
 
     // The grid actually read is the overview IFD's: real dimensions and
     // the exact-ratio-scaled geotransform rasterio reports for the same
@@ -117,35 +67,17 @@ fn check_case(case: &Case, wd: &WindowData) {
         wd.grid.overview_levels.is_empty(),
         "{name}: an overview grid must report no overviews of its own"
     );
-    assert_eq!(wd.grid.nodata, Some(case.nodata), "{name}: grid nodata");
+    assert_eq!(wd.grid.nodata, Some(case.px.nodata), "{name}: grid nodata");
 
     assert_eq!(
         wd.dtype(),
-        common::dtype_from_str(&case.dtype),
+        common::dtype_from_str(&case.px.dtype),
         "{name}: dtype"
     );
-    assert_eq!(wd.nodata, Some(case.nodata), "{name}: nodata sentinel");
-    let expected_len = usize::try_from(wd.window.width * wd.window.height).unwrap();
-    assert_eq!(wd.pixels.len(), expected_len, "{name}: pixel count");
-
+    // The rounding contract: full-res request covered onto the overview
+    // grid, clipped — the returned window is in overview coordinates; then
     // EXACT pixel equality with GDAL's explicit overview read.
-    let hash = format!("{:x}", Sha256::digest(wd.pixels.to_le_bytes()));
-    assert_eq!(hash, case.sha256_le, "{name}: pixel bytes differ from GDAL");
-
-    // Redundant with the hash, but failure output is far more diagnostic.
-    let samples = widened(&wd.pixels);
-    let sentinel = case.nodata as i64;
-    let nodata_count = samples.iter().filter(|&&s| s == sentinel).count() as u64;
-    let valid_sum: i64 = samples.iter().filter(|&&s| s != sentinel).sum();
-    assert_eq!(nodata_count, case.nodata_count, "{name}: nodata count");
-    assert_eq!(valid_sum, case.valid_sum, "{name}: valid-pixel sum");
-    let take8 = samples.len().min(8);
-    assert_eq!(&samples[..take8], &case.first8[..], "{name}: first pixels");
-    assert_eq!(
-        &samples[samples.len() - take8..],
-        &case.last8[..],
-        "{name}: last pixels"
-    );
+    truth::assert_pixels_match(&name, &case.px, wd);
 
     // Provenance is real overview I/O: non-empty, in-bounds, bytes_read is
     // the sum, and the fixtures' single 256×256 overview tile means every
@@ -183,14 +115,14 @@ async fn overview_windows_match_gdal_truth_table_exactly() {
         let wd = source
             .read_window(
                 &AssetRef::new(&case.file),
-                case.requested.into(),
+                case.px.requested.into(),
                 BandSelection::Single(case.band),
                 ReadLevel::Overview {
                     factor: case.factor,
                 },
             )
             .await
-            .unwrap_or_else(|e| panic!("{}/{}: {e}", case.file, case.window_name));
+            .unwrap_or_else(|e| panic!("{}/{}: {e}", case.file, case.px.window_name));
         check_case(case, &wd);
     }
 }
@@ -207,17 +139,17 @@ async fn overview_local_and_memory_stores_agree() {
             factor: case.factor,
         };
         let a = local
-            .read_window(&asset, case.requested.into(), band, level)
+            .read_window(&asset, case.px.requested.into(), band, level)
             .await
             .expect("local read");
         let b = memory
-            .read_window(&asset, case.requested.into(), band, level)
+            .read_window(&asset, case.px.requested.into(), band, level)
             .await
             .expect("memory read");
         assert_eq!(
             a, b,
             "{}/{}: local-file and in-memory reads disagree",
-            case.file, case.window_name
+            case.file, case.px.window_name
         );
     }
 }

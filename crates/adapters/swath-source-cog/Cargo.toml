@@ -20,7 +20,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
+swath-testsupport = { path = "../../swath-testsupport", version = "0.0.0" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]

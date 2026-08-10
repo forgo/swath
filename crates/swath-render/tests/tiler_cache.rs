@@ -263,14 +263,13 @@ async fn cache_failures_never_fail_the_response() {
 async fn read_only_cache_directory_still_serves_live() {
     use std::os::unix::fs::PermissionsExt;
 
-    let dir = std::env::temp_dir().join(format!("swath-ro-cache-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    let mut perms = std::fs::metadata(&dir).expect("stat").permissions();
+    let dir = swath_testsupport::TempDir::new("ro-cache");
+    let mut perms = std::fs::metadata(dir.path()).expect("stat").permissions();
     perms.set_mode(0o555);
-    std::fs::set_permissions(&dir, perms.clone()).expect("chmod");
+    std::fs::set_permissions(dir.path(), perms.clone()).expect("chmod");
 
     let source = cog_source();
-    let store = LocalFileSystem::new_with_prefix(&dir).expect("store opens");
+    let store = LocalFileSystem::new_with_prefix(dir.path()).expect("store opens");
     let cache = ObjectStoreTileCache::new(Arc::new(store));
     let request = request();
     let key = key(&request, "g-2024158");
@@ -284,7 +283,7 @@ async fn read_only_cache_directory_still_serves_live() {
         assert!(!encoded.bytes.is_empty());
     }
 
+    // Restore write permission so TempDir::drop can clean up.
     perms.set_mode(0o755);
-    std::fs::set_permissions(&dir, perms).expect("chmod back");
-    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::set_permissions(dir.path(), perms).expect("chmod back");
 }

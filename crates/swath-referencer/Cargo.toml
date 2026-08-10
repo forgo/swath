@@ -29,5 +29,8 @@ serde_json = { workspace = true }
 swath-core = { path = "../swath-core", version = "0.0.0" }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+swath-testsupport = { path = "../swath-testsupport", version = "0.0.0" }
+
 [lints]
 workspace = true

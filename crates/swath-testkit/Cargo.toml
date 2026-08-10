@@ -12,5 +12,11 @@ publish = false
 [dependencies]
 image = { workspace = true }
 
+# Dev-only on purpose: only `pdiff`'s #[cfg(test)] module uses the shared
+# temp dirs, and dev-dependencies cover a bin target's unit tests. The
+# testkit ships (locally) as tooling; testsupport never leaves test builds.
+[dev-dependencies]
+swath-testsupport = { path = "../swath-testsupport", version = "0.0.0" }
+
 [lints]
 workspace = true
