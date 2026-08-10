@@ -10,6 +10,7 @@ llvm_cov_version := "0.8.7"
 deny_version := "0.20.2"
 zizmor_version := "1.29.0"
 prek_version := "0.4.12"
+oha_version := "1.15.0"
 
 # List available recipes.
 default:
@@ -36,6 +37,7 @@ setup-ci *tools="nextest llvm-cov deny":
             nextest)  command -v cargo-nextest  >/dev/null || install cargo-nextest  "{{nextest_version}}" ;;
             llvm-cov) cargo llvm-cov --version >/dev/null 2>&1 || install cargo-llvm-cov "{{llvm_cov_version}}" ;;
             deny)     command -v cargo-deny     >/dev/null || install cargo-deny     "{{deny_version}}" ;;
+            oha)      command -v oha            >/dev/null || install oha            "{{oha_version}}" ;;
             none)     ;;
             *)        echo "unknown tool: $tool" >&2; exit 1 ;;
         esac
@@ -356,6 +358,26 @@ e2e-web:
     trap 'docker compose down -v' EXIT
     tests/e2e/stack-up.sh
     cd web && pnpm exec playwright test
+
+# --- tests/load (HTTP load harness, issue #101 / ARCHITECTURE §16.7) ---
+
+# `just load`: the concurrency measurement `just e2e` never takes. Brings
+# up the SAME compose stack (tests/e2e/stack-up.sh — the single owner of
+# lifecycle; its full path also drops the fixture granule and polls the
+# proven tile live), then tests/load/load.sh runs the pinned scenarios:
+# (a) hot-cache tile storm, (b) cold live-render burst (unique tiles,
+# each exactly once), (c) a mixed storm of the heaviest live warps WHILE
+# a second oha measures /healthz and curl holds an SSE /traces
+# subscription — the §16.7 (async-vs-blocking render boundary, #102)
+# evidence. Distills the committed baseline docs/perf/load-baseline.
+# {json,md} and prints the table. Under 5 minutes on a laptop.
+load: (setup-ci "oha")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    started=$(date +%s)
+    trap 'docker compose down -v' EXIT
+    tests/e2e/stack-up.sh
+    tests/load/load.sh "$started"
 
 # THE stopwatch demo (issue #35, CHARTER.md §10 Phase 1): the same
 # north-star path the e2e asserts forever, run for human eyes. Brings up

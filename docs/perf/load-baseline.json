@@ -1,0 +1,83 @@
+{
+ "schema": "swath-load-baseline/1",
+ "generated": "2026-08-10T13:39:23Z",
+ "git_sha": "b927977",
+ "oha_version": "1.15.0",
+ "machine": {
+  "cpu": "Apple M2 Max",
+  "cores": 12,
+  "os": "Darwin 25.5.0 arm64"
+ },
+ "duration_seconds": 154,
+ "scenarios": {
+  "healthz_idle": {
+   "tool": "oha",
+   "params": "GET /healthz, c=4, 5s, no other load",
+   "requests": 83235,
+   "errors": 0,
+   "rps": 16638.2,
+   "p50_ms": 0.24,
+   "p95_ms": 0.3,
+   "p99_ms": 0.36,
+   "max_ms": 2.73
+  },
+  "hot_cache_storm": {
+   "tool": "oha",
+   "params": "GET /tilesets/truecolor/tiles/12/1561/848 (pre-warmed, asserted cache_hit), c=32, 20s",
+   "requests": 27239,
+   "errors": 0,
+   "rps": 1360.3,
+   "p50_ms": 22.27,
+   "p95_ms": 34.65,
+   "p99_ms": 41.57,
+   "max_ms": 77.69
+  },
+  "cold_live_burst": {
+   "tool": "python-urllib (unique-URL driver; oha samples URL files randomly with replacement)",
+   "params": "128 unique z15 truecolor tiles, each exactly once, c=8",
+   "requests": 128,
+   "errors": 0,
+   "rps": 11.5,
+   "p50_ms": 653.88,
+   "p95_ms": 1200.51,
+   "p99_ms": 1232.39,
+   "max_ms": 1236.41,
+   "decisions": {
+    "live": 128
+   }
+  },
+  "mixed_tile_storm": {
+   "tool": "oha",
+   "params": "6 heavy tiles (truecolor+ndvi z12 x2, z11 \u2014 full-footprint warps), c=16, 40s, cache cleared every 250 ms to stay on the Live path",
+   "requests": 917,
+   "errors": 0,
+   "rps": 22.5,
+   "p50_ms": 820.02,
+   "p95_ms": 1934.54,
+   "p99_ms": 2040.75,
+   "max_ms": 2093.14,
+   "decision_probes": {
+    "live": 12,
+    "cache_hit": 3
+   }
+  },
+  "healthz_under_warps": {
+   "tool": "oha",
+   "params": "GET /healthz, c=4, 20s, started 5s into the mixed storm",
+   "requests": 190856,
+   "errors": 0,
+   "rps": 9541.0,
+   "p50_ms": 0.39,
+   "p95_ms": 0.64,
+   "p99_ms": 0.94,
+   "max_ms": 22.14
+  },
+  "sse_under_warps": {
+   "window_seconds": 45,
+   "survived_window": true,
+   "curl_exit": 28,
+   "trace_events_received": 932,
+   "keepalives_received": 0
+  }
+ }
+}
