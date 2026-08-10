@@ -33,6 +33,7 @@
 import { type IControl, Map as MapLibreMap } from "maplibre-gl";
 import maplibreCss from "maplibre-gl/dist/maplibre-gl.css?inline";
 import { type EventSourceFactory, XRayOverlay } from "./swath-xray.js";
+import { centerTile } from "./tms.js";
 
 /** One entry of the server's tilesets list, as `layers()` returns it. */
 export interface SwathLayer {
@@ -83,23 +84,6 @@ const DEMO_BASEMAP_URL = "https://demotiles.maplibre.org/style.json";
 const RETRY_INTERVAL_MS = 3000;
 const MAX_TILE_RETRIES = 60;
 
-/** Slippy/WebMercatorQuad tile containing (lon, lat) at the zoom's integer
- * level — the liveness probe's target. Mirrors the server-side TMS math. */
-function centerTile(lon: number, lat: number, zoom: number): { z: number; x: number; y: number } {
-  const z = Math.max(0, Math.min(22, Math.round(zoom)));
-  const n = 2 ** z;
-  const clampedLat = Math.max(-85.0511, Math.min(85.0511, lat));
-  const latRad = (clampedLat * Math.PI) / 180;
-  const x = Math.min(n - 1, Math.max(0, Math.floor(((lon + 180) / 360) * n)));
-  const y = Math.min(
-    n - 1,
-    Math.max(
-      0,
-      Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n),
-    ),
-  );
-  return { z, x, y };
-}
 const basemapCache = new Map<string, Promise<Record<string, unknown> | undefined>>();
 
 function fetchBasemapStyle(url: string): Promise<Record<string, unknown> | undefined> {

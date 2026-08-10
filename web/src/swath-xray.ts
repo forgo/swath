@@ -52,6 +52,8 @@ export type TraceDecision =
   | { overview: { level: number } }
   | { cache_hit: { key: string } };
 
+import { tileNorthWest } from "./tms.js";
+
 /** A candidate strategy as the plan payload names it (`PlannedStrategy`,
  * pinned in swath-core `planner`): the decision vocabulary minus
  * execution details — overviews carry the decimation `factor` (not a
@@ -470,18 +472,6 @@ function plannedLabel(strategy: PlannedStrategy): string {
     return strategy;
   }
   return `overview (factor ${strategy.overview.factor})`;
-}
-
-/**
- * Northwest corner of Web Mercator tile `z/x/y` in lon/lat degrees (the
- * standard slippy-map inverse). The southeast corner is the northwest of
- * `z/x+1/y+1`.
- */
-export function tileNorthWest(z: number, x: number, y: number): [number, number] {
-  const n = 2 ** z;
-  const lon = (x / n) * 360 - 180;
-  const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) * 180) / Math.PI;
-  return [lon, lat];
 }
 
 /** `"z/x/y"` → numbers; undefined when malformed. */
