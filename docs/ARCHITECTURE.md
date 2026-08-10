@@ -359,6 +359,9 @@ replicas) + managed Postgres + bucket. The pure-Rust core keeps the image tiny a
 6. **Extension mechanism (§14).** Commit to compile-time features for v1 and defer WASM? Confirm.
 7. **Async vs blocking render boundary.** `spawn_blocking` + `rayon` vs a dedicated render threadpool with a
    work-stealing queue and admission control (matters under load and for the latency budget).
+   *(Resolved by ADR 0012: render stays inline on the async runtime — measured on 12-core and
+   2-CPU shapes, the control plane stays ≤1.44 ms p99 under full warp saturation; reopen trigger
+   recorded in the ADR.)*
 8. **The Python ingest seam.** Is VirtualiZarr-as-sidecar acceptable long-term for legacy reference
    generation, or do we want a Rust reader for kerchunk/virtual manifests to keep even ingest pure-Rust?
    *(Resolved by ADR 0006: staged Python→Rust behind one manifest port; evidence from prototype 0001.)*

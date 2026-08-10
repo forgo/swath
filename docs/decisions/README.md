@@ -22,3 +22,4 @@ that produced the evidence).
 | 0009 | 2026-08-09 | Fenced spherical-sinusoidal math (narrow exception to ADR 0002) | Accepted |
 | 0010 | 2026-08-09 | Authoring surface: native openEO API at a bounded profile | Accepted |
 | 0011 | 2026-08-10 | UI ships inside the binary (`embedded-ui`); CORS opt-in, default off | Accepted |
+| 0012 | 2026-08-10 | Render stays inline on the async runtime (resolves §16.7 with load evidence) | Accepted |
