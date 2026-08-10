@@ -14,7 +14,6 @@ publish = false
 serde = { workspace = true }
 serde_json = { workspace = true }
 swath-core = { path = "../../swath-core", version = "0.0.0" }
-thiserror = { workspace = true }
 # `time` only: the poll interval between directory scans. The adapter owns
 # the clock the core refuses to (arrival stamping + pacing).
 tokio = { workspace = true, features = ["time"] }

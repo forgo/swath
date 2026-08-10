@@ -4,9 +4,11 @@
 //! Live integration suite against a real pgstac (the compose-stack service).
 //!
 //! Every test is `#[ignore]`: `just test-catalog` brings up the pgstac
-//! container and runs them (`cargo nextest run … --run-ignored all`); CI runs
-//! the same recipe in the e2e job. Connection comes from `SWATH_PGSTAC_URL`
-//! (default: the docker-compose local-dev credentials).
+//! container, exports `SWATH_PGSTAC_URL` (defaulting to the docker-compose
+//! local-dev credentials), and runs them (`cargo nextest run … --run-ignored
+//! all`); CI runs the same recipe in the e2e job. Without the variable the
+//! tests skip cleanly — the workspace-wide gated-suite semantics live in
+//! `swath_testsupport::gated_var` (#97).
 //!
 //! Each test owns one `swath-it-*` dataset id and deletes it up front, so
 //! reruns are deterministic and tests never share state.
@@ -19,13 +21,14 @@ use swath_core::catalog::{
     GranuleAsset, GranuleId, GranuleQuery, Layer, PlanKind, Resampling, Rescale, TimeRange,
 };
 
-/// Connects to the compose-stack pgstac (or `SWATH_PGSTAC_URL`).
-async fn catalog() -> PgstacCatalog {
-    let url = std::env::var("SWATH_PGSTAC_URL")
-        .unwrap_or_else(|_| "postgres://swath:swath-local-dev@localhost:5432/swath".to_owned());
-    PgstacCatalog::connect(&url)
+/// Connects to the pgstac the harness provides via `SWATH_PGSTAC_URL`
+/// (`just test-catalog` exports it); `None` skips the test cleanly.
+async fn catalog() -> Option<PgstacCatalog> {
+    let url = swath_testsupport::gated_var("SWATH_PGSTAC_URL")?;
+    let catalog = PgstacCatalog::connect(&url)
         .await
-        .expect("pgstac must be reachable — run via `just test-catalog`")
+        .expect("pgstac must be reachable — run via `just test-catalog`");
+    Some(catalog)
 }
 
 /// Resets the test's dataset (drops it if a previous run left it behind).
@@ -138,7 +141,9 @@ fn ids(granules: &[Granule]) -> Vec<&str> {
 #[tokio::test]
 #[ignore = "needs live pgstac (just test-catalog)"]
 async fn dataset_upsert_get_round_trip_is_identity() {
-    let catalog = catalog().await;
+    let Some(catalog) = catalog().await else {
+        return;
+    };
     let id = "swath-it-roundtrip";
     reset(&catalog, id).await;
 
@@ -169,7 +174,9 @@ async fn dataset_upsert_get_round_trip_is_identity() {
 #[tokio::test]
 #[ignore = "needs live pgstac (just test-catalog)"]
 async fn missing_dataset_is_none_and_granule_writes_fail_loudly() {
-    let catalog = catalog().await;
+    let Some(catalog) = catalog().await else {
+        return;
+    };
     let id = DatasetId::new("swath-it-does-not-exist");
 
     assert!(catalog.get_dataset(&id).await.unwrap().is_none());
@@ -198,7 +205,9 @@ async fn missing_dataset_is_none_and_granule_writes_fail_loudly() {
 #[tokio::test]
 #[ignore = "needs live pgstac (just test-catalog)"]
 async fn find_granules_filters_by_bbox_and_datetime() {
-    let catalog = catalog().await;
+    let Some(catalog) = catalog().await else {
+        return;
+    };
     let id = "swath-it-filters";
     reset(&catalog, id).await;
     catalog.upsert_dataset(&dataset(id)).await.unwrap();
@@ -308,7 +317,9 @@ async fn find_granules_filters_by_bbox_and_datetime() {
 #[tokio::test]
 #[ignore = "needs live pgstac (just test-catalog)"]
 async fn find_granules_pages_past_the_search_limit() {
-    let catalog = catalog().await;
+    let Some(catalog) = catalog().await else {
+        return;
+    };
     let id = "swath-it-paging";
     reset(&catalog, id).await;
     catalog.upsert_dataset(&dataset(id)).await.unwrap();
@@ -345,7 +356,9 @@ async fn find_granules_pages_past_the_search_limit() {
 #[tokio::test]
 #[ignore = "needs live pgstac (just test-catalog)"]
 async fn plain_stac_clients_see_a_valid_catalog() {
-    let catalog = catalog().await;
+    let Some(catalog) = catalog().await else {
+        return;
+    };
     let id = "swath-it-visibility";
     reset(&catalog, id).await;
     catalog.upsert_dataset(&dataset(id)).await.unwrap();

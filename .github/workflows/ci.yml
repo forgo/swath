@@ -112,8 +112,9 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
-          tools: "none"
+          tools: "machete"
       - run: just lint
+      - run: just machete
 
   rust-test:
     needs: changes

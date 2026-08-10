@@ -45,7 +45,15 @@ expression = "HDF5"
 license-files = [{ path = "ext/hdf5/LICENSE", hash = 0x221a80ac }]
 
 [bans]
-# Duplicate versions warn (tightened later); wildcard requirements are forbidden.
+# Duplicate versions stay "warn" — a decision, not a deferral (issue #105).
+# The duplicates (13 crates as of this decision) are all transitive pins we
+# don't control: gribberish's older generation (syn 1, thiserror 1, num 0.2,
+# itertools 0.10), sqlx's newer RustCrypto 0.11 line vs the workspace's 0.10
+# (sha2/digest/block-buffer/…), and toml's winnow. "deny" would need a
+# skip-list that every Renovate bump churns, buying no safety — advisories
+# and licenses gate above regardless of version count. Revisit if those
+# trees converge or a security-relevant crate ever appears duplicated
+# (`cargo deny check bans` names each version and its dependents).
 multiple-versions = "warn"
 wildcards = "deny"
 
