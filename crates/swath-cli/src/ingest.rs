@@ -99,3 +99,94 @@ pub(crate) fn run(args: &IngestArgs) -> Result<(), IngestError> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use swath_core::manifest::{VirtualManifest, compare};
+    use swath_testsupport::TempDir;
+
+    use super::{IngestArgs, IngestCommand, IngestError, run};
+
+    /// The committed tiny HDF5 fixture (and its h5py-derived truth) from
+    /// the referencer's conformance data.
+    fn data(file: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../swath-referencer/tests/data")
+            .join(file)
+    }
+
+    fn reference(granule: PathBuf, output: Option<PathBuf>) -> IngestArgs {
+        IngestArgs {
+            command: IngestCommand::Reference { granule, output },
+        }
+    }
+
+    #[test]
+    fn reference_writes_the_known_answer_manifest() {
+        let dir = TempDir::new("cli-ingest-known-answer");
+        let out = dir.join("tiny.vmanifest.json");
+        run(&reference(data("tiny.h5"), Some(out.clone()))).expect("referencing succeeds");
+
+        let written = VirtualManifest::from_json_str(
+            &std::fs::read_to_string(&out).expect("manifest written"),
+        )
+        .expect("written manifest parses as schema v1");
+        let expected = VirtualManifest::from_json_str(
+            &std::fs::read_to_string(data("tiny.expected.json")).expect("expected json"),
+        )
+        .expect("expected json parses");
+        let report = compare(&written, &expected);
+        assert!(
+            report.equivalent(),
+            "CLI manifest disagrees with the h5py-derived truth: {report:#?}"
+        );
+    }
+
+    #[test]
+    fn reference_defaults_the_output_beside_the_granule() {
+        let dir = TempDir::new("cli-ingest-default-out");
+        let granule = dir.join("tiny.h5");
+        std::fs::copy(data("tiny.h5"), &granule).expect("fixture copies");
+        run(&reference(granule, None)).expect("referencing succeeds");
+        let default_out = dir.join("tiny.h5.vmanifest.json");
+        assert!(
+            VirtualManifest::from_json_str(
+                &std::fs::read_to_string(&default_out).expect("default-named manifest written"),
+            )
+            .is_ok(),
+            "default output parses as a manifest"
+        );
+    }
+
+    #[test]
+    fn reference_failures_name_the_granule() {
+        let dir = TempDir::new("cli-ingest-badfile");
+        let granule = dir.join("not-a-granule.txt");
+        std::fs::write(&granule, "plain text").expect("file writes");
+        let err = run(&reference(granule.clone(), None)).expect_err("unsupported extension");
+        assert!(matches!(&err, IngestError::Reference { granule: g, .. }
+            if *g == granule.display().to_string()));
+        assert!(
+            err.to_string()
+                .starts_with(&format!("referencing `{}`: ", granule.display())),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn write_failures_name_the_output_path() {
+        let dir = TempDir::new("cli-ingest-badout");
+        let out = dir.join("missing-subdir/manifest.json");
+        let err =
+            run(&reference(data("tiny.h5"), Some(out.clone()))).expect_err("unwritable output");
+        assert!(matches!(&err, IngestError::Write { path, .. }
+            if *path == out.display().to_string()));
+        assert!(
+            err.to_string()
+                .starts_with(&format!("writing manifest `{}`: ", out.display())),
+            "got: {err}"
+        );
+    }
+}
