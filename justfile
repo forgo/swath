@@ -418,5 +418,73 @@ demo countdown="15":
     echo "  Ctrl-C to tear everything down."
     wait "$vite" || true
 
+# --- benchmarks (issue #100; ENGINEERING.md §2 criterion mandate) ---
+
+# All criterion benches across the workspace: the planner microbench
+# (swath-core) plus the render-stage suites (swath-render: warp, IR eval,
+# PNG encode, source window, full-tile composite). Inputs are the committed
+# HLS fixtures — no network, no downloads. Compare runs against the
+# committed baseline in docs/perf/bench-baseline.json.
+bench:
+    cargo bench --workspace
+
+# Re-capture the committed perf baseline: run every bench, then distill
+# criterion's estimates (per-bench median + MAD, ns) plus machine/toolchain
+# metadata into docs/perf/bench-baseline.json. Commit the result; the PR
+# that changes it should say why the numbers moved.
+bench-baseline: bench
+    #!/usr/bin/env bash
+    set -euo pipefail
+    python3 - <<'EOF'
+    import datetime
+    import json
+    import pathlib
+    import platform
+    import subprocess
+
+    def sh(*args: str) -> str:
+        return subprocess.run(args, capture_output=True, text=True, check=True).stdout.strip()
+
+    system = platform.system()
+    if system == "Darwin":
+        model = sh("sysctl", "-n", "machdep.cpu.brand_string")
+    else:
+        model = next(
+            (
+                line.split(":", 1)[1].strip()
+                for line in pathlib.Path("/proc/cpuinfo").read_text().splitlines()
+                if line.startswith("model name")
+            ),
+            platform.machine(),
+        )
+
+    benches = []
+    for est_path in sorted(pathlib.Path("target/criterion").glob("**/new/estimates.json")):
+        meta = json.loads((est_path.parent / "benchmark.json").read_text())
+        est = json.loads(est_path.read_text())
+        benches.append(
+            {
+                "id": meta["full_id"],
+                "median_ns": round(est["median"]["point_estimate"], 1),
+                "mad_ns": round(est["median_abs_dev"]["point_estimate"], 1),
+            }
+        )
+    benches.sort(key=lambda b: b["id"])
+    assert benches, "no criterion estimates found under target/criterion"
+
+    out = {
+        "schema": "swath-bench-baseline/1",
+        "captured": datetime.date.today().isoformat(),
+        "git_sha": sh("git", "rev-parse", "HEAD"),
+        "rustc": sh("rustc", "--version"),
+        "machine": {"model": model, "arch": platform.machine(), "os": system},
+        "benches": benches,
+    }
+    path = pathlib.Path("docs/perf/bench-baseline.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(out, indent=2) + "\n")
+    print(f"wrote {path} ({len(benches)} benches)")
+    EOF
+
 # The one-command gate: everything CI enforces.
 check: fmt-check lint test deny zizmor reuse

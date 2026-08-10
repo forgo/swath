@@ -21,6 +21,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 insta = { workspace = true }
 object_store = { workspace = true }
 proptest = { workspace = true }
@@ -30,6 +31,10 @@ swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.0.0" }
 swath-testkit = { path = "../swath-testkit", version = "0.0.0" }
 swath-testsupport = { path = "../swath-testsupport", version = "0.0.0" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[[bench]]
+name = "render"
+harness = false
 
 [lints]
 workspace = true

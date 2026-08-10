@@ -52,9 +52,11 @@ proptest = { version = "1.8.0" }
 # serde JSON shape and small eval outputs. Dev-dependency only.
 insta = { version = "1.48.0", features = ["json"] }
 # Microbenchmarks (issue #37: `plan()` must be trivially cheap and stay
-# that way). Dev-dependency only; default features off — no plotters/rayon
-# report machinery, just the harness (every extra crate is deny surface).
-criterion = { version = "0.7.0", default-features = false, features = ["cargo_bench_support"] }
+# that way; issue #100: the render-stage suites). Dev-dependency only;
+# default features off — no plotters/rayon report machinery, just the
+# harness (every extra crate is deny surface). `async_tokio` lets the
+# full-tile composite bench await the real `render_tile` future (#100).
+criterion = { version = "0.7.0", default-features = false, features = ["cargo_bench_support", "async_tokio"] }
 # COG/TIFF reading is ADOPT (ARCHITECTURE.md §3): async-tiff (developmentseed)
 # parses headers/IFDs/GeoKeys and decodes tiles; default features off — we
 # drive it through our own object_store-backed reader (no reqwest, and no
