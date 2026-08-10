@@ -139,3 +139,64 @@ fn init_tracing() {
         .with_target(false)
         .init();
 }
+
+#[cfg(test)]
+mod tests {
+    use clap::CommandFactory as _;
+    use clap::Parser as _;
+
+    use super::{Cli, Command, init_tracing, report};
+
+    /// clap's own consistency audit of the whole tree (issue #96 AC): the
+    /// canonical smoke test the clap docs prescribe for derive CLIs.
+    #[test]
+    fn clap_tree_is_internally_consistent() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn subcommands_parse_as_documented() {
+        let cli = Cli::try_parse_from(["swath", "serve", "--fixtures"]).expect("serve parses");
+        assert!(matches!(cli.command, Command::Serve(args) if args.fixtures));
+
+        let cli = Cli::try_parse_from([
+            "swath",
+            "ingest",
+            "reference",
+            "granule.h5",
+            "--output",
+            "out.json",
+        ])
+        .expect("ingest reference parses");
+        assert!(matches!(cli.command, Command::Ingest(_)));
+
+        // `--fixtures` and `--config` are mutually exclusive up front.
+        assert!(
+            Cli::try_parse_from(["swath", "serve", "--fixtures", "--config", "x.toml"]).is_err()
+        );
+        // Unknown subcommands are refused, not defaulted.
+        assert!(Cli::try_parse_from(["swath", "register"]).is_err());
+    }
+
+    #[test]
+    fn report_maps_results_onto_exit_codes() {
+        let success = report(Ok::<(), String>(()));
+        let failure = report(Err::<(), String>("boom".to_owned()));
+        assert_eq!(
+            format!("{success:?}"),
+            format!("{:?}", std::process::ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            format!("{failure:?}"),
+            format!("{:?}", std::process::ExitCode::FAILURE)
+        );
+    }
+
+    /// The subscriber installs exactly once per process; the default level
+    /// path (no/invalid `SWATH_LOG`) must never take the binary down.
+    #[test]
+    fn init_tracing_installs_the_subscriber() {
+        init_tracing();
+        tracing::info!("subscriber accepts events");
+    }
+}

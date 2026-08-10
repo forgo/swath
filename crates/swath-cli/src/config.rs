@@ -1202,5 +1202,107 @@ mod tests {
             ),
             Err(ConfigError::DuplicateLayer { layer }) if layer == "truecolor"
         ));
+
+        // A dataset id appearing twice is refused outright.
+        let mut file: ConfigFile = toml::from_str(CATALOG_TOML).expect("parses");
+        let twin: ConfigFile = toml::from_str(CATALOG_TOML).expect("parses");
+        let mut twin_dataset = twin.datasets.into_iter().next().unwrap();
+        twin_dataset.layers.clear();
+        file.datasets.push(twin_dataset);
+        let err = super::compile_catalog_mode(
+            "postgres://x".to_owned(),
+            None,
+            &file.datasets,
+            &Budget::default(),
+        )
+        .err()
+        .expect("duplicate dataset id");
+        assert!(matches!(&err, ConfigError::DuplicateDataset { dataset } if dataset == "hls-s30"));
+        assert_eq!(err.to_string(), "duplicate dataset id `hls-s30`");
+
+        // Static [[layers]] and catalog mode are mutually exclusive.
+        let mixed = format!(
+            "{CATALOG_TOML}\n\
+             [[layers]]\n\
+             id = \"static\"\n\
+             kind = \"ndvi\"\n\
+             [layers.bands]\n\
+             nir = \"b8a.tif\"\n\
+             red = \"b04.tif\"\n"
+        );
+        let dir = swath_testsupport::TempDir::new("cli-config-mixed");
+        let path = dir.join("swath.toml");
+        std::fs::write(&path, mixed).expect("config writes");
+        let err = resolve(&ServeArgs {
+            config: Some(path),
+            ..args()
+        })
+        .err()
+        .expect("mixed layer sources");
+        assert!(matches!(err, ConfigError::MixedLayerSources));
+        assert_eq!(
+            err.to_string(),
+            "catalog mode and static [[layers]] are mutually exclusive: \
+             define [[datasets.layers]]"
+        );
+
+        // [[datasets]] without a catalog has nowhere to live.
+        let datasets_only = r#"
+            store-root = "/data"
+            [[datasets]]
+            id = "hls-s30"
+        "#;
+        let path = dir.join("datasets-only.toml");
+        std::fs::write(&path, datasets_only).expect("config writes");
+        let err = resolve(&ServeArgs {
+            config: Some(path),
+            ..args()
+        })
+        .err()
+        .expect("datasets need catalog mode");
+        assert!(matches!(err, ConfigError::DatasetsNeedCatalog));
+        assert_eq!(
+            err.to_string(),
+            "[[datasets]] requires catalog mode (config `catalog`, --catalog, or SWATH_CATALOG)"
+        );
+    }
+
+    /// The two file-level failures (issue #96: previously unasserted
+    /// variants): an unreadable path and invalid TOML, each naming the
+    /// file as given.
+    #[test]
+    fn config_file_read_and_parse_failures_name_the_path() {
+        let dir = swath_testsupport::TempDir::new("cli-config-file-errors");
+
+        let missing = dir.join("nowhere.toml");
+        let err = resolve(&ServeArgs {
+            config: Some(missing.clone()),
+            ..args()
+        })
+        .err()
+        .expect("missing config file");
+        assert!(matches!(&err, ConfigError::Read { path, .. } if *path == missing));
+        assert!(
+            err.to_string().starts_with(&format!(
+                "cannot read config file `{}`: ",
+                missing.display()
+            )),
+            "got: {err}"
+        );
+
+        let invalid = dir.join("invalid.toml");
+        std::fs::write(&invalid, "bind = ").expect("file writes");
+        let err = resolve(&ServeArgs {
+            config: Some(invalid.clone()),
+            ..args()
+        })
+        .err()
+        .expect("invalid TOML");
+        assert!(matches!(&err, ConfigError::Parse { path, .. } if *path == invalid));
+        assert!(
+            err.to_string()
+                .starts_with(&format!("config file `{}` is invalid: ", invalid.display())),
+            "got: {err}"
+        );
     }
 }

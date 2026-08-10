@@ -12,6 +12,7 @@
 //! filedrop ingest loop as a background task in the same process, so
 //! `docker compose up` + a dropped manifest is the whole R1 happy path.
 
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,8 +24,8 @@ use object_store::prefix::PrefixStore;
 use swath_api::{ApiState, CatalogLayers, LayerProvider};
 use swath_cache_objectstore::ObjectStoreTileCache;
 use swath_catalog_pgstac::PgstacCatalog;
-use swath_core::catalog::{Catalog as _, CatalogError};
-use swath_core::events::EventSource as _;
+use swath_core::catalog::{Catalog, CatalogError};
+use swath_core::events::EventSource;
 use swath_events_filedrop::FiledropEvents;
 use swath_reproject_proj4rs::Proj4rsReproject;
 
@@ -143,11 +144,15 @@ pub(crate) fn run(args: &ServeArgs) -> Result<(), ServeError> {
         .enable_all()
         .build()
         .map_err(ServeError::Serve)?;
-    runtime.block_on(serve(cfg))
+    runtime.block_on(serve(cfg, shutdown_signal()))
 }
 
-/// Wires adapters into the router and runs axum with graceful shutdown.
-async fn serve(cfg: ResolvedConfig) -> Result<(), ServeError> {
+/// Wires adapters into the router and runs axum until `shutdown` resolves
+/// (production passes [`shutdown_signal`]; tests pass a ready future).
+async fn serve<F>(cfg: ResolvedConfig, shutdown: F) -> Result<(), ServeError>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
     let ResolvedConfig {
         bind,
         base_url,
@@ -164,9 +169,9 @@ async fn serve(cfg: ResolvedConfig) -> Result<(), ServeError> {
     match layers {
         LayerSource::Static(registry) => {
             let layer_count = registry.identities().len();
-            run_server(&shared, registry, layer_count, None).await
+            run_server(&shared, registry, layer_count, None, shutdown).await
         }
-        LayerSource::Catalog(mode) => serve_catalog(&shared, mode).await,
+        LayerSource::Catalog(mode) => serve_catalog(&shared, mode, shutdown).await,
     }
 }
 
@@ -178,11 +183,30 @@ struct Shared {
     cache: Option<String>,
 }
 
-/// Catalog mode: connect, register datasets (carrying over any layers the
-/// openEO services surface published in earlier runs), start the ingest
-/// loop, serve — with the openEO authoring router merged in (ADR 0010).
-async fn serve_catalog(cfg: &Shared, mut mode: CatalogMode) -> Result<(), ServeError> {
+/// Catalog mode: connect to pgstac, then hand over to the generic tail.
+async fn serve_catalog<F>(cfg: &Shared, mode: CatalogMode, shutdown: F) -> Result<(), ServeError>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
     let catalog = PgstacCatalog::connect(&mode.url).await?;
+    serve_catalog_on(cfg, mode, catalog, shutdown).await
+}
+
+/// The connection-independent body of catalog mode: register datasets
+/// (carrying over any layers the openEO services surface published in
+/// earlier runs), start the ingest loop, serve — with the openEO authoring
+/// router merged in (ADR 0010). Generic over the [`Catalog`] so tests can
+/// drive it against an in-memory catalog.
+async fn serve_catalog_on<C, F>(
+    cfg: &Shared,
+    mut mode: CatalogMode,
+    catalog: C,
+    shutdown: F,
+) -> Result<(), ServeError>
+where
+    C: Catalog + Clone + Send + Sync + 'static,
+    F: Future<Output = ()> + Send + 'static,
+{
     // Register the configured datasets up front: config is the source of
     // truth for dataset identity + config-defined layers, and granules
     // ingested later require their dataset to pre-exist
@@ -259,7 +283,7 @@ async fn serve_catalog(cfg: &Shared, mut mode: CatalogMode) -> Result<(), ServeE
         provider.clone(),
         &cfg.base_url,
     )));
-    run_server(cfg, provider, layer_count, Some(openeo)).await
+    run_server(cfg, provider, layer_count, Some(openeo), shutdown).await
 }
 
 /// The mode-independent tail of `serve`: build the store, assemble the
@@ -267,14 +291,16 @@ async fn serve_catalog(cfg: &Shared, mut mode: CatalogMode) -> Result<(), ServeE
 /// router into the OGC one — catalog mode passes the openEO authoring
 /// surface (ADR 0010), which also switches the landing page into its
 /// dual OGC + openEO-capabilities form.
-async fn run_server<L>(
+async fn run_server<L, F>(
     cfg: &Shared,
     layers: L,
     layer_count: usize,
     extra: Option<axum::Router>,
+    shutdown: F,
 ) -> Result<(), ServeError>
 where
     L: LayerProvider + 'static,
+    F: Future<Output = ()> + Send + 'static,
 {
     let store = build_store(&cfg.store_root)?;
     // The composite source (crate::source): COG assets and virtual-cube
@@ -320,7 +346,7 @@ where
     );
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown)
         .await
         .map_err(ServeError::Serve)?;
     tracing::info!("shutdown complete");
@@ -330,8 +356,9 @@ where
 /// The ingest loop (ARCHITECTURE.md §8): pull granule arrivals from the
 /// filedrop watcher, register each through the core's ingest step, log the
 /// outcome with its ingest latency. Errors never stop the loop — one bad
-/// manifest must not block the next granule (R1).
-async fn ingest_loop(mut source: FiledropEvents, catalog: PgstacCatalog) {
+/// manifest must not block the next granule (R1). Generic over the ports so
+/// the arrive→register flow is testable against in-memory fakes.
+async fn ingest_loop<S: EventSource, C: Catalog>(mut source: S, catalog: C) {
     loop {
         match source.next_event().await {
             Ok(Some(event)) => match swath_core::ingest::ingest_granule(&catalog, &event).await {
@@ -417,4 +444,520 @@ async fn shutdown_signal() {
         () = terminate => {}
     }
     tracing::info!("shutdown signal received; draining in-flight requests");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::future::ready;
+    use std::sync::{Arc, Mutex};
+
+    use object_store::ObjectStoreExt as _;
+
+    use swath_core::catalog::{
+        Bbox, Catalog, CatalogError, Dataset, DatasetId, Datetime, Granule, GranuleId,
+        GranuleQuery, TimeRange,
+    };
+    use swath_core::events::{EventError, EventSource, GranuleEvent};
+    use swath_testsupport::TempDir;
+
+    use super::{
+        ServeArgs, ServeError, Shared, build_store, ingest_loop, now_unix_millis, run, serve,
+        serve_catalog_on,
+    };
+    use crate::config::{self, ConfigError, LayerSource};
+
+    /// A minimal in-memory [`Catalog`] enforcing the dataset-must-pre-exist
+    /// contract, shared by clones like pgstac in production.
+    #[derive(Debug, Clone, Default)]
+    struct MemoryCatalog {
+        datasets: Arc<Mutex<BTreeMap<String, Dataset>>>,
+        granules: Arc<Mutex<Vec<Granule>>>,
+    }
+
+    impl Catalog for MemoryCatalog {
+        async fn upsert_dataset(&self, dataset: &Dataset) -> Result<(), CatalogError> {
+            self.datasets
+                .lock()
+                .unwrap()
+                .insert(dataset.id.as_str().to_owned(), dataset.clone());
+            Ok(())
+        }
+
+        async fn upsert_granules(&self, granules: &[Granule]) -> Result<(), CatalogError> {
+            for granule in granules {
+                if !self
+                    .datasets
+                    .lock()
+                    .unwrap()
+                    .contains_key(granule.dataset.as_str())
+                {
+                    return Err(CatalogError::DatasetNotFound {
+                        id: granule.dataset.clone(),
+                    });
+                }
+                self.granules.lock().unwrap().push(granule.clone());
+            }
+            Ok(())
+        }
+
+        async fn get_dataset(&self, id: &DatasetId) -> Result<Option<Dataset>, CatalogError> {
+            Ok(self.datasets.lock().unwrap().get(id.as_str()).cloned())
+        }
+
+        async fn list_datasets(&self) -> Result<Vec<Dataset>, CatalogError> {
+            Ok(self.datasets.lock().unwrap().values().cloned().collect())
+        }
+
+        async fn find_granules(
+            &self,
+            dataset: &DatasetId,
+            _query: &GranuleQuery,
+        ) -> Result<Vec<Granule>, CatalogError> {
+            Ok(self
+                .granules
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|granule| granule.dataset == *dataset)
+                .cloned()
+                .collect())
+        }
+    }
+
+    /// A finite replay [`EventSource`]: yields the scripted results, then
+    /// reports exhaustion (`Ok(None)`).
+    struct ScriptedEvents(Vec<Result<Option<GranuleEvent>, EventError>>);
+
+    impl EventSource for ScriptedEvents {
+        async fn next_event(&mut self) -> Result<Option<GranuleEvent>, EventError> {
+            if self.0.is_empty() {
+                Ok(None)
+            } else {
+                self.0.remove(0)
+            }
+        }
+    }
+
+    fn granule_event(dataset: &str) -> GranuleEvent {
+        GranuleEvent {
+            granule: Granule {
+                id: GranuleId::new("g1"),
+                dataset: DatasetId::new(dataset),
+                bbox: Bbox {
+                    west: -106.1,
+                    south: 39.2,
+                    east: -105.9,
+                    north: 39.4,
+                },
+                datetime: Datetime::new("2024-06-06T17:54:00Z").expect("valid datetime"),
+                assets: BTreeMap::new(),
+                ingested_at: None,
+            },
+            arrived_at: Datetime::new("2026-08-08T12:00:00Z").expect("valid datetime"),
+        }
+    }
+
+    fn dataset(id: &str) -> Dataset {
+        Dataset {
+            id: DatasetId::new(id),
+            title: id.to_owned(),
+            description: String::new(),
+            license: "other".to_owned(),
+            extent: swath_core::catalog::Extent {
+                bbox: Bbox {
+                    west: -180.0,
+                    south: -90.0,
+                    east: 180.0,
+                    north: 90.0,
+                },
+                interval: TimeRange::default(),
+            },
+            bands: std::collections::BTreeSet::new(),
+            layers: Vec::new(),
+        }
+    }
+
+    fn args() -> ServeArgs {
+        ServeArgs {
+            config: None,
+            fixtures: false,
+            bind: None,
+            base_url: None,
+            store_root: None,
+            catalog: None,
+            watch_dir: None,
+            cache: None,
+            overview_oversample: None,
+            max_estimated_live_bytes: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn build_store_local_directory_roots_the_store() {
+        let dir = TempDir::new("cli-store-local");
+        let store =
+            build_store(dir.path().to_str().expect("utf-8 temp path")).expect("local store builds");
+        store
+            .put(
+                &object_store::path::Path::from("probe.txt"),
+                object_store::PutPayload::from_static(b"tile bytes"),
+            )
+            .await
+            .expect("put succeeds");
+        assert_eq!(
+            std::fs::read(dir.join("probe.txt")).expect("object lands under the root"),
+            b"tile bytes"
+        );
+    }
+
+    #[test]
+    fn build_store_s3_scheme_builds_with_and_without_prefix() {
+        // Credentials are lazy (resolved per request), so building from a
+        // bare bucket URL succeeds without any AWS_* environment.
+        assert!(build_store("s3://tiles").is_ok(), "bare bucket");
+        assert!(build_store("s3://tiles/some/prefix").is_ok(), "with prefix");
+    }
+
+    #[test]
+    fn build_store_unsupported_scheme_is_a_store_error() {
+        // Any non-s3 scheme falls through to the local branch, where the
+        // pseudo-path honestly fails to open.
+        let err = build_store("memory://tiles").expect_err("unsupported scheme");
+        assert!(matches!(&err, ServeError::Store { root, .. } if root == "memory://tiles"));
+        assert!(
+            err.to_string()
+                .starts_with("cannot open object store at `memory://tiles`: "),
+            "got: {err}"
+        );
+    }
+
+    /// One test per `ServeError` variant, pinning the exact operator-facing
+    /// rendering (issue #96 AC).
+    #[test]
+    fn serve_error_config_message() {
+        let err = ServeError::from(ConfigError::NoLayers);
+        assert_eq!(
+            err.to_string(),
+            "no layers to serve: pass --fixtures, or --config with at least one [[layers]]"
+        );
+    }
+
+    #[test]
+    fn serve_error_store_message() {
+        let err = ServeError::Store {
+            root: "s3://tiles".to_owned(),
+            source: object_store::Error::Generic {
+                store: "S3",
+                source: "bucket vanished".into(),
+            },
+        };
+        assert_eq!(
+            err.to_string(),
+            "cannot open object store at `s3://tiles`: Generic S3 error: bucket vanished"
+        );
+    }
+
+    #[test]
+    fn serve_error_bind_message() {
+        let err = ServeError::Bind {
+            bind: "127.0.0.1:8080".parse().expect("socket addr"),
+            source: std::io::Error::other("address in use"),
+        };
+        assert_eq!(
+            err.to_string(),
+            "cannot bind 127.0.0.1:8080: address in use"
+        );
+    }
+
+    #[test]
+    fn serve_error_serve_message() {
+        let err = ServeError::Serve(std::io::Error::other("connection reset"));
+        assert_eq!(err.to_string(), "server error: connection reset");
+    }
+
+    #[test]
+    fn serve_error_catalog_message() {
+        let err = ServeError::from(CatalogError::DatasetNotFound {
+            id: DatasetId::new("hls-s30"),
+        });
+        assert_eq!(err.to_string(), "catalog: dataset not found: hls-s30");
+    }
+
+    #[test]
+    fn now_unix_millis_reads_the_wall_clock() {
+        let first = now_unix_millis();
+        let second = now_unix_millis();
+        // After mid-2025 in real time, and monotone across two reads.
+        assert!(first > 1_750_000_000_000, "got {first}");
+        assert!(second >= first);
+    }
+
+    #[tokio::test]
+    async fn ingest_loop_registers_arrivals_and_survives_bad_ones() {
+        let catalog = MemoryCatalog::default();
+        catalog
+            .upsert_dataset(&dataset("hls-s30"))
+            .await
+            .expect("seed dataset");
+        let events = ScriptedEvents(vec![
+            Ok(Some(granule_event("hls-s30"))),
+            // A granule of an unknown dataset: logged, never blocks the loop.
+            Ok(Some(granule_event("nope"))),
+            // A bad announcement: logged, never blocks the loop.
+            Err(EventError::Malformed {
+                detail: "not a manifest".to_owned(),
+            }),
+        ]);
+        // The scripted source then reports exhaustion, so the loop exits.
+        ingest_loop(events, catalog.clone()).await;
+        let stored = catalog
+            .find_granules(&DatasetId::new("hls-s30"), &GranuleQuery::default())
+            .await
+            .expect("query succeeds");
+        assert_eq!(stored.len(), 1, "exactly the good granule registered");
+        assert_eq!(
+            stored[0].ingested_at,
+            Some(Datetime::new("2026-08-08T12:00:00Z").expect("valid datetime")),
+            "ingested_at is stamped from the event's arrival time"
+        );
+    }
+
+    #[tokio::test]
+    async fn serve_static_mode_binds_serves_and_drains() {
+        let store = TempDir::new("cli-serve-store");
+        let cache = TempDir::new("cli-serve-cache");
+        let cfg = config::resolve(&ServeArgs {
+            fixtures: true,
+            bind: Some("127.0.0.1:0".parse().expect("socket addr")),
+            store_root: Some(store.path().display().to_string()),
+            cache: Some(cache.path().display().to_string()),
+            ..args()
+        })
+        .expect("fixtures config resolves");
+        // An already-resolved shutdown: the server binds, serves zero
+        // requests, drains, and returns cleanly.
+        serve(cfg, ready(())).await.expect("serves and shuts down");
+    }
+
+    #[tokio::test]
+    async fn serve_reports_bind_conflicts() {
+        let taken = std::net::TcpListener::bind("127.0.0.1:0").expect("listener binds");
+        let addr = taken.local_addr().expect("local addr");
+        let store = TempDir::new("cli-serve-bindfail");
+        let mut cfg = config::resolve(&ServeArgs {
+            fixtures: true,
+            store_root: Some(store.path().display().to_string()),
+            ..args()
+        })
+        .expect("fixtures config resolves");
+        cfg.bind = addr;
+        let err = serve(cfg, ready(())).await.expect_err("port is taken");
+        assert!(matches!(&err, ServeError::Bind { bind, .. } if *bind == addr));
+        assert!(
+            err.to_string()
+                .starts_with(&format!("cannot bind {addr}: ")),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn run_surfaces_config_errors_before_serving() {
+        let err = run(&args()).expect_err("no store root configured");
+        assert!(matches!(err, ServeError::Config(ConfigError::NoStoreRoot)));
+    }
+
+    /// A `[[datasets]]` config over a temp store/drop dir, with the bind
+    /// port ephemeral. Returns the TOML text. Paths are written as TOML
+    /// *literal* (single-quoted) strings — in a basic string a Windows
+    /// path's backslashes read as escape sequences (`C:\Users` trips on
+    /// `\U`), exactly as they would for an operator authoring the file.
+    fn catalog_toml(store_root: &std::path::Path, watch_dir: &std::path::Path) -> String {
+        format!(
+            r#"
+            bind = "127.0.0.1:0"
+            store-root = '{store}'
+            catalog = "postgres://unused@localhost/unused"
+            watch-dir = '{drop}'
+
+            [[datasets]]
+            id = "hls-s30"
+            title = "HLS S30"
+            license = "CC0-1.0"
+
+            [[datasets.layers]]
+            id = "truecolor"
+            kind = "truecolor"
+            rescale = [0.0, 3000.0]
+            [datasets.layers.bands]
+            r = "b04"
+            g = "b03"
+            b = "b02"
+
+            [[datasets.layers]]
+            id = "ndvi"
+            kind = "ndvi"
+            [datasets.layers.bands]
+            nir = "b8a"
+            red = "b04"
+            "#,
+            store = store_root.display(),
+            drop = watch_dir.display(),
+        )
+    }
+
+    /// A persisted openEO service layer (ADR 0010) as the services surface
+    /// would have written it.
+    fn service_layer(id: &str, process: serde_json::Value) -> swath_core::catalog::Layer {
+        swath_core::catalog::Layer {
+            id: id.to_owned(),
+            title: id.to_owned(),
+            description: String::new(),
+            plan: swath_core::catalog::PlanKind::BandMath {
+                expression: "(b8a - b04) / (b8a + b04)".to_owned(),
+            },
+            rescale: swath_core::catalog::Rescale {
+                min: -1.0,
+                max: 1.0,
+            },
+            colormap: None,
+            resampling: swath_core::catalog::Resampling::Bilinear,
+            tile_size: 256,
+            process: Some(process),
+        }
+    }
+
+    /// An NDVI process graph that compiles against the config dataset's
+    /// band vocabulary (b02/b03/b04/b8a).
+    fn ndvi_graph() -> serde_json::Value {
+        serde_json::json!({ "process_graph": {
+            "load": { "process_id": "load_collection", "arguments": {
+                "id": "hls-s30", "spatial_extent": null, "temporal_extent": null,
+                "bands": ["b8a", "b04"],
+            }},
+            "ndvi": { "process_id": "ndvi", "arguments": {
+                "data": { "from_node": "load" }, "nir": "b8a", "red": "b04",
+            }},
+            "save": { "process_id": "save_result", "arguments": {
+                "data": { "from_node": "ndvi" }, "format": "png",
+            }, "result": true },
+        }})
+    }
+
+    #[tokio::test]
+    async fn serve_catalog_mode_registers_datasets_and_restores_services() {
+        let store = TempDir::new("cli-catalog-store");
+        let drop_dir = TempDir::new("cli-catalog-drop");
+        let config_dir = TempDir::new("cli-catalog-config");
+        let config_path = config_dir.join("swath.toml");
+        std::fs::write(&config_path, catalog_toml(store.path(), drop_dir.path()))
+            .expect("config writes");
+        let cfg = config::resolve(&ServeArgs {
+            config: Some(config_path),
+            ..args()
+        })
+        .expect("catalog config resolves");
+        let LayerSource::Catalog(mode) = cfg.layers else {
+            panic!("catalog config resolves to catalog mode");
+        };
+
+        // An earlier run's catalog document: a published service (restored),
+        // a broken service (dropped loudly), a service colliding with a
+        // config layer id (config wins), and a plain config layer (owned by
+        // config, not carried over).
+        let catalog = MemoryCatalog::default();
+        let mut existing = dataset("hls-s30");
+        existing.layers = vec![
+            service_layer("xyz-restored", ndvi_graph()),
+            service_layer(
+                "xyz-broken",
+                serde_json::json!({ "process_graph": {
+                    "bad": { "process_id": "no_such_process", "arguments": {}, "result": true },
+                }}),
+            ),
+            service_layer("truecolor", ndvi_graph()),
+            swath_core::catalog::Layer {
+                process: None,
+                ..service_layer("stale-config-layer", ndvi_graph())
+            },
+        ];
+        catalog
+            .upsert_dataset(&existing)
+            .await
+            .expect("seed dataset");
+
+        let shared = Shared {
+            bind: cfg.bind,
+            base_url: cfg.base_url,
+            store_root: cfg.store_root,
+            cache: cfg.cache,
+        };
+        serve_catalog_on(&shared, mode, catalog.clone(), ready(()))
+            .await
+            .expect("catalog mode serves and shuts down");
+
+        let stored = catalog
+            .get_dataset(&DatasetId::new("hls-s30"))
+            .await
+            .expect("query succeeds")
+            .expect("dataset registered");
+        let ids: Vec<&str> = stored.layers.iter().map(|l| l.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["truecolor", "ndvi", "xyz-restored"],
+            "config layers plus the restored service; broken/colliding/stale dropped"
+        );
+    }
+
+    #[tokio::test]
+    async fn serve_catalog_mode_remote_root_disables_referencing_and_store_errors_surface() {
+        let drop_dir = TempDir::new("cli-catalog-remote-drop");
+        let config_dir = TempDir::new("cli-catalog-remote-config");
+        let config_path = config_dir.join("swath.toml");
+        // `memory://` contains a scheme, so the legacy-referencing branch
+        // is skipped with a warning — and the same root then fails to open
+        // as an object store, surfacing as `ServeError::Store`.
+        std::fs::write(
+            &config_path,
+            catalog_toml(std::path::Path::new("memory://tiles"), drop_dir.path()),
+        )
+        .expect("config writes");
+        let cfg = config::resolve(&ServeArgs {
+            config: Some(config_path),
+            ..args()
+        })
+        .expect("catalog config resolves");
+        let LayerSource::Catalog(mode) = cfg.layers else {
+            panic!("catalog config resolves to catalog mode");
+        };
+        let shared = Shared {
+            bind: cfg.bind,
+            base_url: cfg.base_url,
+            store_root: cfg.store_root,
+            cache: cfg.cache,
+        };
+        let err = serve_catalog_on(&shared, mode, MemoryCatalog::default(), ready(()))
+            .await
+            .expect_err("pseudo-remote root cannot open");
+        assert!(matches!(&err, ServeError::Store { root, .. } if root == "memory://tiles"));
+    }
+
+    /// SIGTERM (the container stop signal) resolves the shutdown future.
+    /// Unix-gated: Windows has neither SIGTERM nor `kill` — there the
+    /// terminate arm is `pending()` and only Ctrl-C applies.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shutdown_signal_resolves_on_sigterm() {
+        // Multi-thread flavor: the blocking sleep below must not starve
+        // the spawned future of its first poll (which installs the
+        // handlers — an uninstalled SIGTERM would be fatal).
+        let waiter = tokio::spawn(super::shutdown_signal());
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let status = std::process::Command::new("kill")
+            .args(["-s", "TERM", &std::process::id().to_string()])
+            .status()
+            .expect("kill runs");
+        assert!(status.success(), "kill exits zero");
+        waiter.await.expect("shutdown future resolves");
+    }
 }
