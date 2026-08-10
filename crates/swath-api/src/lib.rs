@@ -34,7 +34,10 @@
 //! authoring surface** (ADR 0010, [`openeo`] module: capabilities,
 //! collections, processes, XYZ secondary services) — `GET /` then serves
 //! the OGC landing page and the openEO capabilities from one root
-//! ([`ApiState::with_openeo`]).
+//! ([`ApiState::with_openeo`]) — and the **granule browsing surface**
+//! (issue #107, [`granules`] module): read-only
+//! `GET /datasets/{datasetId}/granules` over `Catalog::find_granules`,
+//! paginated, in the same RFC 7807 error taxonomy as the tiles routes.
 //!
 //! Users address **layers** (R2): a layer id is the only name a client
 //! ever sees — band assets, plans, and catalog plumbing stay behind the
@@ -113,6 +116,7 @@
 
 pub mod cors;
 mod error;
+pub mod granules;
 mod model;
 pub mod openeo;
 mod provider;
@@ -123,6 +127,7 @@ pub mod ui;
 
 pub use cors::cors_layer;
 pub use error::ApiError;
+pub use granules::{GranuleList, GranulesState, granules_router};
 pub use model::{Conformance, LandingPage, Link, TileSetItem, TileSetList, TileSetMetadata};
 pub use openeo::{
     OPENEO_API_VERSION, OpenEoError, OpenEoState, compile_service_layer, openeo_router,

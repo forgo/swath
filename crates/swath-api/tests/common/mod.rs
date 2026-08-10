@@ -321,17 +321,40 @@ impl Catalog for MemoryCatalog {
     async fn find_granules(
         &self,
         dataset: &DatasetId,
-        _query: &GranuleQuery,
+        query: &GranuleQuery,
     ) -> Result<Vec<Granule>, CatalogError> {
         Ok(self
             .granules
             .lock()
             .unwrap()
             .iter()
-            .filter(|granule| granule.dataset == *dataset)
+            .filter(|granule| granule.dataset == *dataset && matches_query(query, granule))
             .cloned()
             .collect())
     }
+}
+
+/// Whether `granule` satisfies `query` — the filter semantics the pgstac
+/// adapter delegates to STAC search: bbox intersection (inclusive edges;
+/// no antimeridian handling — the fixture footprints don't cross it) and
+/// inclusive datetime bounds.
+fn matches_query(query: &GranuleQuery, granule: &Granule) -> bool {
+    if let Some(bbox) = query.bbox {
+        let g = granule.bbox;
+        if bbox.west > g.east || g.west > bbox.east || bbox.south > g.north || g.south > bbox.north
+        {
+            return false;
+        }
+    }
+    if let Some(range) = &query.datetime {
+        let t = granule.datetime.to_unix_millis();
+        if range.start.as_ref().is_some_and(|s| t < s.to_unix_millis())
+            || range.end.as_ref().is_some_and(|e| t > e.to_unix_millis())
+        {
+            return false;
+        }
+    }
+    true
 }
 
 /// The HLS fixture dataset in catalog form: the same band vocabulary and

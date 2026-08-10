@@ -292,6 +292,12 @@ where
         tokio::spawn(ingest_loop(events, catalog.clone()));
     }
     let layer_count = mode.layers.len();
+    // The granule browsing surface (issue #107): read-only
+    // `GET /datasets/{datasetId}/granules` over the same catalog.
+    let granules = swath_api::granules_router(Arc::new(swath_api::GranulesState::new(
+        catalog.clone(),
+        &cfg.base_url,
+    )));
     let provider = CatalogLayers::new(catalog, mode.layers);
     // The openEO authoring surface (ADR 0010) over the same provider:
     // clones share the layer set, so a POSTed service serves on the next
@@ -300,7 +306,14 @@ where
         provider.clone(),
         &cfg.base_url,
     )));
-    run_server(cfg, provider, layer_count, Some(openeo), shutdown).await
+    run_server(
+        cfg,
+        provider,
+        layer_count,
+        Some(openeo.merge(granules)),
+        shutdown,
+    )
+    .await
 }
 
 /// The mode-independent tail of `serve`: build the store, assemble the
