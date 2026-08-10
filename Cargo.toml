@@ -173,3 +173,10 @@ rc_mutex = "warn"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# The profile cargo-dist builds release artifacts with (release.yml,
+# docs/RELEASING.md): identical to release today, kept separate so
+# artifact-only tuning never changes what `cargo build --release` means.
+[profile.dist]
+inherits = "release"
+lto = "thin"

@@ -8,7 +8,19 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-publish = false
+# The one crate WITHOUT `publish = false`, deliberately (issue #116):
+# `release-plz release` skips manifest-unpublishable packages outright —
+# verified against v0.3.160 (project.rs `publishable_packages()`) — and this
+# is the package whose `v{version}` tag releases the workspace
+# (release-plz.toml). Nothing can reach crates.io anyway: every path
+# dependency below is `publish = false`, which `cargo publish` rejects, and
+# release-plz's own config says `publish = false` + `git_only`.
+
+# `publish = false` in the manifest would likewise hide the binary from
+# cargo-dist; `dist = true` opts the `swath` binary in to release artifacts
+# (docs/RELEASING.md).
+[package.metadata.dist]
+dist = true
 
 # The crate is `swath-cli` (ARCHITECTURE.md §12); the installed binary is
 # plain `swath`.

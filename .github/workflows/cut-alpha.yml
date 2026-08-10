@@ -1,0 +1,101 @@
+# Cut an alpha release PR (docs/RELEASING.md, issue #116).
+#
+# The one human action in an alpha release is running this workflow and
+# merging the PR it opens ("tag approval"); every version string, tag, and
+# changelog line is computed by tooling. The workflow:
+#
+#   1. computes the next `{base}-alpha.N` from existing `v{base}-alpha.*`
+#      tags (release-plz cannot: its release detection only matches
+#      plain-semver tags — see release-plz.toml),
+#   2. applies it with `cargo set-version --workspace` (workspace version +
+#      every inter-crate version requirement) and syncs Cargo.lock,
+#   3. regenerates CHANGELOG.md with git-cliff (pre-release-tag aware),
+#   4. opens the release PR. Squash-merging it produces the
+#      `chore(release): v...` commit that release-plz.yml turns into a tag.
+#
+# Needs the RELEASE_PLZ_TOKEN secret (fine-grained PAT: contents + pull
+# requests write): branches pushed and PRs opened with GITHUB_TOKEN would
+# not trigger CI on the release PR.
+
+name: Cut alpha
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Base semver of the pre-release train"
+        required: true
+        default: "0.1.0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: git-cliff walks every tag to rebuild the changelog.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tools: "cargo-edit git-cliff"
+
+      - name: Compute the next alpha version
+        env:
+          BASE: ${{ inputs.base }}
+        run: |
+          [[ "$BASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::base '$BASE' is not plain semver"; exit 1; }
+          last=$(git tag -l "v${BASE}-alpha.*" | sed "s/^v${BASE}-alpha\.//" | sort -n | tail -1)
+          next=$(( ${last:-0} + 1 ))
+          version="${BASE}-alpha.${next}"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "next alpha: $version"
+
+      - name: Set the workspace version and regenerate the changelog
+        run: |
+          cargo set-version --workspace "$VERSION"
+          # Sync the workspace members' versions into Cargo.lock so
+          # `--locked` builds (Dockerfile, dist) keep working.
+          cargo update --workspace
+          git-cliff --tag "v$VERSION" -o CHANGELOG.md
+
+      - name: Open the release PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          # Author = the PAT's account (the maintainer who dispatched this),
+          # with a DCO sign-off to match — the release PR passes the same
+          # gates as any other PR.
+          login=$(gh api user -q .login)
+          user_id=$(gh api user -q .id)
+          git config user.name "$login"
+          git config user.email "${user_id}+${login}@users.noreply.github.com"
+          branch="release-plz-alpha"
+          git checkout -b "$branch"
+          git add Cargo.toml Cargo.lock crates CHANGELOG.md
+          git commit -s -m "chore(release): v${VERSION}"
+          git push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:${branch}"
+          body="Release PR for v${VERSION} (cut-alpha.yml; docs/RELEASING.md).
+
+          Merging this PR is tag approval: release-plz tags v${VERSION} on the
+          squash commit, which triggers the dist release (binaries + checksums,
+          marked prerelease) and the versioned GHCR image."
+          if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            gh pr create --head "$branch" --title "chore(release): v${VERSION}" --body "$body"
+          else
+            gh pr edit "$branch" --title "chore(release): v${VERSION}" --body "$body"
+          fi
