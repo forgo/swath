@@ -73,7 +73,8 @@ use std::collections::BTreeMap;
 
 use serde_json::Value as Json;
 
-use crate::ir::{BandInput, BinaryOp, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
+use crate::ir::{BinaryOp, Colormap, Expr, RenderPlan};
+use crate::plan::{PlanSpec, ndvi_expr, plan_for};
 
 /// What a graph's `load_collection` bands may call one dataset band: the
 /// dataset band name itself plus any openEO names / common names bound to
@@ -149,6 +150,10 @@ pub struct CompiledProduct {
     /// The dataset bands the plan actually reads, in plan-input order —
     /// serving fetches exactly these.
     pub bands: Vec<String>,
+    /// The plan spec the graph lowered to — the same vocabulary every
+    /// other construction site speaks, so callers can derive the persisted
+    /// metadata ([`crate::plan::plan_for`]) without re-reading the ops.
+    pub spec: PlanSpec,
 }
 
 /// The supported process ids, for diagnostics.
@@ -706,8 +711,7 @@ impl<'a> Compiler<'a> {
         };
         let nir = band_param("nir", "nir")?;
         let red = band_param("red", "red")?;
-        let expr = (Expr::band(nir.clone()) - Expr::band(red.clone()))
-            / (Expr::band(nir) + Expr::band(red));
+        let expr = ndvi_expr(nir, red);
         Ok(Value::Cube(Cube {
             kind: CubeKind::Gray(expr),
             rescale: None,
@@ -988,23 +992,6 @@ impl<'a> Compiler<'a> {
     }
 }
 
-/// Every dataset band an expression references, first-reference order,
-/// deduplicated — the compiled plan's inputs.
-fn referenced_bands(expr: &Expr, out: &mut Vec<String>) {
-    match expr {
-        Expr::Band(name) => {
-            if !out.iter().any(|n| n == name) {
-                out.push(name.clone());
-            }
-        }
-        Expr::Const(_) => {}
-        Expr::Binary { lhs, rhs, .. } => {
-            referenced_bands(lhs, out);
-            referenced_bands(rhs, out);
-        }
-    }
-}
-
 /// Compiles an openEO process graph against `ctx` into an executable
 /// [`RenderPlan`] plus its serving metadata. See the module docs for the
 /// exact conformance statement (the supported v0 subset).
@@ -1043,19 +1030,12 @@ pub fn compile(graph: &Json, ctx: &CompileContext) -> Result<CompiledProduct, Co
         });
     };
 
-    let (bands, ops) = match cube.kind {
-        CubeKind::Gray(expr) => {
-            let mut bands = Vec::new();
-            referenced_bands(&expr, &mut bands);
-            let mut ops = vec![PixelOp::BandMath(expr)];
-            if let Some((min, max)) = cube.rescale {
-                ops.push(PixelOp::Rescale { min, max });
-            }
-            ops.push(PixelOp::Colormap(
-                cube.colormap.unwrap_or(Colormap::Grayscale),
-            ));
-            (bands, ops)
-        }
+    let spec = match cube.kind {
+        CubeKind::Gray(expr) => PlanSpec::BandMath {
+            expr,
+            rescale: cube.rescale,
+            colormap: cube.colormap.unwrap_or(Colormap::Grayscale),
+        },
         CubeKind::Multi(loaded) => {
             let [r, g, b] = loaded.as_slice() else {
                 return Err(CompileError::TypeMismatch {
@@ -1066,28 +1046,21 @@ pub fn compile(graph: &Json, ctx: &CompileContext) -> Result<CompiledProduct, Co
                     got: format!("a data cube with {} bands", loaded.len()),
                 });
             };
-            let mut bands = Vec::new();
-            for band in [r, g, b] {
-                if !bands.iter().any(|n| n == &band.dataset) {
-                    bands.push(band.dataset.clone());
-                }
-            }
-            let mut ops = vec![PixelOp::Composite {
+            PlanSpec::Composite {
                 r: r.dataset.clone(),
                 g: g.dataset.clone(),
                 b: b.dataset.clone(),
-            }];
-            if let Some((min, max)) = cube.rescale {
-                ops.push(PixelOp::Rescale { min, max });
+                rescale: cube.rescale,
             }
-            (bands, ops)
         }
     };
 
-    let inputs = bands.iter().map(BandInput::new).collect();
+    let (plan, _) = plan_for(&spec);
+    let bands = plan.inputs.iter().map(|input| input.name.clone()).collect();
     Ok(CompiledProduct {
-        plan: RenderPlan::new(inputs, ops, OutputSpec::new(TileFormat::Png)),
+        plan,
         collection: ctx.collection.clone(),
         bands,
+        spec,
     })
 }

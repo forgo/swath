@@ -61,13 +61,9 @@ use axum::routing::get;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use swath_core::catalog::stac::{STAC_VERSION, dataset_to_stac_collection};
-use swath_core::catalog::{
-    Catalog, Colormap as DomainColormap, Dataset, DatasetId, Layer as DomainLayer, PlanKind,
-    Rescale as DomainRescale,
-};
+use swath_core::catalog::{Catalog, Dataset, DatasetId, Layer as DomainLayer};
 use swath_core::planner::Budget;
-use swath_render::ir::{Colormap as IrColormap, PixelOp, RenderPlan};
-use swath_render::{CompileContext, CompileError, NodataPolicy, Resampling, compile};
+use swath_render::{CompileContext, CompileError, NodataPolicy, Resampling, compile, plan_for};
 
 use crate::provider::{CatalogLayer, CatalogLayers};
 
@@ -610,24 +606,6 @@ pub fn compile_service_layer(
     })
 }
 
-/// The persisted colormap vocabulary of a compiled plan's `Colormap` op
-/// (`None` when the plan has none, i.e. a composite). The compiled graph
-/// stays the source of truth — this is presentation metadata mirroring
-/// exactly what the plan will render, variant for variant.
-fn domain_colormap(plan: &RenderPlan) -> Option<DomainColormap> {
-    plan.ops.iter().find_map(|op| match op {
-        PixelOp::Colormap(map) => Some(match map {
-            IrColormap::Viridis => DomainColormap::Viridis,
-            IrColormap::Magma => DomainColormap::Magma,
-            IrColormap::RdYlGn => DomainColormap::RdYlGn,
-            // Grayscale, and any future palette until this lowering
-            // learns it (the graph record still renders it faithfully).
-            _ => DomainColormap::Grayscale,
-        }),
-        _ => None,
-    })
-}
-
 /// The content-derived service id: `xyz-` plus the first 12 hex digits of
 /// the SHA-256 of the canonical (sorted-key) process-graph JSON. Identical
 /// definition, identical id — creation is idempotent by construction.
@@ -758,55 +736,18 @@ async fn create_service<C: Catalog>(
     // Validate: the whole #32 compiler, against the collection's bands.
     let product = compile(&request.process, &compile_context(&dataset))?;
 
-    // Lower the compiled plan to the persisted layer vocabulary. The ops
-    // are exactly what the compiler emits: band math or a composite,
-    // optionally rescaled, gray results colormapped.
+    // Lower the compiled product to the persisted layer vocabulary: the
+    // single #95 constructor derives the metadata from the same spec the
+    // plan was built from, so the two representations cannot disagree.
     let id = service_id(&request.process);
-    let expression = product.plan.ops.iter().find_map(|op| match op {
-        PixelOp::BandMath(expr) => Some(expr.to_string()),
-        _ => None,
-    });
-    let plan = match expression {
-        Some(expression) => PlanKind::BandMath { expression },
-        None => match product.plan.ops.first() {
-            Some(PixelOp::Composite { r, g, b }) => PlanKind::Composite {
-                r: r.clone(),
-                g: g.clone(),
-                b: b.clone(),
-            },
-            _ => {
-                return Err(OpenEoError::internal(
-                    "compiled plan has no band math and no composite (compiler invariant broken)",
-                ));
-            }
-        },
-    };
-    let rescale = product
-        .plan
-        .ops
-        .iter()
-        .find_map(|op| match op {
-            PixelOp::Rescale { min, max } => Some(DomainRescale {
-                min: *min,
-                max: *max,
-            }),
-            _ => None,
-        })
-        // No linear_scale_range in the graph: the identity mapping of the
-        // 8-bit output range (exactly what the plan's absent Rescale op
-        // renders).
-        .unwrap_or(DomainRescale {
-            min: 0.0,
-            max: 255.0,
-        });
-    let colormap = domain_colormap(&product.plan);
+    let (_, meta) = plan_for(&product.spec);
     let layer = DomainLayer {
         id: id.clone(),
         title: request.title.unwrap_or_else(|| id.clone()),
         description: request.description.unwrap_or_default(),
-        plan,
-        rescale,
-        colormap,
+        plan: meta.kind,
+        rescale: meta.rescale,
+        colormap: meta.colormap,
         resampling: swath_core::catalog::Resampling::Bilinear,
         tile_size: request.tile_size,
         process: Some(request.process.clone()),
@@ -871,10 +812,10 @@ mod tests {
         Rescale as DomainRescale, TimeRange,
     };
     use swath_render::ir::{Colormap as IrColormap, PixelOp};
+    use swath_render::plan_for;
 
     use super::{
-        DomainLayer, compile_context, compile_service_layer, domain_colormap, loaded_collection,
-        service_id,
+        DomainLayer, compile_context, compile_service_layer, loaded_collection, service_id,
     };
 
     #[test]
@@ -969,8 +910,10 @@ mod tests {
                 Some(&PixelOp::Colormap(ir)),
                 "{name}: compiled plan must end in its colormap"
             );
-            // Plan -> persisted vocabulary, variant for variant.
-            assert_eq!(domain_colormap(&product.plan), Some(domain));
+            // Plan -> persisted vocabulary, variant for variant (the #95
+            // constructor derives it from the compiled spec).
+            let meta = plan_for(&product.spec).1;
+            assert_eq!(meta.colormap, Some(domain));
             // Persisted layer -> plan again (serve-time rehydration).
             let layer = DomainLayer {
                 id: format!("xyz-{name}"),
@@ -983,7 +926,7 @@ mod tests {
                     min: -1.0,
                     max: 1.0,
                 },
-                colormap: domain_colormap(&product.plan),
+                colormap: plan_for(&product.spec).1.colormap,
                 resampling: swath_core::catalog::Resampling::Bilinear,
                 tile_size: 256,
                 process: Some(graph),
