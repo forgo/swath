@@ -12,8 +12,9 @@ publish = false
 
 [dependencies]
 # `tokio` beyond the workspace default: axum's `KeepAlive` (the SSE ping
-# timer) is gated behind axum's `tokio` feature (#28).
-axum = { workspace = true, features = ["tokio"] }
+# timer) is gated behind axum's `tokio` feature (#28); `query` gates the
+# `Query` extractor the granule browsing route parses parameters with (#107).
+axum = { workspace = true, features = ["query", "tokio"] }
 futures-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
