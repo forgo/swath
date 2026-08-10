@@ -21,3 +21,4 @@ that produced the evidence).
 | 0008 | 2026-08-08 | Legacy-primary dataset: VNP09GA — VNP09 swath is HDF4 (amends 0004) | Accepted |
 | 0009 | 2026-08-09 | Fenced spherical-sinusoidal math (narrow exception to ADR 0002) | Accepted |
 | 0010 | 2026-08-09 | Authoring surface: native openEO API at a bounded profile | Accepted |
+| 0011 | 2026-08-10 | UI ships inside the binary (`embedded-ui`); CORS opt-in, default off | Accepted |

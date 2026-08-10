@@ -26,6 +26,10 @@ thiserror = { workspace = true }
 # `sync` only: the trace bus is a `tokio::sync::broadcast` channel (#28).
 # The runtime itself still arrives with the binary (#29).
 tokio = { workspace = true, features = ["sync"] }
+# `cors` only: the opt-in CORS layer (issue #103, ADR 0011) — the origin
+# allowlist is the whole policy, built here so the decision, the layer,
+# and its integration test live together.
+tower-http = { workspace = true, features = ["cors"] }
 
 [dev-dependencies]
 # `http1` (+ the `tokio` feature above): the SSE tests drive a real

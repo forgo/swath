@@ -141,6 +141,10 @@ pub(crate) struct ResolvedConfig {
     /// local directory or `s3://bucket[/prefix]`. `None` = no cache —
     /// serving is byte-for-byte the pre-cache behavior.
     pub(crate) cache: Option<String>,
+    /// CORS origin allowlist (issue #103, ADR 0011): exact origins, or
+    /// `*` for any. Empty (the default) = no CORS layer at all — the
+    /// same-origin story (embedded UI / vite proxy) needs none.
+    pub(crate) cors_allowed_origins: Vec<String>,
     /// Where the layers come from.
     pub(crate) layers: LayerSource,
 }
@@ -187,6 +191,8 @@ struct ConfigFile {
     catalog: Option<String>,
     /// Drop directory watched for granule manifests (catalog mode only).
     watch_dir: Option<PathBuf>,
+    /// CORS origin allowlist (issue #103); `["*"]` = any origin.
+    cors_allowed_origins: Option<Vec<String>>,
     /// Global default materialization budget (issue #37); per-layer
     /// `[layers.budget]` values override it knob by knob.
     budget: Option<BudgetConfig>,
@@ -394,6 +400,13 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
     let cache = args.cache.clone().or(file.cache);
     let catalog = args.catalog.clone().or(file.catalog);
     let watch_dir = args.watch_dir.clone().or(file.watch_dir);
+    // Flag/env (a non-empty list) outranks the file, like every scalar;
+    // absent everywhere resolves to an empty list — CORS off (ADR 0011).
+    let cors_allowed_origins = if args.cors_allowed_origins.is_empty() {
+        file.cors_allowed_origins.unwrap_or_default()
+    } else {
+        args.cors_allowed_origins.clone()
+    };
 
     // The resolved global default budget (#37): built-in defaults →
     // top-level [budget] → flags/env. Per-layer [layers.budget] overlays
@@ -450,6 +463,7 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
         base_url,
         store_root,
         cache,
+        cors_allowed_origins,
         layers,
     })
 }
@@ -716,6 +730,7 @@ mod tests {
             cache: None,
             overview_oversample: None,
             max_estimated_live_bytes: None,
+            cors_allowed_origins: Vec::new(),
         }
     }
 
@@ -782,6 +797,36 @@ mod tests {
         })
         .expect("resolves");
         assert_eq!(cfg.cache.as_deref(), Some("s3://tiles/cache"));
+    }
+
+    /// CORS (issue #103, ADR 0011) layers like the other scalars and —
+    /// the decision — defaults to OFF (an empty allowlist).
+    #[test]
+    fn cors_origins_default_off_and_flags_outrank_the_file() {
+        let cfg = resolve(&ServeArgs {
+            fixtures: true,
+            ..args()
+        })
+        .expect("resolves");
+        assert!(
+            cfg.cors_allowed_origins.is_empty(),
+            "CORS is off unless configured"
+        );
+
+        let file: ConfigFile =
+            toml::from_str(r#"cors-allowed-origins = ["http://localhost:5173"]"#).expect("parses");
+        assert_eq!(
+            file.cors_allowed_origins.as_deref(),
+            Some(&["http://localhost:5173".to_owned()][..])
+        );
+
+        let cfg = resolve(&ServeArgs {
+            fixtures: true,
+            cors_allowed_origins: vec!["*".to_owned()],
+            ..args()
+        })
+        .expect("resolves");
+        assert_eq!(cfg.cors_allowed_origins, ["*"]);
     }
 
     #[test]
