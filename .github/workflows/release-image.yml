@@ -1,38 +1,23 @@
-# GHCR image publishing (ENGINEERING.md §6, issue #104).
-# Main-only (CI wall-time respected): build the image once with buildx +
-# GHA layer cache, SMOKE-TEST IT BEFORE PUSHING (the forgo-auth pattern —
-# run the README install one-liner against the freshly built image, assert
-# /healthz, a truecolor tile, and the embedded UI), then push `latest` +
-# `main` + an immutable `sha-<shortsha>` tag. linux/amd64 only: the release
-# build compiles libhdf5 from source (cmake) plus a full Rust release
-# profile, which under QEMU emulation blows far past the ~15 min budget;
-# arm64 waits for a native-arm runner + manifest-merge design (recorded in
-# PR #104's thread).
+# Versioned GHCR image on release tags (docs/RELEASING.md, issue #116).
+# The tag-push sibling of publish-image.yml (which owns main-branch
+# `latest`/`main`/`sha-*` publishing — a separate workflow because `paths:`
+# filters and tag triggers don't mix): build the image once with buildx +
+# GHA layer cache, SMOKE-TEST IT BEFORE PUSHING (the same shared script),
+# then push exactly one immutable tag, `ghcr.io/forgo/swath:v{version}`.
+# `latest` does not move on pre-releases — it keeps tracking main until the
+# graduation checklist (docs/RELEASING.md) says otherwise. linux/amd64
+# only, same as publish-image.yml (QEMU-emulated arm64 blows the budget).
 
-name: Publish image
+name: Release image
 
 on:
   push:
-    branches: [main]
-    # The image-relevant set: everything COPY'd into the build context plus
-    # the build definition itself. Docs-only pushes don't cut an image.
-    paths:
-      - "Dockerfile"
-      - ".dockerignore"
-      - "crates/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - "web/**"
-      - "tests/fixtures/**"
-      - ".github/workflows/publish-image.yml"
-  workflow_dispatch:
+    tags: ["v*"]
 
 permissions:
   contents: read
 
-# One publish at a time, never cancelled mid-push: a half-updated tag set
-# (`latest` moved, `main` not) is worse than a queued run.
+# One publish at a time per tag, never cancelled mid-push.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -54,18 +39,15 @@ jobs:
 
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-      # Tags: `latest` + `main` (moving, default branch only) and
-      # `sha-<shortsha>` (immutable). `latest` exists so the README's bare
-      # `ghcr.io/forgo/swath` one-liner resolves. OCI annotations
-      # (source/revision/licenses/description) ride along as image labels.
+      # Exactly one tag: the release version, immutable
+      # (`type=ref,event=tag` -> `v0.1.0-alpha.1`). OCI annotations ride
+      # along as image labels, as on main.
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=branch
-            type=sha,prefix=sha-
+            type=ref,event=tag
           labels: |
             org.opencontainers.image.description=Swath — cloud-native geospatial tiles: serve the committed HLS fixtures and the embedded viewer with `docker run -p 8080:8080 ghcr.io/forgo/swath serve --fixtures`
             org.opencontainers.image.licenses=Apache-2.0
@@ -78,21 +60,20 @@ jobs:
           context: .
           platforms: linux/amd64
           load: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # The README install one-liner's assertions, shared with the release
-      # image job (script extracted by issue #116): liveness, a real
-      # rendered tile, and the embedded UI (#103).
-      - name: Smoke-test the one-liner
-        run: ./.github/scripts/smoke-image.sh ghcr.io/forgo/swath:latest
+      # The same assertions the main-branch publish makes (shared script):
+      # liveness, a real rendered tile, and the embedded UI.
+      - name: Smoke-test the release image
+        run: ./.github/scripts/smoke-image.sh "ghcr.io/forgo/swath:${GITHUB_REF_NAME}"
 
       - name: Record image size
         run: |
           set -euo pipefail
-          size=$(docker image inspect --format '{{.Size}}' ghcr.io/forgo/swath:latest)
+          size=$(docker image inspect --format '{{.Size}}' "ghcr.io/forgo/swath:${GITHUB_REF_NAME}")
           printf 'Image size: %d bytes (%d MB)\n' "$size" "$((size / 1000000))" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 

@@ -12,6 +12,11 @@ machete_version := "0.9.2"
 zizmor_version := "1.29.0"
 prek_version := "0.4.12"
 oha_version := "1.15.0"
+# Release-pipeline tools (docs/RELEASING.md, issue #116). cargo-dist is
+# pinned separately in dist-workspace.toml (github-releases datasource).
+release_plz_version := "0.3.160"
+git_cliff_version := "2.13.1"
+cargo_edit_version := "0.13.13"
 
 # List available recipes.
 default:
@@ -40,6 +45,9 @@ setup-ci *tools="nextest llvm-cov deny":
             deny)     command -v cargo-deny     >/dev/null || install cargo-deny     "{{deny_version}}" ;;
             machete)  command -v cargo-machete  >/dev/null || install cargo-machete  "{{machete_version}}" ;;
             oha)      command -v oha            >/dev/null || install oha            "{{oha_version}}" ;;
+            release-plz) command -v release-plz >/dev/null || install release-plz "{{release_plz_version}}" ;;
+            git-cliff)   command -v git-cliff   >/dev/null || install git-cliff   "{{git_cliff_version}}" ;;
+            cargo-edit)  command -v cargo-set-version >/dev/null || install cargo-edit "{{cargo_edit_version}}" ;;
             none)     ;;
             *)        echo "unknown tool: $tool" >&2; exit 1 ;;
         esac

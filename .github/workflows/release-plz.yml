@@ -1,0 +1,63 @@
+# Tag releases with release-plz (docs/RELEASING.md, issue #116).
+#
+# Runs on every push to main but acts only on `chore(release):` commits —
+# the squash-merge of a release PR (cut-alpha.yml). release-plz sees the
+# workspace version is untagged and creates + pushes `v{version}`; that tag
+# triggers release.yml (dist: binaries, checksums, the GitHub prerelease)
+# and release-image.yml (versioned GHCR image). Config: release-plz.toml.
+#
+# The tag must be pushed with RELEASE_PLZ_TOKEN (fine-grained PAT, contents
+# write): tags pushed with GITHUB_TOKEN do not trigger workflows, which
+# would silently skip the artifact and image builds. workflow_dispatch is
+# the recovery path if a run is lost (safe to re-run: tagging is
+# idempotent, and a 0.0.0 or already-tagged version is a no-op).
+
+name: Release-plz
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  tag:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.head_commit.message, 'chore(release):')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # release-plz inspects history to decide what is already released.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tools: "release-plz"
+      - name: Tag the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          version=$(cargo metadata --format-version 1 --no-deps \
+            | jq -r '.packages[] | select(.name == "swath-cli") | .version')
+          if [ "$version" = "0.0.0" ]; then
+            echo "workspace version is 0.0.0 — no release cut yet, nothing to tag"
+            exit 0
+          fi
+          # Push with the PAT so the tag event triggers the release workflows
+          # (checkout kept no credentials; GITHUB_TOKEN-pushed tags trigger
+          # nothing).
+          git remote set-url origin \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          release-plz release --git-token "$GITHUB_TOKEN"

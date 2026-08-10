@@ -1,0 +1,58 @@
+# git-cliff config (docs/RELEASING.md, issue #116): generates CHANGELOG.md
+# in cut-alpha.yml. git-cliff is release-plz's own changelog engine, driven
+# directly here because it handles pre-release tags (v0.1.0-alpha.N) that
+# release-plz's release detection does not — see release-plz.toml. Sections
+# per tag; commit titles are the squash-merged conventional PR titles
+# (ENGINEERING.md §7), so this is exactly the PR history.
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Until the first plain-semver release, versions are `0.1.0-alpha.N`
+pre-releases: built, tested, and checksummed, with no semver or stability
+commitment (see docs/RELEASING.md).
+
+"""
+body = """
+{% if version %}\
+    ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+    ## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | striptags | trim | upper_first }}
+    {% for commit in commits %}
+        - {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
+            {% if commit.breaking %}[**breaking**] {% endif %}\
+            {{ commit.message | upper_first }}\
+    {% endfor %}
+{% endfor %}
+"""
+trim = true
+render_always = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+protect_breaking_commits = false
+commit_parsers = [
+    { message = "^feat", group = "<!-- 0 -->Features" },
+    { message = "^fix", group = "<!-- 1 -->Bug fixes" },
+    { message = "^perf", group = "<!-- 2 -->Performance" },
+    { message = "^refactor", group = "<!-- 3 -->Refactoring" },
+    { message = "^docs", group = "<!-- 4 -->Documentation" },
+    { message = "^test", group = "<!-- 5 -->Testing" },
+    # Release bookkeeping and dependency-bump noise stay out of the story.
+    { message = "^chore\\(release\\)", skip = true },
+    { message = "^chore\\(deps.*\\)", skip = true },
+    { message = "^chore|^ci|^build|^style", group = "<!-- 6 -->Miscellaneous" },
+    { message = ".*", group = "<!-- 7 -->Other" },
+]
+filter_commits = false
+topo_order = false
+sort_commits = "oldest"

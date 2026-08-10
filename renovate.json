@@ -27,6 +27,11 @@
       "groupName": "dev-tools"
     },
     {
+      "description": "cargo-dist is pinned in dist-workspace.toml AND in the vendored release.yml installer URLs — one grouped PR keeps them in lockstep",
+      "matchDepNames": ["cargo-dist"],
+      "groupName": "cargo-dist"
+    },
+    {
       "description": "Security advisories bypass the weekly schedule and cooldown",
       "matchCategories": ["security"],
       "schedule": ["at any time"],
@@ -68,6 +73,47 @@
       "matchStrings": ["prek_version := \"(?<currentValue>[0-9.]+)\""],
       "depNameTemplate": "prek",
       "datasourceTemplate": "crate"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^justfile$/"],
+      "matchStrings": ["release_plz_version := \"(?<currentValue>[0-9.]+)\""],
+      "depNameTemplate": "release-plz",
+      "datasourceTemplate": "crate"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^justfile$/"],
+      "matchStrings": ["git_cliff_version := \"(?<currentValue>[0-9.]+)\""],
+      "depNameTemplate": "git-cliff",
+      "datasourceTemplate": "crate"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^justfile$/"],
+      "matchStrings": ["cargo_edit_version := \"(?<currentValue>[0-9.]+)\""],
+      "depNameTemplate": "cargo-edit",
+      "datasourceTemplate": "crate"
+    },
+    {
+      "customType": "regex",
+      "description": "cargo-dist pin in dist-workspace.toml",
+      "managerFilePatterns": ["/^dist-workspace\\.toml$/"],
+      "matchStrings": ["cargo-dist-version = \"(?<currentValue>[0-9.]+)\""],
+      "depNameTemplate": "cargo-dist",
+      "packageNameTemplate": "axodotdev/cargo-dist",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "cargo-dist installer URLs in the vendored release workflow",
+      "managerFilePatterns": ["/^\\.github/workflows/release\\.yml$/"],
+      "matchStrings": ["cargo-dist/releases/download/v(?<currentValue>[0-9.]+)/cargo-dist-installer\\.sh"],
+      "depNameTemplate": "cargo-dist",
+      "packageNameTemplate": "axodotdev/cargo-dist",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
     },
     {
       "customType": "regex",

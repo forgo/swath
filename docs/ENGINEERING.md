@@ -183,21 +183,38 @@ changes (dorny/paths-filter) ─┬─ rust: fmt → clippy → nextest (+ --doc
 
 ## 7. Release & publish
 
-- **release-plz** drives versioning: release PRs from conventional-commit history, git-cliff
-  changelog, crates.io publish via **trusted publishing (OIDC)**. Most crates stay
-  `publish = false`; only genuinely reusable libraries go to crates.io.
-- **cargo-dist (dist)** builds the multi-platform single-binary release artifacts + installers
-  (shell/PowerShell/Homebrew), with `cargo auditable` enabled. It is actively maintained again
-  (v0.32, May 2026) but has a turbulent stewardship history — **pin its version** and vendor the
-  generated workflow. The release-plz + cargo-dist combination is the documented canonical pattern.
-- **Artifact attestation**: `actions/attest-build-provenance` on release artifacts (SLSA Build L2
-  ~free); `SHA256SUMS` published (forgo-auth pattern); SLSA L3 via reusable workflow when demand
-  appears.
+**Implemented (pre-release tier), graduation documented** — issue #116; the operating manual
+is `docs/RELEASING.md`, which includes the graduation checklist (maintainer-signed) gating the
+first official release.
+
+- **Two-tier discipline**: `v0.1.0-alpha.N` tags ship now as GitHub **prereleases** with full
+  build rigor (built, tested, checksummed, changelogged) and zero semver/stability commitment;
+  any plain-semver release is forbidden until the graduation checklist in RELEASING.md is
+  signed off.
+- **release-plz** (pinned in the justfile, Renovate-tracked) turns merged release PRs into
+  `v{version}` tags (`release-plz.yml`, config `release-plz.toml`). Known limitation, verified:
+  its release detection only matches plain-semver tags, so pre-release *bumps* are computed by
+  `cut-alpha.yml` (`cargo set-version --workspace` + git-cliff changelog, both pinned) and the
+  stock release-PR flow takes over at graduation. All crates stay `publish = false` for now;
+  crates.io via **trusted publishing (OIDC)** remains the plan for any genuinely reusable
+  library.
+- **cargo-dist (dist)** builds the release artifacts on tag push (`release.yml`):
+  mac-arm64 + linux-x64 binaries with the embedded viewer, per-artifact `.sha256` + aggregate
+  checksums, prerelease marking automatic from the version suffix. Version **pinned** in
+  `dist-workspace.toml` and the workflow is **vendored** and hand-hardened (SHA-pinned actions,
+  zizmor-clean) — `allow-dirty = ["ci"]` records that divergence. Installers and
+  `cargo auditable` are graduation-tier decisions.
+- **Versioned GHCR images**: `release-image.yml` publishes `ghcr.io/forgo/swath:v{version}`,
+  smoke-tested before push with the same script as main-branch publishing; `latest` keeps
+  tracking main until graduation.
+- **Artifact attestation**: `actions/attest-build-provenance` on release artifacts (SLSA Build
+  L2 ~free) at graduation; SLSA L3 via reusable workflow when demand appears.
 - Web components (if published): npm **trusted publishing** (classic tokens are dead as of Dec
   2025); provenance automatic.
 - **Conventional commits via squash-only merges + PR-title lint** (amannn/action-semantic-pull-request,
   step-security fork) — per-commit enforcement is noise; squashed PR titles are exactly what
-  release-plz reads. Tag scheme for any independently-released component: `<name>@<semver>`
+  release-plz and git-cliff read. Tag scheme: the workspace releases in lockstep under
+  `v<semver>`; any future independently-released component gets `<name>@<semver>`
   (forgo-rust convention).
 
 ## 8. Project hygiene
@@ -234,3 +251,6 @@ release-plz eliminates it), cargo-make (replaced by `just` for the same tasks-as
 ## 10. Amendments
 
 - 2026-08-08 — v1.0 established (with ADR 0007).
+- 2026-08-10 — §7 updated from planned to implemented (pre-release tier; issue #116):
+  release-plz + vendored cargo-dist + versioned GHCR images live, graduation checklist in
+  docs/RELEASING.md.

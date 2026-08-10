@@ -12,8 +12,8 @@ inputs:
   tools:
     description: >-
       Space-separated pinned tools to install via `just setup-ci` (subset of:
-      nextest llvm-cov deny machete), or "none". Install only what the job
-      runs.
+      nextest llvm-cov deny machete oha release-plz git-cliff cargo-edit), or
+      "none". Install only what the job runs.
     required: false
     default: "nextest llvm-cov deny"
 

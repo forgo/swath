@@ -1,0 +1,20 @@
+# cargo-dist (dist) config — release binaries + checksums on `v*` tags
+# (ENGINEERING.md §7, docs/RELEASING.md, issue #116). Version pinned here
+# (Renovate-tracked; the vendored workflow's installer URLs bump in the
+# same grouped PR). `allow-dirty = ["ci"]` because release.yml is VENDORED:
+# dist generated it once, then it was hand-hardened (SHA-pinned actions,
+# env-var indirection for zizmor, the web-bundle build for embedded-ui) —
+# a dist bump regenerates and re-applies those edits, deliberately.
+[workspace]
+members = ["cargo:."]
+
+[dist]
+cargo-dist-version = "0.32.0"
+ci = "github"
+# Binaries + sha256 checksums only for the alpha tier; installers
+# (shell/Homebrew) are a graduation decision (docs/RELEASING.md).
+installers = []
+# The two release platforms the pre-release tier promises (issue #116);
+# x86_64 linux matches the GHCR image. More targets graduate later.
+targets = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"]
+allow-dirty = ["ci"]

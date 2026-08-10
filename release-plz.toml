@@ -1,0 +1,31 @@
+# release-plz config (ENGINEERING.md §7, docs/RELEASING.md, issue #116).
+#
+# Pre-release tier: release-plz's job here is exactly one thing — turn a
+# merged release PR into the `v{version}` git tag (release-plz.yml). It does
+# NOT compute pre-release version bumps: release-plz's release detection
+# only matches plain-semver tags (`^v(\d+\.\d+\.\d+)$`), so `v*-alpha.N`
+# tags are invisible to its next-version logic (upstream discussion
+# release-plz#2443). cut-alpha.yml therefore computes the next alpha number
+# from existing tags and applies it with `cargo set-version` + git-cliff.
+# At graduation (first plain-semver release) the stock release-pr flow takes
+# over version bumps and the changelog — that regex matches from then on.
+
+[workspace]
+# No crates.io publishes in the pre-release tier: every crate is
+# `publish = false`, so releases are git state only.
+publish = false
+git_only = true
+# Nothing on a registry to diff against.
+semver_check = false
+# cargo-dist owns the GitHub release (artifacts, checksums, prerelease
+# marking — release.yml); release-plz only creates and pushes the tag.
+git_release_enable = false
+# One tag for the whole lockstep workspace: only swath-cli (below) is
+# released; everything else rides the shared workspace version.
+release = false
+
+[[package]]
+name = "swath-cli"
+release = true
+git_tag_name = "v{{ version }}"
+changelog_path = "./CHANGELOG.md"
