@@ -21,8 +21,8 @@ use std::collections::BTreeMap;
 use swath_core::planner::Budget;
 use swath_core::raster::AssetRef;
 use swath_core::tile::TileCoord;
-use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
-use swath_render::{NodataPolicy, Resampling, TileRequest};
+use swath_render::ir::{Colormap, RenderPlan};
+use swath_render::{NodataPolicy, PlanSpec, Resampling, TileRequest, ndvi_expr, plan_for};
 
 /// One servable layer: identity for the OGC documents, and the render
 /// template `render_tile` consumes.
@@ -125,25 +125,13 @@ impl LayerRegistry {
                 ("b02".to_owned(), asset("b02")),
             ]
             .into(),
-            plan: RenderPlan::new(
-                vec![
-                    BandInput::new("b04"),
-                    BandInput::new("b03"),
-                    BandInput::new("b02"),
-                ],
-                vec![
-                    PixelOp::Composite {
-                        r: "b04".into(),
-                        g: "b03".into(),
-                        b: "b02".into(),
-                    },
-                    PixelOp::Rescale {
-                        min: 0.0,
-                        max: 3000.0,
-                    },
-                ],
-                OutputSpec::new(TileFormat::Png),
-            ),
+            plan: plan_for(&PlanSpec::Composite {
+                r: "b04".into(),
+                g: "b03".into(),
+                b: "b02".into(),
+                rescale: Some((0.0, 3000.0)),
+            })
+            .0,
             resampling: BILINEAR,
             tile_size: 256,
             budget: Budget::default(),
@@ -160,21 +148,12 @@ impl LayerRegistry {
                 ("b04".to_owned(), asset("b04")),
             ]
             .into(),
-            plan: RenderPlan::new(
-                vec![BandInput::new("b8a"), BandInput::new("b04")],
-                vec![
-                    PixelOp::BandMath(
-                        (Expr::band("b8a") - Expr::band("b04"))
-                            / (Expr::band("b8a") + Expr::band("b04")),
-                    ),
-                    PixelOp::Rescale {
-                        min: -1.0,
-                        max: 1.0,
-                    },
-                    PixelOp::Colormap(Colormap::RdYlGn),
-                ],
-                OutputSpec::new(TileFormat::Png),
-            ),
+            plan: plan_for(&PlanSpec::BandMath {
+                expr: ndvi_expr("b8a", "b04"),
+                rescale: Some((-1.0, 1.0)),
+                colormap: Colormap::RdYlGn,
+            })
+            .0,
             resampling: BILINEAR,
             tile_size: 256,
             budget: Budget::default(),

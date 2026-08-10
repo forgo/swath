@@ -31,8 +31,8 @@ use swath_api::{CatalogLayer, Layer, LayerRegistry};
 use swath_core::catalog as domain;
 use swath_core::planner::Budget;
 use swath_core::raster::AssetRef;
-use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
-use swath_render::{NodataPolicy, Resampling};
+use swath_render::ir::Colormap;
+use swath_render::{NodataPolicy, PlanSpec, Resampling, ndvi_expr, plan_for};
 
 use crate::serve::ServeArgs;
 
@@ -342,16 +342,6 @@ impl ColormapConfig {
             Self::Rdylgn => Colormap::RdYlGn,
         }
     }
-
-    /// The persisted catalog vocabulary for the same map.
-    fn to_domain(self) -> domain::Colormap {
-        match self {
-            Self::Grayscale => domain::Colormap::Grayscale,
-            Self::Viridis => domain::Colormap::Viridis,
-            Self::Magma => domain::Colormap::Magma,
-            Self::Rdylgn => domain::Colormap::RdYlGn,
-        }
-    }
 }
 
 /// Config-file spelling of the warp kernel.
@@ -559,11 +549,10 @@ impl LayerConfig {
         }
     }
 
-    /// Compiles this entry into a servable [`Layer`], validating that the
-    /// declared bands are exactly the set the kind consumes.
-    /// `default_budget` is the resolved global default the entry's own
-    /// `[layers.budget]` overlays.
-    fn to_layer(&self, default_budget: &Budget) -> Result<Layer, ConfigError> {
+    /// Role (`r`/`g`/`b` or `nir`/`red`) → the configured `[layers.bands]`
+    /// value, validating the declared set is exactly what the kind
+    /// consumes.
+    fn role_bands(&self) -> Result<BTreeMap<&'static str, &str>, ConfigError> {
         let expected = self.kind.bands();
         for band in self.bands.keys() {
             if !expected.contains(&band.as_str()) {
@@ -575,9 +564,9 @@ impl LayerConfig {
                 });
             }
         }
-        let mut bands = BTreeMap::new();
+        let mut roles = BTreeMap::new();
         for name in expected {
-            let uri = self
+            let value = self
                 .bands
                 .get(*name)
                 .ok_or_else(|| ConfigError::MissingBand {
@@ -585,40 +574,67 @@ impl LayerConfig {
                     kind: self.kind.name(),
                     band: name,
                 })?;
-            bands.insert((*name).to_owned(), AssetRef::new(uri.clone()));
+            roles.insert(*name, value.as_str());
         }
+        Ok(roles)
+    }
 
-        let inputs = expected.iter().map(|name| BandInput::new(*name)).collect();
-        let mut ops = Vec::new();
-        match self.kind {
+    /// This entry's [`PlanSpec`] — the one plan-kind vocabulary
+    /// [`plan_for`] lowers ([issue #95]) — with each band role resolved
+    /// through `band` (identity in static mode, role → dataset band in
+    /// catalog mode). `materialize_rescale`: catalog mode always writes
+    /// the truecolor rescale (the persisted record and the compiled ops
+    /// must describe the same rendering, default `[0, 255]`); static mode
+    /// omits it when unset (raw values clamp at quantization).
+    ///
+    /// [issue #95]: https://github.com/forgo/swath/issues/95
+    fn plan_spec(
+        &self,
+        band: impl Fn(&'static str) -> String,
+        materialize_rescale: bool,
+    ) -> Result<PlanSpec, ConfigError> {
+        Ok(match self.kind {
             LayerKind::Truecolor => {
                 self.reject_colormap()?;
-                ops.push(PixelOp::Composite {
-                    r: "r".into(),
-                    g: "g".into(),
-                    b: "b".into(),
-                });
-                if let Some([min, max]) = self.rescale {
-                    ops.push(PixelOp::Rescale { min, max });
+                let rescale = self
+                    .rescale
+                    .map(|[min, max]| (min, max))
+                    .or_else(|| materialize_rescale.then_some((0.0, 255.0)));
+                PlanSpec::Composite {
+                    r: band("r"),
+                    g: band("g"),
+                    b: band("b"),
+                    rescale,
                 }
             }
             LayerKind::Ndvi => {
-                ops.push(PixelOp::BandMath(
-                    (Expr::band("nir") - Expr::band("red"))
-                        / (Expr::band("nir") + Expr::band("red")),
-                ));
                 let [min, max] = self.rescale.unwrap_or([-1.0, 1.0]);
-                ops.push(PixelOp::Rescale { min, max });
-                ops.push(PixelOp::Colormap(self.colormap().to_ir()));
+                PlanSpec::BandMath {
+                    expr: ndvi_expr(band("nir"), band("red")),
+                    rescale: Some((min, max)),
+                    colormap: self.colormap().to_ir(),
+                }
             }
-        }
+        })
+    }
 
+    /// Compiles this entry into a servable [`Layer`]: plan inputs are the
+    /// role names themselves, and each role's configured value is the
+    /// asset URI backing it. `default_budget` is the resolved global
+    /// default the entry's own `[layers.budget]` overlays.
+    fn to_layer(&self, default_budget: &Budget) -> Result<Layer, ConfigError> {
+        let roles = self.role_bands()?;
+        let spec = self.plan_spec(str::to_owned, false)?;
+        let bands = roles
+            .iter()
+            .map(|(role, uri)| ((*role).to_owned(), AssetRef::new((*uri).to_owned())))
+            .collect();
         Ok(Layer {
             id: self.id.clone(),
             title: self.title.clone().unwrap_or_else(|| self.id.clone()),
             description: self.description.clone().unwrap_or_default(),
             bands,
-            plan: RenderPlan::new(inputs, ops, OutputSpec::new(TileFormat::Png)),
+            plan: plan_for(&spec).0,
             resampling: self.resampling.into(),
             tile_size: self.tile_size.unwrap_or(256),
             budget: self.budget.map_or_else(
@@ -632,86 +648,16 @@ impl LayerConfig {
     /// **dataset bands** rather than asset URIs, into the serving template
     /// (plan inputs = dataset band names, resolved against granule assets
     /// per tile) *and* the domain [`domain::Layer`] persisted on the
-    /// dataset's catalog document — same entry, both views.
-    ///
-    /// Unlike static mode, the rescale always materializes (default
-    /// `[0, 255]` for truecolor, `[-1, 1]` for ndvi): the persisted
-    /// `PlanKind` + `Rescale` and the compiled pixel ops must describe the
-    /// same rendering.
+    /// dataset's catalog document — same entry, both views, one
+    /// [`plan_for`] call producing both so they cannot disagree.
     fn to_catalog_layer(
         &self,
         dataset: &str,
         default_budget: &Budget,
     ) -> Result<(CatalogLayer, domain::Layer), ConfigError> {
-        let expected = self.kind.bands();
-        for band in self.bands.keys() {
-            if !expected.contains(&band.as_str()) {
-                return Err(ConfigError::UnknownBand {
-                    layer: self.id.clone(),
-                    kind: self.kind.name(),
-                    expected,
-                    band: band.clone(),
-                });
-            }
-        }
-        // Role (`r`/`g`/`b`/`nir`/`red`) -> dataset band name.
-        let mut role = BTreeMap::new();
-        for name in expected {
-            let band = self
-                .bands
-                .get(*name)
-                .ok_or_else(|| ConfigError::MissingBand {
-                    layer: self.id.clone(),
-                    kind: self.kind.name(),
-                    band: name,
-                })?;
-            role.insert(*name, band.clone());
-        }
-
-        let inputs = expected
-            .iter()
-            .map(|name| BandInput::new(&role[name]))
-            .collect();
-        let mut ops = Vec::new();
-        let (plan_kind, rescale, colormap) = match self.kind {
-            LayerKind::Truecolor => {
-                self.reject_colormap()?;
-                ops.push(PixelOp::Composite {
-                    r: role["r"].clone(),
-                    g: role["g"].clone(),
-                    b: role["b"].clone(),
-                });
-                let [min, max] = self.rescale.unwrap_or([0.0, 255.0]);
-                ops.push(PixelOp::Rescale { min, max });
-                (
-                    domain::PlanKind::Composite {
-                        r: role["r"].clone(),
-                        g: role["g"].clone(),
-                        b: role["b"].clone(),
-                    },
-                    domain::Rescale { min, max },
-                    None,
-                )
-            }
-            LayerKind::Ndvi => {
-                let (nir, red) = (&role["nir"], &role["red"]);
-                ops.push(PixelOp::BandMath(
-                    (Expr::band(nir.clone()) - Expr::band(red.clone()))
-                        / (Expr::band(nir.clone()) + Expr::band(red.clone())),
-                ));
-                let [min, max] = self.rescale.unwrap_or([-1.0, 1.0]);
-                ops.push(PixelOp::Rescale { min, max });
-                let colormap = self.colormap();
-                ops.push(PixelOp::Colormap(colormap.to_ir()));
-                (
-                    domain::PlanKind::BandMath {
-                        expression: format!("({nir} - {red}) / ({nir} + {red})"),
-                    },
-                    domain::Rescale { min, max },
-                    Some(colormap.to_domain()),
-                )
-            }
-        };
+        let roles = self.role_bands()?;
+        let spec = self.plan_spec(|role| roles[role].to_owned(), true)?;
+        let (plan, meta) = plan_for(&spec);
 
         let title = self.title.clone().unwrap_or_else(|| self.id.clone());
         let description = self.description.clone().unwrap_or_default();
@@ -721,7 +667,7 @@ impl LayerConfig {
             title: title.clone(),
             description: description.clone(),
             dataset: domain::DatasetId::new(dataset),
-            plan: RenderPlan::new(inputs, ops, OutputSpec::new(TileFormat::Png)),
+            plan,
             resampling: self.resampling.into(),
             tile_size,
             budget: self.budget.map_or_else(
@@ -733,9 +679,9 @@ impl LayerConfig {
             id: self.id.clone(),
             title,
             description,
-            plan: plan_kind,
-            rescale,
-            colormap,
+            plan: meta.kind,
+            rescale: meta.rescale,
+            colormap: meta.colormap,
             resampling: match self.resampling {
                 ResamplingConfig::Bilinear => domain::Resampling::Bilinear,
                 ResamplingConfig::Nearest => domain::Resampling::Nearest,
