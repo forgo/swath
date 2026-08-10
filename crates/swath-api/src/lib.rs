@@ -28,6 +28,7 @@
 //! | `GET /tilesets/{layerId}/tiles/{tileMatrix}/{tileRow}/{tileCol}` | a PNG tile |
 //! | `GET /traces` | the x-ray Trace SSE stream (control-plane, issue #28) |
 //! | `GET /healthz` | liveness probe: plain 200 `ok` (operational, non-OGC, issue #29) |
+//! | *(fallback)* | embedded UI assets, when a bundle is mounted (issue #103, [`ui`]) |
 //!
 //! Catalog-backed deployments additionally merge in the **openEO
 //! authoring surface** (ADR 0010, [`openeo`] module: capabilities,
@@ -70,6 +71,27 @@
 //!   best-effort telemetry with an API-layer envelope
 //!   (`{"tile","layer","trace"}`); the [`traces`] module docs carry the
 //!   full wire contract and slow-subscriber semantics.
+//! - **The embedded UI** (issue #103, ADR 0011): the binary can embed the
+//!   production web bundle ([`ApiState::with_ui`]). Browsers (an `Accept`
+//!   listing `text/html`) get its `index.html` at `GET /`; every other
+//!   client keeps the JSON landing page. Assets serve from the router
+//!   *fallback*, so API routes structurally outrank any bundle file; no
+//!   SPA rewrite — unknown paths stay plain 404. Full rules in [`ui`].
+//!
+//! # CORS (a decision, recorded — issue #103, ADR 0011)
+//!
+//! **Default off, opt-in by origin allowlist.** The default deployment
+//! story is same-origin: the binary serves the UI itself (above), and the
+//! dev workflow proxies API routes through Vite — no cross-origin
+//! requests exist, and none are advertised. Deployments that serve a
+//! browser frontend from another origin opt in with an explicit list
+//! (`--cors-allowed-origins` / `SWATH_CORS_ALLOWED_ORIGINS` /
+//! `cors-allowed-origins`; `*` = any origin, for cross-origin dev). The
+//! layer is built by [`cors_layer`] (tower-http) and applied by the
+//! binary over the whole merged router; with no origins configured no
+//! layer exists at all and responses are byte-identical to before. No
+//! credentials support — the surface is public reads plus openEO
+//! authoring, cookie-less by design. See [`cors`] module docs.
 //!
 //! # Deferred (noted, not built)
 //!
@@ -89,6 +111,7 @@
 //! `ingest_to_pixel_ms` (also surfaced in the `X-Swath-Trace` header) — the
 //! north-star metric's serve half. See [`provider`](CatalogLayers) docs.
 
+pub mod cors;
 mod error;
 mod model;
 pub mod openeo;
@@ -96,7 +119,9 @@ mod provider;
 mod registry;
 mod routes;
 pub mod traces;
+pub mod ui;
 
+pub use cors::cors_layer;
 pub use error::ApiError;
 pub use model::{Conformance, LandingPage, Link, TileSetItem, TileSetList, TileSetMetadata};
 pub use openeo::{
@@ -106,3 +131,4 @@ pub use provider::{CatalogLayer, CatalogLayers, LayerIdentity, LayerProvider, Re
 pub use registry::{Layer, LayerRegistry};
 pub use routes::{ApiState, CONFORMANCE_CLASSES, TraceExtension, router};
 pub use traces::{TraceBus, TraceEvent};
+pub use ui::UiAssets;

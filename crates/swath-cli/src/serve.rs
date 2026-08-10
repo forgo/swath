@@ -105,6 +105,18 @@ pub(crate) struct ServeArgs {
     /// `[layers.budget]` values override it.
     #[arg(long, value_name = "BYTES", env = "SWATH_MAX_ESTIMATED_LIVE_BYTES")]
     pub(crate) max_estimated_live_bytes: Option<u64>,
+
+    /// Serve CORS headers for these origins (comma-separated exact
+    /// origins, or `*` for any — cross-origin dev). Default: none — no
+    /// CORS headers at all; same-origin serving (the embedded UI, or the
+    /// vite dev proxy) needs none (issue #103, ADR 0011).
+    #[arg(
+        long,
+        value_name = "ORIGINS",
+        env = "SWATH_CORS_ALLOWED_ORIGINS",
+        value_delimiter = ','
+    )]
+    pub(crate) cors_allowed_origins: Vec<String>,
 }
 
 /// Serve-path errors, each phrased for the operator reading the log.
@@ -158,6 +170,7 @@ where
         base_url,
         store_root,
         cache,
+        cors_allowed_origins,
         layers,
     } = cfg;
     let shared = Shared {
@@ -165,6 +178,7 @@ where
         base_url,
         store_root,
         cache,
+        cors_allowed_origins,
     };
     match layers {
         LayerSource::Static(registry) => {
@@ -181,6 +195,9 @@ struct Shared {
     base_url: String,
     store_root: String,
     cache: Option<String>,
+    /// CORS origin allowlist (issue #103, ADR 0011); empty = no CORS
+    /// layer at all (the default).
+    cors_allowed_origins: Vec<String>,
 }
 
 /// Catalog mode: connect to pgstac, then hand over to the generic tail.
@@ -316,6 +333,23 @@ where
     if extra.is_some() {
         state = state.with_openeo();
     }
+    // The embedded UI (issue #103, ADR 0011): browsers get index.html at
+    // `/`, hashed assets serve from the router fallback, API clients see
+    // no change. Compiled in by default (feature `embedded-ui`); an empty
+    // embed (a build without web/dist) degrades honestly to no UI.
+    #[cfg(feature = "embedded-ui")]
+    {
+        let ui = embedded_ui();
+        if ui.is_empty() {
+            tracing::warn!(
+                "no web bundle was embedded at build time (web/dist was absent — build via \
+                 `just build-full`); serving without a UI"
+            );
+        } else {
+            tracing::info!("embedded UI at {base}/", base = cfg.base_url);
+            state = state.with_ui(ui);
+        }
+    }
     // The cache is just another object store (#36): same root grammar,
     // same builder. Wired through `with_cache` so a cache-less config
     // constructs the exact pre-#36 state type and serve path.
@@ -329,6 +363,19 @@ where
     };
     let app = match extra {
         Some(extra) => app.merge(extra),
+        None => app,
+    };
+    // Opt-in CORS (issue #103, ADR 0011), layered over the WHOLE merged
+    // router (openEO included). Absent origins = absent layer: the
+    // default same-origin story serves byte-identical responses.
+    let app = match swath_api::cors_layer(&cfg.cors_allowed_origins) {
+        Some(cors) => {
+            tracing::info!(
+                "CORS enabled for origins: {origins}",
+                origins = cfg.cors_allowed_origins.join(", "),
+            );
+            app.layer(cors)
+        }
         None => app,
     };
 
@@ -392,6 +439,27 @@ fn now_unix_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+}
+
+/// The web bundle staged by the build script (`$OUT_DIR/ui`, a copy of
+/// `web/dist` — empty when the checkout had no bundle at build time),
+/// flattened into the API crate's [`swath_api::UiAssets`].
+#[cfg(feature = "embedded-ui")]
+fn embedded_ui() -> swath_api::UiAssets {
+    static UI_DIR: include_dir::Dir<'_> = include_dir::include_dir!("$OUT_DIR/ui");
+    fn collect<'a>(dir: &include_dir::Dir<'a>, files: &mut Vec<(String, &'a [u8])>) {
+        for entry in dir.entries() {
+            match entry {
+                include_dir::DirEntry::Dir(sub) => collect(sub, files),
+                include_dir::DirEntry::File(file) => {
+                    files.push((file.path().to_string_lossy().into_owned(), file.contents()));
+                }
+            }
+        }
+    }
+    let mut files = Vec::new();
+    collect(&UI_DIR, &mut files);
+    swath_api::UiAssets::from_files(files)
 }
 
 /// The object store behind the configured root: `s3://bucket[/prefix]`
@@ -590,6 +658,7 @@ mod tests {
             cache: None,
             overview_oversample: None,
             max_estimated_live_bytes: None,
+            cors_allowed_origins: Vec::new(),
         }
     }
 
@@ -891,6 +960,7 @@ mod tests {
             base_url: cfg.base_url,
             store_root: cfg.store_root,
             cache: cfg.cache,
+            cors_allowed_origins: cfg.cors_allowed_origins,
         };
         serve_catalog_on(&shared, mode, catalog.clone(), ready(()))
             .await
@@ -935,11 +1005,32 @@ mod tests {
             base_url: cfg.base_url,
             store_root: cfg.store_root,
             cache: cfg.cache,
+            cors_allowed_origins: cfg.cors_allowed_origins,
         };
         let err = serve_catalog_on(&shared, mode, MemoryCatalog::default(), ready(()))
             .await
             .expect_err("pseudo-remote root cannot open");
         assert!(matches!(&err, ServeError::Store { root, .. } if root == "memory://tiles"));
+    }
+
+    /// The route-table half of the issue #103 collision AC, run against
+    /// whatever bundle THIS build embedded: no embedded path may start
+    /// with a segment the API routers own — such a file would be
+    /// unreachable (API routes structurally outrank the UI fallback; the
+    /// priority itself is pinned in swath-api's router tests). With no
+    /// web/dist at build time the set is empty and the check is vacuous.
+    #[cfg(feature = "embedded-ui")]
+    #[test]
+    fn embedded_bundle_paths_stay_off_api_routes() {
+        let ui = super::embedded_ui();
+        for path in ui.paths() {
+            assert!(
+                !swath_api::ui::collides_with_api_routes(path),
+                "embedded UI file `{path}` collides with an API route prefix \
+                 ({:?})",
+                swath_api::ui::API_ROUTE_PREFIXES,
+            );
+        }
     }
 
     /// SIGTERM (the container stop signal) resolves the shutdown future.
