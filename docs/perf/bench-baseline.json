@@ -1,0 +1,63 @@
+{
+  "schema": "swath-bench-baseline/1",
+  "captured": "2026-08-10",
+  "git_sha": "b7a775b2f6248f3af85630a93a927cefac2790f6",
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "machine": {
+    "model": "Apple M2 Max",
+    "arch": "arm64",
+    "os": "Darwin"
+  },
+  "benches": [
+    {
+      "id": "composite/render_tile_ndvi_z12",
+      "median_ns": 37276941.7,
+      "mad_ns": 72042.1
+    },
+    {
+      "id": "encode_png_ndvi_256",
+      "median_ns": 12959458.2,
+      "mad_ns": 67690.0
+    },
+    {
+      "id": "eval_ndvi_grayscale",
+      "median_ns": 3152751.3,
+      "mad_ns": 11868.5
+    },
+    {
+      "id": "eval_ndvi_rdylgn",
+      "median_ns": 3290739.6,
+      "mad_ns": 15281.6
+    },
+    {
+      "id": "plan_cache_hit",
+      "median_ns": 53.2,
+      "mad_ns": 0.3
+    },
+    {
+      "id": "plan_miss_three_bands",
+      "median_ns": 72.8,
+      "mad_ns": 0.3
+    },
+    {
+      "id": "plan_overview_single_band",
+      "median_ns": 44.8,
+      "mad_ns": 0.2
+    },
+    {
+      "id": "source_window_z12",
+      "median_ns": 13437.4,
+      "mad_ns": 49.2
+    },
+    {
+      "id": "warp_bilinear_fullres_z12",
+      "median_ns": 8875475.7,
+      "mad_ns": 32426.7
+    },
+    {
+      "id": "warp_nearest_fullres_z12",
+      "median_ns": 7965875.0,
+      "mad_ns": 35864.7
+    }
+  ]
+}
