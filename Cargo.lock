@@ -599,6 +599,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tinytemplate",
+ "tokio",
  "walkdir",
 ]
 
@@ -3250,6 +3251,7 @@ dependencies = [
 name = "swath-render"
 version = "0.0.0"
 dependencies = [
+ "criterion",
  "image",
  "insta",
  "object_store",
