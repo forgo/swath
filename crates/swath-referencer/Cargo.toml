@@ -15,6 +15,17 @@ publish = false
 name = "vmanifest-compare"
 path = "src/bin/vmanifest_compare.rs"
 
+[features]
+default = ["legacy-hdf5"]
+# HDF5/NetCDF4 referencing via hdf5-metno's statically bundled libhdf5
+# (issue #99). Default ON: `just test`, the release binary, and the Docker
+# image all carry it (REQUIREMENTS R8 — out of the box means legacy
+# granules work). OFF is the fast dev-loop profile: no C toolchain, no
+# libhdf5 build; `handles()` stops claiming .h5/.nc and `generate` returns
+# a loud "built without the legacy-hdf5 feature" error. GRIB2 stays
+# unconditional — gribberish is pure Rust and costs nothing.
+legacy-hdf5 = ["dep:hdf5-metno"]
+
 [dependencies]
 # GRIB2 metadata walk (prototype 0001: message offsets/lengths/grids/packing
 # come straight from the section structs — no field decode, no default
@@ -23,8 +34,12 @@ gribberish = { workspace = true }
 # HDF5/NetCDF4 chunk-index walk (prototype 0001: chunks_visit/H5Dchunk_iter,
 # filter pipeline, type descriptors). `static` bundles libhdf5 built from
 # source — no system HDF5 anywhere, keeping the single-binary deployment
-# story (ADR 0006 H4: 4.5 MB binary vs a 273 MB Python env).
-hdf5-metno = { workspace = true }
+# story (ADR 0006 H4: 4.5 MB binary vs a 273 MB Python env). Optional
+# behind `legacy-hdf5` (default ON — issue #99): the bundled C build costs
+# minutes of wall clock and gigabytes of target/, so dev loops that never
+# touch HDF5 can opt out (`just check-fast` / `just test-fast`) while every
+# default build — `just test`, release, Docker — keeps it exactly as before.
+hdf5-metno = { workspace = true, optional = true }
 serde_json = { workspace = true }
 swath-core = { path = "../swath-core", version = "0.0.0" }
 thiserror = { workspace = true }

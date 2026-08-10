@@ -81,6 +81,14 @@ Per-language version pinning stays in the idiomatic files — `rust-toolchain.to
   ASan/UBSan test mode carried from forgo-auth where FFI (PROJ, HDF5 bindings) enters.
 - **Coverage**: `cargo-llvm-cov` (region coverage) → **Codecov** (OSS default; informational PR
   comment + patch-coverage signal; no hard gate initially — gates come after the baseline exists).
+- **Fast dev-loop profile** (issue #99): the referencer's HDF5/NetCDF4 support — and with it the
+  bundled libhdf5 C build (hdf5-metno `static`) — sits behind the default-ON `legacy-hdf5`
+  feature (`swath-referencer`, forwarded by `swath-cli`). Defaults are untouched (R8: `just
+  test`, the release binary, and the Docker image all carry HDF5); `just check-fast` /
+  `just test-fast` are the documented opt-out for loops that never touch legacy referencing —
+  no C toolchain, minutes and gigabytes of target/ saved. A feature-off binary declines
+  `.h5`/`.nc` with a loud "built without the `legacy-hdf5` feature" error; CI's
+  `rust-check-fast` job keeps the feature-off state compiling.
 
 ## 3. TypeScript / Web Components standards (`web/`)
 

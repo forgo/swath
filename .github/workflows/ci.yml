@@ -158,6 +158,24 @@ jobs:
           toolchain: "1.95"
       - run: cargo check --workspace
 
+  # The feature-off state of the `legacy-hdf5` gate (issue #99): the whole
+  # workspace must keep compiling without the bundled libhdf5 C build — the
+  # fast dev-loop profile (`just check-fast`) stays green. Cheap (no C
+  # toolchain work), ubuntu only; the default state (feature ON) is what
+  # every other rust job already builds.
+  rust-check-fast:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tools: "none"
+      - run: just check-fast
+
   rust-coverage:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
@@ -346,7 +364,7 @@ jobs:
   # was skipped by the path filter; red on any failure, cancellation, or a
   # failed `changes` job (which would silently skip everything downstream).
   ci-ok:
-    needs: [changes, rust-fmt, rust-lint, rust-test, rust-deny, rust-msrv, rust-coverage, zizmor, reuse, e2e, e2e-web, web, python, oracle]
+    needs: [changes, rust-fmt, rust-lint, rust-test, rust-deny, rust-msrv, rust-check-fast, rust-coverage, zizmor, reuse, e2e, e2e-web, web, python, oracle]
     if: always()
     runs-on: ubuntu-latest
     steps:

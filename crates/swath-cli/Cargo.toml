@@ -17,7 +17,7 @@ name = "swath"
 path = "src/main.rs"
 
 [features]
-default = ["embedded-ui"]
+default = ["embedded-ui", "legacy-hdf5"]
 # Compile the production web bundle (web/dist, built by `pnpm build` /
 # `just build-full`) into the binary and serve it at `/` (issue #103,
 # ADR 0011). Default ON — the shipped binary carries its UI, like the
@@ -25,6 +25,13 @@ default = ["embedded-ui"]
 # (the build script embeds an empty set and serving is UI-less); opt out
 # entirely with `--no-default-features`.
 embedded-ui = ["dep:include_dir"]
+# HDF5/NetCDF4 referencing (swath-referencer's statically bundled libhdf5 —
+# issue #99). Default ON: the shipped binary and Docker image reference
+# legacy granules out of the box (R8). The fast dev-loop profile turns it
+# off (`just check-fast` / `just test-fast`: no C toolchain, no libhdf5
+# build); a feature-off binary declines .h5/.nc with a loud "built without
+# the legacy-hdf5 feature" error. GRIB2 referencing is always compiled.
+legacy-hdf5 = ["swath-referencer/legacy-hdf5"]
 
 [dependencies]
 include_dir = { workspace = true, optional = true }
@@ -43,7 +50,9 @@ swath-core = { path = "../swath-core", version = "0.0.0" }
 swath-events-filedrop = { path = "../adapters/swath-events-filedrop", version = "0.0.0" }
 # The production referencer behind the IngestReferencer port (ADR 0006):
 # `swath ingest reference` and the serve-time filedrop legacy path.
-swath-referencer = { path = "../swath-referencer", version = "0.0.0" }
+# default-features = false so this crate's own `legacy-hdf5` feature (above,
+# default ON) is the single switch for the bundled libhdf5 build.
+swath-referencer = { path = "../swath-referencer", version = "0.0.0", default-features = false }
 swath-render = { path = "../swath-render", version = "0.0.0" }
 swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.0.0" }
 swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.0.0" }

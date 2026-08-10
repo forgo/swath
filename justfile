@@ -78,6 +78,29 @@ test:
     cargo nextest run --workspace
     cargo test --workspace --doc
 
+# --- fast dev-loop profile (issue #99: `legacy-hdf5` OFF) ---
+#
+# The bundled-libhdf5 C build (hdf5-metno `static`, behind the default-ON
+# `legacy-hdf5` feature) costs minutes of wall clock and gigabytes of
+# target/ that loops never touching HDF5 referencing don't need. These
+# recipes are the documented opt-out: no C toolchain, no cmake, GRIB2 and
+# everything else exactly as default. `just test`/`just check` remain the
+# full gate — nothing below replaces them before a push.
+
+# Type-check the whole workspace without the libhdf5 build (embedded-ui
+# stays on — the profile differs from default in `legacy-hdf5` only).
+check-fast:
+    cargo check --workspace --no-default-features --features swath-cli/embedded-ui
+
+# Fast tests: the same feature-off profile. HDF5-dependent tests are
+# feature-gated (compile out; `just test` always runs them), and the two
+# crates whose test suites drive real HDF5 generation through a
+# dev-dependency on swath-referencer (default features — they'd rebuild
+# libhdf5) are excluded. No doctests (nextest); the full gate runs them.
+test-fast:
+    cargo nextest run --workspace --no-default-features --features swath-cli/embedded-ui \
+        --exclude swath-events-filedrop --exclude swath-source-virtual
+
 # Supply-chain gate: advisories, licenses, bans, sources (config: deny.toml).
 deny:
     cargo deny check

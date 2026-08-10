@@ -11,6 +11,8 @@
 
 // A gated test's skip notice legitimately goes to stderr.
 #![allow(clippy::print_stderr)]
+// Real-granule HDF5 assertions: compiled out of feature-off builds (#99).
+#![cfg(feature = "legacy-hdf5")]
 
 use std::path::PathBuf;
 
