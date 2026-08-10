@@ -11,6 +11,26 @@
 // swath:8080), so SSE-through-proxy is exercised too.
 import { expect, type Page, test } from "@playwright/test";
 
+// Where the demo page lives: /demo/ under vite dev, / when the binary
+// serves the embedded production bundle (set by playwright.config.ts).
+const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
+
+/** Waits until the zero-config bounds fit has landed and settled. The
+ * fit is async (tileset metadata fetch -> setStyle -> fitBounds): a view
+ * jump issued before it lands is silently clobbered back to the fitted
+ * view. The binary-served bundle (issue #103) boots fast enough to
+ * expose exactly that race. `getZoom() > 5` discriminates the fitted
+ * footprint view (~z12) from the zoom-1 boot view. */
+async function waitForFittedView(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const el = document.querySelector("swath-map") as {
+      map?: { loaded(): boolean; areTilesLoaded(): boolean; getZoom(): number };
+    } | null;
+    const map = el?.map;
+    return Boolean(map?.loaded() && map.areTilesLoaded() && map.getZoom() > 5);
+  });
+}
+
 /** The trace envelope as swath-api pins it (traces.rs). */
 interface Envelope {
   tile: string;
@@ -57,7 +77,7 @@ function latestByKey(received: Envelope[]): Map<string, Envelope> {
 test("overlay paints decisions matching the traces the test received over SSE", async ({
   page,
 }) => {
-  await page.goto("/demo/");
+  await page.goto(DEMO_PATH);
   await expect(page.locator("swath-map canvas.maplibregl-canvas")).toBeVisible();
 
   // Subscribe FIRST: the broadcast bus delivers every event published
@@ -75,12 +95,18 @@ test("overlay paints decisions matching the traces the test received over SSE", 
   // Force fresh renders both subscribers will see: jump deeper into the
   // fixture footprint (bbox -106.1..-105.9 / 39.2..39.4; style zoom 13
   // displays z14 tiles from the 256px source — well inside the served
-  // 0..24 matrix range).
-  await page.evaluate(() => {
+  // 0..24 matrix range). "Fresh" matters twice over: cache hits carry no
+  // ingest_to_pixel_ms (the north-star number belongs to the FIRST
+  // render after ingest), and `just e2e-web` runs both modes (issue
+  // #103) against ONE stack — so the against-binary pass dives one zoom
+  // deeper (z15 tiles) than the vite-dev pass to keep its tiles unseen.
+  await waitForFittedView(page);
+  const fresh = process.env.SWATH_E2E_MODE === "binary" ? "14" : "13";
+  await page.evaluate((zoom) => {
     const el = document.querySelector("swath-map");
     el?.setAttribute("center", "-106.0,39.3");
-    el?.setAttribute("zoom", "13");
-  });
+    el?.setAttribute("zoom", zoom);
+  }, fresh);
 
   // Badges appear once traces flow.
   await page.waitForFunction(() => document.querySelectorAll(".swath-xray-badge").length > 0);
@@ -180,7 +206,7 @@ interface ReceivedPlan {
 }
 
 test("v1: heatmap buckets, feed lines, and why-view match the SSE stream", async ({ page }) => {
-  await page.goto("/demo/");
+  await page.goto(DEMO_PATH);
   await expect(page.locator("swath-map canvas.maplibregl-canvas")).toBeVisible();
   await subscribeToTraces(page);
 
@@ -191,6 +217,8 @@ test("v1: heatmap buckets, feed lines, and why-view match the SSE stream", async
   // runs after v0 on the same stack, v0's tiles are all cache hits by
   // now — zero bytes_read across the board. Fresh z13 tiles guarantee
   // live/overview renders so the heatmap has a non-degenerate range too.
+  // (Same fit-race guard as v0: jump only after the fitted view landed.)
+  await waitForFittedView(page);
   await page.evaluate(() => {
     const el = document.querySelector("swath-map");
     el?.setAttribute("center", "-105.95,39.25");

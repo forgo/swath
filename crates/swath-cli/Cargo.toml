@@ -16,7 +16,18 @@ publish = false
 name = "swath"
 path = "src/main.rs"
 
+[features]
+default = ["embedded-ui"]
+# Compile the production web bundle (web/dist, built by `pnpm build` /
+# `just build-full`) into the binary and serve it at `/` (issue #103,
+# ADR 0011). Default ON — the shipped binary carries its UI, like the
+# statically bundled libhdf5. Without web/dist the build still compiles
+# (the build script embeds an empty set and serving is UI-less); opt out
+# entirely with `--no-default-features`.
+embedded-ui = ["dep:include_dir"]
+
 [dependencies]
+include_dir = { workspace = true, optional = true }
 # `http1` + `tokio`: this is the crate that actually runs `axum::serve`
 # (the API crate only builds Routers — see its manifest).
 axum = { workspace = true, features = ["http1", "tokio"] }

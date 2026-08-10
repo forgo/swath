@@ -1,11 +1,16 @@
-# Keep the image build context to what `cargo build -p swath-cli` and the
-# fixture COPY actually consume: the workspace + tests/fixtures.
+# Keep the image build context to what the web-bundle stage, `cargo build
+# -p swath-cli`, and the fixture COPY actually consume: the workspace,
+# web/ sources (issue #103 — the pnpm stage builds the embedded UI), and
+# tests/fixtures.
 .git
 target
 docs
 prototypes
 python
-web
+web/node_modules
+web/dist
+web/test-results
+web/playwright-report
 tests/oracle
 .github
 .claude

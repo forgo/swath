@@ -8,6 +8,10 @@
 // tile *requests*, but off-footprint ones — no 200s, blank canvas.
 import { expect, type Page, test } from "@playwright/test";
 
+// Where the demo page lives: /demo/ under vite dev, / when the binary
+// serves the embedded production bundle (set by playwright.config.ts).
+const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
+
 /** Minimal structural view of the element for in-page evaluation. */
 interface SwathMapLike {
   map?: {
@@ -84,7 +88,7 @@ test("map loads, fetches real tiles, renders pixels, and switches layers", async
   // the API lists tilesets in layer-id order, so that is `ndvi`.
   const initialTile = tileResponse(page, "ndvi");
 
-  await page.goto("/demo/");
+  await page.goto(DEMO_PATH);
   await expect(page.locator("swath-map canvas.maplibregl-canvas")).toBeVisible();
 
   const tile = await initialTile;

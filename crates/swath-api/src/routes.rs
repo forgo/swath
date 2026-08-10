@@ -32,6 +32,7 @@ use crate::model::{
 use crate::provider::{LayerIdentity, LayerProvider};
 use crate::registry::Layer;
 use crate::traces::TraceBus;
+use crate::ui::UiAssets;
 
 /// The OGC API - Tiles 1.0 (OGC 20-057) conformance classes this surface
 /// implements — exactly the set `/conformance` declares. Kept honest by
@@ -97,6 +98,10 @@ pub struct ApiState<S, R, L, C = NoCache> {
     /// (ADR 0010): the landing page then serves the openEO capabilities
     /// vocabulary alongside the OGC one.
     openeo: bool,
+    /// The embedded UI bundle (issue #103): `GET /` negotiates browsers
+    /// onto its `index.html`, and the router fallback serves its assets.
+    /// `None` (or an empty bundle) serves exactly the pre-UI surface.
+    ui: Option<Arc<UiAssets>>,
 }
 
 impl<S, R, L> ApiState<S, R, L> {
@@ -119,6 +124,7 @@ impl<S, R, L> ApiState<S, R, L> {
             base_url,
             traces: TraceBus::default(),
             openeo: false,
+            ui: None,
         }
     }
 }
@@ -144,7 +150,20 @@ impl<S, R, L, C> ApiState<S, R, L, C> {
             base_url: self.base_url,
             traces: self.traces,
             openeo: self.openeo,
+            ui: self.ui,
         }
+    }
+
+    /// Mounts the embedded UI bundle (issue #103): browsers get its
+    /// `index.html` at `GET /` (content negotiation — API clients keep
+    /// the JSON landing page) and its assets from the router fallback,
+    /// which API routes always outrank. An empty bundle is ignored.
+    #[must_use]
+    pub fn with_ui(mut self, ui: UiAssets) -> Self {
+        if !ui.is_empty() {
+            self.ui = Some(Arc::new(ui));
+        }
+        self
     }
 
     /// Declares that the openEO surface (ADR 0010) is merged beside this
@@ -202,7 +221,49 @@ where
         // dependency-free (no registry/source I/O) so orchestrator
         // healthchecks measure the process, not the data plane.
         .route("/healthz", get(healthz))
+        // Embedded UI assets (issue #103) live in the FALLBACK: axum
+        // consults it only when no route above matched, so API paths
+        // structurally outrank any file the bundle could ever ship (the
+        // ui module docs carry the full serving rules). Without a bundle
+        // the handler answers the same plain 404 axum's default would.
+        .fallback(ui_asset)
         .with_state(state)
+}
+
+/// Router fallback: an exact lookup in the embedded UI bundle (GET/HEAD
+/// only), else the plain empty 404 unknown paths always produced.
+async fn ui_asset<S, R, L, C>(
+    State(app): State<Arc<ApiState<S, R, L, C>>>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+) -> Response
+where
+    S: RasterSource + 'static,
+    R: Reproject + 'static,
+    L: LayerProvider + 'static,
+    C: TileCache + 'static,
+{
+    if matches!(method, axum::http::Method::GET | axum::http::Method::HEAD)
+        && let Some(ui) = &app.ui
+        && let Some(response) = ui.asset_response(uri.path())
+    {
+        return response;
+    }
+    StatusCode::NOT_FOUND.into_response()
+}
+
+/// True when the request's `Accept` header explicitly lists `text/html`
+/// (a browser navigation). Absent or generic (`*/*`) accepts stay on the
+/// JSON landing page — OGC clients and plain `fetch` see no change.
+fn accepts_html(headers: &HeaderMap) -> bool {
+    headers
+        .get(ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|accept| {
+            accept
+                .split(',')
+                .any(|range| range.split(';').next().unwrap_or("").trim() == "text/html")
+        })
 }
 
 /// `GET /healthz` — plain 200 `ok`. Liveness only: the process is up and
@@ -217,16 +278,26 @@ async fn healthz() -> &'static str {
 /// `GET /` — the OGC API landing page; with the openEO surface mounted
 /// ([`ApiState::with_openeo`]), the same document additionally carries
 /// the openEO capabilities fields (both standards claim the root, so the
-/// root speaks both — each schema tolerates the other's fields).
+/// root speaks both — each schema tolerates the other's fields). With an
+/// embedded UI ([`ApiState::with_ui`], issue #103), an `Accept` listing
+/// `text/html` (a browser) receives the UI's `index.html` instead — the
+/// JSON document stays byte-identical for every other client.
 async fn landing<S, R, L, C>(
     State(app): State<Arc<ApiState<S, R, L, C>>>,
-) -> Json<serde_json::Value>
+    headers: HeaderMap,
+) -> Response
 where
     S: RasterSource + 'static,
     R: Reproject + 'static,
     L: LayerProvider + 'static,
     C: TileCache + 'static,
 {
+    if let Some(ui) = &app.ui
+        && accepts_html(&headers)
+        && let Some(response) = ui.index_response()
+    {
+        return response;
+    }
     let base = &app.base_url;
     let page = LandingPage {
         title: "Swath".to_owned(),
@@ -259,7 +330,7 @@ where
     if app.openeo {
         crate::openeo::extend_capabilities(&mut doc, base);
     }
-    Json(doc)
+    Json(doc).into_response()
 }
 
 async fn conformance() -> Json<Conformance> {
@@ -595,7 +666,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{check_accepts_png, parse_tile_path};
+    use super::{accepts_html, check_accepts_png, parse_tile_path};
     use axum::http::{HeaderMap, HeaderValue, StatusCode};
 
     #[test]
@@ -649,6 +720,139 @@ mod tests {
         assert_eq!(
             accepts(Some("application/json")).unwrap_err().status,
             StatusCode::NOT_ACCEPTABLE
+        );
+    }
+
+    #[test]
+    fn html_negotiation_requires_an_explicit_text_html() {
+        let headers = |value: Option<&str>| {
+            let mut headers = HeaderMap::new();
+            if let Some(value) = value {
+                headers.insert("accept", HeaderValue::from_str(value).unwrap());
+            }
+            headers
+        };
+        // Browser navigation shapes opt into HTML...
+        assert!(accepts_html(&headers(Some("text/html"))));
+        assert!(accepts_html(&headers(Some(
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        ))));
+        // ...everything else (OGC clients, bare fetch) stays JSON.
+        assert!(!accepts_html(&headers(None)));
+        assert!(!accepts_html(&headers(Some("*/*"))));
+        assert!(!accepts_html(&headers(Some("application/json"))));
+    }
+
+    // --- The embedded-UI route table (issue #103) ---
+
+    use std::sync::Arc;
+
+    use tower::ServiceExt as _;
+
+    /// A fixture-registry router with an adversarially named UI bundle:
+    /// files named exactly like API routes, which must stay unreachable.
+    fn ui_router() -> axum::Router {
+        let state = crate::ApiState::new(
+            crate::LayerRegistry::hls_fixtures(),
+            swath_source_cog::CogSource::new(Arc::new(object_store::memory::InMemory::new())),
+            swath_reproject_proj4rs::Proj4rsReproject,
+            "http://localhost:8080",
+        )
+        .with_ui(crate::UiAssets::from_files([
+            ("index.html", b"<!doctype html><title>ui</title>".as_slice()),
+            ("assets/index-abc.js", b"console.log('ui')".as_slice()),
+            // Adversarial names: even if a bundle shipped these, the
+            // routed API handlers win (fallback priority is structural).
+            ("healthz", b"not the probe".as_slice()),
+            ("tilesets", b"not the list".as_slice()),
+        ]));
+        crate::router(Arc::new(state))
+    }
+
+    async fn get(app: axum::Router, path: &str, accept: Option<&str>) -> axum::response::Response {
+        let mut request = axum::http::Request::builder().uri(path);
+        if let Some(accept) = accept {
+            request = request.header("accept", accept);
+        }
+        app.oneshot(request.body(axum::body::Body::empty()).unwrap())
+            .await
+            .expect("infallible")
+    }
+
+    async fn body_text(response: axum::response::Response) -> String {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body reads");
+        String::from_utf8(bytes.to_vec()).expect("utf-8 body")
+    }
+
+    /// The route-table proof (issue #103 AC): API paths keep answering the
+    /// API even when the bundle carries colliding names, the UI serves
+    /// only from `/` (negotiated) and exact asset paths, and unknown
+    /// paths stay plain 404.
+    #[tokio::test]
+    async fn api_routes_outrank_ui_assets_and_root_negotiates() {
+        // Browsers get the UI entry page at `/`...
+        let response = get(ui_router(), "/", Some("text/html,*/*;q=0.8")).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/html; charset=utf-8"
+        );
+        assert!(body_text(response).await.contains("<title>ui</title>"));
+
+        // ...API clients keep the JSON landing page, byte-shape unchanged.
+        for accept in [None, Some("application/json"), Some("*/*")] {
+            let response = get(ui_router(), "/", accept).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.headers().get("content-type").unwrap(),
+                "application/json",
+                "accept={accept:?}"
+            );
+        }
+
+        // Hashed assets serve from the fallback.
+        let response = get(ui_router(), "/assets/index-abc.js", None).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/javascript"
+        );
+
+        // API routes win over identically named bundle files.
+        let response = get(ui_router(), "/healthz", None).await;
+        assert_eq!(body_text(response).await, "ok", "the probe, not the file");
+        let response = get(ui_router(), "/tilesets", None).await;
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json",
+            "the tilesets list, not the file"
+        );
+
+        // No SPA fallback: unknown paths are the plain empty 404 they
+        // always were.
+        let response = get(ui_router(), "/no-such-page", None).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert!(body_text(response).await.is_empty());
+    }
+
+    /// Without a bundle (plain `cargo build`, or `with_ui` on an empty
+    /// set), `/` never serves HTML — the pre-UI surface exactly.
+    #[tokio::test]
+    async fn without_a_bundle_root_stays_json_for_browsers() {
+        let state = crate::ApiState::new(
+            crate::LayerRegistry::hls_fixtures(),
+            swath_source_cog::CogSource::new(Arc::new(object_store::memory::InMemory::new())),
+            swath_reproject_proj4rs::Proj4rsReproject,
+            "http://localhost:8080",
+        )
+        .with_ui(crate::UiAssets::default());
+        let app = crate::router(Arc::new(state));
+        let response = get(app, "/", Some("text/html")).await;
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
         );
     }
 }

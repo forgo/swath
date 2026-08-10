@@ -309,6 +309,15 @@ lint-web:
 test-web:
     cd web && pnpm run test
 
+# The full production build (issue #103): the web bundle (vite, into
+# web/dist), then the release binary embedding it (swath-cli's build
+# script stages web/dist; feature `embedded-ui` is default-on). The result
+# is one self-contained `swath` — `swath serve --fixtures` serves the UI
+# at / and the demo layers beside it, zero external files.
+build-full:
+    cd web && pnpm run build
+    cargo build --release --locked -p swath-cli
+
 # The pgstac catalog integration suite (issue #30): the adapter's live tests
 # are #[ignore] by default (they need a real pgstac); this recipe brings up
 # the compose pgstac service (reusing one that is already running), runs them
@@ -346,18 +355,23 @@ e2e:
 
 # The viewer e2e (issue #33): the same stack bring-up + granule drop as
 # `just e2e` (shared, tests/e2e/stack-up.sh — no duplicated drop logic),
-# then the Playwright suite drives the <swath-map> demo page against it:
-# map renders, real tile requests answer 200 image/png, the canvas shows
-# actual pixels, and the layer switcher re-points requests at the ndvi
-# tileset. Playwright itself manages the vite dev server (which proxies
-# the OGC routes to :8080 — the API serves no CORS headers yet). Needs
-# `just setup-web` first (deps + chromium).
+# then the Playwright suites drive the <swath-map> demo page against it
+# TWICE (issue #103) — first through the vite dev server (which proxies
+# the OGC routes to :8080; CORS stays opt-in and off, ADR 0011), then in
+# against-binary mode: the same specs on the production bundle the swath
+# container embeds and serves itself at :8080/ (feature `embedded-ui`).
+# Asserted: map renders, real tile requests answer 200 image/png, the
+# canvas shows actual pixels, the layer switcher re-points requests, and
+# the x-ray overlay agrees with the SSE trace stream — in both modes.
+# Needs `just setup-web` first (deps + chromium).
 e2e-web:
     #!/usr/bin/env bash
     set -euo pipefail
     trap 'docker compose down -v' EXIT
     tests/e2e/stack-up.sh
-    cd web && pnpm exec playwright test
+    cd web
+    pnpm exec playwright test
+    SWATH_E2E_MODE=binary pnpm exec playwright test
 
 # --- tests/load (HTTP load harness, issue #101 / ARCHITECTURE §16.7) ---
 
