@@ -1,8 +1,12 @@
 # Swath web
 
 Vanilla Web Components + MapLibre GL (ADR 0005), no framework. `<swath-map>` is the viewer;
-`demo/index.html` drives it and — for now — *is* the app (landing polish comes later). The
-production bundle ships inside the `swath` binary (ADR 0011).
+`demo/index.html` *is* the app: the entry page (issue #108) pairs the map with
+`<swath-layer-panel>` (the layer browser) and `demo/main.ts` wires the view-state semantics
+from `src/view-state.ts` — the URL is the shareable representation of layer/center/zoom/x-ray,
+localStorage restores the last session on a paramless visit, URL params beat storage, and
+deep-link URLs are never rewritten on load. The production bundle ships inside the `swath`
+binary (ADR 0011).
 
 ## Dev workflow (vite dev + proxy) — unchanged
 

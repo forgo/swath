@@ -1,0 +1,257 @@
+// SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * View state for the entry page (issue #108): the URL is the shareable
+ * representation of what the viewer shows, localStorage remembers the
+ * last session, and URL params always beat storage.
+ *
+ * Pure module in the ADR 0005 spirit (own state/routing, no framework):
+ * parse/format/compare/persist only — no DOM, no map. The app shell
+ * (demo/main.ts) owns the wiring; this module owns the semantics, so the
+ * precedence rule is unit-testable without a browser history.
+ *
+ * Byte-stability contract: a deep-link URL is never rewritten on load.
+ * The shell only writes the URL on user interaction, and even then skips
+ * the write when the URL already encodes the same state
+ * ([`viewStatesEqual`]) — pasted links survive byte-for-byte.
+ */
+
+/** What a view is: which layer, where, and whether x-ray is on. */
+export interface ViewState {
+  /** Layer id; absent means "the server's first layer" (zero-config). */
+  layer?: string;
+  /** `[lon, lat]` view center; absent means "fit the layer's bounds". */
+  center?: [number, number];
+  /** View zoom; absent means "fit the layer's bounds". */
+  zoom?: number;
+  /** Whether the x-ray overlay is enabled. */
+  xray: boolean;
+}
+
+/** Where an initial state came from — pinned by the precedence tests. */
+export type ViewStateSource = "url" | "storage" | "default";
+
+/** The query params this module owns (everything else passes through). */
+const OWNED_PARAMS = ["layer", "center", "zoom", "xray"] as const;
+
+/** localStorage key; versioned so a future shape change can't misparse. */
+export const STORAGE_KEY = "swath.view-state.v1";
+
+/** Coordinate precision in the URL and storage: 5 decimals ≈ 1 m. */
+const CENTER_DECIMALS = 5;
+/** Zoom precision: 2 decimals is finer than any visible difference. */
+const ZOOM_DECIMALS = 2;
+
+/** Equality tolerances, strictly looser than the write precision above so
+ * a state round-tripped through its own URL always compares equal. */
+const CENTER_EPSILON = 10 ** -(CENTER_DECIMALS - 1);
+const ZOOM_EPSILON = 10 ** -(ZOOM_DECIMALS - 1);
+
+/** Parses `"lon,lat"`; undefined when absent or malformed. */
+export function parseCenter(value: string | null): [number, number] | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  const parts = value.split(",").map((part) => Number(part.trim()));
+  const [lon, lat] = parts;
+  if (parts.length !== 2 || lon === undefined || lat === undefined) {
+    return undefined;
+  }
+  return Number.isFinite(lon) && Number.isFinite(lat) ? [lon, lat] : undefined;
+}
+
+/** Parses a numeric param; undefined when absent or malformed. */
+export function parseNumber(value: string | null): number | undefined {
+  if (value === null || value.trim() === "") {
+    return undefined;
+  }
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/** Fixed-precision decimal with trailing zeros (and a bare `.`) trimmed —
+ * `-106.00000` → `-106`, `39.30000` → `39.3`. */
+function trimmed(value: number, decimals: number): string {
+  return value
+    .toFixed(decimals)
+    .replace(/(\.\d*?)0+$/, "$1")
+    .replace(/\.$/, "");
+}
+
+/** Canonical `"lon,lat"` for URLs, attributes, and storage. */
+export function formatCenter(center: [number, number]): string {
+  return `${trimmed(center[0], CENTER_DECIMALS)},${trimmed(center[1], CENTER_DECIMALS)}`;
+}
+
+/** Canonical zoom string. */
+export function formatZoom(zoom: number): string {
+  return trimmed(zoom, ZOOM_DECIMALS);
+}
+
+/** True when the query string carries any view param this module owns —
+ * the trigger for "URL beats storage". */
+export function hasViewParams(search: string): boolean {
+  const params = new URLSearchParams(search);
+  return OWNED_PARAMS.some((name) => params.has(name));
+}
+
+/** The view state a query string encodes (`?layer=…&center=…&zoom=…&xray`). */
+export function parseViewState(search: string): ViewState {
+  const params = new URLSearchParams(search);
+  const state: ViewState = { xray: params.has("xray") };
+  const layer = params.get("layer");
+  if (layer !== null && layer !== "") {
+    state.layer = layer;
+  }
+  const center = parseCenter(params.get("center"));
+  if (center) {
+    state.center = center;
+  }
+  const zoom = parseNumber(params.get("zoom"));
+  if (zoom !== undefined) {
+    state.zoom = zoom;
+  }
+  return state;
+}
+
+/**
+ * The canonical query string for `state`, preserving every param this
+ * module does not own (e.g. `basemap`) exactly where the current search
+ * put it. Returns `""` for a default state with no foreign params — so a
+ * bare `/` stays a bare `/`. The `xray` flag is written valueless
+ * (`&xray`), matching the hand-written deep-link style.
+ */
+export function withViewState(search: string, state: ViewState): string {
+  const foreign = new URLSearchParams(search);
+  for (const name of OWNED_PARAMS) {
+    foreign.delete(name);
+  }
+  const parts: string[] = [];
+  if (state.layer !== undefined) {
+    parts.push(`layer=${encodeURIComponent(state.layer)}`);
+  }
+  if (state.center) {
+    parts.push(`center=${formatCenter(state.center)}`);
+  }
+  if (state.zoom !== undefined) {
+    parts.push(`zoom=${formatZoom(state.zoom)}`);
+  }
+  if (state.xray) {
+    parts.push("xray");
+  }
+  const rest = foreign.toString();
+  if (rest !== "") {
+    parts.push(rest);
+  }
+  return parts.length === 0 ? "" : `?${parts.join("&")}`;
+}
+
+/** Semantic equality within the write precision — the "don't rewrite a
+ * URL that already says this" guard behind byte-stable deep links. */
+export function viewStatesEqual(a: ViewState, b: ViewState): boolean {
+  if (a.layer !== b.layer || a.xray !== b.xray) {
+    return false;
+  }
+  if ((a.center === undefined) !== (b.center === undefined)) {
+    return false;
+  }
+  if (a.center && b.center) {
+    if (
+      Math.abs(a.center[0] - b.center[0]) > CENTER_EPSILON ||
+      Math.abs(a.center[1] - b.center[1]) > CENTER_EPSILON
+    ) {
+      return false;
+    }
+  }
+  if ((a.zoom === undefined) !== (b.zoom === undefined)) {
+    return false;
+  }
+  if (a.zoom !== undefined && b.zoom !== undefined && Math.abs(a.zoom - b.zoom) > ZOOM_EPSILON) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * The initial view for a page load — THE precedence rule (issue #108):
+ * any owned URL param present → the URL alone wins (storage ignored, no
+ * merging: a shared link must show the same view everywhere); otherwise
+ * the stored last session; otherwise the zero-config default.
+ */
+export function resolveInitialState(
+  search: string,
+  storage: Storage | undefined,
+): { state: ViewState; source: ViewStateSource } {
+  if (hasViewParams(search)) {
+    return { state: parseViewState(search), source: "url" };
+  }
+  const stored = storage ? loadViewState(storage) : undefined;
+  if (stored) {
+    return { state: stored, source: "storage" };
+  }
+  return { state: { xray: false }, source: "default" };
+}
+
+/** Persists `state` as the last session; storage failures (quota, private
+ * mode) are deliberately silent — persistence is a nicety, never a fault. */
+export function saveViewState(storage: Storage, state: ViewState): void {
+  try {
+    storage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Best-effort by design.
+  }
+}
+
+/** The stored last session, or undefined when absent or malformed (a
+ * corrupt entry must never break the page — it just loses the restore). */
+export function loadViewState(storage: Storage): ViewState | undefined {
+  let raw: string | null;
+  try {
+    raw = storage.getItem(STORAGE_KEY);
+  } catch {
+    return undefined;
+  }
+  if (raw === null) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    return undefined;
+  }
+  const record = parsed as Record<string, unknown>;
+  const state: ViewState = { xray: record["xray"] === true };
+  if (typeof record["layer"] === "string" && record["layer"] !== "") {
+    state.layer = record["layer"];
+  }
+  const center = record["center"];
+  if (
+    Array.isArray(center) &&
+    center.length === 2 &&
+    typeof center[0] === "number" &&
+    typeof center[1] === "number" &&
+    Number.isFinite(center[0]) &&
+    Number.isFinite(center[1])
+  ) {
+    state.center = [center[0], center[1]];
+  }
+  if (typeof record["zoom"] === "number" && Number.isFinite(record["zoom"])) {
+    state.zoom = record["zoom"];
+  }
+  return state;
+}
+
+/** `window.localStorage`, or undefined where touching it throws (storage
+ * disabled): the whole persistence feature then degrades to no-op. */
+export function safeLocalStorage(): Storage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
