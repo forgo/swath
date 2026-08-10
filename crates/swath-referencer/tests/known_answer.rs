@@ -7,6 +7,13 @@
 //! chunk index — see `tests/data/make_tiny_fixture.py`). This is the PR-CI
 //! half of the conformance suite; the real-VNP09GA half is the gated
 //! `vnp09ga_real.rs` + `just test-referencer`.
+//!
+//! Requires the default-ON `legacy-hdf5` feature (issue #99): the whole
+//! file exercises HDF5 generation, so a feature-off build compiles it out
+//! (nothing here can silently skip in the default profile — `just test`
+//! always runs it).
+
+#![cfg(feature = "legacy-hdf5")]
 
 use std::path::PathBuf;
 

@@ -104,13 +104,17 @@ pub(crate) fn run(args: &IngestArgs) -> Result<(), IngestError> {
 mod tests {
     use std::path::PathBuf;
 
+    #[cfg(feature = "legacy-hdf5")]
     use swath_core::manifest::{VirtualManifest, compare};
     use swath_testsupport::TempDir;
 
     use super::{IngestArgs, IngestCommand, IngestError, run};
 
     /// The committed tiny HDF5 fixture (and its h5py-derived truth) from
-    /// the referencer's conformance data.
+    /// the referencer's conformance data. Only the `legacy-hdf5` tests
+    /// (default profile — `just test` always runs them) touch it; the
+    /// feature-off fast profile compiles them out (#99).
+    #[cfg(feature = "legacy-hdf5")]
     fn data(file: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../swath-referencer/tests/data")
@@ -123,6 +127,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "legacy-hdf5")]
     #[test]
     fn reference_writes_the_known_answer_manifest() {
         let dir = TempDir::new("cli-ingest-known-answer");
@@ -144,6 +149,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "legacy-hdf5")]
     #[test]
     fn reference_defaults_the_output_beside_the_granule() {
         let dir = TempDir::new("cli-ingest-default-out");
@@ -175,6 +181,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "legacy-hdf5")]
     #[test]
     fn write_failures_name_the_output_path() {
         let dir = TempDir::new("cli-ingest-badout");

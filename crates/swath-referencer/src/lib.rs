@@ -21,9 +21,19 @@
 //! equivalence harness (`just test-referencer`) runs both generators on a
 //! real VNP09GA granule and asserts byte-range equivalence via
 //! [`swath_core::manifest::compare`].
+//!
+//! HDF5/NetCDF4 support (and with it the statically bundled libhdf5 C
+//! build) sits behind the default-ON `legacy-hdf5` feature (issue #99):
+//! every default build behaves exactly as described above, while the
+//! feature-off dev-loop profile (`just check-fast` / `just test-fast`)
+//! compiles without a C toolchain — `handles()` declines `.h5`/`.nc` and
+//! `generate` returns a loud "built without the `legacy-hdf5` feature"
+//! error. GRIB2 is always on (pure Rust, cheap).
 
+#[cfg(feature = "legacy-hdf5")]
 mod eos;
 mod grib;
+#[cfg(feature = "legacy-hdf5")]
 mod hdf;
 
 use std::path::Path;
@@ -49,13 +59,16 @@ impl SwathReferencer {
 
     /// Whether `path`'s extension names a format this generator handles —
     /// the trigger predicate ingest adapters use to route legacy assets
-    /// here.
+    /// here. HDF5/NetCDF4 extensions are only claimed when the crate is
+    /// built with the `legacy-hdf5` feature (default ON); a feature-off
+    /// build honestly declines them so no adapter routes a granule it
+    /// cannot reference.
     #[must_use]
     pub fn handles(path: &Path) -> bool {
-        matches!(
-            extension(path).as_str(),
-            "h5" | "hdf5" | "nc" | "nc4" | "grib2" | "grb2" | "grib"
-        )
+        let ext = extension(path);
+        let hdf = matches!(ext.as_str(), "h5" | "hdf5" | "nc" | "nc4");
+        let grib = matches!(ext.as_str(), "grib2" | "grb2" | "grib");
+        (cfg!(feature = "legacy-hdf5") && hdf) || grib
     }
 }
 
@@ -66,7 +79,17 @@ impl IngestReferencer for SwathReferencer {
 
     fn generate(&self, granule: &Path) -> Result<VirtualManifest, ReferencerError> {
         match extension(granule).as_str() {
+            #[cfg(feature = "legacy-hdf5")]
             "h5" | "hdf5" | "nc" | "nc4" => hdf::generate(granule),
+            #[cfg(not(feature = "legacy-hdf5"))]
+            ext @ ("h5" | "hdf5" | "nc" | "nc4") => Err(ReferencerError::Unsupported {
+                detail: format!(
+                    "extension `{ext}` of `{}`: this binary was built without the \
+                     `legacy-hdf5` feature — HDF5/NetCDF4 referencing is compiled \
+                     out (rebuild with default features)",
+                    granule.display()
+                ),
+            }),
             "grib2" | "grb2" | "grib" => grib::generate(granule),
             other => Err(ReferencerError::Unsupported {
                 detail: format!(
@@ -93,10 +116,16 @@ mod tests {
 
     #[test]
     fn handles_recognizes_the_legacy_extensions() {
-        for yes in [
-            "a.h5", "b.HDF5", "c.nc", "d.nc4", "e.grib2", "f.grb2", "g.grib",
-        ] {
+        for yes in ["e.grib2", "f.grb2", "g.grib"] {
             assert!(SwathReferencer::handles(Path::new(yes)), "{yes}");
+        }
+        // HDF5/NetCDF4 extensions are claimed exactly when the feature is in.
+        for hdf in ["a.h5", "b.HDF5", "c.nc", "d.nc4"] {
+            assert_eq!(
+                SwathReferencer::handles(Path::new(hdf)),
+                cfg!(feature = "legacy-hdf5"),
+                "{hdf}"
+            );
         }
         for no in ["a.tif", "b.json", "c", "d.h5.json"] {
             assert!(!SwathReferencer::handles(Path::new(no)), "{no}");
@@ -109,5 +138,17 @@ mod tests {
             .generate(Path::new("granule.tif"))
             .unwrap_err();
         assert!(matches!(err, ReferencerError::Unsupported { .. }), "{err}");
+    }
+
+    /// Feature-off builds must fail loudly on HDF5 granules, naming the
+    /// missing feature — never a generic "unsupported extension".
+    #[cfg(not(feature = "legacy-hdf5"))]
+    #[test]
+    fn hdf5_without_the_feature_is_a_loud_unsupported_error() {
+        let err = SwathReferencer::new()
+            .generate(Path::new("granule.h5"))
+            .unwrap_err();
+        assert!(matches!(err, ReferencerError::Unsupported { .. }), "{err}");
+        assert!(err.to_string().contains("legacy-hdf5"), "{err}");
     }
 }
