@@ -66,7 +66,7 @@ use swath_core::catalog::{
     Rescale as DomainRescale,
 };
 use swath_core::planner::Budget;
-use swath_render::ir::PixelOp;
+use swath_render::ir::{Colormap as IrColormap, PixelOp, RenderPlan};
 use swath_render::{CompileContext, CompileError, NodataPolicy, Resampling, compile};
 
 use crate::provider::{CatalogLayer, CatalogLayers};
@@ -610,6 +610,24 @@ pub fn compile_service_layer(
     })
 }
 
+/// The persisted colormap vocabulary of a compiled plan's `Colormap` op
+/// (`None` when the plan has none, i.e. a composite). The compiled graph
+/// stays the source of truth — this is presentation metadata mirroring
+/// exactly what the plan will render, variant for variant.
+fn domain_colormap(plan: &RenderPlan) -> Option<DomainColormap> {
+    plan.ops.iter().find_map(|op| match op {
+        PixelOp::Colormap(map) => Some(match map {
+            IrColormap::Viridis => DomainColormap::Viridis,
+            IrColormap::Magma => DomainColormap::Magma,
+            IrColormap::RdYlGn => DomainColormap::RdYlGn,
+            // Grayscale, and any future palette until this lowering
+            // learns it (the graph record still renders it faithfully).
+            _ => DomainColormap::Grayscale,
+        }),
+        _ => None,
+    })
+}
+
 /// The content-derived service id: `xyz-` plus the first 12 hex digits of
 /// the SHA-256 of the canonical (sorted-key) process-graph JSON. Identical
 /// definition, identical id — creation is idempotent by construction.
@@ -781,12 +799,7 @@ async fn create_service<C: Catalog>(
             min: 0.0,
             max: 255.0,
         });
-    let colormap = product
-        .plan
-        .ops
-        .iter()
-        .any(|op| matches!(op, PixelOp::Colormap(_)))
-        .then_some(DomainColormap::Grayscale);
+    let colormap = domain_colormap(&product.plan);
     let layer = DomainLayer {
         id: id.clone(),
         title: request.title.unwrap_or_else(|| id.clone()),
@@ -852,9 +865,17 @@ async fn delete_service<C: Catalog>(
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
+    use swath_core::catalog::{
+        Bbox, Colormap as DomainColormap, Dataset, DatasetId, Extent, PlanKind,
+        Rescale as DomainRescale, TimeRange,
+    };
+    use swath_render::ir::{Colormap as IrColormap, PixelOp};
 
-    use super::{loaded_collection, service_id};
+    use super::{
+        DomainLayer, compile_context, compile_service_layer, domain_colormap, loaded_collection,
+        service_id,
+    };
 
     #[test]
     fn loaded_collection_reads_the_load_node_wrapped_or_bare() {
@@ -878,5 +899,109 @@ mod tests {
         assert_ne!(service_id(&a), service_id(&c));
         assert!(service_id(&a).starts_with("xyz-"));
         assert_eq!(service_id(&a).len(), 4 + 12);
+    }
+
+    /// A minimal HLS-shaped dataset for compiling graphs against.
+    fn hls_dataset() -> Dataset {
+        Dataset {
+            id: DatasetId::new("hls-s30"),
+            title: "HLS S30".to_owned(),
+            description: String::new(),
+            license: "CC0-1.0".to_owned(),
+            extent: Extent {
+                bbox: Bbox {
+                    west: -180.0,
+                    south: -90.0,
+                    east: 180.0,
+                    north: 90.0,
+                },
+                interval: TimeRange::default(),
+            },
+            bands: ["b04".to_owned(), "b8a".to_owned()].into(),
+            layers: Vec::new(),
+        }
+    }
+
+    /// An NDVI graph whose `save_result` carries the given `options`.
+    fn ndvi_graph(options: &Value) -> Value {
+        json!({ "process_graph": {
+            "load": { "process_id": "load_collection", "arguments": {
+                "id": "hls-s30", "bands": ["b8a", "b04"],
+            }},
+            "ndvi": { "process_id": "ndvi", "arguments": {
+                "data": { "from_node": "load" }, "nir": "b8a", "red": "b04",
+            }},
+            "scale": { "process_id": "linear_scale_range", "arguments": {
+                "x": { "from_node": "ndvi" },
+                "inputMin": -1, "inputMax": 1, "outputMin": 0, "outputMax": 255,
+            }},
+            "save": { "process_id": "save_result", "arguments": {
+                "data": { "from_node": "scale" }, "format": "png", "options": options,
+            }, "result": true },
+        }})
+    }
+
+    /// The colormap AC's round trip (issue #94, unit-level until the M4
+    /// round-trip proptest): a graph naming a colormap compiles to a plan
+    /// carrying that variant; the plan lowers to the persisted
+    /// `swath:layers` colormap vocabulary; and recompiling the persisted
+    /// layer (what `swath serve` does at startup) reproduces the same
+    /// executable plan, colormap included.
+    #[test]
+    fn colormap_round_trips_through_the_openeo_graph_representation() {
+        let dataset = hls_dataset();
+        for (name, ir, domain) in [
+            (
+                "grayscale",
+                IrColormap::Grayscale,
+                DomainColormap::Grayscale,
+            ),
+            ("viridis", IrColormap::Viridis, DomainColormap::Viridis),
+            ("magma", IrColormap::Magma, DomainColormap::Magma),
+            ("rdylgn", IrColormap::RdYlGn, DomainColormap::RdYlGn),
+        ] {
+            let graph = ndvi_graph(&json!({ "colormap": name }));
+            // Graph -> plan: the option becomes the plan's Colormap op.
+            let product =
+                swath_render::compile(&graph, &compile_context(&dataset)).expect("graph compiles");
+            assert_eq!(
+                product.plan.ops.last(),
+                Some(&PixelOp::Colormap(ir)),
+                "{name}: compiled plan must end in its colormap"
+            );
+            // Plan -> persisted vocabulary, variant for variant.
+            assert_eq!(domain_colormap(&product.plan), Some(domain));
+            // Persisted layer -> plan again (serve-time rehydration).
+            let layer = DomainLayer {
+                id: format!("xyz-{name}"),
+                title: name.to_owned(),
+                description: String::new(),
+                plan: PlanKind::BandMath {
+                    expression: "(b8a - b04) / (b8a + b04)".to_owned(),
+                },
+                rescale: DomainRescale {
+                    min: -1.0,
+                    max: 1.0,
+                },
+                colormap: domain_colormap(&product.plan),
+                resampling: swath_core::catalog::Resampling::Bilinear,
+                tile_size: 256,
+                process: Some(graph),
+            };
+            let template =
+                compile_service_layer(&dataset, &layer).expect("persisted layer recompiles");
+            assert_eq!(
+                template.plan, product.plan,
+                "{name}: rehydrated plan must equal the originally compiled plan"
+            );
+        }
+        // No colormap option at all: gray results default to grayscale.
+        let bare = ndvi_graph(&json!({}));
+        let product =
+            swath_render::compile(&bare, &compile_context(&dataset)).expect("graph compiles");
+        assert_eq!(
+            product.plan.ops.last(),
+            Some(&PixelOp::Colormap(IrColormap::Grayscale))
+        );
     }
 }

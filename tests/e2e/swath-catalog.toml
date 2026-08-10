@@ -9,8 +9,11 @@
 #
 # The layer definitions mirror the built-in `--fixtures` demo registry
 # (truecolor, ndvi) so a served tile stays byte-comparable to the committed
-# GDAL/rio-tiler goldens — but here their band assets resolve per tile from
-# the dataset's latest ingested granule.
+# goldens — but here their band assets resolve per tile from the dataset's
+# latest ingested granule. Truecolor pins against the GDAL/rio-tiler
+# golden; ndvi (RdYlGn-colormapped by default, issue #94) pins against the
+# committed colormapped self-golden, with its values proven against the
+# grayscale GDAL golden via the two-level scheme in `just e2e`.
 
 bind = "0.0.0.0:8080"
 base-url = "http://localhost:8080"
@@ -43,7 +46,7 @@ b = "b02"
 [[datasets.layers]]
 id = "ndvi"
 title = "HLS NDVI"
-description = "(B8A - B04) / (B8A + B04), rescaled -1..1, grayscale."
+description = "(B8A - B04) / (B8A + B04), rescaled -1..1, RdYlGn colormap."
 kind = "ndvi"
 [datasets.layers.bands]
 nir = "b8a"

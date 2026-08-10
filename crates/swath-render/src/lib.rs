@@ -44,6 +44,7 @@
 //!
 //! [`CoordTransform`]: swath_core::reproject::CoordTransform
 
+pub mod colormaps;
 mod encode;
 mod error;
 mod grid;

@@ -91,6 +91,19 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "openEO consortium contributors"
 SPDX-License-Identifier = "Apache-2.0"
 
+# Vendored matplotlib 3.10.3 colormap byte LUTs (provenance + regeneration:
+# crates/swath-render/src/colormaps/README.md). viridis/magma color data are
+# CC0-1.0 (Smith & van der Walt, github.com/BIDS/colormap); RdYlGn is a
+# ColorBrewer palette, Apache-2.0 (Brewer, Harrower, Penn State).
+[[annotations]]
+path = ["crates/swath-render/src/colormaps/luts.json"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = [
+    "2002 Cynthia Brewer, Mark Harrower, and The Pennsylvania State University",
+    "Nathaniel J. Smith and Stefan van der Walt",
+]
+SPDX-License-Identifier = "Apache-2.0 AND CC0-1.0"
+
 # Real VNP09GA StructMetadata.0 text, committed verbatim as parser test truth
 # (extracted from LP DAAC granule VNP09GA.A2012019.h33v12.002.2023122182434.h5;
 # NASA LP DAAC data carry no use restrictions). Same aggregate treatment as

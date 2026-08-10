@@ -629,3 +629,54 @@ fn save_result_format_is_case_insensitive() {
     let product = swath_render::compile(&g, &hls_ctx()).expect("compiles");
     assert_eq!(product.plan.output, OutputSpec::new(TileFormat::Png));
 }
+
+// --- save_result colormap option (issue #94) ----------------------------
+
+#[test]
+fn save_result_colormap_option_selects_the_palette() {
+    for (name, expected) in [
+        ("grayscale", Colormap::Grayscale),
+        ("viridis", Colormap::Viridis),
+        ("magma", Colormap::Magma),
+        ("rdylgn", Colormap::RdYlGn),
+    ] {
+        let mut g = graph("ndvi-convenience.json");
+        g["process_graph"]["save"]["arguments"]["options"] = json!({ "colormap": name });
+        let product = swath_render::compile(&g, &hls_ctx()).expect("compiles");
+        assert_eq!(
+            product.plan.ops.last(),
+            Some(&PixelOp::Colormap(expected)),
+            "colormap option `{name}`"
+        );
+    }
+    // Empty options object: same as absent — gray defaults to grayscale.
+    let mut g = graph("ndvi-convenience.json");
+    g["process_graph"]["save"]["arguments"]["options"] = json!({});
+    let product = swath_render::compile(&g, &hls_ctx()).expect("compiles");
+    assert_eq!(product.plan, hand_ndvi_plan());
+}
+
+#[test]
+fn save_result_colormap_errors_are_pinned() {
+    // Unknown colormap name.
+    let mut g = graph("ndvi-convenience.json");
+    g["process_graph"]["save"]["arguments"]["options"] = json!({ "colormap": "jet" });
+    insta::assert_snapshot!(
+        err(&g),
+        @r#"node `save` (save_result): invalid argument `options`: unknown colormap "jet": expected one of "grayscale", "viridis", "magma", "rdylgn""#
+    );
+    // Unknown option key.
+    let mut g = graph("ndvi-convenience.json");
+    g["process_graph"]["save"]["arguments"]["options"] = json!({ "quality": 9 });
+    insta::assert_snapshot!(
+        err(&g),
+        @r#"node `save` (save_result): invalid argument `options`: the only supported format option is "colormap", got key "quality""#
+    );
+    // A colormap on a multi-band (composite) result.
+    let mut g = graph("truecolor.json");
+    g["process_graph"]["save"]["arguments"]["options"] = json!({ "colormap": "viridis" });
+    insta::assert_snapshot!(
+        err(&g),
+        @"node `save` (save_result): invalid argument `options`: a colormap maps one gray value per pixel; it cannot apply to a multi-band (composite) result — reduce to gray first"
+    );
+}

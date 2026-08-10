@@ -45,12 +45,18 @@
 //!
 //! # Colormaps
 //!
-//! Real colormaps (viridis and friends) are deferred: they are pure lookup
-//! tables with no architectural weight, and pulling in palette data now
-//! would grow this crate without exercising any new pipeline semantics.
-//! [`Colormap::Grayscale`] — the identity map — pins the op's position in
-//! the IR (after rescale, before encode) so the compiler can target it
-//! today and palettes can land as new variants without reshaping plans.
+//! [`PixelOp::Colormap`] sits after rescale and before encode.
+//! [`Colormap::Grayscale`] is the identity map; the palette variants
+//! ([`Colormap::Viridis`], [`Colormap::Magma`], [`Colormap::RdYlGn`]) look
+//! each gray pixel up in a vendored 256-entry RGB byte LUT
+//! ([`crate::colormaps`], matplotlib's published tables). The index is the
+//! **quantized** gray value — `clamp(0.0, 255.0)`, truncate toward zero —
+//! exactly the arithmetic the final quantization applies, with linear
+//! interpolation deliberately off: a colormapped pixel is `lut[q(gray)]`
+//! for the same `q(gray)` the grayscale render would have emitted, so
+//! palette output stays mechanically derivable from the oracle-validated
+//! gray values. Alpha is untouched — validity alone decides transparency.
+//! Palette maps require gray planes (band math), never a composite.
 
 use serde::{Deserialize, Serialize};
 
@@ -227,13 +233,21 @@ impl Expr {
 
 /// A named colormap applied to gray planes.
 ///
-/// Only the identity map exists today; real palettes (viridis etc.) are a
-/// deferred variant addition — see the module docs.
+/// The palette variants are matplotlib's published 256-entry byte LUTs,
+/// indexed by quantized gray value with interpolation off — see the
+/// module docs and [`crate::colormaps`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Colormap {
     /// The identity map: gray in, gray out.
     Grayscale,
+    /// Matplotlib's perceptually uniform sequential `viridis`.
+    Viridis,
+    /// Matplotlib's perceptually uniform sequential `magma`.
+    Magma,
+    /// The `ColorBrewer` diverging red–yellow–green map (`RdYlGn`) — the
+    /// standard vegetation-index palette; NDVI's default.
+    RdYlGn,
 }
 
 /// One step of the pixel pipeline. See the module docs for the
@@ -396,6 +410,13 @@ pub enum PlanError {
         /// The rescale maximum.
         max: f64,
     },
+    /// A palette colormap applied to non-gray planes (a composite): a LUT
+    /// maps one gray value per pixel, so only band-math output qualifies.
+    #[error("colormap `{map:?}` needs gray planes: apply it after band math, not a composite")]
+    ColormapNeedsGray {
+        /// The palette that had no gray planes to map.
+        map: Colormap,
+    },
 }
 
 /// The mutable pipeline state [`eval`] threads through the ops.
@@ -403,6 +424,9 @@ struct Planes {
     r: Vec<f64>,
     g: Vec<f64>,
     b: Vec<f64>,
+    /// Whether the three planes are one gray value per pixel (band-math
+    /// output) — the shape a palette colormap can index by.
+    gray: bool,
 }
 
 /// Evaluates a band-math expression over every still-valid pixel, marking
@@ -468,7 +492,12 @@ impl Planes {
 ///
 /// Any [`PlanError`]: mismatched input count or shapes, references to
 /// undeclared bands, a transform op before any producing op (or no
-/// producing op at all), or a degenerate rescale range.
+/// producing op at all), a degenerate rescale range, or a palette
+/// colormap over non-gray planes.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one match arm per PixelOp; splitting the loop would hide the pipeline"
+)]
 pub fn eval(plan: &RenderPlan, inputs: &[WarpedBuffer]) -> Result<RgbaTile, PlanError> {
     if plan.inputs.len() != inputs.len() {
         return Err(PlanError::InputCount {
@@ -522,6 +551,7 @@ pub fn eval(plan: &RenderPlan, inputs: &[WarpedBuffer]) -> Result<RgbaTile, Plan
                     r: gray.clone(),
                     g: gray.clone(),
                     b: gray,
+                    gray: true,
                 });
             }
             PixelOp::Composite { r, g, b } => {
@@ -530,6 +560,7 @@ pub fn eval(plan: &RenderPlan, inputs: &[WarpedBuffer]) -> Result<RgbaTile, Plan
                     r: inputs[ri].values.clone(),
                     g: inputs[gi].values.clone(),
                     b: inputs[bi].values.clone(),
+                    gray: false,
                 });
             }
             PixelOp::Rescale { min, max } => {
@@ -551,11 +582,29 @@ pub fn eval(plan: &RenderPlan, inputs: &[WarpedBuffer]) -> Result<RgbaTile, Plan
                 }
             }
             PixelOp::Colormap(map) => {
-                if planes.is_none() {
-                    return Err(PlanError::NothingToTransform { op: "Colormap" });
-                }
-                match map {
-                    Colormap::Grayscale => {} // identity
+                let planes = planes
+                    .as_mut()
+                    .ok_or(PlanError::NothingToTransform { op: "Colormap" })?;
+                // Grayscale is the identity; palettes look each quantized
+                // gray value up in their vendored 256-entry LUT — no
+                // interpolation (module docs on colormaps).
+                if let Some(lut) = crate::colormaps::lut(*map) {
+                    if !planes.gray {
+                        return Err(PlanError::ColormapNeedsGray { map: *map });
+                    }
+                    #[allow(
+                        clippy::cast_possible_truncation,
+                        clippy::cast_sign_loss,
+                        reason = "clamped into 0..=255 before the cast"
+                    )]
+                    let q = |v: f64| v.clamp(0.0, 255.0) as u8;
+                    for i in 0..planes.r.len() {
+                        let [r, g, b] = lut[usize::from(q(planes.r[i]))];
+                        planes.r[i] = f64::from(r);
+                        planes.g[i] = f64::from(g);
+                        planes.b[i] = f64::from(b);
+                    }
+                    planes.gray = false;
                 }
             }
         }

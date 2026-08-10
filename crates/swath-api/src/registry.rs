@@ -98,10 +98,11 @@ impl LayerRegistry {
 
     /// The built-in demo registry over the committed HLS fixture COGs:
     /// `truecolor` (B04/B03/B02 composite, rescale 0..3000) and `ndvi`
-    /// (`(b8a - b04) / (b8a + b04)`, rescale -1..1, grayscale) — the same
-    /// plans the render golden suites pin against the GDAL/rio-tiler
-    /// oracle (issues #25/#26), so an API-served tile is byte-comparable
-    /// to a direct render.
+    /// (`(b8a - b04) / (b8a + b04)`, rescale -1..1, `RdYlGn` colormap —
+    /// issue #94; the gray values under the palette are the ones the
+    /// render golden suites pin against the GDAL/rio-tiler oracle,
+    /// issues #25/#26), so an API-served tile is byte-comparable to a
+    /// direct render.
     ///
     /// Asset refs are the bare fixture file names; the caller decides
     /// where they live by choosing the `RasterSource`'s store root (the
@@ -152,7 +153,7 @@ impl LayerRegistry {
             id: "ndvi".to_owned(),
             title: "HLS NDVI".to_owned(),
             description: "HLS S30 T13SDD 2024-158 NDVI ((B8A - B04) / (B8A + B04)), \
-                          rescaled -1..1, grayscale."
+                          rescaled -1..1, RdYlGn colormap."
                 .to_owned(),
             bands: [
                 ("b8a".to_owned(), asset("b8a")),
@@ -170,7 +171,7 @@ impl LayerRegistry {
                         min: -1.0,
                         max: 1.0,
                     },
-                    PixelOp::Colormap(Colormap::Grayscale),
+                    PixelOp::Colormap(Colormap::RdYlGn),
                 ],
                 OutputSpec::new(TileFormat::Png),
             ),

@@ -102,7 +102,12 @@ fn layer() -> impl Strategy<Value = Layer> {
         text(),
         plan_kind(),
         (finite_f64(), finite_f64()).prop_map(|(min, max)| Rescale { min, max }),
-        proptest::option::of(Just(Colormap::Grayscale)),
+        proptest::option::of(prop_oneof![
+            Just(Colormap::Grayscale),
+            Just(Colormap::Viridis),
+            Just(Colormap::Magma),
+            Just(Colormap::RdYlGn),
+        ]),
         prop_oneof![Just(Resampling::Nearest), Just(Resampling::Bilinear)],
         1..=1024_u32,
         // The optional openEO process record: any JSON object round-trips
@@ -313,4 +318,22 @@ fn representative_collection_document_is_pinned() {
 #[test]
 fn representative_item_document_is_pinned() {
     insta::assert_json_snapshot!("hls_item", granule_to_stac_item(&hls_granule()));
+}
+
+/// The persisted colormap spellings are contractual (they appear verbatim
+/// in `swath:layers` documents, config files, and the openEO `save_result`
+/// colormap option): pin every variant's wire name.
+#[test]
+fn colormap_spellings_are_contractual() {
+    for (map, spelling) in [
+        (Colormap::Grayscale, "grayscale"),
+        (Colormap::Viridis, "viridis"),
+        (Colormap::Magma, "magma"),
+        (Colormap::RdYlGn, "rdylgn"),
+    ] {
+        let json = serde_json::to_value(map).expect("serializes");
+        assert_eq!(json, serde_json::json!(spelling));
+        let back: Colormap = serde_json::from_value(json).expect("deserializes");
+        assert_eq!(back, map);
+    }
 }

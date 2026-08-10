@@ -48,7 +48,7 @@ expression: ndvi_plan()
       }
     },
     {
-      "Colormap": "Grayscale"
+      "Colormap": "RdYlGn"
     }
   ],
   "output": {

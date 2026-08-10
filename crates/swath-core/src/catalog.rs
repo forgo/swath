@@ -385,13 +385,21 @@ pub struct Rescale {
 }
 
 /// A named colormap applied to gray planes. Mirrors the serving vocabulary
-/// (`swath-render` grows real palettes; this enum follows).
+/// (`swath_render::ir::Colormap`); the persisted spellings are the same
+/// lowercase names the config file and openEO `save_result` option use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Colormap {
     /// The identity map: gray in, gray out.
     Grayscale,
+    /// Matplotlib's perceptually uniform sequential `viridis`.
+    Viridis,
+    /// Matplotlib's perceptually uniform sequential `magma`.
+    Magma,
+    /// The `ColorBrewer` diverging red–yellow–green map — NDVI's default.
+    #[serde(rename = "rdylgn")]
+    RdYlGn,
 }
 
 /// Resampling kernel a layer's warps use. The nodata *policy* is a

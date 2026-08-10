@@ -91,6 +91,16 @@ pub(crate) enum ConfigError {
         /// The unexpected band name.
         band: String,
     },
+    /// A colormap on a layer kind that renders RGB directly.
+    #[error(
+        "layer `{layer}`: kind `{kind}` renders RGB directly; `colormap` applies only to `ndvi`"
+    )]
+    ColormapNotApplicable {
+        /// The layer id.
+        layer: String,
+        /// The kind name as written in the file.
+        kind: &'static str,
+    },
     /// Catalog mode was requested without any datasets to serve.
     #[error("catalog mode needs at least one [[datasets]] entry (layers are defined per dataset)")]
     NoDatasets,
@@ -229,6 +239,9 @@ struct LayerConfig {
     /// Linear rescale of pipeline output to 0..255. Optional for
     /// `truecolor` (raw values clamp); `ndvi` defaults to `[-1, 1]`.
     rescale: Option<[f64; 2]>,
+    /// Colormap applied to the gray result — `ndvi` only (`truecolor`
+    /// renders RGB directly); `ndvi` defaults to `rdylgn` (issue #94).
+    colormap: Option<ColormapConfig>,
     /// Warp kernel; defaults to bilinear (nodata-excluding).
     #[serde(default)]
     resampling: ResamplingConfig,
@@ -299,6 +312,44 @@ impl LayerKind {
         match self {
             Self::Truecolor => &["r", "g", "b"],
             Self::Ndvi => &["nir", "red"],
+        }
+    }
+}
+
+/// Config-file spelling of the colormap applied to gray (ndvi) output.
+/// The names match the persisted catalog vocabulary and the openEO
+/// `save_result` colormap option.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ColormapConfig {
+    /// The identity map: gray in, gray out.
+    Grayscale,
+    /// Matplotlib's perceptually uniform sequential `viridis`.
+    Viridis,
+    /// Matplotlib's perceptually uniform sequential `magma`.
+    Magma,
+    /// The `ColorBrewer` diverging red–yellow–green map — the NDVI default.
+    Rdylgn,
+}
+
+impl ColormapConfig {
+    /// The Render IR variant this spelling selects.
+    fn to_ir(self) -> Colormap {
+        match self {
+            Self::Grayscale => Colormap::Grayscale,
+            Self::Viridis => Colormap::Viridis,
+            Self::Magma => Colormap::Magma,
+            Self::Rdylgn => Colormap::RdYlGn,
+        }
+    }
+
+    /// The persisted catalog vocabulary for the same map.
+    fn to_domain(self) -> domain::Colormap {
+        match self {
+            Self::Grayscale => domain::Colormap::Grayscale,
+            Self::Viridis => domain::Colormap::Viridis,
+            Self::Magma => domain::Colormap::Magma,
+            Self::Rdylgn => domain::Colormap::RdYlGn,
         }
     }
 }
@@ -491,6 +542,23 @@ fn load_file(path: &Path) -> Result<ConfigFile, ConfigError> {
 }
 
 impl LayerConfig {
+    /// The effective colormap of a gray (`ndvi`) layer: the configured
+    /// map, defaulting to the diverging `RdYlGn` (issue #94).
+    fn colormap(&self) -> ColormapConfig {
+        self.colormap.unwrap_or(ColormapConfig::Rdylgn)
+    }
+
+    /// Rejects an explicit `colormap` on kinds that render RGB directly.
+    fn reject_colormap(&self) -> Result<(), ConfigError> {
+        match self.colormap {
+            None => Ok(()),
+            Some(_) => Err(ConfigError::ColormapNotApplicable {
+                layer: self.id.clone(),
+                kind: self.kind.name(),
+            }),
+        }
+    }
+
     /// Compiles this entry into a servable [`Layer`], validating that the
     /// declared bands are exactly the set the kind consumes.
     /// `default_budget` is the resolved global default the entry's own
@@ -524,6 +592,7 @@ impl LayerConfig {
         let mut ops = Vec::new();
         match self.kind {
             LayerKind::Truecolor => {
+                self.reject_colormap()?;
                 ops.push(PixelOp::Composite {
                     r: "r".into(),
                     g: "g".into(),
@@ -540,7 +609,7 @@ impl LayerConfig {
                 ));
                 let [min, max] = self.rescale.unwrap_or([-1.0, 1.0]);
                 ops.push(PixelOp::Rescale { min, max });
-                ops.push(PixelOp::Colormap(Colormap::Grayscale));
+                ops.push(PixelOp::Colormap(self.colormap().to_ir()));
             }
         }
 
@@ -606,6 +675,7 @@ impl LayerConfig {
         let mut ops = Vec::new();
         let (plan_kind, rescale, colormap) = match self.kind {
             LayerKind::Truecolor => {
+                self.reject_colormap()?;
                 ops.push(PixelOp::Composite {
                     r: role["r"].clone(),
                     g: role["g"].clone(),
@@ -631,13 +701,14 @@ impl LayerConfig {
                 ));
                 let [min, max] = self.rescale.unwrap_or([-1.0, 1.0]);
                 ops.push(PixelOp::Rescale { min, max });
-                ops.push(PixelOp::Colormap(Colormap::Grayscale));
+                let colormap = self.colormap();
+                ops.push(PixelOp::Colormap(colormap.to_ir()));
                 (
                     domain::PlanKind::BandMath {
                         expression: format!("({nir} - {red}) / ({nir} + {red})"),
                     },
                     domain::Rescale { min, max },
-                    Some(domain::Colormap::Grayscale),
+                    Some(colormap.to_domain()),
                 )
             }
         };
@@ -904,6 +975,111 @@ mod tests {
             "
             )
             .is_err()
+        );
+    }
+
+    /// The per-layer colormap key (issue #94): ndvi defaults to the
+    /// diverging `RdYlGn`, an explicit map wins, and RGB kinds reject the
+    /// key loudly.
+    #[test]
+    fn ndvi_colormap_defaults_to_rdylgn_and_is_selectable() {
+        use swath_render::ir::{Colormap, PixelOp};
+
+        let ndvi = |extra: &str| -> super::ConfigFile {
+            toml::from_str(&format!(
+                r#"
+                [[layers]]
+                id = "veg"
+                kind = "ndvi"
+                {extra}
+                [layers.bands]
+                nir = "b8a.tif"
+                red = "b04.tif"
+            "#
+            ))
+            .expect("parses")
+        };
+
+        // Unset: the NDVI default is the diverging map.
+        let layer = ndvi("").layers[0]
+            .to_layer(&Budget::default())
+            .expect("compiles");
+        assert_eq!(
+            layer.plan.ops.last(),
+            Some(&PixelOp::Colormap(Colormap::RdYlGn))
+        );
+
+        // Explicit choice wins — including opting back into grayscale.
+        for (spelling, expected) in [
+            ("grayscale", Colormap::Grayscale),
+            ("viridis", Colormap::Viridis),
+            ("magma", Colormap::Magma),
+            ("rdylgn", Colormap::RdYlGn),
+        ] {
+            let file = ndvi(&format!("colormap = \"{spelling}\""));
+            let layer = file.layers[0]
+                .to_layer(&Budget::default())
+                .expect("compiles");
+            assert_eq!(layer.plan.ops.last(), Some(&PixelOp::Colormap(expected)));
+        }
+
+        // An unknown spelling fails at parse, like every enum key.
+        assert!(
+            toml::from_str::<super::ConfigFile>(
+                r#"
+                [[layers]]
+                id = "veg"
+                kind = "ndvi"
+                colormap = "jet"
+                [layers.bands]
+                nir = "b8a.tif"
+                red = "b04.tif"
+            "#
+            )
+            .is_err()
+        );
+
+        // truecolor renders RGB directly: an explicit colormap is an error.
+        let file: super::ConfigFile = toml::from_str(
+            r#"
+            [[layers]]
+            id = "tc"
+            kind = "truecolor"
+            colormap = "viridis"
+            [layers.bands]
+            r = "b04.tif"
+            g = "b03.tif"
+            b = "b02.tif"
+        "#,
+        )
+        .expect("parses");
+        assert!(matches!(
+            file.layers[0].to_layer(&Budget::default()),
+            Err(ConfigError::ColormapNotApplicable { .. })
+        ));
+    }
+
+    /// Catalog mode persists the same default: the ndvi layer's domain
+    /// record carries the diverging map (issue #94).
+    #[test]
+    fn catalog_ndvi_layer_persists_the_rdylgn_colormap() {
+        let file: ConfigFile = toml::from_str(CATALOG_TOML).expect("parses");
+        let mode = super::compile_catalog_mode(
+            file.catalog.clone().unwrap(),
+            None,
+            &file.datasets,
+            &Budget::default(),
+        )
+        .expect("compiles");
+        assert_eq!(
+            mode.datasets[0].layers[1].colormap,
+            Some(super::domain::Colormap::RdYlGn)
+        );
+        assert_eq!(
+            mode.layers[1].plan.ops.last(),
+            Some(&swath_render::ir::PixelOp::Colormap(
+                swath_render::ir::Colormap::RdYlGn
+            ))
         );
     }
 
