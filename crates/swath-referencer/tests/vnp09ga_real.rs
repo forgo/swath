@@ -9,8 +9,6 @@
 //! test is skipped (the tiny committed fixture in `known_answer.rs` keeps PR
 //! CI covering the same code paths).
 
-// A gated test's skip notice legitimately goes to stderr.
-#![allow(clippy::print_stderr)]
 // Real-granule HDF5 assertions: compiled out of feature-off builds (#99).
 #![cfg(feature = "legacy-hdf5")]
 
@@ -20,19 +18,15 @@ use swath_core::ingest::IngestReferencer as _;
 use swath_core::manifest::GeorefCrs;
 use swath_referencer::SwathReferencer;
 
-/// The granule under test, when the harness provides one.
-fn granule() -> Option<PathBuf> {
-    std::env::var_os("SWATH_VNP09GA").map(PathBuf::from)
-}
-
 #[test]
 #[ignore = "needs a real VNP09GA granule (run via `just test-referencer`)"]
 fn vnp09ga_manifest_structure_and_georef() {
-    let Some(path) = granule() else {
-        // Belt and braces: even under --ignored, absent creds skip cleanly.
-        eprintln!("SWATH_VNP09GA not set; skipping");
+    // Belt and braces: even under --ignored, absent creds skip cleanly
+    // (the workspace-wide skip semantics live in swath-testsupport, #97).
+    let Some(granule) = swath_testsupport::gated_var("SWATH_VNP09GA") else {
         return;
     };
+    let path = PathBuf::from(granule);
     let manifest = SwathReferencer::new().generate(&path).expect("generates");
 
     // The bake-off's structural truth for this product (prototype 0001 §7):

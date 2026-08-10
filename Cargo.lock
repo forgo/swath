@@ -3199,6 +3199,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "swath-core",
+ "swath-testsupport",
  "tokio",
 ]
 
@@ -3262,7 +3263,6 @@ dependencies = [
  "swath-core",
  "swath-referencer",
  "swath-testsupport",
- "thiserror 2.0.20",
  "tokio",
 ]
 
@@ -3272,10 +3272,8 @@ version = "0.0.0"
 dependencies = [
  "gribberish",
  "hdf5-metno",
- "serde_json",
  "swath-core",
  "swath-testsupport",
- "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -3323,7 +3321,6 @@ dependencies = [
  "serde_json",
  "swath-core",
  "swath-testsupport",
- "thiserror 2.0.20",
  "tokio",
 ]
 
@@ -3339,7 +3336,6 @@ dependencies = [
  "swath-render",
  "swath-reproject-proj4rs",
  "swath-testsupport",
- "thiserror 2.0.20",
  "tokio",
 ]
 

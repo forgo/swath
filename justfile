@@ -8,6 +8,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 nextest_version := "0.9.143"
 llvm_cov_version := "0.8.7"
 deny_version := "0.20.2"
+machete_version := "0.9.2"
 zizmor_version := "1.29.0"
 prek_version := "0.4.12"
 oha_version := "1.15.0"
@@ -37,6 +38,7 @@ setup-ci *tools="nextest llvm-cov deny":
             nextest)  command -v cargo-nextest  >/dev/null || install cargo-nextest  "{{nextest_version}}" ;;
             llvm-cov) cargo llvm-cov --version >/dev/null 2>&1 || install cargo-llvm-cov "{{llvm_cov_version}}" ;;
             deny)     command -v cargo-deny     >/dev/null || install cargo-deny     "{{deny_version}}" ;;
+            machete)  command -v cargo-machete  >/dev/null || install cargo-machete  "{{machete_version}}" ;;
             oha)      command -v oha            >/dev/null || install oha            "{{oha_version}}" ;;
             none)     ;;
             *)        echo "unknown tool: $tool" >&2; exit 1 ;;
@@ -72,6 +74,13 @@ fmt-check:
 # Lint: clippy over the whole workspace, warnings are errors.
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
+
+# Unused-dependency gate (issue #105): cargo-machete (pinned; install via
+# `just setup-ci machete`) over the workspace manifests. Zero findings is
+# the bar; false positives get a documented `[package.metadata.cargo-machete]
+# ignored` entry, never a shrug.
+machete:
+    cargo machete
 
 # Run all tests: nextest (unit/integration) + doctests (nextest skips them).
 test:
@@ -343,7 +352,9 @@ build-full:
 
 # The pgstac catalog integration suite (issue #30): the adapter's live tests
 # are #[ignore] by default (they need a real pgstac); this recipe brings up
-# the compose pgstac service (reusing one that is already running), runs them
+# the compose pgstac service (reusing one that is already running), exports
+# the gating SWATH_PGSTAC_URL (the tests skip cleanly without it — issue
+# #105 unified all gated suites on swath_testsupport::gated_var), runs them
 # (serially — see .config/nextest.toml), and tears down only what it started.
 test-catalog:
     #!/usr/bin/env bash
@@ -355,7 +366,8 @@ test-catalog:
     fi
     teardown() { if [ "$started" = 1 ]; then docker compose rm -sfv pgstac; fi; }
     trap teardown EXIT
-    cargo nextest run -p swath-catalog-pgstac --run-ignored all
+    SWATH_PGSTAC_URL="${SWATH_PGSTAC_URL:-postgres://swath:swath-local-dev@localhost:5432/swath}" \
+        cargo nextest run -p swath-catalog-pgstac --run-ignored all
 
 # The compose-stack e2e — now THE north-star demo path (issues #15/#29/#31,
 # REQUIREMENTS.md R1/R8 + §3): build the swath image, bring up the full local
@@ -546,4 +558,4 @@ bench-baseline: bench
     EOF
 
 # The one-command gate: everything CI enforces.
-check: fmt-check lint test deny zizmor reuse
+check: fmt-check lint machete test deny zizmor reuse

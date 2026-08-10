@@ -4,8 +4,9 @@
 //! Swath domain core.
 //!
 //! The pure-logic center of Swath (ADR 0001, ADR 0002): domain types, port
-//! traits, the materialization planner, the process-graph compiler + Render IR,
-//! and the [`Trace`](trace::Trace) model. This crate performs **no I/O** — no
+//! traits, the materialization planner, and the [`Trace`](trace::Trace) model.
+//! (The process-graph compiler and the Render IR live in `swath-render`, the
+//! rendering engine crate — not here.) This crate performs **no I/O** — no
 //! filesystem, no network, no clocks, no async runtime. Everything external
 //! enters through port traits implemented by adapter crates. Port traits may
 //! be `async` (they describe I/O an adapter will perform — see

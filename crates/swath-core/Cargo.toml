@@ -1,6 +1,6 @@
 [package]
 name = "swath-core"
-description = "Swath domain core: types, port traits, planner, compiler + IR, trace model. No I/O."
+description = "Swath domain core: types, port traits, planner, trace model. No I/O. (Compiler + Render IR live in swath-render.)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

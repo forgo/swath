@@ -16,7 +16,6 @@ publish = false
 flate2 = { workspace = true }
 object_store = { workspace = true }
 swath-core = { path = "../../swath-core", version = "0.0.0" }
-thiserror = { workspace = true }
 
 [dev-dependencies]
 serde = { workspace = true }
