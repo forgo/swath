@@ -50,5 +50,9 @@ COPY tests/fixtures /app/tests/fixtures
 # Unprivileged (ports >1024 only).
 USER 65534:65534
 EXPOSE 8080
+# Bind via env, not only the CMD flag: user-supplied `docker run` args
+# REPLACE CMD, so the README's `docker run … serve --fixtures` would
+# otherwise bind the in-container loopback and be unreachable through -p.
+ENV SWATH_BIND=0.0.0.0:8080
 ENTRYPOINT ["swath"]
 CMD ["serve", "--fixtures", "--bind", "0.0.0.0:8080"]

@@ -29,6 +29,18 @@ Everything in the platform optimizes and reports this number.
 
 Pre-alpha. Design phase.
 
+## Install
+
+Run the demo container — the committed HLS fixtures and the embedded viewer,
+live at <http://localhost:8080>:
+
+```sh
+docker run -p 8080:8080 ghcr.io/forgo/swath serve --fixtures
+```
+
+Every published image passed this exact command in CI (the publish workflow
+smoke-tests `/healthz`, a rendered tile, and the viewer before pushing).
+
 ## Documentation
 
 Read in this order:
