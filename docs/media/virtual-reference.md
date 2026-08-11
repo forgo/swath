@@ -1,7 +1,7 @@
 # Legacy virtual-reference mechanism
 
-Hand-crafted SVG (plan decision #3: this one diagram is SVG, not Mermaid, because the
-chunk-grid/byte-range geometry is the point). The file
+Hand-crafted SVG (plan decision #3 — this figure set the style the other three diagrams now
+follow; here because the chunk-grid/byte-range geometry is the point). The file
 [`virtual-reference.svg`](virtual-reference.svg) is both the editable source and the export.
 Every figure on it is traceable via
 [`virtual-reference.notes.md`](virtual-reference.notes.md).

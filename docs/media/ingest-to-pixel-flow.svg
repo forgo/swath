@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+SPDX-License-Identifier: Apache-2.0
+
+Hand-crafted diagram: the ingest-to-pixel pipeline with measured stage
+timings. Every number traceable via docs/media/ingest-to-pixel-flow.notes.md.
+Opaque light background so it renders identically on GitHub light and dark.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" width="960" height="600"
+     font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#57606a"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="600" fill="#ffffff"/>
+
+  <text x="480" y="36" text-anchor="middle" font-size="19" font-weight="600" fill="#1f2328">Ingest to pixel — the measured path</text>
+  <text x="480" y="58" text-anchor="middle" font-size="12" fill="#57606a">green = committed measurement (criterion medians on Apple M2 Max, load percentiles, e2e) · gray = no committed timing, deliberately unnumbered</text>
+
+  <!-- ============ ingest lane ============ -->
+  <text x="40" y="92" font-size="12.5" font-weight="600" fill="#1f2328">INGEST — whole pipeline, granule event to first correct pixel: <tspan fill="#1a7f37">297 ms / 801 ms local · 535 ms CI</tspan> · budget 10 000 ms</text>
+
+  <g stroke-width="1.5">
+    <rect x="40" y="104" width="130" height="70" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="194" y="104" width="130" height="70" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="348" y="104" width="130" height="70" rx="7" fill="#fff1e5" stroke="#bc4c00"/>
+    <rect x="502" y="104" width="130" height="70" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="656" y="104" width="130" height="70" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="810" y="104" width="130" height="70" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+  </g>
+  <text x="105" y="126" text-anchor="middle" font-weight="600" fill="#1f2328">Granule event</text>
+  <text x="105" y="143" text-anchor="middle" font-size="11" fill="#1f2328">north-star clock starts</text>
+  <text x="105" y="159" text-anchor="middle" font-size="10.5" fill="#57606a">(no committed timing)</text>
+
+  <text x="259" y="130" text-anchor="middle" font-weight="600" fill="#1f2328">Ingest orchestrator</text>
+  <text x="259" y="147" text-anchor="middle" font-size="11" fill="#57606a">routes by format</text>
+
+  <text x="413" y="122" text-anchor="middle" font-weight="600" fill="#1f2328">Virtual-reference</text>
+  <text x="413" y="136" text-anchor="middle" font-size="10.5" fill="#1f2328">manifest — legacy path</text>
+  <text x="413" y="152" text-anchor="middle" font-size="11" font-weight="600" fill="#1a7f37">14 ms warm / 29 ms cold</text>
+  <text x="413" y="166" text-anchor="middle" font-size="10.5" fill="#57606a">(prototype-grade)</text>
+
+  <text x="567" y="130" text-anchor="middle" font-weight="600" fill="#1f2328">Register asset</text>
+  <text x="567" y="147" text-anchor="middle" font-size="10.5" fill="#57606a">(no committed timing)</text>
+
+  <text x="721" y="126" text-anchor="middle" font-weight="600" fill="#1f2328">Catalog upsert</text>
+  <text x="721" y="141" text-anchor="middle" font-size="11" fill="#1f2328">pgstac</text>
+  <text x="721" y="157" text-anchor="middle" font-size="10.5" fill="#57606a">(no committed timing)</text>
+
+  <text x="875" y="130" text-anchor="middle" font-weight="600" fill="#1f2328">Layer servable</text>
+  <text x="875" y="147" text-anchor="middle" font-size="11" fill="#57606a">tilesets appear</text>
+
+  <g stroke="#57606a" stroke-width="1.5">
+    <line x1="170" y1="139" x2="192" y2="139" marker-end="url(#arrow)"/>
+    <line x1="324" y1="139" x2="346" y2="139" marker-end="url(#arrow)"/>
+    <line x1="478" y1="139" x2="500" y2="139" marker-end="url(#arrow)"/>
+    <line x1="632" y1="139" x2="654" y2="139" marker-end="url(#arrow)"/>
+    <line x1="786" y1="139" x2="808" y2="139" marker-end="url(#arrow)"/>
+  </g>
+  <path d="M 259 174 C 300 210 526 210 566 176" fill="none" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="413" y="216" text-anchor="middle" font-size="10.5" fill="#57606a">clean COG / Zarr — skips referencing</text>
+
+  <!-- ============ serve lane ============ -->
+  <text x="40" y="230" font-size="12.5" font-weight="600" fill="#1f2328">SERVE — tile request; end-to-end HTTP under load: <tspan fill="#1a7f37">p50 22.27 ms hot cache · p50 653.88 ms cold live</tspan> (z15, all Live)</text>
+
+  <!-- row A -->
+  <g stroke-width="1.5">
+    <rect x="40" y="246" width="130" height="64" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="194" y="246" width="130" height="64" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="348" y="246" width="130" height="64" rx="7" fill="#ddf4ff" stroke="#0969da"/>
+    <rect x="560" y="246" width="150" height="64" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="810" y="246" width="130" height="64" rx="7" fill="#dafbe1" stroke="#1a7f37"/>
+  </g>
+  <text x="105" y="272" text-anchor="middle" font-weight="600" fill="#1f2328">GET tile z/y/x</text>
+  <text x="105" y="289" text-anchor="middle" font-size="11" fill="#57606a">OGC Tiles route</text>
+
+  <text x="259" y="268" text-anchor="middle" font-weight="600" fill="#1f2328">Resolve layer</text>
+  <text x="259" y="282" text-anchor="middle" font-weight="600" fill="#1f2328">+ RenderSpec</text>
+  <text x="259" y="298" text-anchor="middle" font-size="10.5" fill="#57606a">(no committed timing)</text>
+
+  <text x="413" y="268" text-anchor="middle" font-weight="600" fill="#1f2328">Planner</text>
+  <text x="413" y="284" text-anchor="middle" font-size="11" font-weight="600" fill="#1a7f37">45–73 ns</text>
+  <text x="413" y="299" text-anchor="middle" font-size="10.5" fill="#57606a">pure, no I/O</text>
+
+  <text x="635" y="268" text-anchor="middle" font-weight="600" fill="#1f2328">Serve stored tile</text>
+  <text x="635" y="283" text-anchor="middle" font-size="10.5" fill="#57606a">pre-warmed, asserted hit</text>
+  <text x="635" y="299" text-anchor="middle" font-size="11" font-weight="600" fill="#1a7f37">storm p50 22.27 ms</text>
+
+  <text x="875" y="272" text-anchor="middle" font-weight="600" fill="#1f2328">Encoded tile</text>
+  <text x="875" y="289" text-anchor="middle" font-weight="600" fill="#1f2328">+ Trace</text>
+
+  <g stroke="#57606a" stroke-width="1.5">
+    <line x1="170" y1="278" x2="192" y2="278" marker-end="url(#arrow)"/>
+    <line x1="324" y1="278" x2="346" y2="278" marker-end="url(#arrow)"/>
+    <line x1="478" y1="278" x2="558" y2="278" marker-end="url(#arrow)"/>
+    <line x1="710" y1="278" x2="808" y2="278" marker-end="url(#arrow)"/>
+  </g>
+  <text x="518" y="270" text-anchor="middle" font-size="10.5" fill="#57606a">cache_hit</text>
+
+  <!-- planner down to render path -->
+  <path d="M 413 310 L 413 344 L 105 344 L 105 378" fill="none" stroke="#0969da" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="259" y="338" text-anchor="middle" font-size="10.5" fill="#0969da">overview / live</text>
+
+  <!-- row B -->
+  <g stroke-width="1.5">
+    <rect x="40" y="380" width="130" height="70" rx="7" fill="#ddf4ff" stroke="#0969da"/>
+    <rect x="194" y="380" width="130" height="70" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="348" y="380" width="130" height="70" rx="7" fill="#ddf4ff" stroke="#0969da"/>
+    <rect x="502" y="380" width="130" height="70" rx="7" fill="#ddf4ff" stroke="#0969da"/>
+    <rect x="656" y="380" width="130" height="70" rx="7" fill="#ddf4ff" stroke="#0969da"/>
+    <rect x="810" y="380" width="130" height="70" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+  </g>
+  <text x="105" y="402" text-anchor="middle" font-weight="600" fill="#1f2328">Source window</text>
+  <text x="105" y="418" text-anchor="middle" font-size="11" font-weight="600" fill="#1a7f37">13.4 µs</text>
+  <text x="105" y="433" text-anchor="middle" font-size="10.5" fill="#57606a">geometry only</text>
+
+  <text x="259" y="402" text-anchor="middle" font-weight="600" fill="#1f2328">Read byte ranges</text>
+  <text x="259" y="418" text-anchor="middle" font-size="10.5" fill="#57606a">(no isolated timing;</text>
+  <text x="259" y="431" text-anchor="middle" font-size="10.5" fill="#57606a">read_ms in each Trace)</text>
+
+  <text x="413" y="402" text-anchor="middle" font-weight="600" fill="#1f2328">Warp (reproject)</text>
+  <text x="413" y="418" text-anchor="middle" font-size="11" font-weight="600" fill="#1a7f37">8.0 ms nearest</text>
+  <text x="413" y="432" text-anchor="middle" font-size="11" font-weight="600" fill="#1a7f37">8.9 ms bilinear / band</text>
+
+  <text x="567" y="402" text-anchor="middle" font-weight="600" fill="#1f2328">Render IR eval</text>
+  <text x="567" y="418" text-anchor="middle" font-size="11" font-weight="600" fill="#1a7f37">3.2–3.3 ms</text>
+  <text x="567" y="433" text-anchor="middle" font-size="10.5" fill="#57606a">band math + colormap</text>
+
+  <text x="721" y="402" text-anchor="middle" font-weight="600" fill="#1f2328">Encode PNG</text>
+  <text x="721" y="418" text-anchor="middle" font-size="11" font-weight="600" fill="#1a7f37">13.0 ms</text>
+
+  <text x="875" y="402" text-anchor="middle" font-weight="600" fill="#1f2328">Write to cache</text>
+  <text x="875" y="418" text-anchor="middle" font-size="10.5" fill="#57606a">(no committed timing)</text>
+
+  <g stroke="#57606a" stroke-width="1.5">
+    <line x1="170" y1="415" x2="192" y2="415" marker-end="url(#arrow)"/>
+    <line x1="324" y1="415" x2="346" y2="415" marker-end="url(#arrow)"/>
+    <line x1="478" y1="415" x2="500" y2="415" marker-end="url(#arrow)"/>
+    <line x1="632" y1="415" x2="654" y2="415" marker-end="url(#arrow)"/>
+    <line x1="786" y1="415" x2="808" y2="415" marker-end="url(#arrow)"/>
+    <line x1="875" y1="378" x2="875" y2="312" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- composite bracket -->
+  <g stroke="#1a7f37" stroke-width="1.2">
+    <line x1="40" y1="466" x2="786" y2="466"/>
+    <line x1="40" y1="460" x2="40" y2="466"/>
+    <line x1="786" y1="460" x2="786" y2="466"/>
+  </g>
+  <text x="413" y="486" text-anchor="middle" font-size="11.5" fill="#1a7f37" font-weight="600">composite bench of this chain: 37.3 ms median (NDVI z12, two bands read concurrently, in-memory store)</text>
+  <text x="413" y="502" text-anchor="middle" font-size="10.5" fill="#57606a">stage benches need not sum to it — concurrency, and the warp bench is single-band</text>
+
+  <!-- provenance strip -->
+  <line x1="40" y1="524" x2="920" y2="524" stroke="#d0d7de" stroke-width="1"/>
+  <text x="40" y="546" font-size="11" fill="#57606a">Committed artifacts: docs/perf/bench-baseline.json (criterion medians) · docs/perf/load-baseline.json (oha percentiles) · docs/DEMO.md + swath-e2e (ingest-to-pixel) ·</text>
+  <text x="40" y="562" font-size="11" fill="#57606a">prototypes/0001 (referencer latency, prototype-grade) — figure-by-figure provenance: docs/media/ingest-to-pixel-flow.notes.md</text>
+</svg>

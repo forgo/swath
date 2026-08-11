@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+SPDX-License-Identifier: Apache-2.0
+
+Hand-crafted diagram: standards surfaces around the hexagonal core.
+Solid = implemented with conformance-grade tests; dashed = deferred,
+deliberately not claimed, or docs-only. Line-by-line cross-check:
+docs/media/standards-map.notes.md. Opaque light background so it renders
+identically on GitHub light and dark.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" width="960" height="640"
+     font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5">
+
+  <rect x="0" y="0" width="960" height="640" fill="#ffffff"/>
+
+  <text x="480" y="34" text-anchor="middle" font-size="19" font-weight="600" fill="#1f2328">Standards surfaces — implemented vs deferred</text>
+  <text x="480" y="56" text-anchor="middle" font-size="12" fill="#57606a">solid = code + conformance-grade tests · dashed = deferred, deliberately not claimed, or docs-only</text>
+
+  <text x="180" y="88" text-anchor="middle" font-size="12.5" font-weight="600" fill="#57606a">Inbound API surfaces</text>
+  <text x="780" y="88" text-anchor="middle" font-size="12.5" font-weight="600" fill="#57606a">Persistence and formats behind the ports</text>
+
+  <!-- connectors first; the opaque hexagon covers their convergence -->
+  <g stroke="#0969da" stroke-width="1.6" fill="none">
+    <line x1="320" y1="128" x2="480" y2="330"/>
+    <line x1="320" y1="194" x2="480" y2="330"/>
+    <line x1="320" y1="251" x2="480" y2="330"/>
+    <line x1="640" y1="122" x2="480" y2="330"/>
+    <line x1="640" y1="179" x2="480" y2="330"/>
+    <line x1="640" y1="236" x2="480" y2="330"/>
+  </g>
+  <g stroke="#57606a" stroke-width="1.3" stroke-dasharray="5 4" fill="none">
+    <line x1="320" y1="305" x2="480" y2="330"/>
+    <line x1="320" y1="343" x2="480" y2="330"/>
+    <line x1="320" y1="381" x2="480" y2="330"/>
+    <line x1="320" y1="419" x2="480" y2="330"/>
+    <line x1="320" y1="457" x2="480" y2="330"/>
+    <line x1="320" y1="495" x2="480" y2="330"/>
+    <line x1="320" y1="533" x2="480" y2="330"/>
+    <line x1="640" y1="305" x2="480" y2="330"/>
+    <line x1="640" y1="343" x2="480" y2="330"/>
+    <line x1="640" y1="381" x2="480" y2="330"/>
+  </g>
+
+  <!-- ============ left: inbound, implemented ============ -->
+  <g stroke-width="1.5">
+    <rect x="40" y="96" width="280" height="64" rx="7" fill="#ddf4ff" stroke="#0969da"/>
+    <rect x="40" y="168" width="280" height="52" rx="7" fill="#ddf4ff" stroke="#0969da"/>
+    <rect x="40" y="228" width="280" height="46" rx="7" fill="#ddf4ff" stroke="#0969da"/>
+  </g>
+  <text x="180" y="116" text-anchor="middle" font-weight="600" fill="#1f2328">OGC API — Tiles 1.0</text>
+  <text x="180" y="132" text-anchor="middle" font-size="10.5" fill="#1f2328">5 classes declared: core, tileset, tilesets-list,</text>
+  <text x="180" y="146" text-anchor="middle" font-size="10.5" fill="#1f2328">dataset-tilesets, png · TMS 2.0 WebMercatorQuad</text>
+
+  <text x="180" y="187" text-anchor="middle" font-weight="600" fill="#1f2328">openEO API 1.2.0 — bounded profile</text>
+  <text x="180" y="204" text-anchor="middle" font-size="10.5" fill="#1f2328">collections · 10-process subset · XYZ services (ADR 0010)</text>
+
+  <text x="180" y="246" text-anchor="middle" font-weight="600" fill="#1f2328">Control plane (non-standard)</text>
+  <text x="180" y="262" text-anchor="middle" font-size="10.5" fill="#1f2328">datasets · granules · Trace SSE · healthz</text>
+
+  <!-- ============ left: inbound, dashed ============ -->
+  <g stroke-width="1.3" stroke-dasharray="5 4">
+    <rect x="40" y="290" width="280" height="30" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="40" y="328" width="280" height="30" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="40" y="366" width="280" height="30" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="40" y="404" width="280" height="30" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="40" y="442" width="280" height="30" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="40" y="480" width="280" height="30" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="40" y="518" width="280" height="30" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+  </g>
+  <text x="180" y="309" text-anchor="middle" font-size="11" fill="#1f2328">OGC API — Common · deliberately not claimed</text>
+  <text x="180" y="347" text-anchor="middle" font-size="11" fill="#1f2328">OGC API — Maps · doc over-claim, no code</text>
+  <text x="180" y="385" text-anchor="middle" font-size="11" fill="#1f2328">OGC API — Records · phase 2</text>
+  <text x="180" y="423" text-anchor="middle" font-size="11" fill="#1f2328">OGC API — Processes · phase 2 (openEO today)</text>
+  <text x="180" y="461" text-anchor="middle" font-size="11" fill="#1f2328">OGC API — EDR · phase 3</text>
+  <text x="180" y="499" text-anchor="middle" font-size="11" fill="#1f2328">OGC API — Features · phase 3</text>
+  <text x="180" y="537" text-anchor="middle" font-size="11" fill="#1f2328">openEO auth / jobs / batch / UDPs / files · out of scope</text>
+
+  <!-- ============ right: persistence, implemented ============ -->
+  <g stroke-width="1.5">
+    <rect x="640" y="96" width="280" height="52" rx="7" fill="#ddf4ff" stroke="#0969da"/>
+    <rect x="640" y="156" width="280" height="46" rx="7" fill="#ddf4ff" stroke="#0969da"/>
+    <rect x="640" y="210" width="280" height="52" rx="7" fill="#ddf4ff" stroke="#0969da"/>
+  </g>
+  <text x="780" y="115" text-anchor="middle" font-weight="600" fill="#1f2328">STAC 1.1.0 — hidden persistence (R2)</text>
+  <text x="780" y="132" text-anchor="middle" font-size="10.5" fill="#1f2328">+ datacube extension v2.2.0 · round-trip properties</text>
+
+  <text x="780" y="175" text-anchor="middle" font-weight="600" fill="#1f2328">Cloud-Optimized GeoTIFF reading</text>
+  <text x="780" y="191" text-anchor="middle" font-size="10.5" fill="#1f2328">GDAL / rio-tiler oracle (ADR 0002)</text>
+
+  <text x="780" y="229" text-anchor="middle" font-weight="600" fill="#1f2328">Virtual-reference manifest v1</text>
+  <text x="780" y="246" text-anchor="middle" font-size="10.5" fill="#1f2328">legacy HDF5 · GRIB2 — SHA-256 pixel oracle</text>
+
+  <!-- ============ right: persistence, dashed ============ -->
+  <g stroke-width="1.3" stroke-dasharray="5 4">
+    <rect x="640" y="290" width="280" height="30" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="640" y="328" width="280" height="30" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+    <rect x="640" y="366" width="280" height="30" rx="7" fill="#f6f8fa" stroke="#57606a"/>
+  </g>
+  <text x="780" y="309" text-anchor="middle" font-size="11" fill="#1f2328">GeoZarr overview pyramids · docs-only</text>
+  <text x="780" y="347" text-anchor="middle" font-size="11" fill="#1f2328">Icechunk · docs-only</text>
+  <text x="780" y="385" text-anchor="middle" font-size="11" fill="#1f2328">GeoParquet · docs-only</text>
+
+  <!-- ============ core hexagon (drawn last, covers connector convergence) ============ -->
+  <polygon points="480,266 550,298 550,362 480,394 410,362 410,298" fill="#fff8c5" stroke="#9a6700" stroke-width="2"/>
+  <text x="480" y="320" text-anchor="middle" font-weight="600" fill="#1f2328">swath core</text>
+  <text x="480" y="338" text-anchor="middle" font-size="10.5" fill="#57606a">hexagonal ports</text>
+  <text x="480" y="353" text-anchor="middle" font-size="10.5" fill="#57606a">ADR 0001</text>
+
+  <!-- ============ legend + honesty notes ============ -->
+  <line x1="40" y1="566" x2="920" y2="566" stroke="#d0d7de" stroke-width="1"/>
+  <line x1="60" y1="586" x2="110" y2="586" stroke="#0969da" stroke-width="1.6"/>
+  <text x="118" y="590" font-size="11" fill="#1f2328">implemented — declared and conformance-tested</text>
+  <line x1="470" y1="586" x2="520" y2="586" stroke="#57606a" stroke-width="1.3" stroke-dasharray="5 4"/>
+  <text x="528" y="590" font-size="11" fill="#1f2328">deferred / not claimed / docs-only</text>
+  <text x="60" y="612" font-size="10.5" fill="#57606a">/conformance declares exactly the five Tiles classes (pinned by test); a negative test forbids claiming OGC API Common; openEO claims no conformance</text>
+  <text x="60" y="627" font-size="10.5" fill="#57606a">class by design (no auth endpoints, absence test-enforced) · cross-check table: docs/media/standards-map.notes.md</text>
+</svg>

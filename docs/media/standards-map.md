@@ -1,54 +1,22 @@
 # Standards surfaces map
 
-Solid lines are surfaces that exist in code with conformance-grade test evidence; dashed lines
-are deferred, deliberately-not-claimed, or docs-only surfaces. The split is cross-checked
-line-by-line against the declared conformance list and the test files in
-[`standards-map.notes.md`](standards-map.notes.md).
+Hand-crafted SVG — [`standards-map.svg`](standards-map.svg) is both the editable source and
+the export (canonical). Solid connectors and boxes are surfaces that exist in code with
+conformance-grade test evidence; dashed are deferred, deliberately-not-claimed, or docs-only.
+The split is cross-checked line-by-line against the declared conformance list and the test
+files in [`standards-map.notes.md`](standards-map.notes.md).
 
-```mermaid
-flowchart LR
-    subgraph inbound["Inbound API surfaces"]
-        TILES["OGC API - Tiles 1.0<br/>5 conformance classes declared:<br/>core, tileset, tilesets-list,<br/>dataset-tilesets, png<br/>+ TMS 2.0 WebMercatorQuad"]
-        OPENEO["openEO API 1.2.0<br/>bounded profile, ADR 0010:<br/>collections, processes 10-op subset,<br/>service_types, XYZ services"]
-        CTRL["Control plane, non-standard:<br/>datasets, granules, Trace SSE, healthz"]
-        COMMON["OGC API - Common Part 1<br/>deliberately NOT claimed:<br/>no OpenAPI definition served"]
-        MAPS["OGC API - Maps"]
-        RECORDS["OGC API - Records, phase 2"]
-        PROC["OGC API - Processes, phase 2<br/>today only via the openEO vocabulary"]
-        EDR["OGC API - EDR, phase 3"]
-        FEAT["OGC API - Features, phase 3"]
-        OEDEF["openEO auth, jobs, batch,<br/>UDPs, files — out of scope,<br/>absence test-enforced"]
-    end
-
-    CORE{{"swath core<br/>hexagonal ports, ADR 0001"}}
-
-    subgraph outbound["Persistence and formats behind the ports"]
-        STAC["STAC 1.1.0, hidden persistence<br/>+ datacube extension v2.2.0"]
-        COG["COG reading"]
-        VREF["Virtual-reference manifest v1<br/>legacy HDF5, NetCDF, GRIB2"]
-        GEOZARR["GeoZarr overview pyramids"]
-        ICE["Icechunk"]
-        GPQ["GeoParquet"]
-    end
-
-    TILES --> CORE
-    OPENEO --> CORE
-    CTRL --> CORE
-    COMMON -.-> CORE
-    MAPS -.-> CORE
-    RECORDS -.-> CORE
-    PROC -.-> CORE
-    EDR -.-> CORE
-    FEAT -.-> CORE
-    OEDEF -.-> CORE
-
-    CORE --> STAC
-    CORE --> COG
-    CORE --> VREF
-    CORE -.-> GEOZARR
-    CORE -.-> ICE
-    CORE -.-> GPQ
-```
+![Standards surfaces around the hexagonal swath core (ADR 0001). Implemented, drawn solid —
+inbound: OGC API Tiles 1.0 with exactly five declared conformance classes (core, tileset,
+tilesets-list, dataset-tilesets, png) plus TMS 2.0 WebMercatorQuad; openEO API 1.2.0 as a
+bounded profile (collections, 10-process subset, XYZ services, ADR 0010); and the
+non-standard control plane (datasets, granules, Trace SSE, healthz). Implemented persistence
+and formats: STAC 1.1.0 hidden persistence with datacube extension v2.2.0; Cloud-Optimized
+GeoTIFF reading under the GDAL/rio-tiler oracle; virtual-reference manifest v1 for legacy
+HDF5 and GRIB2 with a SHA-256 pixel oracle. Deferred or not claimed, drawn dashed: OGC API
+Common (deliberately not claimed), Maps (doc over-claim, no code), Records and Processes
+(phase 2), EDR and Features (phase 3), openEO auth/jobs/batch/UDPs/files (out of scope), and
+GeoZarr, Icechunk, GeoParquet (docs-only).](standards-map.svg)
 
 Honesty notes the map encodes (details and evidence in the sidecar):
 

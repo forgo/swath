@@ -1,41 +1,23 @@
 # Ingest-to-pixel flow, with measured stage timings
 
-Every number below comes from a committed artifact — see
+Hand-crafted SVG — [`ingest-to-pixel-flow.svg`](ingest-to-pixel-flow.svg) is both the editable
+source and the export (canonical; there is no separate generated form). Every number on it
+comes from a committed artifact — see
 [`ingest-to-pixel-flow.notes.md`](ingest-to-pixel-flow.notes.md) for the figure-by-figure
-provenance (bench medians are criterion medians on Apple M2 Max; HTTP percentiles are the
-committed load baseline; whole-pipeline numbers are the e2e harness). Stages labeled
-*no committed timing* have never been measured in a committed artifact and carry no number
-on purpose.
+provenance. Stages labeled *(no committed timing)* have never been measured in a committed
+artifact and carry no number on purpose.
 
-```mermaid
-flowchart TD
-    subgraph ingest["Ingest half — whole-pipeline ingest-to-pixel: 297 ms and 801 ms local, 535 ms CI, budget 10 000 ms"]
-        EV["Granule event arrives<br/>arrival stamps the north-star clock<br/>(no committed timing)"] --> ORCH{"Ingest<br/>orchestrator"}
-        ORCH -->|"clean COG / Zarr"| REG["Register asset<br/>(no committed timing)"]
-        ORCH -->|"legacy NetCDF / HDF"| VREF["Virtual-reference manifest<br/>14 ms warm, 29 ms cold<br/>(prototype-grade measurement)"]
-        VREF --> REG
-        REG --> CAT["Catalog upsert, pgstac<br/>(no committed timing)"]
-        CAT --> SRV["Layer servable"]
-    end
-
-    SRV -.-> REQ
-
-    subgraph serve["Serve half — end-to-end HTTP p50: 22.27 ms hot cache, 653.88 ms cold live render"]
-        REQ["GET tile z/y/x"] --> RES["Resolve layer + RenderSpec<br/>(no committed timing)"]
-        RES --> PLAN["Planner<br/>45–73 ns"]
-        PLAN -->|"cache_hit"| HIT["Serve stored tile<br/>storm p50 22.27 ms end-to-end"]
-        PLAN -->|"overview / live"| WIN["Source window computation<br/>13.4 µs"]
-        WIN --> READ["Read source byte ranges<br/>(no committed isolated timing;<br/>read_ms exists per-request in the Trace)"]
-        READ --> WARP["Reproject + resample, per band<br/>8.0 ms nearest, 8.9 ms bilinear"]
-        WARP --> EVAL["Render IR: band math, composite, colormap<br/>3.2 ms grayscale, 3.3 ms RdYlGn"]
-        EVAL --> ENC["Encode PNG<br/>13.0 ms"]
-        ENC --> WT["Write-through cache<br/>(no committed timing)"]
-        WT --> OUT["Encoded tile + Trace"]
-        HIT --> OUT
-    end
-
-    OUT -.- NOTE["Full composite bench, window→read→warp→eval→encode,<br/>NDVI z12 from an in-memory store: 37.3 ms median"]
-```
+![Ingest to pixel, the measured path. Ingest half: granule event (north-star clock starts) to
+ingest orchestrator, which routes clean COG/Zarr straight to asset registration and legacy
+HDF through virtual-reference manifest generation (14 ms warm / 29 ms cold, prototype-grade),
+then catalog upsert to a servable layer; the whole pipeline measures 297 and 801 ms locally,
+535 ms in CI, against a 10 000 ms budget. Serve half: GET tile, resolve layer and RenderSpec,
+planner (45-73 ns); a cache hit serves the stored tile (storm p50 22.27 ms end-to-end), else
+the render path runs source window computation (13.4 microseconds), byte-range reads, warp
+(8.0 ms nearest / 8.9 ms bilinear per band), render IR eval (3.2-3.3 ms), PNG encode
+(13.0 ms), cache write-through, and returns the encoded tile plus Trace; the composite bench
+of that chain is 37.3 ms median, and cold live requests measure p50 653.88 ms end-to-end
+under load.](ingest-to-pixel-flow.svg)
 
 Reading notes:
 
