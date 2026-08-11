@@ -32,10 +32,11 @@ swath/
   python/               # thin ingest sidecars (uv workspace, single uv.lock)
   prototypes/           # dated, immutable trade-studies (own convention; excluded from workspace)
   docs/                 # charter, requirements, architecture, this doc, decisions/
+  renovate.json         # update automation (repo root; Dependabot alerts are a repo setting — §5.8)
   .github/
-    workflows/          # ci.yml, security.yml, release.yml (SHA-pinned actions)
+    workflows/          # ci.yml, security.yml, release*.yml, scorecard.yml, codeql.yml … (SHA-pinned)
     actions/setup-rust/ # composite action: toolchain + tiered caching + pinned tools
-    CODEOWNERS  ISSUE_TEMPLATE/  dependabot.yml (security alerts) / renovate.json (updates)
+    CODEOWNERS  ISSUE_TEMPLATE/  pull_request_template.md
 ```
 
 Heavy monorepo tooling (Bazel, Nx, moon, Pants) is **not warranted** — none of the surveyed
@@ -73,12 +74,20 @@ Per-language version pinning stays in the idiomatic files — `rust-toolchain.to
   nightly scheduled (RustSec updates daily; scheduled run files issues — forgo-rust's audit
   pattern, upgraded from cargo-audit to deny). `cargo auditable` embedded in release binaries.
   cargo-vet/crev: skipped for now (org-scale tooling); `cargo-semver-checks` only when we publish
-  library crates (release-plz integrates it).
+  library crates (release-plz integrates it). *Status: deny runs in CI (`rust-deny`) and nightly
+  (`security.yml`); `cargo auditable` is **deferred to graduation tier** (§7, RELEASING.md
+  checklist) — release binaries do not embed it yet.*
 - **Testing stack**: `cargo-nextest` as the runner (plus a `cargo test --doc` step — nextest skips
   doctests); `proptest` for the planner's property tests; `insta` for snapshot tests; `criterion`
   for the planner/render benchmarks that gate the north-star latency budget *(divan acceptable for
-  cheap always-on microbenches)*; **Miri** as a scheduled job on crates containing `unsafe`;
-  ASan/UBSan test mode carried from forgo-auth where FFI (PROJ, HDF5 bindings) enters.
+  cheap always-on microbenches)*; **Miri** as a scheduled job on crates containing `unsafe` —
+  *status: dormant by design — no crate in the workspace contains `unsafe` today
+  (`unsafe_code = "warn"`, zero hits), so no Miri job exists; it lands with the first
+  unsafe-bearing crate*; ASan/UBSan test mode carried from forgo-auth where FFI enters —
+  *status: **explicitly deferred.** FFI has entered (the bundled libhdf5 C build behind
+  `legacy-hdf5`) but no sanitizer test mode exists yet; deferral inventory candidate for
+  ROADMAP.md (#126). Until then the honest mitigations are the referencer conformance gate
+  (byte-equivalence vs the Python sidecar) and the known-answer tests.*
 - **Coverage**: `cargo-llvm-cov` (region coverage) → **Codecov** (OSS default; informational PR
   comment + patch-coverage signal; no hard gate initially — gates come after the baseline exists).
 - **Fast dev-loop profile** (issue #99): the referencer's HDF5/NetCDF4 support — and with it the
@@ -104,10 +113,14 @@ Per-language version pinning stays in the idiomatic files — `rust-toolchain.to
 - **Vitest 4 with Browser Mode (Playwright provider)** for component tests — jsdom/happy-dom have
   no real Shadow DOM or WebGL, so **MapLibre is untestable outside a real browser**; Browser Mode
   is the 2026 consensus for Web Components. **Playwright** for e2e flows.
-- **ESM-only**; MapLibre GL as a `peerDependency` if the components are published;
-  `custom-elements.json` manifest via `@custom-elements-manifest/analyzer`; a served component
-  **showcase page as living documentation** (carried from forgo-auth). Light-DOM vs Shadow-DOM and
-  vanilla-vs-Lit stay per-ADR-0005 vanilla; revisit only if template/state complexity grows.
+- **ESM-only** *(real)*; MapLibre GL as a `peerDependency` if the components are published *(not
+  published — conditional, dormant)*; `custom-elements.json` manifest via
+  `@custom-elements-manifest/analyzer` — *status: **explicitly deferred** until the components are
+  published as a library; not generated today*; a served component **showcase page as living
+  documentation** (carried from forgo-auth) — *status: exists as the embedded demo viewer
+  (`web/demo/`, served by `just demo` and the fixtures container) rather than a per-component
+  gallery*. Light-DOM vs Shadow-DOM and vanilla-vs-Lit stay per-ADR-0005 vanilla; revisit only if
+  template/state complexity grows.
 
 ## 4. Python sidecar standards (`python/`)
 
@@ -147,7 +160,8 @@ a codified lesson; these are standing rules, enforced by tooling, not memory:
    `minimumReleaseAge` cooldown — the direct Shai-Hulud countermeasure) **+ Dependabot for
    security alerts only**. *(Contested; this split is the common compromise.)*
 9. harden-runner: `egress-policy: audit` for telemetry only — it is **not** a security boundary
-   (bypass research + CVE-2026-32946).
+   (bypass research + CVE-2026-32946). *Status: **not deployed** — no workflow installs it today;
+   given it is telemetry-only, adopting it is a judgment call left open rather than a gap.*
 10. CodeQL with the Rust pack (GA Oct 2025, codeql-action v4) — supplementary signal, not primary.
 
 ## 6. CI architecture
@@ -174,8 +188,9 @@ changes (dorny/paths-filter) ─┬─ rust: fmt → clippy → nextest (+ --doc
   (registry/git/target keyed on `Cargo.lock`; `~/.cargo/bin` keyed on pinned tool versions) +
   `cargo-binstall`-based pinned tool installs.
 - Formatting is checked **once**, not per-matrix-leg (forgo-auth pattern).
-- Scheduled (`security.yml`): nightly cargo-deny advisories (files issues), Scorecard, CodeQL,
-  Miri on unsafe-bearing crates.
+- Scheduled security surfaces, as shipped: nightly cargo-deny advisories in `security.yml` (files
+  issues); Scorecard and CodeQL in their own workflows (`scorecard.yml`, `codeql.yml`) rather than
+  one file; Miri has no job because no crate carries `unsafe` (§2).
 - Docker images (when they exist): buildx with GHA layer cache, **smoke-test the image before
   pushing** (forgo-auth pattern), GHCR via `GITHUB_TOKEN`.
 - Merge queue: adopt when there's more than one regular committer; the `ci-ok` shape is already
@@ -222,9 +237,10 @@ first official release.
 - **SECURITY.md** modeled on forgo-auth's (supported versions, 48-72h ack SLA, ~90-day coordinated
   disclosure, and a "security design" section documenting deliberate choices) + GitHub **Private
   Vulnerability Reporting** enabled (and maintainer notifications turned on — off by default).
-- **DCO** enforced via **cncf/dco2** (probot/dco's hosted instance is dead) or a native ruleset
-  regex. Per ADR 0003; note honestly: DCO grants no relicensing rights — if a commercial `ee/`
-  tree ever lands, it gets CLA-or-no-external-contributions treatment, not DCO.
+- **DCO** enforced via **cncf/dco2** — as shipped, the `DCO` check is a required status in the
+  `main protections` ruleset alongside `ci-ok` and `lint-pr-title`. Per ADR 0003; note honestly:
+  DCO grants no relicensing rights — if a commercial `ee/` tree ever lands, it gets
+  CLA-or-no-external-contributions treatment, not DCO.
 - **CODEOWNERS**: catch-all `* @forgo`, explicit ownership of `/.github/workflows/` (workflow
   changes are the attack surface).
 - **Issue forms** (YAML, `blank_issues_enabled: false`, security routed to PVR); markdown PR
@@ -235,8 +251,10 @@ first official release.
 - **Pre-commit hooks stay light** (fmt + obvious lint; CI is the source of truth) via **prek**
   (Rust rewrite of pre-commit, same config; adopted by CPython/Ruff/FastAPI) — installed by
   `just setup`, never mandatory.
-- **OpenSSF Best Practices badge** (passing tier) once CI lands — it doubles as an external
-  checklist audit of everything above.
+- **OpenSSF Best Practices badge** (passing tier) — *status: **explicitly deferred**; CI has
+  landed but the badge application has not been made (Scorecard runs and is badged in the README;
+  Best Practices is the remaining external audit). Deferral inventory candidate for ROADMAP.md
+  (#126).*
 - Contributor Covenant; CONTRIBUTING.md that mostly points at `just` recipes and this doc.
 
 ## 9. What we deliberately did NOT adopt
@@ -254,3 +272,12 @@ release-plz eliminates it), cargo-make (replaced by `just` for the same tasks-as
 - 2026-08-10 — §7 updated from planned to implemented (pre-release tier; issue #116):
   release-plz + vendored cargo-dist + versioned GHCR images live, graduation checklist in
   docs/RELEASING.md.
+- 2026-08-11 — full aspiration-vs-reality pass (issue #123; walked checklist in the PR). Every
+  practice now either exists in the tree/CI or carries an explicit status marker. Corrections:
+  scheduled security surfaces live in `security.yml` + `scorecard.yml` + `codeql.yml` (not one
+  file); DCO is a required `DCO` status check in the `main protections` ruleset; Renovate config
+  is `renovate.json` at the repo root and Dependabot security alerts are a repo setting (no
+  `dependabot.yml`). Marked deferred/dormant: `cargo auditable` (graduation tier), Miri (no
+  `unsafe` exists), ASan/UBSan mode (FFI entered via bundled libhdf5; deferred),
+  `custom-elements.json` manifest (until the components are published), harden-runner (not
+  deployed), OpenSSF Best Practices badge (not applied for).
