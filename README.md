@@ -24,8 +24,6 @@ docker run -p 8080:8080 ghcr.io/forgo/swath serve --fixtures
 Then open <http://localhost:8080> — the committed HLS fixtures and the embedded viewer. Every
 published image passed this exact command in CI before pushing
 ([smoke test](.github/scripts/smoke-image.sh): `/healthz`, a rendered tile, the viewer).
-On Apple Silicon add `--platform linux/amd64` — the image is linux/amd64-only for now
-([#139](https://github.com/forgo/swath/issues/139)); it runs fine under emulation.
 
 ![Swath viewer after publishing an authored layer: the openEO authoring panel open in the left rail with NDVI process steps and a plain-language narrative of the graph, and the newly published service selected in the layer rail, rendering a colormapped NDVI map live.](docs/media/screenshots/10-authoring-published.png)
 
