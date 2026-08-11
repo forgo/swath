@@ -105,6 +105,9 @@
 //! - **WebP / content negotiation beyond PNG**: PNG is the only encode
 //!   format the render path emits today (`TileFormat`).
 //!
+//! Both are tracked deferrals: WebP in `docs/ROADMAP.md`'s inventory,
+//! render offload via ADR 0012's reopen trigger.
+//!
 //! # Layer resolution (issue #31)
 //!
 //! Handlers resolve `{layerId}` through the [`LayerProvider`] seam: the

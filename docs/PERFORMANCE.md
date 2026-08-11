@@ -208,6 +208,10 @@ Bounded honesty, in the spirit of the requirements' "reports it continuously and
 - **CI runners are slower and noisier.** The enforcement budget (10 s) is sized for that; the
   measured numbers here are laptop numbers.
 
+Several of these gaps are intended future work, not permanent posture — real-ingress (CDN/TLS)
+behavior, multi-node scale, and larger-than-fixture datasets are on the M7+ candidate list in
+[`ROADMAP.md`](ROADMAP.md).
+
 ## 9. Regenerating this document
 
 ```bash

@@ -510,7 +510,8 @@ fn compile_catalog_mode(
             // A whole-world, open-ended placeholder extent: honest for a
             // dataset whose coverage is defined by whatever granules
             // arrive. Deriving/maintaining real extents from ingested
-            // granules is deliberate future work (noted, not built).
+            // granules is deliberate future work (noted, not built;
+            // deferral tracked in docs/ROADMAP.md).
             extent: domain::Extent {
                 bbox: domain::Bbox {
                     west: -180.0,

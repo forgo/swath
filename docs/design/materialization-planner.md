@@ -172,7 +172,9 @@ knobs with documented storage-vs-latency semantics and a checkable byte
 model deliver that today, and Trace history gives a learned model its
 training data *later* without redesign.
 
-**Recorded future work** (deliberately not v1):
+**Recorded future work** (deliberately not v1; each item is tracked, with
+its revisit trigger, in [`../ROADMAP.md`](../ROADMAP.md)'s deferral
+inventory):
 
 - **Learned cost model**: fit the estimate constants (compression ratio,
   warp weight, per-source latency) from accumulated Trace history

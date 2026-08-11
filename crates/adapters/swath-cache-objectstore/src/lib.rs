@@ -30,7 +30,8 @@
 //! works identically on every backend and keeps `get` a single request.
 //! The cost, stated honestly: cached objects are not directly servable
 //! files; a CDN-pointable extension-keyed layout is future work for when
-//! something other than the swath serve path reads the cache.
+//! something other than the swath serve path reads the cache (deferral
+//! tracked in `docs/ROADMAP.md`, alongside the GC sweep).
 //!
 //! # Failure semantics
 //!

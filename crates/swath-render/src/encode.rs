@@ -4,7 +4,7 @@
 //! Tile encoding: [`RgbaTile`] to bytes.
 //!
 //! PNG is the Phase-1 tile format ([`TileFormat`] documents the WebP
-//! deferral). Encoding is deterministic — fixed encoder settings, and PNG
+//! deferral, tracked in `docs/ROADMAP.md`). Encoding is deterministic — fixed encoder settings, and PNG
 //! carries no timestamps or ancillary metadata through this path — so the
 //! same tile always yields the same bytes; a test double-encodes and
 //! compares hashes to keep that contract honest.

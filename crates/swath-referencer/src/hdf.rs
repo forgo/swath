@@ -17,7 +17,8 @@
 //! `HDFEOS/GRIDS/<grid>/…` whose shape matches the grid, with nodata from a
 //! numeric `_FillValue` attribute and band semantics from the field name.
 //! Plain (non-EOS) HDF5/NetCDF4 arrays carry no georef — CF coordinate
-//! interpretation is future scope, recorded honestly rather than guessed.
+//! interpretation is future scope, recorded honestly rather than guessed
+//! (deferral tracked in `docs/ROADMAP.md`).
 //!
 //! Exotic datatypes (big-endian, compound, vlen, …) are a deliberate
 //! [`ReferencerError::Unsupported`]: the conformance sidecar remains the
