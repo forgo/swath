@@ -572,5 +572,239 @@ bench-baseline: bench
     print(f"wrote {path} ({len(benches)} benches)")
     EOF
 
+# --- docs/PERFORMANCE.md instruments (issue #115) ---
+
+# Refresh the committed ingest-to-pixel baseline: the full `just e2e`
+# measures ingest_to_pixel_ms (and enforces the band budget); its
+# machine-readable artifact is then committed as the PERFORMANCE.md input.
+perf-i2p: e2e
+    cp target/e2e/metrics.json docs/perf/i2p-baseline.json
+    cat docs/perf/i2p-baseline.json
+
+# Re-measure the referencer bake-off claims (prototype 0001 §7) on the
+# CURRENT tree: the production Rust generator (`swath ingest reference`,
+# release profile) vs the VirtualiZarr sidecar (python/sidecars/referencer)
+# on the pinned VNP09GA conformance granule (ADR 0008 — the exact granule
+# the prototype ran on). Full-process wall clock, one cold run + median of
+# the remaining warm runs, distilled to docs/perf/referencer-baseline.json
+# (commit it; PERFORMANCE.md quotes it). Granule sourcing mirrors
+# test-referencer, but no credentials is a FAIL here, not a skip — this
+# recipe exists to produce numbers.
+perf-referencer runs="10":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=target/referencer && mkdir -p "$dir"
+    granule="${SWATH_VNP09GA:-}"
+    if [ -z "$granule" ]; then
+        for c in "$dir"/VNP09GA*.h5 prototypes/0001-*/data/VNP09GA*.h5; do
+            if [ -f "$c" ]; then granule="$c"; break; fi
+        done
+    fi
+    if [ -z "$granule" ]; then
+        if [ -f "$HOME/.netrc" ] && grep -q "urs.earthdata.nasa.gov" "$HOME/.netrc"; then
+            granule=$(uv run tests/referencer/fetch_vnp09ga.py "$dir")
+        else
+            echo "FAIL perf-referencer: no VNP09GA granule and no Earthdata credentials." >&2
+            echo "  Provide SWATH_VNP09GA=<path>, or add a ~/.netrc entry for" >&2
+            echo "  urs.earthdata.nasa.gov to fetch the pinned granule (~8 MB)." >&2
+            exit 1
+        fi
+    fi
+    granule=$(cd "$(dirname "$granule")" && pwd)/$(basename "$granule")
+    echo "perf granule: $granule"
+    cargo build --release -q -p swath-cli
+    (cd python && uv sync -q)
+    SWATH_PERF_GRANULE="$granule" SWATH_PERF_RUNS={{runs}} python3 - <<'EOF'
+    import datetime
+    import json
+    import os
+    import pathlib
+    import platform
+    import statistics
+    import subprocess
+    import time
+
+    def sh(*args: str) -> str:
+        return subprocess.run(args, capture_output=True, text=True, check=True).stdout.strip()
+
+    granule = os.environ["SWATH_PERF_GRANULE"]
+    runs = int(os.environ["SWATH_PERF_RUNS"])
+    assert runs >= 2, "need at least a cold run and one warm run"
+    out_manifest = "target/referencer/perf-rs.vmanifest.json"
+    generators = {
+        "referencer-rs": [
+            "target/release/swath", "ingest", "reference", granule,
+            "--output", out_manifest,
+        ],
+        "virtualizarr-sidecar": ["python/.venv/bin/swath-referencer", granule],
+    }
+
+    def measure(cmd: list[str]) -> list[float]:
+        times = []
+        for _ in range(runs):
+            t0 = time.perf_counter()
+            subprocess.run(
+                cmd, check=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            times.append(round((time.perf_counter() - t0) * 1000, 1))
+        return times
+
+    results = {}
+    for name, cmd in generators.items():
+        samples = measure(cmd)
+        results[name] = {
+            "command": " ".join(cmd),
+            "cold_ms": samples[0],
+            "warm_median_ms": round(statistics.median(samples[1:]), 1),
+            "runs_ms": samples,
+        }
+        print(f"{name}: cold {samples[0]} ms, warm median {results[name]['warm_median_ms']} ms")
+
+    system = platform.system()
+    if system == "Darwin":
+        model = sh("sysctl", "-n", "machdep.cpu.brand_string")
+    else:
+        model = next(
+            (
+                line.split(":", 1)[1].strip()
+                for line in pathlib.Path("/proc/cpuinfo").read_text().splitlines()
+                if line.startswith("model name")
+            ),
+            platform.machine(),
+        )
+
+    ratio = (
+        results["virtualizarr-sidecar"]["warm_median_ms"]
+        / results["referencer-rs"]["warm_median_ms"]
+    )
+    out = {
+        "schema": "swath-referencer-baseline/1",
+        "captured": datetime.date.today().isoformat(),
+        "git_sha": sh("git", "rev-parse", "HEAD"),
+        "rustc": sh("rustc", "--version"),
+        "python": platform.python_version(),
+        "machine": {"model": model, "arch": platform.machine(), "os": system},
+        "granule": {
+            "name": pathlib.Path(granule).name,
+            "bytes": pathlib.Path(granule).stat().st_size,
+        },
+        "timing": "full-process wall clock; run 1 = cold, warm = median of the rest",
+        "runs": runs,
+        "generators": results,
+        "warm_ratio_rust_advantage": round(ratio, 1),
+    }
+    path = pathlib.Path("docs/perf/referencer-baseline.json")
+    path.write_text(json.dumps(out, indent=2) + "\n")
+    print(f"wrote {path} (warm ratio {out['warm_ratio_rust_advantage']}x)")
+    EOF
+
+# Regenerate the results tables and measurement stamp in docs/PERFORMANCE.md
+# from the committed artifacts (docs/perf/*.json). Everything between the
+# `table:*` HTML-comment markers is owned by this recipe; the prose around
+# the markers is hand-written. Run after any baseline artifact changes.
+perf-doc:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    python3 - <<'EOF'
+    import json
+    import pathlib
+
+    perf = pathlib.Path("docs/perf")
+    bench = json.loads((perf / "bench-baseline.json").read_text())
+    load = json.loads((perf / "load-baseline.json").read_text())
+    i2p = json.loads((perf / "i2p-baseline.json").read_text())
+    ref = json.loads((perf / "referencer-baseline.json").read_text())
+
+    def human_ns(ns: float) -> str:
+        if ns < 1_000:
+            return f"{ns:.1f} ns"
+        if ns < 1_000_000:
+            return f"{ns / 1_000:.2f} us"
+        return f"{ns / 1_000_000:.2f} ms"
+
+    blocks = {}
+
+    blocks["stamp"] = "\n".join(
+        [
+            "| instrument | artifact | measured at (git sha) | date |",
+            "|---|---|---|---|",
+            f"| ingest-to-pixel (`just perf-i2p`) | `docs/perf/i2p-baseline.json` | `{i2p['git_sha'][:7]}` | {i2p['timestamp']} |",
+            f"| stage benches (`just bench-baseline`) | `docs/perf/bench-baseline.json` | `{bench['git_sha'][:7]}` | {bench['captured']} |",
+            f"| load scenarios (`just load`) | `docs/perf/load-baseline.json` | `{load['git_sha']}` | {load['generated']} |",
+            f"| referencer (`just perf-referencer`) | `docs/perf/referencer-baseline.json` | `{ref['git_sha'][:7]}` | {ref['captured']} |",
+        ]
+    )
+
+    blocks["i2p"] = "\n".join(
+        [
+            "| metric | measured | enforced budget |",
+            "|---|---:|---:|",
+            f"| ingest_to_pixel_ms | {i2p['value']} ms | {i2p['budget_ms']} ms |",
+        ]
+    )
+
+    rows = ["| bench | median | MAD |", "|---|---:|---:|"]
+    for b in bench["benches"]:
+        rows.append(f"| {b['id']} | {human_ns(b['median_ns'])} | {human_ns(b['mad_ns'])} |")
+    blocks["bench"] = "\n".join(rows)
+
+    rows = [
+        "| scenario | requests | errors | rps | p50 ms | p95 ms | p99 ms | max ms |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    labels = {
+        "healthz_idle": "healthz — idle baseline",
+        "hot_cache_storm": "(a) hot-cache tile storm",
+        "cold_live_burst": "(b) cold live-render burst",
+        "mixed_tile_storm": "(c) mixed tile storm",
+        "healthz_under_warps": "(c) healthz UNDER WARPS",
+    }
+    for key, label in labels.items():
+        s = load["scenarios"][key]
+        rows.append(
+            f"| {label} | {s['requests']} | {s['errors']} | {s['rps']} "
+            f"| {s['p50_ms']} | {s['p95_ms']} | {s['p99_ms']} | {s['max_ms']} |"
+        )
+    sse = load["scenarios"]["sse_under_warps"]
+    rows.append(
+        f"\nSSE `/traces` under the mixed storm: survived the {sse['window_seconds']}s window: "
+        f"**{'yes' if sse['survived_window'] else 'NO'}** "
+        f"({sse['trace_events_received']} trace events received)."
+    )
+    blocks["load"] = "\n".join(rows)
+
+    rows = [
+        "| generator | command | cold | warm (median) |",
+        "|---|---|---:|---:|",
+    ]
+    granule_name = ref["granule"]["name"]
+    for name, g in ref["generators"].items():
+        cmd = " ".join(
+            f"<path-to>/{granule_name}" if arg.endswith(granule_name) else arg
+            for arg in g["command"].split()
+        )
+        rows.append(f"| {name} | `{cmd}` | {g['cold_ms']} ms | {g['warm_median_ms']} ms |")
+    rows.append(
+        f"\nWarm-generation ratio (sidecar / Rust): "
+        f"**~{ref['warm_ratio_rust_advantage']}x** in Rust's favor "
+        f"({ref['runs']} runs; {ref['timing']})."
+    )
+    blocks["referencer"] = "\n".join(rows)
+
+    doc = pathlib.Path("docs/PERFORMANCE.md")
+    text = doc.read_text()
+    for name, body in blocks.items():
+        begin = f"<!-- table:{name} (generated by `just perf-doc` — edit the artifact, not this block) -->"
+        end = f"<!-- /table:{name} -->"
+        head, _, rest = text.partition(begin)
+        assert rest, f"marker not found in PERFORMANCE.md: {begin}"
+        _, _, tail = rest.partition(end)
+        assert tail or rest.endswith(end), f"end marker not found: {end}"
+        text = head + begin + "\n" + body + "\n" + end + tail
+    doc.write_text(text)
+    print(f"regenerated {len(blocks)} generated blocks in {doc}")
+    EOF
+
 # The one-command gate: everything CI enforces.
 check: fmt-check lint machete test deny zizmor reuse

@@ -1,0 +1,55 @@
+{
+  "schema": "swath-referencer-baseline/1",
+  "captured": "2026-08-10",
+  "git_sha": "27deca2d2f91778b53125e939e3e47efd3ccf693",
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "python": "3.13.5",
+  "machine": {
+    "model": "Apple M2 Max",
+    "arch": "arm64",
+    "os": "Darwin"
+  },
+  "granule": {
+    "name": "VNP09GA.A2012019.h33v12.002.2023122182434.h5",
+    "bytes": 8202915
+  },
+  "timing": "full-process wall clock; run 1 = cold, warm = median of the rest",
+  "runs": 10,
+  "generators": {
+    "referencer-rs": {
+      "command": "target/release/swath ingest reference /Users/elliott/Code/swath-wt115/target/referencer/VNP09GA.A2012019.h33v12.002.2023122182434.h5 --output target/referencer/perf-rs.vmanifest.json",
+      "cold_ms": 456.2,
+      "warm_median_ms": 13.8,
+      "runs_ms": [
+        456.2,
+        14.3,
+        15.3,
+        14.0,
+        13.8,
+        13.8,
+        13.7,
+        13.9,
+        13.8,
+        13.8
+      ]
+    },
+    "virtualizarr-sidecar": {
+      "command": "python/.venv/bin/swath-referencer /Users/elliott/Code/swath-wt115/target/referencer/VNP09GA.A2012019.h33v12.002.2023122182434.h5",
+      "cold_ms": 13278.0,
+      "warm_median_ms": 545.6,
+      "runs_ms": [
+        13278.0,
+        541.1,
+        556.8,
+        535.4,
+        546.6,
+        550.2,
+        545.6,
+        539.2,
+        543.4,
+        552.8
+      ]
+    }
+  },
+  "warm_ratio_rust_advantage": 39.5
+}
