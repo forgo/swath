@@ -675,3 +675,59 @@ test("lagged events surface as inline marker lines in the feed", () => {
   expect(marker?.className).toBe("swath-xray-feed-line-lagged");
   expect(marker?.textContent).toBe("— missed 4 traces —");
 });
+
+// --- trace analytics (issue #111): the panel over the overlay's stream ---
+
+test("a scripted mix over the mocked stream produces the expected analytics", () => {
+  const { host, source } = mountOverlay();
+  const panel = host.querySelector<HTMLElement>(".swath-xray-analytics");
+  expect(panel?.textContent).toContain("p50 — · p95 — ms"); // no data ≠ zero
+
+  // The scripted request mix: 3 live, 1 overview, 2 cache hits — across
+  // layers and zooms, because the panel describes the stream (like the
+  // feed), not the painted subset.
+  const timings = (totalMs: number): Partial<TraceJson> => ({
+    timings: { read_ms: 1, warp_ms: 1, pixel_ops_ms: 1, encode_ms: 1, total_ms: totalMs },
+  });
+  source.emit("trace", envelope("truecolor", "2/0/0", { decision: "live", ...timings(10) }));
+  source.emit("trace", envelope("truecolor", "2/1/0", { decision: "live", ...timings(20) }));
+  source.emit(
+    "trace",
+    envelope("ndvi", "3/1/1", { decision: { overview: { level: 2 } }, ...timings(30) }),
+  );
+  source.emit("trace", envelope("truecolor", "2/2/0", { decision: "cache_hit", ...timings(5) }));
+  source.emit(
+    "trace",
+    envelope("truecolor", "2/0/0", {
+      decision: { cache_hit: { key: "feedbeef" } },
+      ...timings(15),
+    }),
+  );
+  source.emit("trace", envelope("truecolor", "2/3/0", { decision: "live", ...timings(40) }));
+
+  // Window sorted [5, 10, 15, 20, 30, 40]: p50 = 15 + 0.5 * 5 = 17.5,
+  // p95 = 30 + 0.75 * 10 = 37.5 (rank = p * (n - 1), interpolated).
+  expect(panel?.dataset.p50).toBe("17.5");
+  expect(panel?.dataset.p95).toBe("37.5");
+  expect(panel?.dataset.live).toBe("3");
+  expect(panel?.dataset.overview).toBe("1");
+  expect(panel?.dataset.cacheHit).toBe("2");
+  expect(panel?.dataset.total).toBe("6");
+  expect(panel?.dataset.hitRate).toBe(String(2 / 6));
+  expect(panel?.textContent).toContain("live 3");
+  expect(panel?.textContent).toContain("ovr 1");
+  expect(panel?.textContent).toContain("cache 2");
+  expect(panel?.textContent).toContain("hit 33.3%");
+  // A repeated tile (2/0/0 above) still counts twice: analytics fold the
+  // stream, unlike the latest-wins badge store.
+  expect(panel?.dataset.samples).toBe("6");
+});
+
+test("malformed payloads never reach the analytics", () => {
+  const { host, source } = mountOverlay();
+  const panel = host.querySelector<HTMLElement>(".swath-xray-analytics");
+  source.emit("trace", "not json");
+  source.emit("trace", JSON.stringify({ tile: "nope", layer: "l", trace: makeTrace() }));
+  expect(panel?.dataset.total).toBe("0");
+  expect(panel?.textContent).toContain("p50 — · p95 — ms");
+});

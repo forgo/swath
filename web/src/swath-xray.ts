@@ -53,6 +53,7 @@ export type TraceDecision =
   | { cache_hit: { key: string } };
 
 import { tileNorthWest } from "./tms.js";
+import { AnalyticsPanel } from "./xray-analytics.js";
 
 /** A candidate strategy as the plan payload names it (`PlannedStrategy`,
  * pinned in swath-core `planner`): the decision vocabulary minus
@@ -117,6 +118,27 @@ export interface TraceEnvelope {
   tile: string;
   layer: string;
   trace: TraceJson;
+}
+
+/** The single typed parser for `event: trace` payloads: JSON plus the
+ * envelope's shape invariants (parsable `"z/x/y"` tile, string layer,
+ * object trace). `undefined` on anything malformed — dropped, never
+ * fatal. Every consumer of the stream's data goes through this one
+ * function; the analytics panel deliberately has no parser of its own. */
+export function parseTraceEnvelope(
+  data: string,
+): (TraceEnvelope & { z: number; x: number; y: number }) | undefined {
+  let envelope: TraceEnvelope;
+  try {
+    envelope = JSON.parse(data) as TraceEnvelope;
+  } catch {
+    return undefined;
+  }
+  const tile = parseTile(envelope.tile);
+  if (!tile || typeof envelope.layer !== "string" || typeof envelope.trace !== "object") {
+    return undefined;
+  }
+  return { ...envelope, ...tile };
 }
 
 /** The slice of `EventSource` the overlay uses — the seam unit tests
@@ -436,6 +458,19 @@ const OVERLAY_CSS = `
 .swath-xray-feed-lines li > button:focus { color: #4ade80; }
 .swath-xray-feed-line-lagged { color: #f87171; }
 .swath-xray-badge-flash { outline: 3px solid #4ade80; outline-offset: 2px; }
+.swath-xray-analytics {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 75%);
+  color: #e2e8f0;
+  font: 11px/1.5 ui-monospace, monospace;
+}
+.swath-xray-analytics-live { color: #4ade80; }
+.swath-xray-analytics-overview { color: #fbbf24; }
+.swath-xray-analytics-cache { color: #60a5fa; }
+.swath-xray-analytics-hit { font-weight: 700; }
 `;
 
 function injectStyles(doc: Document): void {
@@ -525,6 +560,7 @@ export class XRayOverlay {
    * always the least recently updated — the LRU eviction victim. */
   readonly #store = new Map<string, XRayEntry>();
 
+  readonly #analytics: AnalyticsPanel;
   readonly #modes: HTMLDivElement;
   readonly #scale: HTMLDivElement;
   readonly #scaleRange: HTMLSpanElement;
@@ -592,7 +628,8 @@ export class XRayOverlay {
     this.#scaleRange.className = "swath-xray-scale-range";
     this.#scaleRange.textContent = "—";
     this.#scale.append(this.#scaleRange);
-    readouts.append(this.#lagged, this.#scale, this.#ingest);
+    this.#analytics = new AnalyticsPanel(host.ownerDocument);
+    readouts.append(this.#lagged, this.#scale, this.#analytics.element, this.#ingest);
 
     this.#modes = document.createElement("div");
     this.#modes.className = "swath-xray-modes";
@@ -721,19 +758,14 @@ export class XRayOverlay {
   }
 
   #onTrace(data: string): void {
-    let envelope: TraceEnvelope;
-    try {
-      envelope = JSON.parse(data) as TraceEnvelope;
-    } catch {
+    const envelope = parseTraceEnvelope(data);
+    if (!envelope) {
       return; // malformed data is dropped, not fatal — the stream goes on
     }
-    const tile = parseTile(envelope.tile);
-    if (!tile || typeof envelope.layer !== "string" || typeof envelope.trace !== "object") {
-      return;
-    }
+    const { z, x, y } = envelope;
     const key = `${envelope.layer}/${envelope.tile}`;
     this.#store.delete(key); // latest wins, and re-insertion refreshes LRU order
-    this.#store.set(key, { layer: envelope.layer, ...tile, trace: envelope.trace });
+    this.#store.set(key, { layer: envelope.layer, z, x, y, trace: envelope.trace });
     while (this.#store.size > this.#capacity) {
       const oldest = this.#store.keys().next().value;
       if (oldest === undefined) {
@@ -752,6 +784,7 @@ export class XRayOverlay {
       );
       this.#ingest.textContent = `ingest→pixel: ${this.#ingestMs} ms`;
     }
+    this.#analytics.record(envelope.trace.decision, envelope.trace.timings.total_ms);
     this.#feedTrace(key, envelope);
     this.#schedule();
   }
