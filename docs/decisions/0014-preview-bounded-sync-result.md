@@ -1,6 +1,6 @@
 # ADR 0014 — Preview: openEO `POST /result` as a preview-bounded synchronous subset
 
-**Status:** Proposed · **Date:** 2026-08-11 · **Extends:** ADR 0010 · **Source:** issue #151,
+**Status:** Accepted · **Date:** 2026-08-11 · **Extends:** ADR 0010 · **Source:** issue #151,
 `docs/design/authoring-ux.md` §6 (option P1, selected by the maintainer 2026-08-11)
 
 ## Context
