@@ -38,15 +38,6 @@ latest: Pulling from forgo/swath
 2026-08-11T07:13:30.427983Z  INFO serving 2 layer(s) on 0.0.0.0:8080 (store: ./tests/fixtures); traces: http://localhost:8080/traces
 ```
 
-> **Apple Silicon:** the published image is currently linux/amd64-only, so
-> the plain one-liner fails with `no matching manifest for linux/arm64/v8`
-> ([#139](https://github.com/forgo/swath/issues/139) tracks the multi-arch
-> manifest). Add `--platform linux/amd64` — it runs fine under emulation:
->
-> ```sh
-> docker run --platform linux/amd64 -p 8080:8080 ghcr.io/forgo/swath serve --fixtures
-> ```
-
 Open <http://localhost:8080> — the viewer, with the layer rail on the
 left and the fixture granule (a 512×512-pixel HLS subset over the
 Rockies southwest of Denver) fitted in view. Switching layers in the rail
@@ -269,11 +260,6 @@ FAIL: a swath stack is already up on :8080 — 'docker compose down -v' first
 Fixes: `ctrl-c` the previous demo; `docker compose down -v` (from the
 checkout) for a leftover stack; `docker ps` then `docker stop <name>` for
 a Track 1 container; `lsof -ti :8080` to find anything else.
-
-**`no matching manifest for linux/arm64/v8`.** You are on Apple Silicon
-and the published image is amd64-only for now
-([#139](https://github.com/forgo/swath/issues/139)). Use the
-`--platform linux/amd64` variant shown in Track 1.
 
 **The map is still gray after the countdown.** MapLibre won't refetch
 tiles it already saw 404 in the same session if the auto-retry has
