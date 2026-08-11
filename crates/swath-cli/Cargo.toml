@@ -55,20 +55,20 @@ clap = { workspace = true }
 # AmazonS3 store from the standard AWS_* environment (MinIO included).
 object_store = { workspace = true, features = ["aws"] }
 serde = { workspace = true }
-swath-api = { path = "../swath-api", version = "0.0.0" }
-swath-cache-objectstore = { path = "../adapters/swath-cache-objectstore", version = "0.0.0" }
-swath-catalog-pgstac = { path = "../adapters/swath-catalog-pgstac", version = "0.0.0" }
-swath-core = { path = "../swath-core", version = "0.0.0" }
-swath-events-filedrop = { path = "../adapters/swath-events-filedrop", version = "0.0.0" }
+swath-api = { path = "../swath-api", version = "0.1.0-alpha.1" }
+swath-cache-objectstore = { path = "../adapters/swath-cache-objectstore", version = "0.1.0-alpha.1" }
+swath-catalog-pgstac = { path = "../adapters/swath-catalog-pgstac", version = "0.1.0-alpha.1" }
+swath-core = { path = "../swath-core", version = "0.1.0-alpha.1" }
+swath-events-filedrop = { path = "../adapters/swath-events-filedrop", version = "0.1.0-alpha.1" }
 # The production referencer behind the IngestReferencer port (ADR 0006):
 # `swath ingest reference` and the serve-time filedrop legacy path.
 # default-features = false so this crate's own `legacy-hdf5` feature (above,
 # default ON) is the single switch for the bundled libhdf5 build.
-swath-referencer = { path = "../swath-referencer", version = "0.0.0", default-features = false }
-swath-render = { path = "../swath-render", version = "0.0.0" }
-swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.0.0" }
-swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.0.0" }
-swath-source-virtual = { path = "../adapters/swath-source-virtual", version = "0.0.0" }
+swath-referencer = { path = "../swath-referencer", version = "0.1.0-alpha.1", default-features = false }
+swath-render = { path = "../swath-render", version = "0.1.0-alpha.1" }
+swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.1.0-alpha.1" }
+swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.1.0-alpha.1" }
+swath-source-virtual = { path = "../adapters/swath-source-virtual", version = "0.1.0-alpha.1" }
 thiserror = { workspace = true }
 # The binary owns the runtime (ARCHITECTURE.md §11): multi-thread tokio,
 # TCP listener, and the SIGINT/SIGTERM graceful-shutdown signals.
@@ -81,7 +81,7 @@ tracing-subscriber = { workspace = true }
 # Authoring an openEO process graph in the serve-time rehydration test.
 serde_json = { workspace = true }
 # Parallel-safe temp dirs for store roots, drop dirs, and manifest outputs.
-swath-testsupport = { path = "../swath-testsupport", version = "0.0.0" }
+swath-testsupport = { path = "../swath-testsupport", version = "0.1.0-alpha.1" }
 
 [lints]
 workspace = true

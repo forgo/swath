@@ -13,8 +13,8 @@ publish = false
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-swath-core = { path = "../swath-core", version = "0.0.0" }
-swath-testkit = { path = "../swath-testkit", version = "0.0.0" }
+swath-core = { path = "../swath-core", version = "0.1.0-alpha.1" }
+swath-testkit = { path = "../swath-testkit", version = "0.1.0-alpha.1" }
 
 [lints]
 workspace = true

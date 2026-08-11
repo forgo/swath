@@ -11,10 +11,10 @@ publish = false
 
 [dependencies]
 object_store = { workspace = true }
-swath-core = { path = "../../swath-core", version = "0.0.0" }
+swath-core = { path = "../../swath-core", version = "0.1.0-alpha.1" }
 
 [dev-dependencies]
-swath-testsupport = { path = "../../swath-testsupport", version = "0.0.0" }
+swath-testsupport = { path = "../../swath-testsupport", version = "0.1.0-alpha.1" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
