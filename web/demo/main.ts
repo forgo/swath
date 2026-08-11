@@ -16,6 +16,7 @@
 // - localStorage tracks every state change as "the last session", so a
 //   later paramless visit resumes where this one ended.
 import { type GranuleBbox, GranuleFootprints } from "../src/granule-footprints.js";
+import { defineSwathAuthoringPanel, SwathAuthoringPanel } from "../src/swath-authoring-panel.js";
 import {
   defineSwathDatasetPanel,
   type GranuleListItem,
@@ -38,6 +39,7 @@ import {
 const mapElement = document.querySelector("swath-map");
 const panelElement = document.querySelector("swath-layer-panel");
 const datasetElement = document.querySelector("swath-dataset-panel");
+const authoringElement = document.querySelector("swath-authoring-panel");
 
 const storage = safeLocalStorage();
 const { state: initial } = resolveInitialState(location.search, storage);
@@ -64,9 +66,13 @@ if (basemap !== null) {
 defineSwathMap();
 defineSwathLayerPanel();
 defineSwathDatasetPanel();
+defineSwathAuthoringPanel();
 
 if (mapElement instanceof SwathMap && panelElement instanceof SwathLayerPanel) {
   wire(mapElement, panelElement);
+}
+if (mapElement instanceof SwathMap && authoringElement instanceof SwathAuthoringPanel) {
+  wireAuthoring(mapElement, authoringElement);
 }
 
 if (mapElement instanceof SwathMap && datasetElement instanceof SwathDatasetPanel) {
@@ -168,4 +174,25 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
     persist();
     syncUrl();
   }).observe(map, { attributes: true, attributeFilter: ["xray"] });
+}
+
+// The authoring panel (issue #109) is a pure openEO client; the shell
+// only routes its outcomes to the map. A created service becomes the
+// viewed layer (the switch refetches /tilesets, so the layer browser
+// lists it immediately — no reload); a deleted one falls back to the
+// server's default layer when it was the viewed one, else just refreshes
+// the layer list.
+function wireAuthoring(map: SwathMap, authoring: SwathAuthoringPanel): void {
+  authoring.addEventListener("swath-service-created", (event) => {
+    const id = (event as CustomEvent<{ id: string }>).detail.id;
+    map.setLayer(id).catch(() => undefined);
+  });
+  authoring.addEventListener("swath-service-deleted", (event) => {
+    const id = (event as CustomEvent<{ id: string }>).detail.id;
+    if (map.getAttribute("layer") === id) {
+      map.removeAttribute("layer"); // re-applies with the server default
+    } else {
+      map.refresh();
+    }
+  });
 }
