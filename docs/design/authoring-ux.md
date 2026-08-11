@@ -252,5 +252,8 @@ _Check one; this design note is inert until a box is checked, and the implementa
 get filed against the choice._
 
 - [ ] **Model A — outcome-first wizard** (expert-mode escape hatch keeps the current panel)
-- [ ] **Model B — always-valid canvas** ← recommended (§7)
+- [x] **Model B — always-valid canvas** ← recommended (§7)
 - [ ] **Other / hybrid** (describe in a comment on #151)
+
+_Selected by the maintainer 2026-08-11: Model B as the core editor, with §6's
+preview-before-publish via the `POST /result` bounded subset (P1) proposed in a follow-up ADR._
