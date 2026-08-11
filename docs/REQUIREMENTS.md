@@ -132,7 +132,7 @@ either learning fast or drifting — and either way it should be a conscious, vi
   STAC would break interop, the very thing R5 exists to protect. Operators and the single pane still
   never see STAC (R2 intact where it was aimed).
   *Where decided:* ADR 0010 (2026-08-09), `docs/design/catalog-domain.md`.
-  *Maintainer sign-off:* recorded in PR #TBD.
+  *Maintainer sign-off:* recorded in PR #157.
 
 - **2026-08-11 — A2: compose-to-oracle demotion (the serving path is owned, the ecosystem became
   our test oracle).**
@@ -147,7 +147,7 @@ either learning fast or drifting — and either way it should be a conscious, vi
   against the ecosystem is a stronger correctness claim than inheriting from it.
   *Where decided:* ADR 0002 (2026-08-08), the oracle harness (#19), ADRs 0006/0008; charter §8
   reconciled in this change.
-  *Maintainer sign-off:* recorded in PR #TBD.
+  *Maintainer sign-off:* recorded in PR #157.
 
 - **2026-08-11 — A3: R5 bounded-profile honesty (standards implemented to a truthful, advertised
   subset).**
@@ -160,7 +160,7 @@ either learning fast or drifting — and either way it should be a conscious, vi
   project forbids; a truthful capabilities document is itself the standards-native way to bound
   scope. Real openEO clients discover and use exactly what is there.
   *Where decided:* ADR 0010 (2026-08-09); conformance tests `crates/swath-api/tests/`.
-  *Maintainer sign-off:* recorded in PR #TBD.
+  *Maintainer sign-off:* recorded in PR #157.
 
 - **2026-08-11 — A4: R8 one command, from checkout (and a no-checkout demo one-liner).**
   *What changed:* R8's "a newcomer runs one command" is defined pre-1.0 as: from a fresh checkout,
@@ -173,4 +173,4 @@ either learning fast or drifting — and either way it should be a conscious, vi
   enforced, not aspirational.
   *Where decided:* issue #104 (GHCR image + CI-tested one-liner, 2026-08-10); ENGINEERING §7
   amendment (release tier); `docs/RELEASING.md`.
-  *Maintainer sign-off:* recorded in PR #TBD.
+  *Maintainer sign-off:* recorded in PR #157.
