@@ -29,6 +29,8 @@ export default defineConfig(({ command }) => ({
       "/tilesets": SWATH,
       "/tiles": SWATH,
       "/conformance": SWATH,
+      "/collections": SWATH,
+      "/datasets": SWATH,
       "/healthz": SWATH,
       "/traces": SWATH,
     },
