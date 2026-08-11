@@ -1,16 +1,19 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-// The authoring loop through the UI (issue #109, ADR 0010), against the
-// real stack in both modes: the panel's forms — generated from the
-// server's own GET /processes, the collection picker fed by GET
-// /collections — compose the NDVI graph, publish it, and the served
+// The authoring loop through the Model B canvas (issues #109/#151, ADR
+// 0010), against the real stack in both modes: the always-valid
+// pipeline — permanent Load → Output frame, stage-typed insert chips,
+// vocabulary-only band widgets — composes the NDVI graph and the served
 // tiles are BYTE-identical to the built-in NDVI layer (the existing
-// openeo_services.rs assertion, now UI-driven). Validation gates submit
-// until the graph is structurally valid; a graph the server still
-// rejects renders its diagnostic on the offending field; deleting a
-// published service 404s its tile URL; and the NDVI template publishes
-// a working layer from one click.
+// openeo_services.rs assertion, UI-driven). The formula builder's
+// reduce_dimension child graph publishes and matches the same bytes
+// (the design note's "e2e-prove every palette-offered insertion
+// actually publishes"); an RGB composite publishes too. Validation
+// gates submit with plain-words reasons; a graph the server still
+// rejects renders its diagnostic on the offending field (the safety
+// net); deleting a published service 404s its tile URL; the NDVI
+// template publishes a working layer from one click.
 import { expect, type Page, test } from "@playwright/test";
 
 const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
@@ -20,45 +23,54 @@ const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
  * byte-identity test uses (crates/swath-api/tests/openeo_services.rs). */
 const TILE = "12/1561/848";
 
-function paletteButton(page: Page, processId: string) {
-  return page.locator(
-    `swath-authoring-panel .swath-authoring-palette button[data-process="${processId}"]`,
-  );
-}
-
 function fieldById(page: Page, id: string) {
   return page.locator(`#swath-authoring-${id}`);
 }
 
+/** The stage-typed insert chip for `processId` at `gap` (0 = right
+ * after the Load card). */
+function chip(page: Page, gap: number, processId: string) {
+  return page.locator(
+    `swath-authoring-panel .swath-authoring-insert[data-gap="${gap}"] ` +
+      `button[data-process="${processId}"]`,
+  );
+}
+
 /** The panel is collapsed and lazy (fetches nothing until opened, like
- * the dataset browser): every flow starts by toggling it open. */
+ * the dataset browser): every flow starts by toggling it open. The
+ * permanent Load card (s1) rendering means the canvas is ready. */
 async function openPanel(page: Page): Promise<void> {
   await page.locator("swath-authoring-panel .swath-authoring-toggle").click();
+  await expect(page.locator('swath-authoring-panel [data-step="s1"]')).toBeVisible();
 }
 
 function submitButton(page: Page) {
   return page.locator("swath-authoring-panel .swath-authoring-submit");
 }
 
-/** Composes the NDVI pipeline through the generated forms. The data-flow
- * selects need no touch: cube parameters (and each step's first required
- * parameter) wire to the previous step by schema-derived default. */
+/** Ticks a Load-card band checkbox (tick order = loaded order). */
+async function tickBand(page: Page, band: string): Promise<void> {
+  await fieldById(page, `s1-bands-${band}`).check();
+}
+
+/** Composes the NDVI pipeline on the Model B canvas: collection from
+ * the /collections-fed select, bands ticked from the vocabulary
+ * checkboxes, NDVI and the stretch step inserted through their
+ * stage-typed chips (nir/red arrive prefilled by the band heuristics —
+ * asserted, not set). Extents and format ride their smart defaults. */
 async function authorNdvi(page: Page, outputMax: string, colormap: string): Promise<void> {
-  await paletteButton(page, "load_collection").click();
-  await paletteButton(page, "ndvi").click();
-  await paletteButton(page, "linear_scale_range").click();
-  await paletteButton(page, "save_result").click();
-  // The collection is a picker fed by GET /collections — no free text.
   await fieldById(page, "s1-id").selectOption("hls-s30");
-  await fieldById(page, "s1-bands").fill("b8a,b04");
-  await fieldById(page, "s2-nir").fill("b8a");
-  await fieldById(page, "s2-red").fill("b04");
+  await tickBand(page, "b8a");
+  await tickBand(page, "b04");
+  await chip(page, 0, "ndvi").click();
+  // The band selects (vocabulary-only, B7) prefilled nir/red correctly.
+  await expect(fieldById(page, "s2-nir")).toHaveValue("b8a");
+  await expect(fieldById(page, "s2-red")).toHaveValue("b04");
+  await chip(page, 1, "linear_scale_range").click();
   await fieldById(page, "s3-inputMin").fill("-1");
   await fieldById(page, "s3-inputMax").fill("1");
   await fieldById(page, "s4-options").selectOption(colormap);
-  // Extents, output range, and format ride their smart defaults
-  // (null / 0..255 / png) under the advanced toggles; only a non-default
-  // output range needs the s3 advanced section opened.
+  // Only a non-default output range needs the s3 advanced section.
   if (outputMax !== "255") {
     await page.locator('[data-step="s3"] .swath-authoring-advanced-toggle').click();
     await fieldById(page, "s3-outputMax").fill(outputMax);
@@ -86,7 +98,6 @@ test("UI-authored NDVI serves tiles byte-identical to the built-in layer, no rel
 }) => {
   await page.goto(DEMO_PATH);
   await openPanel(page);
-  await expect(paletteButton(page, "load_collection")).toBeVisible();
 
   await authorNdvi(page, "255", "rdylgn");
   await fieldById(page, "title").fill("NDVI (authored)");
@@ -111,23 +122,114 @@ test("UI-authored NDVI serves tiles byte-identical to the built-in layer, no rel
   expect(authoredBytes.equals(builtinBytes)).toBe(true);
 });
 
-test("validation gates submit until the graph is structurally valid", async ({ page }) => {
+test("the formula builder's reducer child graph compiles to the same NDVI bytes", async ({
+  page,
+}) => {
   await page.goto(DEMO_PATH);
   await openPanel(page);
-  await expect(paletteButton(page, "load_collection")).toBeVisible();
 
-  // A lone load_collection step with no collection chosen: submit is
-  // disabled and the reasons are spelled out — the server's "no
-  // load_collection node names a collection" rejection is unreachable.
-  await paletteButton(page, "load_collection").click();
+  // NDVI written by hand in the formula builder — the only place
+  // arithmetic exists on the canvas (B2/B3): line1 = b8a − b04,
+  // line2 = b8a + b04, line3 = line1 ÷ line2.
+  await fieldById(page, "s1-id").selectOption("hls-s30");
+  await tickBand(page, "b8a");
+  await tickBand(page, "b04");
+  await chip(page, 0, "reduce_dimension").click();
+  await fieldById(page, "s2-row1-left").selectOption("band:b8a");
+  await fieldById(page, "s2-row1-op").selectOption("subtract");
+  await fieldById(page, "s2-row1-right").selectOption("band:b04");
+  await page.locator("swath-authoring-panel .swath-authoring-formula-add").click();
+  await fieldById(page, "s2-row2-left").selectOption("band:b8a");
+  await fieldById(page, "s2-row2-op").selectOption("add");
+  await fieldById(page, "s2-row2-right").selectOption("band:b04");
+  await page.locator("swath-authoring-panel .swath-authoring-formula-add").click();
+  await fieldById(page, "s2-row3-left").selectOption("row:0");
+  await fieldById(page, "s2-row3-op").selectOption("divide");
+  await fieldById(page, "s2-row3-right").selectOption("row:1");
+  // The narrative reads the formula back as plain math.
+  await expect(page.locator("#swath-authoring-narrative")).toContainText(
+    "(b8a − b04) ÷ (b8a + b04)",
+  );
+  await chip(page, 1, "linear_scale_range").click();
+  await fieldById(page, "s3-inputMin").fill("-1");
+  await fieldById(page, "s3-inputMax").fill("1");
+  await fieldById(page, "s4-options").selectOption("rdylgn");
+  await fieldById(page, "title").fill("NDVI (formula)");
+  const id = await publish(page);
+
+  // Same expression, same plan, same bytes as the built-in NDVI layer:
+  // the composed reduce_dimension child graph is the real thing.
+  const authored = await page.request.get(`/tilesets/${id}/tiles/${TILE}`);
+  const builtin = await page.request.get(`/tilesets/ndvi/tiles/${TILE}`);
+  expect(authored.status()).toBe(200);
+  const authoredBytes = await authored.body();
+  expect(authoredBytes.length).toBeGreaterThan(0);
+  expect(authoredBytes.equals(await builtin.body())).toBe(true);
+});
+
+test("an RGB composite (3 ticked bands, stretch, no reduce) publishes and serves", async ({
+  page,
+}) => {
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+
+  // Tick order is loaded order — red, green, blue.
+  await fieldById(page, "s1-id").selectOption("hls-s30");
+  await tickBand(page, "b04");
+  await tickBand(page, "b03");
+  await tickBand(page, "b02");
+  // The colormap greys out on a multi-band result, with the plain-words
+  // note (B6) — and the composite path still publishes fine.
+  // (No middle steps yet, so the Output card is s2.)
+  await expect(fieldById(page, "s2-options")).toBeDisabled();
+  await expect(fieldById(page, "s2-composite-note")).toContainText("one gray value per pixel");
+  await chip(page, 0, "linear_scale_range").click();
+  await fieldById(page, "s2-inputMin").fill("0");
+  await fieldById(page, "s2-inputMax").fill("3000");
+  await fieldById(page, "title").fill("True color (authored)");
+  const id = await publish(page);
+  const tile = await page.request.get(`/tilesets/${id}/tiles/${TILE}`);
+  expect(tile.status()).toBe(200);
+});
+
+test("the canvas keeps the pipeline valid: permanent frame, typed chips, plain reasons", async ({
+  page,
+}) => {
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+
+  // The empty canvas is already the whole frame: Load (s1) → Output
+  // (s2), neither removable — "the graph must end in save_result" (B1)
+  // is unconstructible, and no chip anywhere offers arithmetic (B2).
+  await expect(page.locator('swath-authoring-panel [data-process="save_result"]')).toBeVisible();
+  await expect(
+    page.locator('swath-authoring-panel [data-step="s2"] [aria-label^="Remove step"]'),
+  ).toHaveCount(0);
+  for (const forbidden of ["divide", "add", "subtract", "multiply", "array_element"]) {
+    await expect(
+      page.locator(
+        `swath-authoring-panel .swath-authoring-insert button[data-process="${forbidden}"]`,
+      ),
+    ).toHaveCount(0);
+  }
+
+  // Submit is gated with the reasons in the user's words.
   await expect(submitButton(page)).toBeDisabled();
   const reason = page.locator("#swath-authoring-submit-reason");
-  await expect(reason).toContainText("field needs a value");
-  await expect(reason).toContainText("no step loads a collection");
+  await expect(reason).toContainText("no collection chosen yet");
+  await fieldById(page, "s1-id").selectOption("hls-s30");
+  await expect(reason).toContainText("no bands ticked yet");
 
-  // The advanced (defaulted) fields are out of the default view: the
-  // nullable extents hide until the step's advanced toggle opens them,
-  // each with a visible plain-language explainer.
+  // Two bands, no reduce: B5's explanation, still gated.
+  await tickBand(page, "b8a");
+  await tickBand(page, "b04");
+  await expect(reason).toContainText("produces 2 channels");
+
+  // The extents stay expert fields under advanced, plain-worded on the
+  // card itself.
+  await expect(fieldById(page, "s1-extent-summary")).toContainText(
+    "everywhere the collection covers",
+  );
   await expect(fieldById(page, "s1-spatial_extent")).toHaveCount(0);
   await page.locator('[data-step="s1"] .swath-authoring-advanced-toggle').click();
   await expect(fieldById(page, "s1-spatial_extent")).toBeVisible();
@@ -135,10 +237,16 @@ test("validation gates submit until the graph is structurally valid", async ({ p
     page.locator('label[for="swath-authoring-s1-spatial_extent"] .swath-authoring-field-help'),
   ).toContainText("leave as is to use the whole collection");
 
-  // Choosing from the /collections-fed picker satisfies both reasons.
-  await fieldById(page, "s1-id").selectOption("hls-s30");
+  // Adding NDVI (stage-typed chip) completes a lawful pipeline.
+  await chip(page, 0, "ndvi").click();
   await expect(submitButton(page)).toBeEnabled();
   await expect(reason).toBeEmpty();
+  // After the scale step, the saturated NDVI pipeline offers no further
+  // insertions anywhere (B4 and friends: nothing else fits).
+  await chip(page, 1, "linear_scale_range").click();
+  await fieldById(page, "s3-inputMin").fill("-1");
+  await fieldById(page, "s3-inputMax").fill("1");
+  await expect(page.locator("swath-authoring-panel .swath-authoring-insert")).toHaveCount(0);
 });
 
 test("a graph the server rejects renders its diagnostic on the offending field", async ({
@@ -146,11 +254,11 @@ test("a graph the server rejects renders its diagnostic on the offending field",
 }) => {
   await page.goto(DEMO_PATH);
   await openPanel(page);
-  await expect(paletteButton(page, "load_collection")).toBeVisible();
 
   // Client-side valid, semantically wrong: the unsupported 0..1 output
-  // range. The compiler's diagnostic names node and argument, so it
-  // lands inline on exactly that field.
+  // range (an expert-advanced field — the one server rejection Model B
+  // leaves reachable here). The compiler's diagnostic names node and
+  // argument, so it lands inline on exactly that field: the safety net.
   await authorNdvi(page, "1", "rdylgn");
   await expect(submitButton(page)).toBeEnabled();
   await submitButton(page).click();
@@ -182,7 +290,6 @@ test("deleting a published service 404s its tile URL and drops it from the brows
 }) => {
   await page.goto(DEMO_PATH);
   await openPanel(page);
-  await expect(paletteButton(page, "load_collection")).toBeVisible();
 
   // A distinct graph (grayscale) so this test owns its service id.
   await authorNdvi(page, "255", "grayscale");

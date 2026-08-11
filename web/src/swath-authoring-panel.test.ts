@@ -1,17 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-// The authoring panel's contract (issue #109): schema-driven throughout.
-// The palette and every form field come from the mocked `GET /processes`
-// response — REMOVE a definition from the mock and its palette entry and
-// form are gone (the no-hand-maintained-forms proof). The collection
-// picker is fed by `GET /collections`; validation blocks submit (with
-// reasons) until the graph is structurally valid; required fields flag
-// inline as the user types; server diagnostics map onto the offending
-// field. Composition, publish (success + inline openEO error), the NDVI
-// template, and delete are exercised against a scripted fetch; no
-// server involved. Real Custom Elements in a real browser, like the
-// rest of the suite.
+// The authoring panel's Model B contract (issue #151, design note §4):
+// the pipeline is NEVER in an invalid state. Each reachable-bad-state
+// from the design note's §2 matrix (B1–B11) is pinned here as either
+// unconstructible or self-explaining — test names cite the B-numbers.
+// Schema honesty carries over from #148: cards, chips, and fields come
+// from the mocked `GET /processes` alone — remove a definition and its
+// UI is gone. Composition, publish (success + inline openEO error),
+// the NDVI template, the formula builder, and delete are exercised
+// against a scripted fetch; no server involved. Real Custom Elements in
+// a real browser, like the rest of the suite.
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import {
   defineSwathAuthoringPanel,
@@ -76,6 +75,57 @@ const DEFINITIONS: ProcessDefinition[] = [
         default: null,
         schema: [{ type: "string" }, { type: "null" }],
       },
+    ],
+  },
+  {
+    id: "reduce_dimension",
+    summary: "Reduce dimensions",
+    parameters: [
+      { name: "data", schema: { type: "object", subtype: "raster-cube" } },
+      { name: "reducer", schema: { type: "object", subtype: "process-graph" } },
+      { name: "dimension", schema: { type: "string" } },
+      { name: "context", optional: true, default: null, schema: {} },
+    ],
+  },
+  {
+    id: "array_element",
+    summary: "Get an element from an array",
+    parameters: [
+      { name: "data", schema: { type: "array" } },
+      { name: "index", optional: true, schema: { type: "integer" } },
+      { name: "label", optional: true, schema: [{ type: "number" }, { type: "string" }] },
+    ],
+  },
+  {
+    id: "add",
+    summary: "Addition of two numbers",
+    parameters: [
+      { name: "x", schema: { type: ["number", "null"] } },
+      { name: "y", schema: { type: ["number", "null"] } },
+    ],
+  },
+  {
+    id: "subtract",
+    summary: "Subtraction of two numbers",
+    parameters: [
+      { name: "x", schema: { type: ["number", "null"] } },
+      { name: "y", schema: { type: ["number", "null"] } },
+    ],
+  },
+  {
+    id: "multiply",
+    summary: "Multiplication of two numbers",
+    parameters: [
+      { name: "x", schema: { type: ["number", "null"] } },
+      { name: "y", schema: { type: ["number", "null"] } },
+    ],
+  },
+  {
+    id: "divide",
+    summary: "Division of two numbers",
+    parameters: [
+      { name: "x", schema: { type: ["number", "null"] } },
+      { name: "y", schema: { type: ["number", "null"] } },
     ],
   },
   {
@@ -186,22 +236,6 @@ async function mount(stub: { impl: typeof fetch }): Promise<SwathAuthoringPanel>
   return panel;
 }
 
-function paletteIds(panel: SwathAuthoringPanel): string[] {
-  return [...panel.querySelectorAll<HTMLButtonElement>(".swath-authoring-palette button")].map(
-    (button) => button.dataset["process"] ?? "",
-  );
-}
-
-function addStep(panel: SwathAuthoringPanel, processId: string): void {
-  const button = panel.querySelector<HTMLButtonElement>(
-    `.swath-authoring-palette button[data-process="${processId}"]`,
-  );
-  if (!button) {
-    throw new Error(`no palette entry for ${processId}`);
-  }
-  button.click();
-}
-
 function field<T extends HTMLElement>(panel: SwathAuthoringPanel, id: string): T {
   const element = panel.querySelector<T>(`#swath-authoring-${id}`);
   if (!element) {
@@ -220,6 +254,43 @@ function choose(panel: SwathAuthoringPanel, id: string, value: string): void {
   const select = field<HTMLSelectElement>(panel, id);
   select.value = value;
   select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+/** Ticks a band checkbox on the Load card (tick order = loaded order). */
+function tickBand(panel: SwathAuthoringPanel, band: string): void {
+  field<HTMLInputElement>(panel, `s1-bands-${band}`).click();
+}
+
+/** The insert chips offered at `gap` (their process ids). */
+function chipsAt(panel: SwathAuthoringPanel, gap: number): string[] {
+  return [
+    ...panel.querySelectorAll<HTMLButtonElement>(
+      `.swath-authoring-insert[data-gap="${gap}"] button`,
+    ),
+  ].map((button) => button.dataset["process"] ?? "");
+}
+
+/** Every insert chip currently offered anywhere on the canvas. */
+function allChips(panel: SwathAuthoringPanel): string[] {
+  return [...panel.querySelectorAll<HTMLButtonElement>(".swath-authoring-insert button")].map(
+    (button) => button.dataset["process"] ?? "",
+  );
+}
+
+function insertAt(panel: SwathAuthoringPanel, gap: number, processId: string): void {
+  const button = panel.querySelector<HTMLButtonElement>(
+    `.swath-authoring-insert[data-gap="${gap}"] button[data-process="${processId}"]`,
+  );
+  if (!button) {
+    throw new Error(`no chip for ${processId} at gap ${gap}`);
+  }
+  button.click();
+}
+
+function stepProcesses(panel: SwathAuthoringPanel): string[] {
+  return [...panel.querySelectorAll<HTMLElement>(".swath-authoring-step")].map(
+    (item) => item.dataset["process"] ?? "",
+  );
 }
 
 function submitButton(panel: SwathAuthoringPanel): HTMLButtonElement {
@@ -260,9 +331,9 @@ test("collapsed by default and lazy: no requests until opened", async () => {
   expect(stub.requests).toEqual([]);
   const toggle = panel.querySelector<HTMLButtonElement>(".swath-authoring-toggle");
   expect(toggle?.getAttribute("aria-expanded")).toBe("false");
-  // The first open loads the definitions (and renders the palette).
+  // The first open loads the definitions (and renders the canvas).
   toggle?.click();
-  await expect.poll(() => paletteIds(panel).length).toBeGreaterThan(0);
+  await expect.poll(() => panel.querySelector('[data-step="s1"]')).not.toBeNull();
   expect(stub.requests.map((request) => request.url).sort()).toEqual([
     "/collections",
     "/processes",
@@ -270,70 +341,228 @@ test("collapsed by default and lazy: no requests until opened", async () => {
   ]);
 });
 
-test("the palette lists exactly the served process definitions", async () => {
+test("B1: the canvas is a permanent Load → Output pipeline — the save_result tail cannot be removed", async () => {
   const panel = await mount(fetchStub({}));
-  expect(paletteIds(panel)).toEqual([
-    "load_collection",
-    "ndvi",
-    "linear_scale_range",
-    "save_result",
-  ]);
+  // The empty canvas is already the full frame: Load then Output.
+  expect(stepProcesses(panel)).toEqual(["load_collection", "save_result"]);
+  // Neither permanent card offers a remove control…
+  expect(panel.querySelector('[data-step="s1"] [aria-label^="Remove step"]')).toBeNull();
+  expect(panel.querySelector('[data-step="s2"] [aria-label^="Remove step"]')).toBeNull();
+  // …and the graph always ends in save_result with result: true, even
+  // after inserting and removing middle steps.
+  insertAt(panel, 0, "ndvi");
+  panel.querySelector<HTMLButtonElement>('[aria-label="Remove step s2"]')?.click();
+  const graph = panel.buildGraph() as Record<string, { process_id: string; result?: boolean }>;
+  const keys = Object.keys(graph);
+  const last = graph[keys[keys.length - 1] ?? ""];
+  expect(last?.process_id).toBe("save_result");
+  expect(last?.result).toBe(true);
 });
 
-test("deleting a definition from /processes removes its palette entry and form", async () => {
-  const withNdvi = await mount(fetchStub({}));
-  addStep(withNdvi, "ndvi");
-  // The form exists, generated from the schema: nir/red prefilled with
-  // the definition's defaults.
-  expect(field<HTMLInputElement>(withNdvi, "s1-nir").value).toBe("nir");
-  expect(field<HTMLInputElement>(withNdvi, "s1-red").value).toBe("red");
-
-  document.body.replaceChildren();
-  const without = await mount(
-    fetchStub({ processes: DEFINITIONS.filter((process) => process.id !== "ndvi") }),
-  );
-  expect(paletteIds(without)).toEqual(["load_collection", "linear_scale_range", "save_result"]);
-  expect(without.querySelector('.swath-authoring-palette button[data-process="ndvi"]')).toBeNull();
-  expect(() => addStep(without, "ndvi")).toThrow();
-  expect(without.querySelector("#swath-authoring-s1-nir")).toBeNull();
-});
-
-test("fields are generated from the parameter schemas, data flow included", async () => {
+test("B2/B3: arithmetic and array_element are never offered as pipeline steps — the formula builder owns them", async () => {
   const panel = await mount(fetchStub({}));
-  addStep(panel, "load_collection");
-  addStep(panel, "ndvi");
-
-  // load_collection: every schema parameter became a field (the
-  // defaulted/nullable ones under the advanced toggle).
-  openAdvanced(panel, "s1");
-  for (const name of ["id", "spatial_extent", "temporal_extent", "bands"]) {
-    expect(panel.querySelector(`#swath-authoring-s1-${name}`)).not.toBeNull();
+  const forbidden = ["add", "subtract", "multiply", "divide", "array_element"];
+  const offered = new Set(allChips(panel));
+  for (const id of forbidden) {
+    expect(offered.has(id), id).toBe(false);
   }
-  // The first step has nothing to wire from: no source selects.
-  expect(panel.querySelector("#swath-authoring-s1-id-source")).toBeNull();
-
-  // ndvi.data is a raster-cube: it defaults to the previous step's
-  // output, and its literal input is disabled accordingly.
-  openAdvanced(panel, "s2");
-  const dataSource = field<HTMLSelectElement>(panel, "s2-data-source");
-  expect(dataSource.value).toBe("s1");
-  expect(field<HTMLInputElement>(panel, "s2-data").disabled).toBe(true);
-  // Band-name parameters stay literal inputs, prefilled from defaults.
-  expect(field<HTMLInputElement>(panel, "s2-nir").disabled).toBe(false);
-
-  // Numbers render as number inputs (schema type, not a per-process map).
-  addStep(panel, "linear_scale_range");
-  expect(field<HTMLInputElement>(panel, "s3-inputMin").type).toBe("number");
-  // x is typed number, but as the first required parameter of a later
-  // step it defaults to wiring from the previous step.
-  openAdvanced(panel, "s3");
-  expect(field<HTMLSelectElement>(panel, "s3-x-source").value).toBe("s2");
+  // Still true at every gap of a longer pipeline (and load/save are
+  // never chips either — they are the permanent frame).
+  insertAt(panel, 0, "ndvi");
+  const later = new Set(allChips(panel));
+  for (const id of [...forbidden, "load_collection", "save_result"]) {
+    expect(later.has(id), id).toBe(false);
+  }
 });
 
-test("every field carries a visible plain-language explainer", async () => {
+test("B4: scale-before-reduce is unconstructible — chips only appear where the whole pipeline still types", async () => {
   const panel = await mount(fetchStub({}));
-  addStep(panel, "load_collection");
+  // Fresh canvas: everything fits right after Load.
+  expect(chipsAt(panel, 0)).toEqual(["ndvi", "reduce_dimension", "linear_scale_range"]);
+  // With a scale step in place, the gap BEFORE it still offers the
+  // reduce steps (reduce-then-scale types)…
+  insertAt(panel, 0, "linear_scale_range");
+  expect(chipsAt(panel, 0)).toEqual(["ndvi", "reduce_dimension"]);
+  // …but the gap AFTER it offers nothing: nothing reduces or re-scales
+  // a scaled cube, so the row is not rendered at all.
+  expect(panel.querySelector('.swath-authoring-insert[data-gap="1"]')).toBeNull();
+  // A complete NDVI pipeline is saturated: no insert rows anywhere.
+  panel.querySelector<HTMLButtonElement>('[aria-label="Remove step s2"]')?.click();
+  insertAt(panel, 0, "ndvi");
+  insertAt(panel, 1, "linear_scale_range");
+  expect(allChips(panel)).toEqual([]);
+});
+
+test("B5: a multi-band pipeline that is not an RGB composite explains itself and gates submit", async () => {
+  const panel = await mount(fetchStub({}));
+  choose(panel, "s1-id", "hls-s30");
+  tickBand(panel, "b02");
+  tickBand(panel, "b03");
+  expect(submitButton(panel).disabled).toBe(true);
+  expect(submitReason(panel)).toContain(
+    "produces 2 channels; a picture needs 1 (add NDVI or a formula) or 3 (red, green, blue)",
+  );
+  // Ticking a third band makes it a lawful RGB composite: reason gone,
+  // submit enabled with zero expert decisions (extents null, png).
+  tickBand(panel, "b04");
+  expect(submitReason(panel)).toBe("");
+  expect(submitButton(panel).disabled).toBe(false);
+});
+
+test("B6: the colormap greys out on a multi-band result, says why, and never publishes", async () => {
+  const panel = await mount(fetchStub({}));
+  choose(panel, "s1-id", "hls-s30");
+  tickBand(panel, "b02");
+  tickBand(panel, "b03");
+  tickBand(panel, "b04");
+  // Multi-band result: the select is disabled and the card explains in
+  // plain words.
+  expect(field<HTMLSelectElement>(panel, "s2-options").disabled).toBe(true);
+  expect(field(panel, "s2-composite-note").textContent).toContain(
+    "A colormap maps one gray value per pixel",
+  );
+  // Adding NDVI reduces to gray: the colormap becomes available.
+  insertAt(panel, 0, "ndvi");
+  expect(field<HTMLSelectElement>(panel, "s3-options").disabled).toBe(false);
+  choose(panel, "s3-options", "viridis");
+  // Removing the reduce step again: the stored colormap cannot ride the
+  // composite — buildGraph omits it (unconstructible, not just noted).
+  panel.querySelector<HTMLButtonElement>('[aria-label="Remove step s2"]')?.click();
+  expect(field<HTMLSelectElement>(panel, "s2-options").disabled).toBe(true);
+  const graph = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
+  expect(graph["s2"]?.arguments["options"]).toBeUndefined();
+});
+
+test("B7: bands are vocabulary widgets — checkboxes on Load, selects for NDVI — never free text", async () => {
+  const panel = await mount(fetchStub({}));
+  // Before a collection is chosen the bands widget says what to do.
+  expect(field(panel, "s1-bands").textContent).toContain("Choose a dataset first");
+  choose(panel, "s1-id", "hls-s30");
+  // One checkbox per band of the CHOSEN collection; no text input.
+  const boxes = [
+    ...panel.querySelectorAll<HTMLInputElement>('#swath-authoring-s1-bands input[type="checkbox"]'),
+  ];
+  expect(boxes.map((box) => box.dataset["band"])).toEqual(["b02", "b03", "b04", "b8a"]);
+  // NDVI's nir/red are selects over the LOADED bands only (tick order).
+  tickBand(panel, "b8a");
+  tickBand(panel, "b04");
+  insertAt(panel, 0, "ndvi");
+  const nir = field<HTMLSelectElement>(panel, "s2-nir");
+  expect(nir.tagName).toBe("SELECT");
+  expect([...nir.options].map((option) => option.value)).toEqual(["", "b8a", "b04"]);
+  // The prefill heuristics picked the right bands already.
+  expect(nir.value).toBe("b8a");
+  expect(field<HTMLSelectElement>(panel, "s2-red").value).toBe("b04");
+  // Unticking a band a step still uses flags it in plain words.
+  tickBand(panel, "b04");
+  expect(field(panel, "s2-red-note").textContent).toContain("b04 is not loaded any more");
+  expect(submitButton(panel).disabled).toBe(true);
+});
+
+test("B8: a degenerate stretch range flags inline before any request", async () => {
+  const panel = await mount(fetchStub({}));
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-template")?.click();
+  fill(panel, "s3-inputMin", "2");
+  fill(panel, "s3-inputMax", "1");
+  expect(field(panel, "s3-inputMin-note").textContent).toBe(
+    "the smallest value must be below the largest",
+  );
+  expect(submitButton(panel).disabled).toBe(true);
+  fill(panel, "s3-inputMax", "3");
+  expect(field(panel, "s3-inputMin-note").textContent).toBe("");
+  expect(submitButton(panel).disabled).toBe(false);
+});
+
+test("B9: the output format is a select over the profile vocabulary — png, no free text", async () => {
+  const panel = await mount(fetchStub({}));
+  openAdvanced(panel, "s2");
+  const format = field<HTMLSelectElement>(panel, "s2-format");
+  expect(format.tagName).toBe("SELECT");
+  expect([...format.options].map((option) => option.value)).toEqual(["png"]);
+  expect(format.value).toBe("png");
+});
+
+test("B10: the canvas is a linear chain — every step feeds the next, nothing dangles", async () => {
+  const panel = await mount(fetchStub({}));
+  choose(panel, "s1-id", "hls-s30");
+  tickBand(panel, "b8a");
+  tickBand(panel, "b04");
+  insertAt(panel, 0, "ndvi");
+  insertAt(panel, 1, "linear_scale_range");
+  const wired = (graph: Record<string, { arguments: Record<string, unknown> }>): string[] =>
+    Object.keys(graph).map((key) => {
+      const args = graph[key]?.arguments ?? {};
+      const reference = Object.values(args).find(
+        (value) => typeof value === "object" && value !== null && "from_node" in value,
+      ) as { from_node?: string } | undefined;
+      return reference?.from_node ?? "";
+    });
+  // s1 ← nothing, s2 ← s1, s3 ← s2, s4 ← s3: a chain by construction.
+  expect(wired(panel.buildGraph() as never)).toEqual(["", "s1", "s2", "s3"]);
+  // Removing a middle step REWIRES rather than dangles: the neighbors
+  // join up and the keys stay positional.
+  panel.querySelector<HTMLButtonElement>('[aria-label="Remove step s2"]')?.click();
+  const after = panel.buildGraph() as Record<string, { process_id: string }>;
+  expect(Object.keys(after)).toEqual(["s1", "s2", "s3"]);
+  expect(after["s2"]?.process_id).toBe("linear_scale_range");
+  expect(wired(after as never)).toEqual(["", "s1", "s2"]);
+});
+
+test("B11: the narrative retells the exact pipeline live — the words show a swap the schema cannot catch", async () => {
+  // Swapped nir/red publishes fine and renders wrong; no validator can
+  // catch it (the design note sends B11 to preview, a follow-up ADR).
+  // The narrative is the honest countermeasure available today: it
+  // spells the formula out with the user's actual choices.
+  const panel = await mount(fetchStub({}));
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-template")?.click();
+  const narrative = () => panel.querySelector("#swath-authoring-narrative")?.textContent ?? "";
+  expect(narrative()).toBe(
+    "Load hls-s30 (bands b8a,b04) → compute NDVI ((b8a − b04) / (b8a + b04)) → " +
+      "rescale -1..1 to 0..255 → save as png, colored with rdylgn.",
+  );
+  choose(panel, "s2-nir", "b04");
+  choose(panel, "s2-red", "b8a");
+  expect(narrative()).toContain("compute NDVI ((b04 − b8a) / (b04 + b8a))");
+  // Live: changing the colormap re-narrates without a re-render cycle.
+  choose(panel, "s4-options", "viridis");
+  expect(narrative()).toContain("colored with viridis");
+});
+
+test("schema honesty: chips and cards exist only for served definitions", async () => {
+  const without = (...ids: string[]): ProcessDefinition[] =>
+    DEFINITIONS.filter((process) => !ids.includes(process.id));
+  // Delete ndvi: its chip is gone (and the template with it).
+  const noNdvi = await mount(fetchStub({ processes: without("ndvi") }));
+  expect(chipsAt(noNdvi, 0)).toEqual(["reduce_dimension", "linear_scale_range"]);
+  expect(noNdvi.querySelector(".swath-authoring-template")).toBeNull();
+  // The formula chip needs its whole toolkit: reduce_dimension,
+  // array_element, and at least one arithmetic op.
+  document.body.replaceChildren();
+  const noElement = await mount(fetchStub({ processes: without("array_element") }));
+  expect(chipsAt(noElement, 0)).toEqual(["ndvi", "linear_scale_range"]);
+  document.body.replaceChildren();
+  const noOps = await mount(
+    fetchStub({ processes: without("add", "subtract", "multiply", "divide") }),
+  );
+  expect(chipsAt(noOps, 0)).toEqual(["ndvi", "linear_scale_range"]);
+  // Without save_result there is no lawful pipeline at all: the canvas
+  // says so instead of offering one.
+  document.body.replaceChildren();
+  const noSave = await mount(fetchStub({ processes: without("save_result") }));
+  expect(noSave.querySelector(".swath-authoring-step")).toBeNull();
+  expect(noSave.querySelector(".swath-authoring-empty")?.textContent).toContain(
+    "load_collection and save_result",
+  );
+});
+
+test("every field carries a visible plain-language explainer, and the Load card speaks area/time plainly", async () => {
+  const panel = await mount(fetchStub({}));
   expect(helpText(panel, "s1-id")).toBe("Which dataset to compute from.");
+  // The extents are advanced expert fields; the card carries the
+  // plain-worded summary of what leaving them alone means.
+  expect(field(panel, "s1-extent-summary").textContent).toBe(
+    "Area: everywhere the collection covers · Time: everything available",
+  );
   openAdvanced(panel, "s1");
   expect(helpText(panel, "s1-spatial_extent")).toBe(
     "The map area to compute over — leave as is to use the whole collection.",
@@ -343,119 +572,48 @@ test("every field carries a visible plain-language explainer", async () => {
   );
 });
 
-test("defaulted fields collapse under advanced and still publish correctly", async () => {
+test("submit stays disabled with spelled-out reasons until the pipeline is complete", async () => {
   const panel = await mount(fetchStub({}));
-  addStep(panel, "load_collection");
-  addStep(panel, "linear_scale_range");
-  addStep(panel, "save_result");
-
-  // Collapsed by default: the nullable extents and the profile-pinned
-  // outputs/format are not in the default view...
-  for (const id of ["s1-spatial_extent", "s2-outputMax", "s3-format"]) {
-    expect(panel.querySelector(`#swath-authoring-${id}`)).toBeNull();
-  }
-  const toggle = panel.querySelector('[data-step="s1"] .swath-authoring-advanced-toggle');
-  expect(toggle?.getAttribute("aria-expanded")).toBe("false");
-  // ...while the newcomer's choices stay visible.
-  for (const id of ["s1-id", "s1-bands", "s2-inputMin", "s3-options"]) {
-    expect(panel.querySelector(`#swath-authoring-${id}`)).not.toBeNull();
-  }
-
-  // Smart defaults make the hidden fields publishable with zero expert
-  // decisions: null extents, 0..255 output, png.
-  choose(panel, "s1-id", "hls-s30");
-  fill(panel, "s2-inputMin", "-1");
-  fill(panel, "s2-inputMax", "1");
-  expect(submitButton(panel).disabled).toBe(false);
-  const graph = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
-  expect(graph["s1"]?.arguments["spatial_extent"]).toBeNull();
-  expect(graph["s2"]?.arguments["outputMin"]).toBe(0);
-  expect(graph["s2"]?.arguments["outputMax"]).toBe(255);
-  expect(graph["s3"]?.arguments["format"]).toBe("png");
-});
-
-test("the collection is a dropdown fed by GET /collections", async () => {
-  const panel = await mount(fetchStub({}));
-  addStep(panel, "load_collection");
-  const picker = field<HTMLSelectElement>(panel, "s1-id");
-  expect(picker.tagName).toBe("SELECT");
-  expect([...picker.options].map((option) => option.value)).toEqual(["", "hls-s30"]);
-  // Choosing the collection surfaces its band vocabulary as a hint on
-  // band-name fields (context from /collections, not hand-maintained).
-  choose(panel, "s1-id", "hls-s30");
-  expect(panel.querySelector('[data-step="s1"] .swath-authoring-band-hint')?.textContent).toContain(
-    "b02, b03, b04, b8a",
-  );
-});
-
-test("the colormap is selectable on save_result's options", async () => {
-  const panel = await mount(fetchStub({}));
-  addStep(panel, "save_result");
-  const options = field<HTMLSelectElement>(panel, "s1-options");
-  expect(options.tagName).toBe("SELECT");
-  expect([...options.options].map((option) => option.value)).toEqual([
-    "",
-    "grayscale",
-    "viridis",
-    "magma",
-    "rdylgn",
-  ]);
-});
-
-test("submit stays disabled with spelled-out reasons until the graph is valid", async () => {
-  const panel = await mount(fetchStub({}));
-  addStep(panel, "load_collection");
-  // Required collection missing: blocked, and the reasons say so.
+  // The permanent frame alone: no collection yet, and the reasons say
+  // so in order (the server's CollectionNotFound/UnknownBand family is
+  // unreachable from here).
   expect(submitButton(panel).disabled).toBe(true);
-  expect(submitReason(panel)).toContain("1 field needs a value");
-  expect(submitReason(panel)).toContain("no step loads a collection");
-  // Choosing the collection clears both reasons (spatial/temporal are
-  // nullable, bands optional): the graph is structurally valid.
+  expect(submitReason(panel)).toContain("no collection chosen yet");
   choose(panel, "s1-id", "hls-s30");
+  expect(submitReason(panel)).toContain("no bands ticked yet");
+  tickBand(panel, "b8a");
+  // One band, no reduce: B5's explanation takes over.
+  expect(submitReason(panel)).toContain("produces 1 channel");
+  insertAt(panel, 0, "ndvi");
+  // nir/red prefill from the single loaded band cannot pick two: the
+  // fields flag and count.
+  expect(submitReason(panel)).toContain("fields need values");
+  tickBand(panel, "b04");
+  choose(panel, "s2-nir", "b8a");
+  choose(panel, "s2-red", "b04");
   expect(submitButton(panel).disabled).toBe(false);
   expect(submitReason(panel)).toBe("");
-  // A disabled submit never POSTs — clicking earlier sent nothing.
-  expect(panel.buildGraph()["s1"]).toMatchObject({ process_id: "load_collection" });
 });
 
-test("required fields flag inline as the user types", async () => {
-  const panel = await mount(fetchStub({}));
-  addStep(panel, "load_collection");
-  addStep(panel, "save_result");
-  // format arrives with the profile default (png) under advanced —
-  // no issue, and only load_collection's id blocks submit.
-  expect(submitReason(panel)).toContain("1 field needs a value");
-  openAdvanced(panel, "s2");
-  const note = () => panel.querySelector("#swath-authoring-s2-format-note")?.textContent;
-  expect(field<HTMLInputElement>(panel, "s2-format").value).toBe("png");
-  expect(note()).toBe("");
-  // Clearing it flags the field the moment it empties.
-  fill(panel, "s2-format", "");
-  expect(note()).toBe("required");
-  expect(submitReason(panel)).toContain("2 fields need values");
-  fill(panel, "s2-format", "png");
-  expect(note()).toBe("");
-});
-
-/** Drives the full NDVI authoring flow through the generated forms —
- * only the newcomer-visible fields: outputs, extents, and format ride
- * their smart defaults (null/0..255/png) untouched. */
+/** Drives the full NDVI authoring flow through the Model B canvas —
+ * vocabulary widgets only: collection select, band checkboxes (tick
+ * order = loaded order), prefilled nir/red selects, range numbers, the
+ * colormap select. Extents and format ride their smart defaults. */
 function authorNdvi(panel: SwathAuthoringPanel): void {
-  addStep(panel, "load_collection");
-  addStep(panel, "ndvi");
-  addStep(panel, "linear_scale_range");
-  addStep(panel, "save_result");
   choose(panel, "s1-id", "hls-s30");
-  fill(panel, "s1-bands", "b8a,b04");
-  fill(panel, "s2-nir", "b8a");
-  fill(panel, "s2-red", "b04");
+  tickBand(panel, "b8a");
+  tickBand(panel, "b04");
+  insertAt(panel, 0, "ndvi");
+  insertAt(panel, 1, "linear_scale_range");
   fill(panel, "s3-inputMin", "-1");
   fill(panel, "s3-inputMax", "1");
   choose(panel, "s4-options", "rdylgn");
 }
 
 /** The graph [`authorNdvi`] composes — also what the NDVI template must
- * produce over the mocked collection (b8a/b04 via the band heuristics). */
+ * produce over the mocked collection (b8a/b04 via the band heuristics).
+ * Identical to the #148 panel's graph: Model B changed how the pipeline
+ * is assembled, not what it publishes. */
 const NDVI_GRAPH = {
   s1: {
     process_id: "load_collection",
@@ -524,7 +682,7 @@ test("the NDVI template composes a valid, submittable pipeline", async () => {
   const template = panel.querySelector<HTMLButtonElement>(".swath-authoring-template");
   expect(template).not.toBeNull();
   template?.click();
-  // The template fills a graph that renders: the first collection,
+  // The template fills a pipeline that renders: the first collection,
   // nir/red picked from its band vocabulary, the built-in NDVI scale
   // and colormap — identical to the hand-authored pipeline.
   expect(field<HTMLSelectElement>(panel, "s1-id").value).toBe("hls-s30");
@@ -534,27 +692,74 @@ test("the NDVI template composes a valid, submittable pipeline", async () => {
   expect(panel.buildGraph()).toEqual(NDVI_GRAPH);
 });
 
-test("the narrative retells the pipeline in plain words, live", async () => {
+test("the formula builder composes the reduce_dimension reducer child graph", async () => {
   const panel = await mount(fetchStub({}));
-  panel.querySelector<HTMLButtonElement>(".swath-authoring-template")?.click();
-  const narrative = () => panel.querySelector("#swath-authoring-narrative")?.textContent;
-  expect(narrative()).toBe(
-    "Load hls-s30 (bands b8a,b04) → compute NDVI ((b8a − b04) / (b8a + b04)) → " +
-      "rescale -1..1 to 0..255 → save as png, colored with rdylgn.",
+  choose(panel, "s1-id", "hls-s30");
+  tickBand(panel, "b8a");
+  tickBand(panel, "b04");
+  insertAt(panel, 0, "reduce_dimension");
+  // The card starts with one incomplete line and explains what is
+  // missing (self-explaining, never silently wrong).
+  expect(field(panel, "s2-formula-issues").textContent).toContain("line 1: pick the left value");
+  expect(submitButton(panel).disabled).toBe(true);
+  // NDVI by hand: line1 = b8a − b04; line2 = b8a + b04; line3 = l1 ÷ l2.
+  choose(panel, "s2-row1-left", "band:b8a");
+  choose(panel, "s2-row1-op", "subtract");
+  choose(panel, "s2-row1-right", "band:b04");
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-formula-add")?.click();
+  choose(panel, "s2-row2-left", "band:b8a");
+  choose(panel, "s2-row2-op", "add");
+  choose(panel, "s2-row2-right", "band:b04");
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-formula-add")?.click();
+  choose(panel, "s2-row3-left", "row:0");
+  choose(panel, "s2-row3-op", "divide");
+  choose(panel, "s2-row3-right", "row:1");
+  expect(field(panel, "s2-formula-issues").textContent).toBe("");
+  // A complete formula unblocks submit: the card's pinned dimension and
+  // composed reducer never count as missing fields.
+  expect(submitButton(panel).disabled).toBe(false);
+  // The narrative reads the formula back as plain math.
+  expect(panel.querySelector("#swath-authoring-narrative")?.textContent).toContain(
+    "combine the bands with a formula ((b8a − b04) ÷ (b8a + b04))",
   );
-  // Live: changing the colormap re-narrates without a re-render cycle.
-  choose(panel, "s4-options", "viridis");
-  expect(narrative()).toContain("colored with viridis");
+  const graph = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
+  expect(graph["s2"]).toEqual({
+    process_id: "reduce_dimension",
+    arguments: {
+      data: { from_node: "s1" },
+      dimension: "bands",
+      reducer: {
+        process_graph: {
+          b1: {
+            process_id: "array_element",
+            arguments: { data: { from_parameter: "data" }, label: "b8a" },
+          },
+          b2: {
+            process_id: "array_element",
+            arguments: { data: { from_parameter: "data" }, label: "b04" },
+          },
+          r1: {
+            process_id: "subtract",
+            arguments: { x: { from_node: "b1" }, y: { from_node: "b2" } },
+          },
+          r2: {
+            process_id: "add",
+            arguments: { x: { from_node: "b1" }, y: { from_node: "b2" } },
+          },
+          r3: {
+            process_id: "divide",
+            arguments: { x: { from_node: "r1" }, y: { from_node: "r2" } },
+            result: true,
+          },
+        },
+      },
+    },
+  });
+  // Gray result: the colormap select is live again (B6's flip side).
+  expect(field<HTMLSelectElement>(panel, "s3-options").disabled).toBe(false);
 });
 
-test("the template is not offered when its processes are not all served", async () => {
-  const panel = await mount(
-    fetchStub({ processes: DEFINITIONS.filter((process) => process.id !== "ndvi") }),
-  );
-  expect(panel.querySelector(".swath-authoring-template")).toBeNull();
-});
-
-test("a server error naming a node and argument lands on that field", async () => {
+test("a server error naming a node and argument lands on that field (the safety net)", async () => {
   const message =
     "node `s3` (linear_scale_range): invalid argument `outputMin`: the Render IR quantizes " +
     "to 8-bit; the output range must be exactly 0..255, got 0..1";
@@ -563,6 +768,9 @@ test("a server error naming a node and argument lands on that field", async () =
   });
   const panel = await mount(stub);
   authorNdvi(panel);
+  // Force the semantically wrong output range through the advanced fold.
+  openAdvanced(panel, "s3");
+  fill(panel, "s3-outputMax", "1");
   submitButton(panel).click();
   await expect
     .poll(() => panel.querySelector("#swath-authoring-s3-outputMin-note")?.textContent)
@@ -582,8 +790,10 @@ test("a rejected graph the panel cannot locate renders the general error inline"
     },
   });
   const panel = await mount(stub);
-  addStep(panel, "load_collection");
   choose(panel, "s1-id", "hls-s30");
+  tickBand(panel, "b02");
+  tickBand(panel, "b03");
+  tickBand(panel, "b04");
   submitButton(panel).click();
   await expect
     .poll(() => panel.querySelector(".swath-authoring-error")?.textContent)
