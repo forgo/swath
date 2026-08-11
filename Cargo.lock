@@ -3160,7 +3160,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "swath-api"
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
  "futures-core",
@@ -3186,7 +3186,7 @@ dependencies = [
 
 [[package]]
 name = "swath-cache-objectstore"
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "object_store",
  "swath-core",
@@ -3196,7 +3196,7 @@ dependencies = [
 
 [[package]]
 name = "swath-catalog-pgstac"
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "serde_json",
  "sqlx",
@@ -3207,7 +3207,7 @@ dependencies = [
 
 [[package]]
 name = "swath-cli"
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
  "clap",
@@ -3235,7 +3235,7 @@ dependencies = [
 
 [[package]]
 name = "swath-core"
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "criterion",
  "insta",
@@ -3248,7 +3248,7 @@ dependencies = [
 
 [[package]]
 name = "swath-e2e"
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3258,7 +3258,7 @@ dependencies = [
 
 [[package]]
 name = "swath-events-filedrop"
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3270,7 +3270,7 @@ dependencies = [
 
 [[package]]
 name = "swath-referencer"
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "gribberish",
  "hdf5-metno",
@@ -3280,7 +3280,7 @@ dependencies = [
 
 [[package]]
 name = "swath-render"
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "criterion",
  "image",
@@ -3302,7 +3302,7 @@ dependencies = [
 
 [[package]]
 name = "swath-reproject-proj4rs"
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "proj4rs",
  "proptest",
@@ -3313,7 +3313,7 @@ dependencies = [
 
 [[package]]
 name = "swath-source-cog"
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "async-tiff",
  "async-trait",
@@ -3328,7 +3328,7 @@ dependencies = [
 
 [[package]]
 name = "swath-source-virtual"
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "flate2",
  "object_store",
@@ -3343,7 +3343,7 @@ dependencies = [
 
 [[package]]
 name = "swath-testkit"
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "image",
  "swath-testsupport",
@@ -3351,7 +3351,7 @@ dependencies = [
 
 [[package]]
 name = "swath-testsupport"
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "serde",
  "serde_json",

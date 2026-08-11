@@ -16,7 +16,7 @@ image = { workspace = true }
 # temp dirs, and dev-dependencies cover a bin target's unit tests. The
 # testkit ships (locally) as tooling; testsupport never leaves test builds.
 [dev-dependencies]
-swath-testsupport = { path = "../swath-testsupport", version = "0.0.0" }
+swath-testsupport = { path = "../swath-testsupport", version = "0.1.0-alpha.1" }
 
 [lints]
 workspace = true

@@ -13,7 +13,7 @@ publish = false
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-swath-core = { path = "../../swath-core", version = "0.0.0" }
+swath-core = { path = "../../swath-core", version = "0.1.0-alpha.1" }
 # `time` only: the poll interval between directory scans. The adapter owns
 # the clock the core refuses to (arrival stamping + pacing).
 tokio = { workspace = true, features = ["time"] }
@@ -21,8 +21,8 @@ tokio = { workspace = true, features = ["time"] }
 [dev-dependencies]
 # The legacy-path integration tests reference the tiny committed HDF5
 # fixture through the real production generator.
-swath-referencer = { path = "../../swath-referencer", version = "0.0.0" }
-swath-testsupport = { path = "../../swath-testsupport", version = "0.0.0" }
+swath-referencer = { path = "../../swath-referencer", version = "0.1.0-alpha.1" }
+swath-testsupport = { path = "../../swath-testsupport", version = "0.1.0-alpha.1" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [lints]

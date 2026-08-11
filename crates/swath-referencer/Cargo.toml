@@ -40,10 +40,10 @@ gribberish = { workspace = true }
 # touch HDF5 can opt out (`just check-fast` / `just test-fast`) while every
 # default build — `just test`, release, Docker — keeps it exactly as before.
 hdf5-metno = { workspace = true, optional = true }
-swath-core = { path = "../swath-core", version = "0.0.0" }
+swath-core = { path = "../swath-core", version = "0.1.0-alpha.1" }
 
 [dev-dependencies]
-swath-testsupport = { path = "../swath-testsupport", version = "0.0.0" }
+swath-testsupport = { path = "../swath-testsupport", version = "0.1.0-alpha.1" }
 
 [lints]
 workspace = true
