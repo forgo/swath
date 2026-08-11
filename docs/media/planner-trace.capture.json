@@ -1,0 +1,183 @@
+{
+  "schema": "swath-trace-capture/1",
+  "captured": "2026-08-10",
+  "git_sha": "27deca2d2f91778b53125e939e3e47efd3ccf693",
+  "command": "cargo run -p swath-cli -- serve --fixtures  # then: curl -sN http://127.0.0.1:8080/traces, plus GET /tilesets/truecolor/tiles/11/780/424 and /tilesets/ndvi/tiles/12/1561/848",
+  "build": "dev profile, rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "machine": {
+    "model": "Apple M2 Max",
+    "arch": "arm64",
+    "os": "Darwin"
+  },
+  "note": "Verbatim data frames from the GET /traces SSE stream, fixture stack (tests/fixtures HLS granule, no cache configured). Timings are dev-profile and are NOT used in any diagram; the plan payloads are.",
+  "events": [
+    {
+      "tile": "11/424/780",
+      "layer": "truecolor",
+      "trace": {
+        "decision": {
+          "overview": {
+            "level": 2
+          }
+        },
+        "source": "hlss30-t13sdd-2024158-b04.tif",
+        "sources": [
+          "hlss30-t13sdd-2024158-b04.tif",
+          "hlss30-t13sdd-2024158-b03.tif",
+          "hlss30-t13sdd-2024158-b02.tif"
+        ],
+        "crs_from": 32613,
+        "crs_to": 3857,
+        "bytes_read": 203489,
+        "provenance": [
+          {
+            "path": "hlss30-t13sdd-2024158-b04.tif",
+            "offset": 934,
+            "length": 69591
+          },
+          {
+            "path": "hlss30-t13sdd-2024158-b03.tif",
+            "offset": 934,
+            "length": 67422
+          },
+          {
+            "path": "hlss30-t13sdd-2024158-b02.tif",
+            "offset": 934,
+            "length": 66476
+          }
+        ],
+        "timings": {
+          "read_ms": 187,
+          "warp_ms": 143,
+          "pixel_ops_ms": 6,
+          "encode_ms": 62,
+          "total_ms": 400
+        },
+        "ingest_to_pixel_ms": null,
+        "plan": {
+          "chosen": {
+            "overview": {
+              "factor": 2
+            }
+          },
+          "considered": [
+            {
+              "strategy": "cache_hit",
+              "estimated_cost_bytes": 0,
+              "admissible": false,
+              "reason": "no cache configured"
+            },
+            {
+              "strategy": {
+                "overview": {
+                  "factor": 2
+                }
+              },
+              "estimated_cost_bytes": 385572,
+              "admissible": true,
+              "reason": "coarsest overview within the oversample threshold"
+            },
+            {
+              "strategy": "live",
+              "estimated_cost_bytes": 1542288,
+              "admissible": true,
+              "reason": "full-resolution read"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tile": "12/848/1561",
+      "layer": "ndvi",
+      "trace": {
+        "decision": "live",
+        "source": "hlss30-t13sdd-2024158-b8a.tif",
+        "sources": [
+          "hlss30-t13sdd-2024158-b8a.tif",
+          "hlss30-t13sdd-2024158-b04.tif"
+        ],
+        "crs_from": 32613,
+        "crs_to": 3857,
+        "bytes_read": 546497,
+        "provenance": [
+          {
+            "path": "hlss30-t13sdd-2024158-b8a.tif",
+            "offset": 70932,
+            "length": 27494
+          },
+          {
+            "path": "hlss30-t13sdd-2024158-b8a.tif",
+            "offset": 98434,
+            "length": 98877
+          },
+          {
+            "path": "hlss30-t13sdd-2024158-b8a.tif",
+            "offset": 197319,
+            "length": 49815
+          },
+          {
+            "path": "hlss30-t13sdd-2024158-b8a.tif",
+            "offset": 247142,
+            "length": 97338
+          },
+          {
+            "path": "hlss30-t13sdd-2024158-b04.tif",
+            "offset": 70533,
+            "length": 27306
+          },
+          {
+            "path": "hlss30-t13sdd-2024158-b04.tif",
+            "offset": 97847,
+            "length": 97414
+          },
+          {
+            "path": "hlss30-t13sdd-2024158-b04.tif",
+            "offset": 195269,
+            "length": 50384
+          },
+          {
+            "path": "hlss30-t13sdd-2024158-b04.tif",
+            "offset": 245661,
+            "length": 97869
+          }
+        ],
+        "timings": {
+          "read_ms": 187,
+          "warp_ms": 112,
+          "pixel_ops_ms": 30,
+          "encode_ms": 132,
+          "total_ms": 463
+        },
+        "ingest_to_pixel_ms": null,
+        "plan": {
+          "chosen": "live",
+          "considered": [
+            {
+              "strategy": "cache_hit",
+              "estimated_cost_bytes": 0,
+              "admissible": false,
+              "reason": "no cache configured"
+            },
+            {
+              "strategy": {
+                "overview": {
+                  "factor": 0
+                }
+              },
+              "estimated_cost_bytes": 0,
+              "admissible": false,
+              "reason": "no overview factor eligible at this zoom"
+            },
+            {
+              "strategy": "live",
+              "estimated_cost_bytes": 257048,
+              "admissible": true,
+              "reason": "full-resolution read"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

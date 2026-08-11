@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+SPDX-License-Identifier: Apache-2.0
+
+Hand-crafted diagram (plan decision #3) of the legacy virtual-reference
+mechanism. Figures traceable via docs/media/virtual-reference.notes.md.
+Opaque light background so it renders identically on GitHub light and dark.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 660" width="960" height="660"
+     font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#57606a"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#0969da"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="660" fill="#ffffff"/>
+
+  <text x="480" y="38" text-anchor="middle" font-size="19" font-weight="600" fill="#1f2328">Legacy virtual reference — serve the original file, never convert it</text>
+  <text x="480" y="60" text-anchor="middle" font-size="12.5" fill="#57606a">ADR 0006 / ADR 0008 · VNP09GA (VIIRS surface reflectance), genuine HDF5 with HDF-EOS5 groups</text>
+
+  <!-- ============ original granule ============ -->
+  <rect x="40" y="100" width="250" height="210" rx="8" fill="#fff1e5" stroke="#bc4c00" stroke-width="1.5"/>
+  <text x="165" y="124" text-anchor="middle" font-weight="600" fill="#1f2328">VNP09GA granule (.h5)</text>
+  <text x="165" y="142" text-anchor="middle" font-size="11.5" fill="#57606a">8,202,915 bytes · original, untouched</text>
+  <!-- chunk grid -->
+  <g stroke="#bc4c00" stroke-width="1">
+    <rect x="66" y="158" width="39" height="26" fill="#ffffff"/>
+    <rect x="105" y="158" width="39" height="26" fill="#ffffff"/>
+    <rect x="144" y="158" width="39" height="26" fill="#ffffff"/>
+    <rect x="183" y="158" width="39" height="26" fill="#ffffff"/>
+    <rect x="222" y="158" width="39" height="26" fill="#ffffff"/>
+    <rect x="66" y="184" width="39" height="26" fill="#ffffff"/>
+    <rect x="105" y="184" width="39" height="26" fill="#ddf4ff"/>
+    <rect x="144" y="184" width="39" height="26" fill="#ddf4ff"/>
+    <rect x="183" y="184" width="39" height="26" fill="#ffffff"/>
+    <rect x="222" y="184" width="39" height="26" fill="#ffffff"/>
+    <rect x="66" y="210" width="39" height="26" fill="#ffffff"/>
+    <rect x="105" y="210" width="39" height="26" fill="#ddf4ff"/>
+    <rect x="144" y="210" width="39" height="26" fill="#ddf4ff"/>
+    <rect x="183" y="210" width="39" height="26" fill="#ffffff"/>
+    <rect x="222" y="210" width="39" height="26" fill="#ffffff"/>
+    <rect x="66" y="236" width="39" height="26" fill="#ffffff"/>
+    <rect x="105" y="236" width="39" height="26" fill="#ffffff"/>
+    <rect x="144" y="236" width="39" height="26" fill="#ffffff"/>
+    <rect x="183" y="236" width="39" height="26" fill="#ffffff"/>
+    <rect x="222" y="236" width="39" height="26" fill="#ffffff"/>
+  </g>
+  <text x="165" y="282" text-anchor="middle" font-size="11.5" fill="#57606a">compressed chunks (deflate-8)</text>
+  <text x="165" y="298" text-anchor="middle" font-size="11.5" fill="#0969da">■ = the only chunks a tile window touches</text>
+
+  <!-- ============ referencer ============ -->
+  <line x1="290" y1="145" x2="358" y2="145" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="324" y="136" text-anchor="middle" font-size="11" fill="#57606a">metadata walk</text>
+
+  <rect x="360" y="100" width="250" height="72" rx="8" fill="#f6f8fa" stroke="#57606a" stroke-width="1.5"/>
+  <text x="485" y="124" text-anchor="middle" font-weight="600" fill="#1f2328">SwathReferencer (ingest-time)</text>
+  <text x="485" y="142" text-anchor="middle" font-size="11.5" fill="#57606a">walks the chunk index (H5Dchunk_iter)</text>
+  <text x="485" y="158" text-anchor="middle" font-size="11.5" fill="#57606a">no pixel data touched</text>
+
+  <line x1="485" y1="172" x2="485" y2="208" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="497" y="194" font-size="11" fill="#1a7f37" font-weight="600">14 ms warm / 29 ms cold</text>
+
+  <!-- ============ manifest ============ -->
+  <rect x="360" y="210" width="250" height="120" rx="8" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+  <text x="485" y="234" text-anchor="middle" font-weight="600" fill="#1f2328">VirtualManifest v1 (JSON sidecar)</text>
+  <text x="485" y="254" text-anchor="middle" font-size="12" fill="#1f2328">67 arrays · 1,551 chunk refs</text>
+  <text x="485" y="272" text-anchor="middle" font-size="11.5" fill="#57606a">ref = { key, path, offset, length }</text>
+  <text x="485" y="288" text-anchor="middle" font-size="11.5" fill="#57606a">codec chain recorded (zlib:8)</text>
+  <text x="485" y="304" text-anchor="middle" font-size="11.5" fill="#57606a">sinusoidal georef from StructMetadata.0</text>
+  <text x="485" y="320" text-anchor="middle" font-size="11.5" fill="#57606a">stored as &lt;asset&gt;.vmanifest.json</text>
+
+  <!-- ============ equivalence ============ -->
+  <line x1="610" y1="270" x2="678" y2="270" stroke="#1a7f37" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <rect x="680" y="210" width="240" height="120" rx="8" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.5"/>
+  <text x="800" y="234" text-anchor="middle" font-weight="600" fill="#1f2328">Cross-checked, ref for ref</text>
+  <text x="800" y="254" text-anchor="middle" font-size="11.5" fill="#1f2328">vs the VirtualiZarr sidecar reference:</text>
+  <text x="800" y="272" text-anchor="middle" font-size="11.5" fill="#1f2328">67/67 arrays · 1,551/1,551 refs</text>
+  <text x="800" y="290" text-anchor="middle" font-size="11.5" fill="#1f2328">per-chunk offset+length identical</text>
+  <text x="800" y="308" text-anchor="middle" font-size="11.5" fill="#57606a">codec strings identical, all 67 arrays</text>
+
+  <!-- ============ serve lane ============ -->
+  <text x="480" y="372" text-anchor="middle" font-size="12" font-weight="600" fill="#57606a">— serve time —</text>
+
+  <rect x="680" y="390" width="240" height="72" rx="8" fill="#f6f8fa" stroke="#57606a" stroke-width="1.5"/>
+  <text x="800" y="414" text-anchor="middle" font-weight="600" fill="#1f2328">GET tile z/y/x</text>
+  <text x="800" y="432" text-anchor="middle" font-size="11.5" fill="#57606a">VirtualSource.read_window over</text>
+  <text x="800" y="448" text-anchor="middle" font-size="11.5" fill="#57606a">manifest#array (fragment required)</text>
+
+  <line x1="678" y1="426" x2="612" y2="426" stroke="#0969da" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+
+  <rect x="360" y="390" width="250" height="120" rx="8" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+  <text x="485" y="414" text-anchor="middle" font-weight="600" fill="#1f2328">Fetch only touched chunks</text>
+  <text x="485" y="434" text-anchor="middle" font-size="11.5" fill="#1f2328">intersect window with the chunk grid,</text>
+  <text x="485" y="450" text-anchor="middle" font-size="11.5" fill="#1f2328">get_range(offset, length) per chunk,</text>
+  <text x="485" y="466" text-anchor="middle" font-size="11.5" fill="#1f2328">decode codecs in reverse (inflate)</text>
+  <text x="485" y="486" text-anchor="middle" font-size="11.5" fill="#57606a">missing chunk = nodata fill, no I/O</text>
+
+  <path d="M 358 426 C 320 426 300 320 292 240" fill="none" stroke="#0969da" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+  <text x="255" y="360" text-anchor="middle" font-size="11" fill="#0969da">byte ranges into</text>
+  <text x="255" y="374" text-anchor="middle" font-size="11" fill="#0969da">the ORIGINAL .h5</text>
+
+  <line x1="485" y1="510" x2="485" y2="548" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="330" y="550" width="310" height="72" rx="8" fill="#f6f8fa" stroke="#57606a" stroke-width="1.5"/>
+  <text x="485" y="574" text-anchor="middle" font-weight="600" fill="#1f2328">Sinusoidal warp → band math → PNG + Trace</text>
+  <text x="485" y="592" text-anchor="middle" font-size="11.5" fill="#57606a">Trace provenance = exactly the fetched ranges,</text>
+  <text x="485" y="608" text-anchor="middle" font-size="11.5" fill="#57606a">pointing at the original granule</text>
+
+  <!-- ============ proof banner ============ -->
+  <rect x="680" y="550" width="240" height="72" rx="8" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.5"/>
+  <text x="800" y="574" text-anchor="middle" font-weight="600" fill="#1f2328">Pixels byte-identical</text>
+  <text x="800" y="592" text-anchor="middle" font-size="11.5" fill="#1f2328">SHA-256 of little-endian window bytes</text>
+  <text x="800" y="608" text-anchor="middle" font-size="11.5" fill="#1f2328">equals h5py's read (CI-asserted)</text>
+  <line x1="642" y1="586" x2="678" y2="586" stroke="#1a7f37" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+</svg>
