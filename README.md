@@ -55,7 +55,12 @@ Read in this order:
    CI/CD, release, security posture.
 5. [`docs/DEMO.md`](docs/DEMO.md) — the stopwatch demo: `just demo`, what the x-ray overlay
    shows, the measured ingest-to-pixel numbers, and how CI asserts the same path forever.
-6. [`docs/decisions/`](docs/decisions/) — dated, immutable ADRs recording *why* Swath is shaped
+6. [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — the operator guide: store backends, the tile
+   cache (and its honest GC deferral), ingest sources, observability, CORS and serving the UI —
+   with [`docs/CONFIG.md`](docs/CONFIG.md) (every flag/env/TOML key, kept in sync mechanically
+   by a CI-enforced drift test) and [`docs/ENDPOINTS.md`](docs/ENDPOINTS.md) (every mounted
+   route, with examples captured from the fixture stack).
+7. [`docs/decisions/`](docs/decisions/) — dated, immutable ADRs recording *why* Swath is shaped
    this way; [`prototypes/`](prototypes/) holds the dated experiments that produced the evidence.
 
 ## License

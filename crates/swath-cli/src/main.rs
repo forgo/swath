@@ -22,6 +22,8 @@
 //! not an env-filter DSL, keeping the regex machinery out of the tree.
 
 mod config;
+#[cfg(test)]
+mod docs_check;
 mod ingest;
 mod serve;
 mod source;
