@@ -102,7 +102,6 @@ test("map loads, fetches real tiles, renders pixels, and switches layers", async
   const stats = await canvasStats(page);
   expect(stats.width).toBeGreaterThan(0);
   expect(stats.distinctColors).toBeGreaterThan(16);
-  await page.locator("swath-map").screenshot({ path: "test-results/swath-map-ndvi.png" });
 
   // The built-in switcher: real buttons, aria-pressed reflects state, and
   // switching re-points the raster source — new requests hit the other
@@ -121,7 +120,6 @@ test("map loads, fetches real tiles, renders pixels, and switches layers", async
   await waitForMapIdle(page);
   const truecolorStats = await canvasStats(page);
   expect(truecolorStats.distinctColors).toBeGreaterThan(16);
-  await page.locator("swath-map").screenshot({ path: "test-results/swath-map-truecolor.png" });
 
   // And back to ndvi: the switch is symmetric, and tile requests follow.
   const ndviAgain = tileResponse(page, "ndvi");

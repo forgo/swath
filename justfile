@@ -504,6 +504,48 @@ demo countdown="15":
     echo "  Ctrl-C to tear everything down."
     wait "$vite" || true
 
+# `just screenshots` (issue #112): reproducible docs screenshots, fixture
+# data only. Brings up the SAME compose stack (tests/e2e/stack-up.sh — the
+# single owner of lifecycle; full path: granule dropped, tile polled live),
+# then the capture suite (web/screenshots/capture.ts, its own Playwright
+# config) drives the entry page through the vite dev server at a pinned
+# viewport/DPR into docs/media/screenshots/: deterministic filenames, an
+# index.md with one-line captions, and shots.json (per-shot sha256 + pdiff
+# policy), both stamped with the capture git sha. The tile cache is cleared
+# before EACH capture run so every run replays the identical request history
+# from the same cold state; a SECOND capture into target/screenshots is then
+# perceptually diffed shot-by-shot against the first (swath-testkit pdiff,
+# per-shot policy) — a shot that cannot be reproduced fails the recipe
+# instead of going stale. Needs `just setup-web`.
+screenshots:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Same port discipline as `just demo`: refuse to collide with a live
+    # sibling (a waiting demo holds 5173 and the compose project).
+    if lsof -ti :5173 >/dev/null 2>&1; then
+        echo "FAIL: port 5173 is busy — a previous demo/vite is still running (ctrl-c it first)"; exit 1
+    fi
+    if curl -sf http://localhost:8080/healthz >/dev/null 2>&1; then
+        echo "FAIL: a swath stack is already up on :8080 — 'docker compose down -v' first"; exit 1
+    fi
+    trap 'docker compose down -v' EXIT
+    tests/e2e/stack-up.sh
+    out="$PWD/docs/media/screenshots"
+    second="$PWD/target/screenshots/second"
+    sha=$(git rev-parse HEAD)
+    capture() { # dest-dir
+        # Cold cache per run: decisions/plan mix reproduce exactly.
+        rm -rf target/e2e/cache/* 2>/dev/null || true
+        (cd web && SWATH_SHOTS_DIR="$1" SWATH_CAPTURE_SHA="$sha" \
+            pnpm exec playwright test --config playwright.screenshots.config.ts)
+    }
+    mkdir -p "$out" && rm -f "$out"/*.png "$out"/index.md "$out"/shots.json
+    rm -rf "$second" && mkdir -p "$second"
+    capture "$out"
+    capture "$second"
+    python3 tests/screenshots/verify_stable.py "$out" "$second"
+    echo "screenshots: $(ls "$out"/*.png | wc -l | tr -d ' ') shots in docs/media/screenshots (capture sha $sha)"
+
 # --- benchmarks (issue #100; ENGINEERING.md §2 criterion mandate) ---
 
 # All criterion benches across the workspace: the planner microbench
