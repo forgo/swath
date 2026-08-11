@@ -33,6 +33,8 @@ export default defineConfig(({ command }) => ({
       "/datasets": SWATH,
       "/healthz": SWATH,
       "/traces": SWATH,
+      "/processes": SWATH,
+      "/services": SWATH,
     },
   },
 }));
