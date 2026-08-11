@@ -483,18 +483,7 @@ where
     // plain curl -D (the e2e gate does exactly that). `decision` joined
     // in #36 so a cache hit is readable the same way (the e2e asserts
     // `cache_hit` off exactly this header).
-    let ingest_to_pixel = trace
-        .ingest_to_pixel_ms
-        .map_or_else(String::new, |ms| format!(",\"ingest_to_pixel_ms\":{ms}"));
-    let decision = match &trace.decision {
-        Strategy::Live => "live",
-        Strategy::CacheHit { .. } => "cache_hit",
-        Strategy::Overview { .. } => "overview",
-    };
-    let debug_header = format!(
-        "{{\"decision\":\"{decision}\",\"bytes_read\":{},\"total_ms\":{}{ingest_to_pixel}}}",
-        trace.bytes_read, trace.timings.total_ms,
-    );
+    let debug_header = trace_debug_header(&trace);
     let mut response = (
         StatusCode::OK,
         [(CONTENT_TYPE, HeaderValue::from_static("image/png"))],
@@ -514,6 +503,26 @@ where
     // loses events (reported as `lagged`), never delays a tile.
     app.traces.publish(&layer.layer.id, coord, trace);
     Ok(response)
+}
+
+/// The `X-Swath-Trace` debug summary of a render: decision, bytes read,
+/// total time, and — when the assets came from a catalog granule — the
+/// north-star `ingest_to_pixel_ms`. Shared by the tile handler and the
+/// openEO preview (ADR 0014), so both renders read the same from a
+/// plain `curl -D`.
+pub(crate) fn trace_debug_header(trace: &Trace) -> String {
+    let ingest_to_pixel = trace
+        .ingest_to_pixel_ms
+        .map_or_else(String::new, |ms| format!(",\"ingest_to_pixel_ms\":{ms}"));
+    let decision = match &trace.decision {
+        Strategy::Live => "live",
+        Strategy::CacheHit { .. } => "cache_hit",
+        Strategy::Overview { .. } => "overview",
+    };
+    format!(
+        "{{\"decision\":\"{decision}\",\"bytes_read\":{},\"total_ms\":{}{ingest_to_pixel}}}",
+        trace.bytes_read, trace.timings.total_ms,
+    )
 }
 
 /// `GET /traces` — the x-ray SSE stream (issue #28): `text/event-stream`

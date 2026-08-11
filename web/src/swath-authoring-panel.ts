@@ -62,6 +62,20 @@
  * is ORDER, not vocabulary: it only sequences processes that exist,
  * mirroring compiler semantics the parameter schemas cannot express.
  *
+ * # Preview before publish (issue #169, ADR 0014 — B11's countermeasure)
+ *
+ * A graph that is *valid and wrong* (swapped nir/red, a washed-out
+ * range, a mismatched colormap) is unreachable by any validator; the
+ * only countermeasure is SEEING the draft. Whenever the pipeline is
+ * complete (the same gate as publish), the panel debounces a
+ * `POST /result` — the server's preview-bounded synchronous subset,
+ * which compiles the draft through the exact publish path — and renders
+ * the returned PNG inline beside the narrative: swapped bands *show*
+ * wrong, a washed-out range *shows* washed out, before anything is
+ * published. A draft the server's preview budget refuses
+ * (`ProcessGraphComplexity`) explains itself in plain words and never
+ * blocks publishing — the budget bounds the preview, not the layer.
+ *
  * `POST /services` publishes; success announces a bubbling
  * `swath-service-created` (detail: `{id}`). Published services list
  * from `GET /services` with per-item delete announcing
@@ -101,6 +115,11 @@ const COLORMAPS = ["grayscale", "viridis", "magma", "rdylgn"] as const;
  * (B9) is unconstructible, mirroring the profile note on the served
  * `save_result` definition. */
 const FORMATS = ["png"] as const;
+
+/** How long the canvas stays quiet after an edit before previewing the
+ * draft (ADR 0014 keeps rate/debounce a UI concern: the endpoint is
+ * stateless, the canvas owns its own pacing). */
+const PREVIEW_DEBOUNCE_MS = 300;
 
 /** The NDVI template's pipeline, in order. The template is only offered
  * while every one of these is present in the served definitions — a
@@ -393,6 +412,26 @@ swath-authoring-panel .swath-authoring-narrative {
   overflow-wrap: anywhere;
 }
 swath-authoring-panel .swath-authoring-narrative:empty { display: none; }
+swath-authoring-panel .swath-authoring-preview {
+  margin: 0 0 10px;
+  padding: 0;
+}
+swath-authoring-panel .swath-authoring-preview img {
+  display: block;
+  width: 128px;
+  height: 128px;
+  border: 1px solid rgb(148 163 184 / 30%);
+  border-radius: 6px;
+  background:
+    repeating-conic-gradient(rgb(148 163 184 / 12%) 0% 25%, rgb(15 23 42 / 60%) 0% 50%)
+    0 0 / 16px 16px;
+}
+swath-authoring-panel .swath-authoring-preview figcaption {
+  margin: 2px 0 0;
+  font: 11px/1.5 system-ui, sans-serif;
+  color: rgb(148 163 184 / 75%);
+  overflow-wrap: anywhere;
+}
 swath-authoring-panel .swath-authoring-advanced-toggle {
   display: block;
   margin: 2px 0 6px;
@@ -749,6 +788,15 @@ export class SwathAuthoringPanel extends HTMLElement {
   /** Server diagnostics mapped onto fields (`s3-outputMin`) or whole
    * steps (`s3`); cleared per field on edit and wholesale on publish. */
   #serverNotes = new Map<string, string>();
+  /** The draft preview (issue #169, ADR 0014 — B11's countermeasure):
+   * the object URL of the last previewed PNG, the plain-words note when
+   * there is no image to show, and the request body the state was
+   * rendered from — previews are keyed on the composed graph, so
+   * re-renders never refetch an unchanged draft. */
+  #previewUrl = "";
+  #previewNote = "";
+  #previewedBody = "";
+  #previewTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** Test seam: the fetch this panel uses for every request. Assign a
    * stub BEFORE the element connects; leave unset for the real fetch. */
@@ -767,6 +815,12 @@ export class SwathAuthoringPanel extends HTMLElement {
       this.setAttribute("aria-label", "Author a layer");
     }
     this.#render();
+  }
+
+  disconnectedCallback(): void {
+    clearTimeout(this.#previewTimer);
+    this.#previewTimer = undefined;
+    this.#clearPreview();
   }
 
   /** Opens the panel (if collapsed) and (re)fetches the process
@@ -1105,6 +1159,104 @@ export class SwathAuthoringPanel extends HTMLElement {
     if (narrative) {
       narrative.textContent = this.#narrative();
     }
+    this.#schedulePreview();
+  }
+
+  // --- The draft preview (issue #169, ADR 0014 — B11's countermeasure) ---
+
+  /** Schedules (or clears) the draft preview: whenever the pipeline is
+   * complete — the same gate as publish — the composed graph is
+   * debounced into the preview-bounded `POST /result`; anything less
+   * shows no preview and makes no request. */
+  #schedulePreview(): void {
+    if (!this.querySelector("#swath-authoring-preview")) {
+      return; // the canvas is not rendered (collapsed / unavailable)
+    }
+    if (this.#submitIssues().length > 0) {
+      clearTimeout(this.#previewTimer);
+      this.#previewTimer = undefined;
+      this.#clearPreview();
+      this.#reflectPreview();
+      return;
+    }
+    const body = JSON.stringify({ process: { process_graph: this.buildGraph() } });
+    if (body === this.#previewedBody) {
+      this.#reflectPreview(); // a re-render, not a new draft
+      return;
+    }
+    clearTimeout(this.#previewTimer);
+    this.#previewTimer = setTimeout(() => {
+      void this.#loadPreview(body);
+    }, PREVIEW_DEBOUNCE_MS);
+    this.#reflectPreview();
+  }
+
+  #clearPreview(): void {
+    if (this.#previewUrl !== "") {
+      URL.revokeObjectURL(this.#previewUrl);
+    }
+    this.#previewUrl = "";
+    this.#previewNote = "";
+    this.#previewedBody = "";
+  }
+
+  /** POSTs the draft to `POST /result` and shows the returned PNG — or
+   * the failure, in plain words. A refused preview never gates publish:
+   * the server's budget bounds the preview, not the layer. */
+  async #loadPreview(body: string): Promise<void> {
+    this.#previewedBody = body;
+    let url = "";
+    let note = "";
+    try {
+      const response = await this.#fetch("/result", {
+        method: "POST",
+        headers: { accept: "image/png", "content-type": "application/json" },
+        body,
+      });
+      if (response.ok) {
+        url = URL.createObjectURL(await response.blob());
+      } else {
+        note = await previewFailureNote(response);
+      }
+    } catch {
+      note = "The preview is unavailable right now — publishing still works.";
+    }
+    if (this.#previewedBody !== body) {
+      // The draft moved on while this preview was in flight.
+      if (url !== "") {
+        URL.revokeObjectURL(url);
+      }
+      return;
+    }
+    if (this.#previewUrl !== "") {
+      URL.revokeObjectURL(this.#previewUrl);
+    }
+    this.#previewUrl = url;
+    this.#previewNote = note;
+    this.#reflectPreview();
+  }
+
+  /** Applies the preview state to the DOM in place (the elements are
+   * re-created on every render; the state lives on the panel). */
+  #reflectPreview(): void {
+    const container = this.querySelector<HTMLElement>("#swath-authoring-preview");
+    const image = this.querySelector<HTMLImageElement>("#swath-authoring-preview-image");
+    const note = this.querySelector("#swath-authoring-preview-note");
+    if (!container || !image || !note) {
+      return;
+    }
+    if (this.#previewUrl === "") {
+      image.hidden = true;
+      image.removeAttribute("src");
+    } else {
+      image.hidden = false;
+      if (image.getAttribute("src") !== this.#previewUrl) {
+        image.src = this.#previewUrl;
+      }
+    }
+    note.textContent =
+      this.#previewUrl === "" ? this.#previewNote : "Preview — how the draft will look on the map.";
+    container.hidden = this.#previewUrl === "" && this.#previewNote === "";
   }
 
   /** The pipeline in one plain sentence ("Load hls-s30 (bands …) →
@@ -1363,6 +1515,24 @@ export class SwathAuthoringPanel extends HTMLElement {
     narrative.className = "swath-authoring-narrative";
     narrative.id = "swath-authoring-narrative";
     form.append(narrative);
+
+    // The draft preview beside the narrative (B11's countermeasure,
+    // ADR 0014): ground truth where the narrative can only retell —
+    // filled in by #reflectPreview whenever the draft is complete.
+    const preview = document.createElement("figure");
+    preview.className = "swath-authoring-preview";
+    preview.id = "swath-authoring-preview";
+    preview.hidden = true;
+    const previewImage = document.createElement("img");
+    previewImage.id = "swath-authoring-preview-image";
+    previewImage.alt = "Preview of the draft layer";
+    previewImage.width = 128;
+    previewImage.height = 128;
+    previewImage.hidden = true;
+    const previewNote = document.createElement("figcaption");
+    previewNote.id = "swath-authoring-preview-note";
+    preview.append(previewImage, previewNote);
+    form.append(preview);
 
     const list = document.createElement("ol");
     list.className = "swath-authoring-steps";
@@ -1992,6 +2162,25 @@ export class SwathAuthoringPanel extends HTMLElement {
     }
     return [heading, list];
   }
+}
+
+/** A preview failure in the user's words: the server's budget refusal
+ * (`ProcessGraphComplexity`, ADR 0014) says what to do about it — and
+ * that publishing is unaffected; anything else falls back to the
+ * standardized error line. */
+async function previewFailureNote(response: Response): Promise<string> {
+  try {
+    const body = (await response.clone().json()) as { code?: unknown };
+    if (body.code === "ProcessGraphComplexity") {
+      return (
+        "This draft covers too much data to preview at once — narrow the area " +
+        "(Load imagery → advanced), or publish and look at the map itself."
+      );
+    }
+  } catch {
+    // Fall through to the standardized line.
+  }
+  return `The preview failed: ${await readOpenEoError(response)}`;
 }
 
 /** The standardized openEO error body (`{code, message}`), rendered as

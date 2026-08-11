@@ -251,6 +251,25 @@ impl<C: Catalog> LayerProvider for CatalogLayers<C> {
         let entry = self
             .entry(id)
             .ok_or_else(|| ApiError::not_found(format!("no layer `{id}`")))?;
+        self.resolve_template(&entry).await
+    }
+}
+
+impl<C: Catalog> CatalogLayers<C> {
+    /// Resolves a layer template — registered or not — against the latest
+    /// granule of its dataset: the shared resolution of [`resolve`]
+    /// (which looks the template up by id first) and the openEO preview
+    /// (ADR 0014), which must resolve a *draft* template without ever
+    /// inserting it into the served layer set.
+    ///
+    /// [`resolve`]: LayerProvider::resolve
+    ///
+    /// # Errors
+    ///
+    /// API-shaped like [`resolve`]: no granules yet → 404, catalog
+    /// failure → 500, a granule missing a required band → 500.
+    pub async fn resolve_template(&self, entry: &CatalogLayer) -> Result<ResolvedLayer, ApiError> {
+        let id = &entry.id;
         let granules = self
             .catalog
             .find_granules(&entry.dataset, &GranuleQuery::default())

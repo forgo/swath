@@ -76,6 +76,22 @@ async fn capabilities_are_valid_under_both_standards_and_list_only_what_exists()
             "unimplemented endpoint claimed: {path}"
         );
     }
+    // POST /result exists (ADR 0014) — with its preview-grade narrowing
+    // declared honestly in the capabilities description, and no general
+    // sync-processing claim anywhere else.
+    assert!(
+        listed
+            .iter()
+            .any(|(path, methods)| path == "/result" && methods == &["POST"]),
+        "POST /result must be listed"
+    );
+    let description = capabilities["description"].as_str().expect("description");
+    assert!(
+        description.contains("preview-bounded")
+            && description.contains("not general synchronous processing")
+            && description.contains("ProcessGraphComplexity"),
+        "the capabilities description must state the POST /result narrowing: {description}"
+    );
 
     // The OGC conformance declaration is untouched by the openEO merge:
     // only the Tiles classes actually met, no openEO class over-claimed.
@@ -330,6 +346,9 @@ fn emitted_error_codes_exist_in_the_pinned_registry_with_matching_status() {
         ("ProcessUnsupported", 400),
         ("ProcessParameterRequired", 400),
         ("ProcessParameterInvalid", 400),
+        // The preview surface (ADR 0014, POST /result).
+        ("ProcessGraphComplexity", 400),
+        ("NotFound", 404),
     ] {
         let entry = registry
             .get(code)

@@ -267,6 +267,41 @@ test("a graph the server rejects renders its diagnostic on the offending field",
   await expect(page.locator("swath-authoring-panel .swath-authoring-error")).toHaveCount(0);
 });
 
+test("a complete draft shows its live preview image before anything is published", async ({
+  page,
+}) => {
+  // B11's countermeasure against the real stack (issue #169, ADR 0014):
+  // the moment the NDVI template completes the draft, the panel
+  // previews it through POST /result — a real PNG rendered by the same
+  // compiler path publishing would use — with nothing published yet.
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+  const published: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().includes("/services")) {
+      published.push(request.url());
+    }
+  });
+  const preview = page.waitForResponse(
+    (response) => response.url().includes("/result") && response.request().method() === "POST",
+  );
+  await page.locator("swath-authoring-panel .swath-authoring-template").click();
+  const response = await preview;
+  expect(response.status()).toBe(200);
+  expect(response.headers()["content-type"]).toBe("image/png");
+  const image = page.locator("#swath-authoring-preview-image");
+  await expect(image).toBeVisible();
+  await expect(image).toHaveAttribute("src", /^blob:/);
+  // The blob decodes to real pixels.
+  await expect
+    .poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0);
+  await expect(page.locator("#swath-authoring-preview-note")).toContainText("Preview");
+  // Seeing the draft published nothing: this page never POSTed a
+  // service (previewing is side-effect-free by construction).
+  expect(published).toEqual([]);
+});
+
 test("the NDVI template publishes a working layer from one click", async ({ page }) => {
   await page.goto(DEMO_PATH);
   await openPanel(page);
