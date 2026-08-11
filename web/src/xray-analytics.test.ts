@@ -1,0 +1,123 @@
+// SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+// The analytics math against hand-computed expectations (issue #111):
+// every percentile assertion below carries the arithmetic that produced
+// it, so the test IS the spec of the quantile method (linear
+// interpolation between closest ranks, rank = p * (n - 1)). The DOM
+// face and the overlay wiring are covered here and in swath-xray.test.ts
+// respectively; the against-the-real-stream proof is
+// web/e2e/swath-xray.e2e.ts.
+import { expect, test } from "vitest";
+import { AnalyticsPanel, quantileSorted, TraceAnalytics } from "./xray-analytics.js";
+
+test("quantileSorted: empty sample has no quantile — not 0", () => {
+  expect(quantileSorted([], 0.5)).toBeUndefined();
+  expect(quantileSorted([], 0.95)).toBeUndefined();
+});
+
+test("quantileSorted: a single sample is every quantile", () => {
+  expect(quantileSorted([7], 0)).toBe(7);
+  expect(quantileSorted([7], 0.5)).toBe(7);
+  expect(quantileSorted([7], 0.95)).toBe(7);
+  expect(quantileSorted([7], 1)).toBe(7);
+});
+
+test("quantileSorted: hand-computed p50/p95, even-sized sample", () => {
+  // n=4, sorted [10, 20, 30, 40].
+  // p50: rank = 0.50 * 3 = 1.5 → 20 + 0.5 * (30 - 20) = 25.
+  // p95: rank = 0.95 * 3 = 2.85 → 30 + 0.85 * (40 - 30) = 38.5.
+  expect(quantileSorted([10, 20, 30, 40], 0.5)).toBe(25);
+  expect(quantileSorted([10, 20, 30, 40], 0.95)).toBe(38.5);
+});
+
+test("quantileSorted: hand-computed p50/p95, odd-sized sample", () => {
+  // n=5, sorted [1, 2, 3, 4, 5].
+  // p50: rank = 0.50 * 4 = 2 (integer) → the middle element, 3.
+  // p95: rank = 0.95 * 4 = 3.8 → 4 + 0.8 * (5 - 4) = 4.8.
+  expect(quantileSorted([1, 2, 3, 4, 5], 0.5)).toBe(3);
+  expect(quantileSorted([1, 2, 3, 4, 5], 0.95)).toBe(4.8);
+  // Extremes are the order statistics themselves.
+  expect(quantileSorted([1, 2, 3, 4, 5], 0)).toBe(1);
+  expect(quantileSorted([1, 2, 3, 4, 5], 1)).toBe(5);
+});
+
+test("TraceAnalytics sorts internally: arrival order never matters", () => {
+  const analytics = new TraceAnalytics();
+  for (const totalMs of [40, 10, 30, 20]) {
+    analytics.record("live", totalMs);
+  }
+  // Same sample as the even-sized case above, delivered shuffled.
+  expect(analytics.quantile(0.5)).toBe(25);
+  expect(analytics.quantile(0.95)).toBe(38.5);
+});
+
+test("the window slides: oldest sample evicted, counters keep all-time", () => {
+  const analytics = new TraceAnalytics(4);
+  for (const totalMs of [10, 20, 30, 40]) {
+    analytics.record("live", totalMs);
+  }
+  expect(analytics.sampleCount).toBe(4);
+  // A fifth sample evicts the 10: window is now [20, 30, 40, 100].
+  // p50: rank 1.5 → 30 + 0.5 * (40 - 30) = 35.
+  // p95: rank 2.85 → 40 + 0.85 * (100 - 40) = 91 (to float precision:
+  // 0.95 * 3 is 2.8499999999999996 in binary, hence closeTo).
+  analytics.record("live", 100);
+  expect(analytics.sampleCount).toBe(4);
+  expect(analytics.quantile(0.5)).toBe(35);
+  expect(analytics.quantile(0.95)).toBeCloseTo(91, 10);
+  // The mix is all-time: the evicted trace still counts.
+  expect(analytics.total).toBe(5);
+  expect(analytics.mix.live).toBe(5);
+});
+
+test("decision mix and hit rate: keyed and bare decisions both count", () => {
+  const analytics = new TraceAnalytics();
+  expect(analytics.hitRate).toBeUndefined(); // 0/0 is "no data", not 0%
+  analytics.record("live", 18);
+  analytics.record({ overview: { level: 2 } }, 9);
+  analytics.record("cache_hit", 1); // pre-#36 bare form
+  analytics.record({ cache_hit: { key: "0123abcd" } }, 2); // keyed form (#36)
+  analytics.record("live", 22);
+  expect(analytics.mix).toEqual({ live: 2, overview: 1, cache_hit: 2 });
+  expect(analytics.total).toBe(5);
+  expect(analytics.hitRate).toBe(2 / 5);
+});
+
+test("panel renders exact values in data attributes, formatted text on top", () => {
+  const panel = new AnalyticsPanel(document);
+  document.body.append(panel.element);
+  const { element } = panel;
+  expect(element.getAttribute("aria-label")).toBe("Trace analytics");
+  // Empty: percentiles and hit rate show "no data", not zeros.
+  expect(element.textContent).toContain("p50 — · p95 — ms");
+  expect(element.textContent).toContain("hit —");
+  expect(element.dataset.p50).toBeUndefined();
+  expect(element.dataset.hitRate).toBeUndefined();
+
+  // The scripted mix: 3 live, 1 overview, 2 cache hits.
+  panel.record("live", 10);
+  panel.record("live", 20);
+  panel.record({ overview: { level: 2 } }, 30);
+  panel.record("cache_hit", 5);
+  panel.record({ cache_hit: { key: "feedbeef" } }, 15);
+  panel.record("live", 40);
+
+  // Window sorted: [5, 10, 15, 20, 30, 40], n=6.
+  // p50: rank 2.5 → 15 + 0.5 * (20 - 15) = 17.5.
+  // p95: rank 4.75 → 30 + 0.75 * (40 - 30) = 37.5.
+  expect(element.dataset.p50).toBe("17.5");
+  expect(element.dataset.p95).toBe("37.5");
+  expect(element.dataset.samples).toBe("6");
+  expect(element.textContent).toContain("p50 17.5 · p95 37.5 ms (last 6)");
+  expect(element.dataset.live).toBe("3");
+  expect(element.dataset.overview).toBe("1");
+  expect(element.dataset.cacheHit).toBe("2");
+  expect(element.dataset.total).toBe("6");
+  expect(element.dataset.hitRate).toBe(String(2 / 6));
+  expect(element.textContent).toContain("live 3");
+  expect(element.textContent).toContain("ovr 1");
+  expect(element.textContent).toContain("cache 2");
+  expect(element.textContent).toContain("hit 33.3%");
+  element.remove();
+});

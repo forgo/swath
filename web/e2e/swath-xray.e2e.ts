@@ -9,7 +9,13 @@
 // The ingest-to-pixel readout and the inspector's bytes_read get the same
 // treatment. Both streams ride the vite dev proxy (`/traces` →
 // swath:8080), so SSE-through-proxy is exercised too.
+import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
+
+/** The compose project root (web/e2e/ → repo root), where the analytics
+ * kill-and-resume test restarts the swath service from. */
+const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 // Where the demo page lives: /demo/ under vite dev, / when the binary
 // serves the embedded production bundle (set by playwright.config.ts).
@@ -48,6 +54,9 @@ interface Envelope {
 declare global {
   interface Window {
     __received?: Envelope[];
+    /** Quiescence probe state for the analytics baseline (see below). */
+    __quietLen?: number;
+    __quietAt?: number;
   }
 }
 
@@ -344,4 +353,251 @@ test("v1: heatmap buckets, feed lines, and why-view match the SSE stream", async
   await modeGroup.getByRole("button", { name: "off", exact: true }).click();
   await expect(page.locator(".swath-xray-badge")).toHaveCount(0);
   await expect(page.locator("swath-map .swath-xray")).toBeAttached();
+});
+
+// --- trace analytics (issue #111): the panel's counters against the
+// test's own SSE subscription, then a real disconnect/reconnect.
+//
+// The mix assertion is delta-based on purpose. Two subscriptions open
+// milliseconds apart (the test's, then the overlay's on toggle) can
+// disagree about events published in that gap — and other spec files
+// share the compose stack, so background traffic exists. Absolute
+// counters would carry that gap forever; deltas from a baseline taken
+// while the stream is QUIET (no arrivals for >1.2 s, so nothing is
+// in flight between the two readers) cancel it exactly: past the
+// baseline, both subscriptions see the identical suffix of the
+// broadcast, so the panel's counter deltas must equal the kind-
+// reduction of what the test itself received past its own baseline.
+
+/** Waits until no new envelope arrived for >1.2 s — both streams have
+ * drained, so a baseline snapshot cannot straddle an in-flight event. */
+async function waitForQuietStream(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const len = (window.__received ?? []).length;
+    const now = Date.now();
+    if (window.__quietLen !== len || window.__quietAt === undefined) {
+      window.__quietLen = len;
+      window.__quietAt = now;
+      return false;
+    }
+    return now - window.__quietAt > 1200;
+  });
+}
+
+interface AnalyticsBaseline {
+  received: number;
+  live: number;
+  overview: number;
+  cacheHit: number;
+  total: number;
+}
+
+/** One-task snapshot of both readers: the test stream's length and the
+ * panel's displayed counters. */
+async function analyticsBaseline(page: Page): Promise<AnalyticsBaseline> {
+  return await page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>(".swath-xray-analytics");
+    return {
+      received: (window.__received ?? []).length,
+      live: Number(panel?.dataset.live ?? 0),
+      overview: Number(panel?.dataset.overview ?? 0),
+      cacheHit: Number(panel?.dataset.cacheHit ?? 0),
+      total: Number(panel?.dataset.total ?? 0),
+    };
+  });
+}
+
+/** Polls until the panel's counter deltas over `base` equal the kind-
+ * reduction of the envelopes the test received past its baseline, the
+ * published hit rate is exactly cacheHit/total, and the percentiles are
+ * present and ordered. Returns the number of new envelopes reduced. */
+async function expectAnalyticsAgreement(page: Page, base: AnalyticsBaseline): Promise<number> {
+  const handle = await page.waitForFunction((baseline) => {
+    const received = window.__received ?? [];
+    if (received.length <= baseline.received) {
+      return null; // the driven burst has not landed yet
+    }
+    const delta = { live: 0, overview: 0, cache_hit: 0 };
+    for (const envelope of received.slice(baseline.received)) {
+      const { decision } = envelope.trace;
+      const kind =
+        typeof decision === "string"
+          ? decision
+          : "cache_hit" in decision
+            ? "cache_hit"
+            : "overview";
+      if (kind === "live" || kind === "overview" || kind === "cache_hit") {
+        delta[kind] += 1;
+      }
+    }
+    const panel = document.querySelector<HTMLElement>(".swath-xray-analytics");
+    if (!panel) {
+      return null;
+    }
+    const { dataset } = panel;
+    if (
+      dataset.live !== String(baseline.live + delta.live) ||
+      dataset.overview !== String(baseline.overview + delta.overview) ||
+      dataset.cacheHit !== String(baseline.cacheHit + delta.cache_hit) ||
+      dataset.total !== String(baseline.total + delta.live + delta.overview + delta.cache_hit)
+    ) {
+      return null; // one reader is ahead of the other — keep polling
+    }
+    // The published hit rate is exactly the displayed counters' ratio.
+    const total = Number(dataset.total);
+    if (total > 0 && dataset.hitRate !== String(Number(dataset.cacheHit) / total)) {
+      return null;
+    }
+    // Percentiles: present once traces flowed, finite, and ordered.
+    const p50 = Number(dataset.p50);
+    const p95 = Number(dataset.p95);
+    if (!Number.isFinite(p50) || !Number.isFinite(p95) || p50 > p95) {
+      return null;
+    }
+    return received.length - baseline.received;
+  }, base);
+  return (await handle.jsonValue()) as number;
+}
+
+/** Shared setup: page, test subscription, x-ray on, fitted view, then a
+ * driven burst of fresh renders agreed between panel and test stream.
+ * Returns the quiet-stream baseline the burst was agreed against. */
+async function setUpAgreedAnalytics(page: Page, center: string, zoom: string): Promise<void> {
+  await page.goto(DEMO_PATH);
+  await expect(page.locator("swath-map canvas.maplibregl-canvas")).toBeVisible();
+  await subscribeToTraces(page);
+
+  const toggle = page.getByRole("button", { name: "Toggle x-ray overlay" });
+  await toggle.click();
+  await expect(page.locator("swath-map .swath-xray")).toBeAttached();
+  await expect(page.locator(".swath-xray-analytics")).toBeVisible();
+
+  await waitForFittedView(page);
+  await waitForQuietStream(page);
+  const base = await analyticsBaseline(page);
+  await page.evaluate(
+    (view) => {
+      const el = document.querySelector("swath-map");
+      el?.setAttribute("center", view.center);
+      el?.setAttribute("zoom", view.zoom);
+    },
+    { center, zoom },
+  );
+  const reduced = await expectAnalyticsAgreement(page, base);
+  expect(reduced).toBeGreaterThan(0); // the scripted burst rendered tiles
+}
+
+test("analytics panel counters agree with the test's own SSE stream", async ({ page }) => {
+  // A view of this test's own (the against-binary pass dives one zoom
+  // deeper than the vite-dev pass, same convention as v0 — one stack
+  // serves both passes).
+  const zoom = process.env.SWATH_E2E_MODE === "binary" ? "13" : "12";
+  await setUpAgreedAnalytics(page, "-106.05,39.35", zoom);
+});
+
+// Binary mode only, deliberately. The kill is a real server restart —
+// the only way to drop an ESTABLISHED SSE stream (`context.setOffline`
+// blocks new requests but leaves established streaming responses
+// delivering; both behaviors observed here, not speculation). Against
+// the binary (the production shape: browser talks straight to swath),
+// the connection dies with the server, EventSource fires its error and
+// retries on its own, and the stream resumes. Through the VITE DEV
+// PROXY, a backend restart is invisible: the proxy holds the client
+// connection open while its upstream is gone (observed: readyState
+// stays OPEN, no error ever fires), so EventSource's reconnect can
+// never trigger — a dev-proxy artifact, not a property of the overlay
+// or of production, hence no vite-mode variant of this test.
+test("analytics panel survives a kill-and-resume of the SSE stream", async ({ page }) => {
+  test.skip(
+    process.env.SWATH_E2E_MODE !== "binary",
+    "the vite dev proxy masks a backend restart from established SSE clients",
+  );
+  // Well over the default budget: this test deliberately spends wall
+  // clock on quiet-stream waits, a real server restart, and EventSource
+  // reconnect backoff.
+  test.setTimeout(120_000);
+  const zoom = "14"; // its own fresh view, below both agreement-test passes
+  await setUpAgreedAnalytics(page, "-106.03,39.32", zoom);
+  const panel = page.locator(".swath-xray-analytics");
+
+  // --- Kill: restart the server under the live stream. Quiesce first
+  // so nothing is in flight when the baseline freezes.
+  await waitForQuietStream(page);
+  const frozen = await analyticsBaseline(page);
+  execSync("docker compose restart swath", { cwd: REPO_ROOT, stdio: "ignore" });
+  // Through the outage the panel holds its last computed values — no
+  // reset, no error state, and no reconnect machinery of its own.
+  await page.waitForTimeout(800);
+  await expect(panel).toBeVisible();
+  expect(await analyticsBaseline(page)).toEqual(frozen); // holds, not resets
+
+  // Wait for the server to come back; the EventSources' own retry
+  // loops re-establish both streams from here (refused connections are
+  // network-level failures, which EventSource keeps retrying).
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    expect(Date.now(), "server never came back after restart").toBeLessThan(deadline);
+    try {
+      const response = await fetch("http://localhost:8080/tilesets");
+      if (response.ok) {
+        break;
+      }
+    } catch {
+      // still coming up
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  // --- Resume: the browser's EventSource reconnects on its own — the
+  // panel has no reconnect machinery to duplicate. The two streams (the
+  // test's and the overlay's) reconnect at INDEPENDENT times, so first
+  // drive warm-up traffic until both provably resumed (each grows past
+  // its frozen point), retrying with fresh centers because renders
+  // published while a stream is still down are simply missed, not
+  // replayed — and the tiles are browser-cached afterwards.
+  const warmZoom = String(Number(zoom) + 1);
+  for (let attempt = 0; ; attempt += 1) {
+    await page.evaluate(
+      ({ z, lng }) => {
+        const el = document.querySelector("swath-map");
+        el?.setAttribute("center", `${lng},39.35`);
+        el?.setAttribute("zoom", z);
+      },
+      { z: warmZoom, lng: String(-106.05 + attempt * 0.01) },
+    );
+    const grown = await page
+      .waitForFunction(
+        (f) => {
+          const panel = document.querySelector<HTMLElement>(".swath-xray-analytics");
+          return (
+            (window.__received ?? []).length > f.received &&
+            Number(panel?.dataset.total ?? 0) > f.total
+          );
+        },
+        frozen,
+        { timeout: 4000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    if (grown) {
+      break;
+    }
+    expect(attempt, "streams never resumed after reconnect").toBeLessThan(8);
+  }
+
+  // Both streams live again: quiesce, re-baseline (cancelling whatever
+  // the reconnect gap made the two readers disagree about), and hold
+  // the same agreement bar over one more driven burst.
+  await waitForQuietStream(page);
+  const resumedBase = await analyticsBaseline(page);
+  expect(resumedBase.total).toBeGreaterThan(frozen.total); // it resumed
+  await page.evaluate(
+    (z) => {
+      const el = document.querySelector("swath-map");
+      el?.setAttribute("zoom", z);
+    },
+    String(Number(zoom) + 2),
+  );
+  const resumed = await expectAnalyticsAgreement(page, resumedBase);
+  expect(resumed).toBeGreaterThan(0); // post-reconnect traffic, agreed on
 });
