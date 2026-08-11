@@ -42,6 +42,11 @@ docker run -p 8080:8080 ghcr.io/forgo/swath serve --fixtures
 Every published image passed this exact command in CI (the publish workflow
 smoke-tests `/healthz`, a rendered tile, and the viewer before pushing).
 
+More ways in — the Apple Silicon caveat for the one-liner, authoring your
+first layer from the UI, and the full ingest-to-pixel demo from a checkout,
+each verified end-to-end in a fresh environment:
+[`docs/QUICKSTART.md`](docs/QUICKSTART.md).
+
 ## Documentation
 
 Read in this order:
