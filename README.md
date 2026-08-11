@@ -20,6 +20,10 @@ a managed platform where **ingest -> derive -> serve** is a single, low-latency,
 > **Nobody compiles a data-scientist's process graph into a low-latency dynamic tile service with a
 > cost-aware cache.** That bridge is Swath.
 
+Every claim in that paragraph is defined, graded, and cited — against the compared
+projects' own documentation and this repo's tests — in
+[`docs/COMPARISON.md`](docs/COMPARISON.md).
+
 ## North-star metric
 
 **Ingest-to-pixel latency** -- seconds from "a new granule lands" to "it's a visible, correct tile on the map."
