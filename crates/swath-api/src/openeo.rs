@@ -367,8 +367,9 @@ const PROCESS_DEFINITIONS: &[(&str, &str)] = &[
     ),
     (
         include_str!("../data/openeo-processes/linear_scale_range.json"),
-        "`outputMin`/`outputMax` must be exactly 0/255 (the render path quantizes to 8-bit \
-         RGBA); at most one scale per graph, applied after reduction/composition.",
+        "`outputMin`/`outputMax` must be exactly 0/255, spelled out explicitly (the render \
+         path quantizes to 8-bit RGBA; the spec's defaults, 0/1, are rejected); at most one \
+         scale per graph, applied after reduction/composition.",
     ),
     (
         include_str!("../data/openeo-processes/load_collection.json"),
@@ -390,8 +391,10 @@ const PROCESS_DEFINITIONS: &[(&str, &str)] = &[
     ),
     (
         include_str!("../data/openeo-processes/save_result.json"),
-        "`format` must be \"png\" (case-insensitive) and `options` empty; must be the graph's \
-         result node.",
+        "`format` must be \"png\" (case-insensitive); `options` accepts exactly one optional \
+         key, `colormap` (\"grayscale\" | \"viridis\" | \"magma\" | \"rdylgn\"), the palette \
+         applied to a gray result (rejected on a multi-band composite; absent, gray results \
+         default to \"grayscale\"); must be the graph's result node.",
     ),
     (
         include_str!("../data/openeo-processes/subtract.json"),
