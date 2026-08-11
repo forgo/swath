@@ -1,0 +1,97 @@
+{
+  "schema": "swath-screenshots/1",
+  "git_sha": "c944a411d813b0f5d0dc40ab4e55e1b6ffbd1071",
+  "captured": "2026-08-11T06:23:38.600Z",
+  "viewport": {
+    "width": 1528,
+    "height": 860,
+    "dpr": 1
+  },
+  "stack": "tests/e2e/stack-up.sh (fixture granule only), captured via `just screenshots`",
+  "shots": [
+    {
+      "file": "01-landing-layer-rail.png",
+      "caption": "Zero-config landing page: the layer rail beside the map, default NDVI layer fitted to the fixture granule's footprint.",
+      "tolerance": 2,
+      "maxBadFrac": 0.005,
+      "sha256": "4258331423afcb419213f8fd19f8ae37891a03e3c9261eadebfabfac315070d8"
+    },
+    {
+      "file": "02-ndvi-colormapped.png",
+      "caption": "Colormapped NDVI (rdylgn) rendered live at z12 from the fixture granule — nothing pre-baked.",
+      "tolerance": 2,
+      "maxBadFrac": 0.005,
+      "sha256": "fc574b873a6d67610e781563d377ecab598d9d35685f2d267b00b68e0adfc3e8"
+    },
+    {
+      "file": "03-truecolor-live.png",
+      "caption": "HLS true color at the same viewpoint: selecting a layer in the rail re-points the raster source.",
+      "tolerance": 2,
+      "maxBadFrac": 0.005,
+      "sha256": "366abea9348a8712f86d9a1ae37cf007ab4b13e44084b2c454d67cee554a0c2a"
+    },
+    {
+      "file": "04-xray-decisions.png",
+      "caption": "X-ray decision overlay: every tile badged with its render decision and timing; ingest→pixel readout top-left.",
+      "tolerance": 2,
+      "maxBadFrac": 0.03,
+      "sha256": "a86bd8c30c76990b87c52ffb0b6be10928bfca71f76bba25184a5f353addaea6"
+    },
+    {
+      "file": "05-xray-why-view.png",
+      "caption": "Why-view for one tile: the planner's candidate table — chosen plan, rejected candidates, and the reason for each.",
+      "tolerance": 2,
+      "maxBadFrac": 0.03,
+      "sha256": "8be9a3b9d5edc7e2691d086d2601c4010ab8472f30ca782ae9122ad109c2c21b"
+    },
+    {
+      "file": "06-xray-heatmap.png",
+      "caption": "Bytes-read heatmap mode: badges bucketed on a log scale, with the legend the overlay itself publishes.",
+      "tolerance": 2,
+      "maxBadFrac": 0.03,
+      "sha256": "5f1fff968e0da364cbbabac86b9cb341a1fdd7ccedc2624df79acfaa2f03d416"
+    },
+    {
+      "file": "07-xray-trace-feed.png",
+      "caption": "Trace feed: the /traces SSE stream as scrollback — every line a render decision, clickable back to its tile.",
+      "tolerance": 2,
+      "maxBadFrac": 0.06,
+      "sha256": "8abedcc6de6b75e28b06578aad48c07cab015fba14bcdcca78e472b4666b4162"
+    },
+    {
+      "file": "08-authoring-form.png",
+      "caption": "openEO authoring panel: forms generated from the server's own GET /processes, with plain-language field help.",
+      "tolerance": 2,
+      "maxBadFrac": 0.005,
+      "sha256": "3b63d3add134b0eb4d7f03a48cdc68d77e31916cdad75ef55de1c42bf623b68d"
+    },
+    {
+      "file": "09-authoring-narrative-advanced.png",
+      "caption": "NDVI template loaded: the plain-words narrative of the graph, with a step's advanced (defaulted) fields opened.",
+      "tolerance": 2,
+      "maxBadFrac": 0.005,
+      "sha256": "d318197ea1df2368b78adbc3939ee8952e8bd0530f2bbfd01db3c106cedf6e15"
+    },
+    {
+      "file": "10-authoring-published.png",
+      "caption": "Publish flow result: the authored NDVI service appears in the layer rail and serves on the map immediately — no reload.",
+      "tolerance": 2,
+      "maxBadFrac": 0.02,
+      "sha256": "060a6b47d4340fe0bff751d8cba97f6f3d3954efd324a05af07768fadaa14ec8"
+    },
+    {
+      "file": "11-dataset-footprints.png",
+      "caption": "Dataset browser expanded: the catalog's granules listed in the rail, footprints outlined live on the map.",
+      "tolerance": 2,
+      "maxBadFrac": 0.005,
+      "sha256": "abe0ca406444f3d581f7015cdf1fc2cd3489dbd1fe809db1575ed49426026dc8"
+    },
+    {
+      "file": "12-analytics-under-load.png",
+      "caption": "Trace analytics under load: rolling p50/p95 render latency, plan mix, and cache hit rate over the session's tiles.",
+      "tolerance": 2,
+      "maxBadFrac": 0.03,
+      "sha256": "9aaa23365377bf82a051283740bd3229c4023a02213da470b81fbb7a06548c7f"
+    }
+  ]
+}

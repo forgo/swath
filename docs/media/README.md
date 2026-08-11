@@ -23,3 +23,12 @@ Four diagrams (docs audit ranks 2–5, issue #113). Conventions:
 
 `planner-trace.capture.json` is the committed capture (verbatim `GET /traces` SSE frames from
 the fixture stack) that the planner diagram's embedded payload is copied from.
+
+## Screenshots
+
+UI screenshots live in [`screenshots/`](screenshots/index.md) and are captured exclusively by
+`just screenshots` (issue #112): the fixture compose stack, a pinned viewport/DPR,
+deterministic filenames, and a second capture run that must reproduce every shot within a
+perceptual-diff policy before the recipe passes. The index carries one-line captions and the
+capture git sha; `shots.json` carries per-shot sha256 + diff policy. Never hand-edit or
+hand-replace a shot — re-run the recipe.
