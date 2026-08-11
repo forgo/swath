@@ -2,74 +2,92 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `<swath-authoring-panel>` — the openEO authoring panel (issue #109,
- * ADR 0010): compose a process graph as a linear pipeline of steps,
- * publish it as an XYZ secondary service, delete published services.
+ * `<swath-authoring-panel>` — the openEO authoring panel (issues #109
+ * and #151, ADR 0010): compose a process graph as an ALWAYS-VALID
+ * pipeline, publish it as an XYZ secondary service, delete published
+ * services.
  *
  * Plain Custom Element, light DOM, no framework (ADR 0005). Collapsed
  * by default and lazy like the dataset browser beside it (issue #110):
- * the closed panel fetches nothing, so the entry page's request budget
- * is untouched until a user actually authors. The panel is a pure
- * client of the openEO surface — it invents nothing:
+ * the closed panel fetches nothing until a user actually authors.
  *
- * - The **palette** (which processes can be added) and every **form
- *   field** are generated from the parameter schemas `GET /processes`
- *   serves. There are no hand-maintained per-process form definitions:
- *   delete a process from the served definitions and its palette entry
- *   and form disappear (a vitest pins exactly that).
- * - Field widgets are chosen by schema shape alone: number → number
- *   input, array-of-strings → comma-separated text, `enum` → select,
- *   everything else a text input parsed as JSON when it looks like
- *   JSON. Two subtypes get dedicated widgets: `collection-id` renders
- *   as a select fed by `GET /collections` (an unknown collection is
- *   unreachable from the UI), and `output-format-options` as the Swath
- *   colormap select (grayscale/viridis/magma/rdylgn — the render
- *   profile's vocabulary, keyed on the schema subtype, not on any
- *   process id).
- * - Data flow is a per-parameter **source** select: a parameter either
- *   holds a literal value or references an earlier step's output
- *   (`from_node`). Defaults are derived from the schemas too: raster-cube
- *   parameters — and the first required parameter of any step after the
- *   first — default to the previous step, so a straight pipeline needs
- *   no source fiddling.
- * - **Validation before submit**, from the same schemas: required
- *   parameters and numeric fields flag inline as the user types, and
- *   the publish button stays disabled — with the blocking reasons
- *   spelled out — until every field passes and some step names a
- *   collection (derived from the `collection-id` subtype, so the
- *   server's "no load_collection node names a collection" rejection is
- *   unreachable from the UI). The server stays the authority: whatever
- *   it still rejects renders inline — mapped onto the offending field
- *   when its message names a node/argument, as a general error
- *   otherwise. (The openEO `POST /validation` endpoint is not part of
- *   Swath's bounded profile; live server-side validation is a possible
- *   follow-up.)
- * - **Context** comes from the definitions themselves: process
- *   summaries under each step header and on the palette buttons,
- *   parameter descriptions as tooltips, and the chosen collection's
- *   band vocabulary (from `GET /collections`) hinted under band-name
- *   fields.
- * - **Written for non-experts** (maintainer UX round 2): every field
- *   carries a visible plain-language one-liner ([`FIELD_HELP`] — a
- *   curated glossary over the served vocabulary, not a form
- *   definition); fields that work when left alone (nullable extents,
- *   profile-pinned values like PNG/0..255) get smart defaults and
- *   collapse under a per-step "advanced" toggle; and an always-visible
- *   narrative sentence retells the pipeline in plain words, live
- *   ("Load hls-s30 (bands …) → compute NDVI (…) → … colored with
- *   rdylgn").
- * - The empty state explains the pipeline model and offers a
- *   **start-from-working-graph** template: the NDVI pipeline over the
- *   first collection, nir/red picked from its band vocabulary by
- *   common-name heuristics — something that renders, ready to modify.
- * - `POST /services` publishes. Success announces a bubbling
- *   `swath-service-created` (detail: `{id}`); the app shell switches
- *   the map, which refreshes the layer list — the authored layer
- *   appears in the browser with no reload.
- * - Published services are listed from `GET /services` with a delete
- *   button each; `DELETE /services/{id}` announces
- *   `swath-service-deleted` the same way.
+ * # Model B — the always-valid canvas (issue #151, design note §4/§8)
+ *
+ * The #148 panel validated FIELDS; the server still rejected pipeline
+ * SHAPES (the recorded dangling-`divide` case). This panel generalizes
+ * the pattern the collection picker proved — "an invalid value is
+ * unreachable from the UI" — to pipeline structure. The invariant: the
+ * pipeline is never in a state the server's process compiler rejects.
+ *
+ * - **Permanent head and tail.** The canvas always reads Load →
+ *   [steps…] → Output. The Load and Output cards cannot be removed or
+ *   reordered, so "the graph must end in save_result" (B1) and "no step
+ *   loads a collection" are unconstructible; every step sits on the
+ *   result path, so silently dead steps (B10) are too.
+ * - **Stage-typed insertion.** Steps are insertable only where the
+ *   whole pipeline still types under the compiler's cube discipline
+ *   (the pinned stage table in `authoring-model.ts`): NDVI and the
+ *   formula need a multi-band unscaled cube, stretching needs an
+ *   unscaled cube — so scale-before-reduce (B4) and its mirror are
+ *   unconstructible, and each gap's palette shows only what fits.
+ * - **The formula builder.** Arithmetic (`add`…`divide`) and
+ *   `array_element` never appear as pipeline steps (B2/B3); they live
+ *   inside the "combine bands with a formula" card, which owns the
+ *   `reduce_dimension` reducer child graph: lines of `left op right`
+ *   over band selects, numbers, and earlier lines.
+ * - **Vocabulary-only values.** Bands are checkboxes over the chosen
+ *   collection's band vocabulary and NDVI's nir/red are selects over
+ *   the LOADED bands (B7); the output format is a select over the
+ *   profile vocabulary (B9); the colormap select greys out with a
+ *   plain-words note while the result is multi-band (B6). Free text
+ *   remains only where genuinely free (the title, numbers, expert
+ *   extents under advanced).
+ * - **Explained, not blocked silently.** What no structural rule can
+ *   decide for the user is explained pre-submit in their words and
+ *   gates the publish button: a 2-band pipeline "produces 2 channels; a
+ *   picture needs 1 (NDVI or a formula) or 3 (red, green, blue)" (B5);
+ *   a degenerate stretch range flags inline (B8).
+ *
+ * The #148 wins carry over: plain-language one-liners under every
+ * field, smart defaults with per-card advanced collapse, the live
+ * plain-words narrative, the one-click NDVI template, and server
+ * diagnostics mapped onto the offending field — now nearly unreachable,
+ * kept as the safety net (the server stays the authority; the client's
+ * stage table only mirrors it, pinned by tests on both sides).
+ *
+ * Schema honesty, restated for Model B: the cards, their fields, their
+ * widgets, and their validation still come from the served
+ * `GET /processes` definitions — delete a definition and its card or
+ * chip disappears (vitests pin exactly that). What the stage table adds
+ * is ORDER, not vocabulary: it only sequences processes that exist,
+ * mirroring compiler semantics the parameter schemas cannot express.
+ *
+ * `POST /services` publishes; success announces a bubbling
+ * `swath-service-created` (detail: `{id}`). Published services list
+ * from `GET /services` with per-item delete announcing
+ * `swath-service-deleted`.
  */
+
+import {
+  buildReducerGraph,
+  CUBE_PARAM,
+  EMPTY_OPERAND,
+  FORMULA_OPS,
+  type FormulaOp,
+  type FormulaRow,
+  finalStage,
+  formulaIssues,
+  formulaPhrase,
+  insertableAt,
+  locateServerError,
+  type Operand,
+  type ProcessDefinition,
+  type ProcessParameter,
+  pickBand,
+  type Stage,
+} from "./authoring-model.js";
+
+export type { ProcessDefinition, ProcessParameter } from "./authoring-model.js";
 
 const STYLE_ELEMENT_ID = "swath-authoring-panel-styles";
 
@@ -78,10 +96,33 @@ const STYLE_ELEMENT_ID = "swath-authoring-panel-styles";
  * A widget for a subtype — not a per-process form definition. */
 const COLORMAPS = ["grayscale", "viridis", "magma", "rdylgn"] as const;
 
+/** The render profile's output-format vocabulary: the profile serves
+ * PNG tiles, so the format select offers exactly that — a wrong format
+ * (B9) is unconstructible, mirroring the profile note on the served
+ * `save_result` definition. */
+const FORMATS = ["png"] as const;
+
 /** The NDVI template's pipeline, in order. The template is only offered
  * while every one of these is present in the served definitions — a
- * shortcut over the palette, not a parallel form source. */
+ * shortcut over the canvas, not a parallel form source. */
 const NDVI_TEMPLATE = ["load_collection", "ndvi", "linear_scale_range", "save_result"] as const;
+
+/** Plain step titles over the served vocabulary (curated wording, like
+ * [`FIELD_HELP`]); unknown processes fall back to their id. */
+const STEP_TITLES: Record<string, string> = {
+  load_collection: "Load imagery",
+  ndvi: "NDVI (vegetation health)",
+  reduce_dimension: "Combine bands with a formula",
+  linear_scale_range: "Stretch values for display",
+  save_result: "Output",
+};
+
+/** The insert chips' plain wording, same curation. */
+const INSERT_LABELS: Record<string, string> = {
+  ndvi: "NDVI (vegetation health)",
+  reduce_dimension: "combine bands with a formula",
+  linear_scale_range: "stretch values for display",
+};
 
 /**
  * Plain-language one-liners, visible under every field (not tooltips):
@@ -98,30 +139,18 @@ const FIELD_HELP: Record<string, string> = {
   "load_collection.temporal_extent":
     "The time range to include — leave as is to use everything available.",
   "load_collection.bands":
-    "The channels to load, comma-separated — pick from the bands listed below.",
+    "The channels to load — tick them in the order you want them (for a 3-band picture, " +
+    "that order is red, green, blue).",
   "load_collection.properties": "Extra metadata filters — safe to leave alone.",
-  "ndvi.data": "The imagery from the step it points at.",
   "ndvi.nir": "The band that measures near-infrared light.",
   "ndvi.red": "The band that measures red light.",
   "ndvi.target_band": "Leave as is: the NDVI result replaces the bands.",
-  "linear_scale_range.x": "The values to rescale — usually the previous step's result.",
   "linear_scale_range.inputMin": "The smallest value expected in the data (NDVI: -1).",
   "linear_scale_range.inputMax": "The largest value expected in the data (NDVI: 1).",
   "linear_scale_range.outputMin": "Keep at 0 — screen pixels run 0..255.",
   "linear_scale_range.outputMax": "Keep at 255 — screen pixels run 0..255.",
-  "save_result.data": "The finished result from the step it points at.",
   "save_result.format": "The image format tiles are served in — png.",
   "save_result.options": "How numbers become colors on the map.",
-  "reduce_dimension.data": "The imagery from the step it points at.",
-  "reduce_dimension.reducer": "The formula applied across the bands.",
-  "reduce_dimension.dimension": "Which dimension to collapse — bands.",
-  "reduce_dimension.context": "Extra data for the reducer — safe to leave alone.",
-  "array_element.data": "The band list to pick from.",
-  "array_element.index": "The band's position, counting from 0.",
-  "array_element.label": "The band's name.",
-  "array_element.return_nodata": "Return no-data instead of failing for a missing band.",
-  "*.x": "A number, or an earlier step's result.",
-  "*.y": "A number, or an earlier step's result.",
 };
 
 function fieldHelp(processId: string, name: string): string {
@@ -141,10 +170,10 @@ const PROFILE_DEFAULTS: Record<string, string> = {
 };
 
 /** Is this field tucked under the step's "advanced" toggle? Everything
- * that works when left alone (optional, nullable, defaulted, or
- * auto-wired) collapses; what stays visible is exactly the newcomer's
- * choices — the collection, bands, the colormap, and required values
- * without a default. Derived from the schemas, like the fields. */
+ * that works when left alone (optional, nullable, or defaulted)
+ * collapses; what stays visible is exactly the newcomer's choices —
+ * the collection, bands, ranges, and the colormap. Derived from the
+ * schemas, like the fields. */
 function isAdvancedParam(processId: string, param: ProcessParameter): boolean {
   if (
     hasSubtype(param.schema, "collection-id") ||
@@ -152,9 +181,6 @@ function isAdvancedParam(processId: string, param: ProcessParameter): boolean {
     isBandName(param.schema)
   ) {
     return false;
-  }
-  if (isCube(param.schema)) {
-    return true; // auto-wired to the previous step
   }
   return (
     param.optional === true ||
@@ -167,7 +193,11 @@ function isAdvancedParam(processId: string, param: ProcessParameter): boolean {
 /** One step's phrase of the what-is-happening narrative, in plain
  * words, from the current field values (another curated glossary over
  * the served process vocabulary). */
-function narrativePhrase(processId: string, value: (name: string) => string): string {
+function narrativePhrase(
+  processId: string,
+  value: (name: string) => string,
+  formula: string,
+): string {
   switch (processId) {
     case "load_collection": {
       const id = value("id");
@@ -193,14 +223,9 @@ function narrativePhrase(processId: string, value: (name: string) => string): st
       return `save as ${format}${colormap === "" ? "" : `, colored with ${colormap}`}`;
     }
     case "reduce_dimension":
-      return "combine the bands with a formula";
-    case "array_element":
-      return "pick one band";
-    case "add":
-    case "subtract":
-    case "multiply":
-    case "divide":
-      return `${processId} values`;
+      return formula === ""
+        ? "combine the bands with a formula"
+        : `combine the bands with a formula (${formula})`;
     default:
       return processId.replaceAll("_", " ");
   }
@@ -237,36 +262,21 @@ swath-authoring-panel .swath-authoring-heading {
   text-transform: uppercase;
   color: rgb(148 163 184 / 90%);
 }
-swath-authoring-panel .swath-authoring-palette {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: 0 0 10px;
-}
-swath-authoring-panel .swath-authoring-palette button {
-  padding: 3px 7px;
-  border: 1px solid rgb(148 163 184 / 35%);
-  border-radius: 999px;
-  background: none;
-  cursor: pointer;
-  color: inherit;
-  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-swath-authoring-panel .swath-authoring-palette button:hover {
-  background: rgb(148 163 184 / 12%);
-}
 swath-authoring-panel .swath-authoring-steps {
   margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 swath-authoring-panel .swath-authoring-step {
   border: 1px solid rgb(148 163 184 / 20%);
   border-radius: 6px;
   padding: 8px;
+}
+swath-authoring-panel .swath-authoring-step[data-permanent] {
+  border-color: rgb(74 222 128 / 25%);
 }
 swath-authoring-panel .swath-authoring-step-header {
   display: flex;
@@ -293,6 +303,26 @@ swath-authoring-panel .swath-authoring-step-summary {
   font: italic 11px/1.5 system-ui, sans-serif;
   color: rgb(148 163 184 / 75%);
 }
+swath-authoring-panel .swath-authoring-insert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+}
+swath-authoring-panel .swath-authoring-insert button {
+  padding: 2px 8px;
+  border: 1px dashed rgb(148 163 184 / 40%);
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+  color: rgb(148 163 184 / 90%);
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+swath-authoring-panel .swath-authoring-insert button:hover {
+  background: rgb(148 163 184 / 12%);
+}
 swath-authoring-panel label {
   display: block;
   margin: 0 0 6px;
@@ -318,7 +348,27 @@ swath-authoring-panel button:focus-visible {
   outline: 2px solid #4ade80;
   outline-offset: 1px;
 }
-swath-authoring-panel input:disabled { opacity: 0.4; }
+swath-authoring-panel input:disabled,
+swath-authoring-panel select:disabled { opacity: 0.4; cursor: not-allowed; }
+swath-authoring-panel .swath-authoring-bands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin: 2px 0 0;
+}
+swath-authoring-panel .swath-authoring-bands label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  cursor: pointer;
+}
+swath-authoring-panel .swath-authoring-bands input {
+  display: inline-block;
+  width: auto;
+  margin: 0;
+}
 swath-authoring-panel .swath-authoring-field-help {
   display: block;
   margin: 0 0 2px;
@@ -326,6 +376,12 @@ swath-authoring-panel .swath-authoring-field-help {
   font-weight: 400;
   letter-spacing: normal;
   text-transform: none;
+  color: rgb(148 163 184 / 75%);
+}
+swath-authoring-panel .swath-authoring-plain {
+  display: block;
+  margin: 0 0 6px;
+  font: 11px/1.5 system-ui, sans-serif;
   color: rgb(148 163 184 / 75%);
 }
 swath-authoring-panel .swath-authoring-narrative {
@@ -359,17 +415,54 @@ swath-authoring-panel .swath-authoring-field-note {
   overflow-wrap: anywhere;
 }
 swath-authoring-panel .swath-authoring-field-note:empty { display: none; }
-swath-authoring-panel .swath-authoring-band-hint {
-  display: block;
-  margin: 1px 0 0;
-  font: 11px/1.5 system-ui, sans-serif;
-  color: rgb(148 163 184 / 70%);
-}
 swath-authoring-panel .swath-authoring-step-error {
   margin: 0 0 6px;
   font: 11px/1.5 system-ui, sans-serif;
   color: #fca5a5;
   overflow-wrap: anywhere;
+}
+swath-authoring-panel .swath-authoring-step-error:empty { display: none; }
+swath-authoring-panel .swath-authoring-formula-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 4px;
+}
+swath-authoring-panel .swath-authoring-formula-row .swath-authoring-formula-line {
+  font: 700 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #4ade80;
+  white-space: nowrap;
+}
+swath-authoring-panel .swath-authoring-formula-row select,
+swath-authoring-panel .swath-authoring-formula-row input {
+  margin-top: 0;
+  min-width: 0;
+}
+swath-authoring-panel .swath-authoring-formula-row .swath-authoring-formula-op {
+  flex: 0 0 52px;
+}
+swath-authoring-panel .swath-authoring-formula-row button {
+  flex: none;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: rgb(148 163 184 / 80%);
+  font: 12px/1 system-ui, sans-serif;
+}
+swath-authoring-panel .swath-authoring-formula-row button:hover { color: #f87171; }
+swath-authoring-panel .swath-authoring-formula-add {
+  display: block;
+  margin: 0 0 6px;
+  padding: 2px 8px;
+  border: 1px dashed rgb(148 163 184 / 40%);
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+  color: rgb(148 163 184 / 90%);
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+swath-authoring-panel .swath-authoring-formula-add:hover {
+  background: rgb(148 163 184 / 12%);
 }
 swath-authoring-panel .swath-authoring-submit {
   margin-top: 10px;
@@ -471,22 +564,6 @@ function injectStyles(doc: Document): void {
   doc.head.append(style);
 }
 
-/** One parameter of a served process definition (openEO 1.2.0). */
-interface ProcessParameter {
-  name: string;
-  description?: string;
-  optional?: boolean;
-  default?: unknown;
-  schema?: unknown;
-}
-
-/** The slice of a `GET /processes` entry the panel reads. */
-export interface ProcessDefinition {
-  id: string;
-  summary?: string;
-  parameters?: ProcessParameter[];
-}
-
 /** The slice of a `GET /services` entry the panel reads. */
 export interface ServiceItem {
   id: string;
@@ -495,22 +572,22 @@ export interface ServiceItem {
 
 /** The slice of a `GET /collections` entry the panel reads: the id (the
  * collection-id picker's vocabulary) and the datacube band names (the
- * band-field hints and the template's nir/red candidates). */
+ * bands checkboxes' and band selects' vocabulary). */
 export interface CollectionItem {
   id: string;
   bands: string[];
 }
 
-/** One pipeline step: a chosen process plus the user's raw field state.
- * `sources` maps a parameter to the step key it references (`""` =
- * explicit literal, absent = derive the schema default); `values` holds
- * the literal inputs as typed, parsed only at build time. */
-interface Step {
-  key: string;
+/** One pipeline card: a served process plus the user's raw field state.
+ * `values` holds literal inputs as typed, parsed only at build time;
+ * formula cards (`reduce_dimension`) carry their `rows` instead of a
+ * reducer value. Data flow needs no per-card state: the canvas is a
+ * linear chain, each cube input wired to the previous card. */
+interface Card {
   process: ProcessDefinition;
-  sources: Map<string, string>;
   values: Map<string, string>;
-  /** Whether the step's advanced (defaulted/nullable) fields are shown. */
+  rows: FormulaRow[];
+  /** Whether the card's advanced (defaulted/nullable) fields are shown. */
   advanced: boolean;
 }
 
@@ -533,11 +610,6 @@ function typesOf(alt: Record<string, unknown>): string[] {
 
 function hasSubtype(schema: unknown, subtype: string): boolean {
   return alternatives(schema).some((alt) => alt["subtype"] === subtype);
-}
-
-/** Data-cube parameters are wired, not typed. */
-function isCube(schema: unknown): boolean {
-  return hasSubtype(schema, "raster-cube") || hasSubtype(schema, "vector-cube");
 }
 
 function allowsNull(schema: unknown): boolean {
@@ -581,12 +653,18 @@ function enumValues(schema: unknown): string[] {
   return [];
 }
 
-/** Does the parameter name (or its array items) a band? Drives the
- * band-vocabulary hint under the field. */
+/** Does the parameter name a single band? Drives the band-select
+ * widget (the loaded-band vocabulary promoted into the field, B7). */
 function isBandName(schema: unknown): boolean {
   if (hasSubtype(schema, "band-name")) {
     return true;
   }
+  return isBandArray(schema);
+}
+
+/** Does the parameter name an ARRAY of bands (`load_collection.bands`)?
+ * Drives the band-checkbox widget. */
+function isBandArray(schema: unknown): boolean {
   return alternatives(schema).some((alt) => {
     const items = alt["items"];
     return typeof items === "object" && items !== null && !Array.isArray(items)
@@ -638,33 +716,6 @@ function defaultText(param: ProcessParameter): string {
   return "";
 }
 
-/** The first band matching any pattern, else the fallback — the NDVI
- * template's nir/red picker over a collection's band vocabulary. */
-function pickBand(bands: readonly string[], patterns: RegExp[], fallback: string): string {
-  for (const pattern of patterns) {
-    const match = bands.find((band) => pattern.test(band));
-    if (match !== undefined) {
-      return match;
-    }
-  }
-  return fallback;
-}
-
-/** Where a server diagnostic points: the compiler names nodes as
- * ``node `key`(...)`` and arguments as ``argument `name```. */
-function locateServerError(message: string): { node?: string; argument?: string } {
-  const located: { node?: string; argument?: string } = {};
-  const node = message.match(/node `([^`]+)`/);
-  if (node?.[1] !== undefined) {
-    located.node = node[1];
-  }
-  const argument = message.match(/(?:missing required argument|invalid argument) `([^`]+)`/);
-  if (argument?.[1] !== undefined) {
-    located.argument = argument[1];
-  }
-  return located;
-}
-
 export class SwathAuthoringPanel extends HTMLElement {
   static readonly tagName = "swath-authoring-panel";
 
@@ -676,14 +727,24 @@ export class SwathAuthoringPanel extends HTMLElement {
   #processes: readonly ProcessDefinition[] = [];
   #collections: readonly CollectionItem[] = [];
   #services: readonly ServiceItem[] = [];
-  #steps: Step[] = [];
-  #counter = 0;
+  /** The permanent head: the Load card (`load_collection`), created
+   * from the served definition — absent only when the server does not
+   * serve one. */
+  #loadCard: Card | undefined;
+  /** The steps between Load and Output, in pipeline order. */
+  #middle: Card[] = [];
+  /** The permanent tail: the Output card (`save_result`) — B1's
+   * "graph must end in save_result" made structural. */
+  #saveCard: Card | undefined;
+  /** The bands ticked on the Load card, in the order they were ticked
+   * (the loaded-band order — for a composite that order is R, G, B). */
+  #loadBands: string[] = [];
   #title = "";
   #error = "";
   #unavailable = false;
   /** Field keys (`s1-id`) the user has interacted with — inline
-   * required/type messages only show for these, so freshly added steps
-   * are not a wall of red; the disabled submit still counts them. */
+   * required/type messages only show for these, so a freshly inserted
+   * card is not a wall of red; the disabled submit still counts them. */
   #touched = new Set<string>();
   /** Server diagnostics mapped onto fields (`s3-outputMin`) or whole
    * steps (`s3`); cleared per field on edit and wholesale on publish. */
@@ -766,6 +827,18 @@ export class SwathAuthoringPanel extends HTMLElement {
       });
       this.#services = (serviceBody.services ?? []).filter((s) => typeof s.id === "string");
       this.#unavailable = false;
+      // The permanent head and tail come from the served definitions —
+      // schema honesty: no served `load_collection`/`save_result`, no
+      // card. Existing cards survive a reload only if still served.
+      const definition = (id: string): ProcessDefinition | undefined =>
+        this.#processes.find((process) => process.id === id);
+      const loadDef = definition("load_collection");
+      const saveDef = definition("save_result");
+      this.#loadCard =
+        loadDef === undefined ? undefined : (this.#loadCard ?? this.#newCard(loadDef));
+      this.#saveCard =
+        saveDef === undefined ? undefined : (this.#saveCard ?? this.#newCard(saveDef));
+      this.#middle = this.#middle.filter((card) => definition(card.process.id) !== undefined);
     } catch {
       this.#unavailable = true;
     }
@@ -791,28 +864,75 @@ export class SwathAuthoringPanel extends HTMLElement {
     }
   }
 
-  #addStep(process: ProcessDefinition): Step {
-    this.#counter += 1;
-    const step: Step = {
-      key: `s${this.#counter}`,
+  #newCard(process: ProcessDefinition): Card {
+    return {
       process,
-      sources: new Map(),
       values: new Map(
         (process.parameters ?? [])
+          .filter((param) => !isBandName(param.schema)) // band values come from vocabulary picks
           .map((param): [string, string] => [
             param.name,
             PROFILE_DEFAULTS[`${process.id}.${param.name}`] ?? defaultText(param),
           ])
           .filter(([, text]) => text !== ""),
       ),
+      rows: [],
       advanced: false,
     };
-    this.#steps.push(step);
-    return step;
   }
 
-  #removeStep(key: string): void {
-    this.#steps = this.#steps.filter((step) => step.key !== key);
+  /** The full pipeline, head to tail, in order — the single source of
+   * step keys: the card at index `i` is `s${i + 1}`. */
+  #cards(): Card[] {
+    const cards: Card[] = [];
+    if (this.#loadCard) {
+      cards.push(this.#loadCard);
+    }
+    cards.push(...this.#middle);
+    if (this.#saveCard) {
+      cards.push(this.#saveCard);
+    }
+    return cards;
+  }
+
+  #keyOf(card: Card): string {
+    return `s${this.#cards().indexOf(card) + 1}`;
+  }
+
+  /** The middle chain's process ids, for the stage table. */
+  #middleIds(): string[] {
+    return this.#middle.map((card) => card.process.id);
+  }
+
+  /** The pipeline's result stage (what reaches the Output card). */
+  #resultStage(): Stage {
+    return finalStage(this.#middleIds()) ?? { kind: "multi", scaled: false };
+  }
+
+  /** Inserts a served middle process at `gap` (0 = right after Load),
+   * with newcomer prefills where the vocabulary suggests them (NDVI's
+   * nir/red from the loaded bands, a first formula line). */
+  #insertAt(gap: number, process: ProcessDefinition): void {
+    const card = this.#newCard(process);
+    if (process.id === "ndvi") {
+      const nir = pickBand(this.#loadBands, [/nir/i, /8a$/i], "");
+      const red = pickBand(this.#loadBands, [/red/i, /04$/i], "");
+      if (nir !== "" && red !== "" && nir !== red) {
+        card.values.set("nir", nir);
+        card.values.set("red", red);
+      }
+    }
+    if (process.id === "reduce_dimension") {
+      card.rows.push({ op: "subtract", left: { ...EMPTY_OPERAND }, right: { ...EMPTY_OPERAND } });
+    }
+    this.#middle.splice(gap, 0, card);
+    this.#serverNotes.clear(); // keys shift; stale notes would mislead
+    this.#render();
+  }
+
+  #removeMiddle(card: Card): void {
+    this.#middle = this.#middle.filter((c) => c !== card);
+    this.#serverNotes.clear();
     this.#render();
   }
 
@@ -823,66 +943,63 @@ export class SwathAuthoringPanel extends HTMLElement {
     const definition = (id: string): ProcessDefinition | undefined =>
       this.#processes.find((process) => process.id === id);
     const collection = this.#collections[0];
-    if (collection === undefined) {
-      return;
+    const ndviDef = definition("ndvi");
+    const scaleDef = definition("linear_scale_range");
+    if (!collection || !this.#loadCard || !this.#saveCard || !ndviDef || !scaleDef) {
+      return; // the button only renders when everything exists
     }
     const nir = pickBand(collection.bands, [/nir/i, /8a$/i], "nir");
     const red = pickBand(collection.bands, [/red/i, /04$/i], "red");
-    const fill: Record<string, Record<string, string>> = {
-      load_collection: { id: collection.id, bands: `${nir},${red}` },
-      ndvi: { nir, red },
-      linear_scale_range: { inputMin: "-1", inputMax: "1", outputMin: "0", outputMax: "255" },
-      save_result: { format: "png", options: "rdylgn" },
-    };
-    for (const id of NDVI_TEMPLATE) {
-      const process = definition(id);
-      if (process === undefined) {
-        continue; // the button only renders when all four exist
-      }
-      const step = this.#addStep(process);
-      for (const [name, value] of Object.entries(fill[id] ?? {})) {
-        step.values.set(name, value);
-      }
-    }
+    this.#loadCard.values.set("id", collection.id);
+    this.#loadBands = [nir, red];
+    const ndvi = this.#newCard(ndviDef);
+    ndvi.values.set("nir", nir);
+    ndvi.values.set("red", red);
+    const scale = this.#newCard(scaleDef);
+    scale.values.set("inputMin", "-1");
+    scale.values.set("inputMax", "1");
+    scale.values.set("outputMin", "0");
+    scale.values.set("outputMax", "255");
+    this.#middle = [ndvi, scale];
+    this.#saveCard.values.set("format", "png");
+    this.#saveCard.values.set("options", "rdylgn");
     this.#render();
   }
 
-  /** The step keys a parameter of `index` may reference: earlier only. */
-  #priorKeys(index: number): string[] {
-    return this.#steps.slice(0, index).map((step) => step.key);
-  }
+  // --- Validation (schema- and stage-driven, before any request) ---
 
-  /** Where a parameter draws from: the stored choice when it still names
-   * an earlier step (or an explicit literal), else the schema-derived
-   * default — cube parameters and the first required parameter of a
-   * non-first step wire to the previous step. */
-  #effectiveSource(step: Step, index: number, param: ProcessParameter): string {
-    const prior = this.#priorKeys(index);
-    const stored = step.sources.get(param.name);
-    if (stored === "" || (stored !== undefined && prior.includes(stored))) {
-      return stored;
-    }
-    const previous = prior[prior.length - 1];
-    if (previous === undefined) {
-      return "";
-    }
-    if (isCube(param.schema)) {
-      return previous;
-    }
-    const firstRequired = (step.process.parameters ?? []).find((p) => p.optional !== true);
-    return firstRequired?.name === param.name ? previous : "";
+  /** The chosen collection's band vocabulary (empty until chosen). */
+  #collectionBands(): string[] {
+    const chosen = (this.#loadCard?.values.get("id") ?? "").trim();
+    return this.#collections.find((c) => c.id === chosen)?.bands ?? [];
   }
-
-  // --- Validation (schema-driven, before any request) ---
 
   /** What blocks this literal field, or `""`: required-but-empty (when
-   * the schema offers no null alternative) and non-numeric input into a
-   * number-typed parameter. */
-  #fieldIssue(step: Step, index: number, param: ProcessParameter): string {
-    if (this.#effectiveSource(step, index, param) !== "") {
+   * the schema offers no null alternative), non-numeric input into a
+   * number-typed parameter, and the degenerate stretch range (B8). */
+  #fieldIssue(card: Card, param: ProcessParameter): string {
+    if (param.name === CUBE_PARAM[card.process.id]) {
+      return ""; // wired to the previous card, never a field
+    }
+    if (card.process.id === "reduce_dimension") {
+      // The formula card owns its parameters: `dimension` is pinned to
+      // "bands" and `reducer` is composed from the rows —
+      // [`formulaIssues`] is their validation.
       return "";
     }
-    const raw = (step.values.get(param.name) ?? "").trim();
+    if (isBandArray(param.schema)) {
+      return ""; // the bands checkboxes; counted as a pipeline issue
+    }
+    const raw = (card.values.get(param.name) ?? "").trim();
+    if (isBandName(param.schema)) {
+      // Band selects: a value is always needed (the schema's "nir"/
+      // "red" defaults are common names the loaded bands may not
+      // carry), and it must be a currently loaded band (B7).
+      if (raw === "") {
+        return "pick a band";
+      }
+      return this.#loadBands.includes(raw) ? "" : `${raw} is not loaded any more`;
+    }
     if (raw === "") {
       if (param.optional === true || allowsNull(param.schema)) {
         return "";
@@ -892,21 +1009,30 @@ export class SwathAuthoringPanel extends HTMLElement {
     if (isNumeric(param.schema) && !isStringArray(param.schema) && Number.isNaN(Number(raw))) {
       return "must be a number";
     }
+    if (card.process.id === "linear_scale_range" && param.name === "inputMin") {
+      const min = Number(raw);
+      const max = Number((card.values.get("inputMax") ?? "").trim());
+      if (!Number.isNaN(min) && !Number.isNaN(max) && min >= max) {
+        return "the smallest value must be below the largest";
+      }
+    }
     return "";
   }
 
-  /** Everything still blocking submit, spelled out. Structural rule:
-   * some step must name a collection (a filled `collection-id`-subtype
-   * parameter) — the class of rejection the server would otherwise
-   * answer with is unreachable from the UI. */
+  /** Everything still blocking submit, spelled out in the user's words.
+   * Structure is enforced by construction; what remains are the choices
+   * only the user can make (B5's "which fix" included). */
   #submitIssues(): string[] {
     const issues: string[] = [];
     let blockedFields = 0;
-    for (const [index, step] of this.#steps.entries()) {
-      for (const param of step.process.parameters ?? []) {
-        if (this.#fieldIssue(step, index, param) !== "") {
+    for (const card of this.#cards()) {
+      for (const param of card.process.parameters ?? []) {
+        if (this.#fieldIssue(card, param) !== "") {
           blockedFields += 1;
         }
+      }
+      if (card.process.id === "reduce_dimension") {
+        blockedFields += formulaIssues(card.rows, this.#loadBands).length;
       }
     }
     if (blockedFields > 0) {
@@ -914,16 +1040,21 @@ export class SwathAuthoringPanel extends HTMLElement {
         blockedFields === 1 ? "1 field needs a value" : `${blockedFields} fields need values`,
       );
     }
-    const loadsCollection = this.#steps.some((step, index) =>
-      (step.process.parameters ?? []).some(
-        (param) =>
-          hasSubtype(param.schema, "collection-id") &&
-          this.#effectiveSource(step, index, param) === "" &&
-          (step.values.get(param.name) ?? "").trim() !== "",
-      ),
-    );
-    if (!loadsCollection) {
-      issues.push("no step loads a collection yet");
+    if ((this.#loadCard?.values.get("id") ?? "").trim() === "") {
+      issues.push("no collection chosen yet");
+    } else if (this.#loadBands.length === 0) {
+      issues.push("no bands ticked yet");
+    }
+    // B5, explained pre-submit: a multi-band result must be an RGB
+    // composite; "which fix" (reduce, or load exactly 3) is the user's
+    // call, so it gates rather than auto-corrects.
+    const stage = this.#resultStage();
+    if (stage.kind === "multi" && this.#loadBands.length > 0 && this.#loadBands.length !== 3) {
+      const n = this.#loadBands.length;
+      issues.push(
+        `this pipeline produces ${n} channel${n === 1 ? "" : "s"}; a picture needs ` +
+          "1 (add NDVI or a formula) or 3 (red, green, blue)",
+      );
     }
     return issues;
   }
@@ -932,13 +1063,20 @@ export class SwathAuthoringPanel extends HTMLElement {
    * line in place — called on each keystroke, no re-render, no lost
    * focus. */
   #updateValidity(): void {
-    for (const [index, step] of this.#steps.entries()) {
-      const stepNote = this.querySelector(`#swath-authoring-${step.key}-error`);
+    for (const card of this.#cards()) {
+      const key = this.#keyOf(card);
+      const stepNote = this.querySelector(`#swath-authoring-${key}-error`);
       if (stepNote) {
-        stepNote.textContent = this.#serverNotes.get(step.key) ?? "";
+        stepNote.textContent = this.#serverNotes.get(key) ?? "";
       }
-      for (const param of step.process.parameters ?? []) {
-        const fieldKey = `${step.key}-${param.name}`;
+      if (card.process.id === "reduce_dimension") {
+        const list = this.querySelector(`#swath-authoring-${key}-formula-issues`);
+        if (list) {
+          list.textContent = formulaIssues(card.rows, this.#loadBands).join("; ");
+        }
+      }
+      for (const param of card.process.parameters ?? []) {
+        const fieldKey = `${key}-${param.name}`;
         const note = this.querySelector(`#swath-authoring-${fieldKey}-note`);
         if (!note) {
           continue;
@@ -948,8 +1086,12 @@ export class SwathAuthoringPanel extends HTMLElement {
           note.textContent = server;
           continue;
         }
-        const issue = this.#fieldIssue(step, index, param);
-        note.textContent = this.#touched.has(fieldKey) ? issue : "";
+        const issue = this.#fieldIssue(card, param);
+        // Empty-required messages wait for a first touch (a fresh card
+        // is not a wall of red); a FILLED field's issue — a stale band
+        // pick, a degenerate range — always explains itself.
+        const filled = (card.values.get(param.name) ?? "").trim() !== "";
+        note.textContent = this.#touched.has(fieldKey) || filled ? issue : "";
       }
     }
     const submit = this.querySelector<HTMLButtonElement>(".swath-authoring-submit");
@@ -968,62 +1110,101 @@ export class SwathAuthoringPanel extends HTMLElement {
   /** The pipeline in one plain sentence ("Load hls-s30 (bands …) →
    * compute NDVI (…) → …"), from the current field values. */
   #narrative(): string {
-    const phrases = this.#steps.map((step) =>
-      narrativePhrase(step.process.id, (name) => (step.values.get(name) ?? "").trim()),
+    const phrases = this.#cards().map((card) =>
+      narrativePhrase(
+        card.process.id,
+        (name) =>
+          name === "bands" && card === this.#loadCard
+            ? this.#loadBands.join(",")
+            : (card.values.get(name) ?? "").trim(),
+        card.process.id === "reduce_dimension" ? formulaPhrase(card.rows, this.#loadBands) : "",
+      ),
     );
     const sentence = phrases.join(" → ");
     return sentence === "" ? "" : `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
   }
 
-  /** The composed openEO process graph: one node per step, arguments
-   * from the generated fields, the last step marked as the result. */
+  /** The composed openEO process graph: one node per card in pipeline
+   * order, each cube input wired to the previous card, the Output card
+   * marked as the result — a graph that always ends in `save_result`
+   * with nothing dangling, by construction (B1/B10). */
   buildGraph(): Record<string, unknown> {
+    const cards = this.#cards();
+    const stage = this.#resultStage();
     const graph: Record<string, unknown> = {};
-    for (const [index, step] of this.#steps.entries()) {
+    cards.forEach((card, index) => {
+      const key = `s${index + 1}`;
+      const previous = index > 0 ? `s${index}` : "";
       const args: Record<string, unknown> = {};
-      for (const param of step.process.parameters ?? []) {
-        const source = this.#effectiveSource(step, index, param);
-        if (source !== "") {
-          args[param.name] = { from_node: source };
-          continue;
-        }
-        const raw = (step.values.get(param.name) ?? "").trim();
-        if (raw === "") {
-          if (param.optional === true) {
-            continue; // optional and empty: omitted, the default applies
+      if (card.process.id === "reduce_dimension") {
+        args["data"] = { from_node: previous };
+        args["dimension"] = "bands";
+        args["reducer"] = { process_graph: buildReducerGraph(card.rows) };
+      } else {
+        for (const param of card.process.parameters ?? []) {
+          if (param.name === CUBE_PARAM[card.process.id] && previous !== "") {
+            args[param.name] = { from_node: previous };
+            continue;
           }
-          if (allowsNull(param.schema)) {
-            args[param.name] = null; // required but nullable: explicit null
+          if (card === this.#loadCard && isBandArray(param.schema)) {
+            if (this.#loadBands.length > 0) {
+              args[param.name] = [...this.#loadBands];
+            }
+            continue;
           }
-          // Required without a null alternative and left empty: omitted.
-          // Unreachable through submit (validation disables it), kept for
-          // direct buildGraph() callers.
-          continue;
+          if (
+            card === this.#saveCard &&
+            hasSubtype(param.schema, "output-format-options") &&
+            stage.kind === "multi"
+          ) {
+            // B6 made structural: a colormap never rides a composite.
+            continue;
+          }
+          const raw = (card.values.get(param.name) ?? "").trim();
+          if (raw === "") {
+            if (param.optional === true) {
+              continue; // optional and empty: omitted, the default applies
+            }
+            if (allowsNull(param.schema)) {
+              args[param.name] = null; // required but nullable: explicit null
+            }
+            // Required without a null alternative and left empty: omitted.
+            // Unreachable through submit (validation disables it), kept for
+            // direct buildGraph() callers.
+            continue;
+          }
+          args[param.name] = parseLiteral(raw, param.schema);
         }
-        args[param.name] = parseLiteral(raw, param.schema);
       }
-      const node: Record<string, unknown> = { process_id: step.process.id, arguments: args };
-      if (index === this.#steps.length - 1) {
+      const node: Record<string, unknown> = { process_id: card.process.id, arguments: args };
+      if (index === cards.length - 1) {
         node["result"] = true;
       }
-      graph[step.key] = node;
-    }
+      graph[key] = node;
+    });
     return graph;
   }
 
   /** Files a server diagnostic where it belongs: on the named field
    * when the message locates a node and argument, on the step when only
-   * a node, else the general inline error. */
+   * a node, else the general inline error. Model B makes these nearly
+   * unreachable; the mapping stays as the safety net. */
   #reportServerError(message: string): void {
     const { node, argument } = locateServerError(message);
-    const step = this.#steps.find((s) => s.key === node);
-    if (step !== undefined) {
-      const param = (step.process.parameters ?? []).find((p) => p.name === argument);
-      const key = param ? `${step.key}-${param.name}` : step.key;
-      this.#serverNotes.set(key, message);
+    const cards = this.#cards();
+    const index = node === undefined ? -1 : cards.findIndex((_, i) => `s${i + 1}` === node);
+    const card = cards[index];
+    if (card !== undefined) {
+      const key = `s${index + 1}`;
+      const param = (card.process.parameters ?? []).find((p) => p.name === argument);
+      const noteKey = param ? `${key}-${param.name}` : key;
+      this.#serverNotes.set(noteKey, message);
+      if (param && isAdvancedParam(card.process.id, param)) {
+        card.advanced = true; // surface the note even under the fold
+      }
       this.#error = "";
       this.#render();
-      this.querySelector(`[data-step="${step.key}"]`)?.scrollIntoView({ block: "nearest" });
+      this.querySelector(`[data-step="${key}"]`)?.scrollIntoView({ block: "nearest" });
     } else {
       this.#error = message;
       this.#render();
@@ -1090,6 +1271,8 @@ export class SwathAuthoringPanel extends HTMLElement {
     }
   }
 
+  // --- Rendering ---------------------------------------------------------
+
   #render(): void {
     const toggle = document.createElement("button");
     toggle.type = "button";
@@ -1118,8 +1301,19 @@ export class SwathAuthoringPanel extends HTMLElement {
       this.replaceChildren(toggle, empty);
       return;
     }
+    if (!this.#loadCard || !this.#saveCard) {
+      // Schema honesty: the canvas is only as capable as the served
+      // definitions — no load_collection or save_result, no pipeline.
+      const empty = document.createElement("p");
+      empty.className = "swath-authoring-empty";
+      empty.textContent =
+        "The served process set cannot author a picture here " +
+        "(it needs load_collection and save_result).";
+      this.replaceChildren(toggle, empty);
+      return;
+    }
 
-    const children: Element[] = [toggle, this.#renderPalette(), this.#renderForm()];
+    const children: Element[] = [toggle, this.#renderForm()];
     if (this.#error !== "") {
       const error = document.createElement("p");
       error.className = "swath-authoring-error";
@@ -1132,30 +1326,6 @@ export class SwathAuthoringPanel extends HTMLElement {
     this.#updateValidity();
   }
 
-  /** The palette: one add-button per served process definition, the
-   * process summary as its tooltip. */
-  #renderPalette(): Element {
-    const palette = document.createElement("div");
-    palette.className = "swath-authoring-palette";
-    palette.setAttribute("role", "group");
-    palette.setAttribute("aria-label", "Add a process step");
-    for (const process of this.#processes) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = `+ ${process.id}`;
-      button.dataset["process"] = process.id;
-      if (process.summary !== undefined) {
-        button.title = process.summary;
-      }
-      button.addEventListener("click", () => {
-        this.#addStep(process);
-        this.#render();
-      });
-      palette.append(button);
-    }
-    return palette;
-  }
-
   #renderForm(): Element {
     const form = document.createElement("form");
     form.addEventListener("submit", (event) => {
@@ -1163,12 +1333,12 @@ export class SwathAuthoringPanel extends HTMLElement {
       void this.#publish();
     });
 
-    if (this.#steps.length === 0) {
+    if (this.#middle.length === 0) {
       const hint = document.createElement("p");
       hint.className = "swath-authoring-hint";
       hint.textContent =
-        "Build a pipeline: add steps from the palette above. Later steps can use " +
-        "earlier steps' outputs, and the last step is the published result.";
+        "Every pipeline starts by loading imagery and ends by saving a picture. " +
+        "Add steps in between to compute something from the bands.";
       form.append(hint);
       if (
         NDVI_TEMPLATE.every((id) => this.#processes.some((process) => process.id === id)) &&
@@ -1185,7 +1355,6 @@ export class SwathAuthoringPanel extends HTMLElement {
         });
         form.append(template);
       }
-      return form;
     }
 
     // The what-is-happening narrative: the pipeline in plain words,
@@ -1197,8 +1366,20 @@ export class SwathAuthoringPanel extends HTMLElement {
 
     const list = document.createElement("ol");
     list.className = "swath-authoring-steps";
-    for (const [index, step] of this.#steps.entries()) {
-      list.append(this.#renderStep(step, index));
+    const cards = this.#cards();
+    const served = new Set(this.#processes.map((process) => process.id));
+    for (const [index, card] of cards.entries()) {
+      list.append(this.#renderStep(card, `s${index + 1}`));
+      // An insert gap after every card except the Output tail, showing
+      // only the chips the stage table admits there (B2/B3/B4: what
+      // does not fit is not offered, anywhere).
+      if (card !== this.#saveCard) {
+        const gap = index; // gap g = insert at middle position g
+        const fits = insertableAt(this.#middleIds(), gap, served);
+        if (fits.length > 0) {
+          list.append(this.#renderInsert(gap, fits));
+        }
+      }
     }
     form.append(list);
 
@@ -1227,58 +1408,130 @@ export class SwathAuthoringPanel extends HTMLElement {
     return form;
   }
 
-  #renderStep(step: Step, index: number): Element {
+  /** One insert gap: a chip per process the stage table admits here. */
+  #renderInsert(gap: number, fits: readonly string[]): Element {
+    const item = document.createElement("li");
+    item.className = "swath-authoring-insert";
+    item.dataset["gap"] = String(gap);
+    item.setAttribute("role", "group");
+    item.setAttribute("aria-label", "Add a step here");
+    for (const id of fits) {
+      const process = this.#processes.find((p) => p.id === id);
+      if (!process) {
+        continue;
+      }
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = `+ ${INSERT_LABELS[id] ?? id}`;
+      button.dataset["process"] = id;
+      if (process.summary !== undefined) {
+        button.title = process.summary;
+      }
+      button.addEventListener("click", () => {
+        this.#insertAt(gap, process);
+      });
+      item.append(button);
+    }
+    return item;
+  }
+
+  #renderStep(card: Card, key: string): Element {
     const item = document.createElement("li");
     item.className = "swath-authoring-step";
-    item.dataset["step"] = step.key;
+    item.dataset["step"] = key;
+    item.dataset["process"] = card.process.id;
+    const permanent = card === this.#loadCard || card === this.#saveCard;
+    if (permanent) {
+      // The permanent head and tail: not removable, not reorderable —
+      // B1 ("must end in save_result") unconstructible by construction.
+      item.setAttribute("data-permanent", "");
+    }
 
     const header = document.createElement("p");
     header.className = "swath-authoring-step-header";
-    const key = document.createElement("span");
-    key.className = "swath-authoring-step-key";
-    key.textContent = step.key;
+    const keySpan = document.createElement("span");
+    keySpan.className = "swath-authoring-step-key";
+    keySpan.textContent = key;
     const name = document.createElement("span");
-    name.textContent = step.process.id;
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.textContent = "✕";
-    remove.setAttribute("aria-label", `Remove step ${step.key}`);
-    remove.addEventListener("click", () => {
-      this.#removeStep(step.key);
-    });
-    header.append(key, name, remove);
+    name.textContent = STEP_TITLES[card.process.id] ?? card.process.id;
+    name.title = card.process.id;
+    header.append(keySpan, name);
+    if (!permanent) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "✕";
+      remove.setAttribute("aria-label", `Remove step ${key}`);
+      remove.addEventListener("click", () => {
+        this.#removeMiddle(card);
+      });
+      header.append(remove);
+    }
     item.append(header);
 
-    if (step.process.summary !== undefined) {
+    if (card.process.summary !== undefined) {
       const summary = document.createElement("small");
       summary.className = "swath-authoring-step-summary";
-      summary.textContent = step.process.summary;
+      summary.textContent = card.process.summary;
       item.append(summary);
     }
 
     const stepError = document.createElement("p");
     stepError.className = "swath-authoring-step-error";
-    stepError.id = `swath-authoring-${step.key}-error`;
+    stepError.id = `swath-authoring-${key}-error`;
     stepError.setAttribute("role", "alert");
     item.append(stepError);
 
+    if (card.process.id === "reduce_dimension") {
+      this.#renderFormula(card, key, item);
+      return item;
+    }
+
     // Progressive disclosure: fields that work when left alone collapse
-    // under the step's "advanced" toggle; the default view is only the
+    // under the card's "advanced" toggle; the default view is only the
     // choices a newcomer understands. A blocked or server-flagged
     // advanced field forces the section open so its message is visible.
-    const parameters = step.process.parameters ?? [];
-    const basic = parameters.filter((param) => !isAdvancedParam(step.process.id, param));
-    const advanced = parameters.filter((param) => isAdvancedParam(step.process.id, param));
+    const parameters = (card.process.parameters ?? []).filter(
+      (param) => param.name !== CUBE_PARAM[card.process.id], // wired, never a field
+    );
+    const basic = parameters.filter((param) => !isAdvancedParam(card.process.id, param));
+    const advanced = parameters.filter((param) => isAdvancedParam(card.process.id, param));
     for (const param of basic) {
-      item.append(...this.#renderField(step, index, param));
+      item.append(...this.#renderField(card, key, param));
+    }
+    if (card === this.#loadCard) {
+      // The plain-worded where/when line (design note §4): the extents
+      // stay expert fields under advanced; the card says what leaving
+      // them alone means, in the user's vocabulary.
+      const plain = document.createElement("small");
+      plain.className = "swath-authoring-plain";
+      plain.id = `swath-authoring-${key}-extent-summary`;
+      const custom = (name: string): boolean => (card.values.get(name) ?? "").trim() !== "";
+      plain.textContent = `Area: ${
+        custom("spatial_extent") ? "custom (see advanced)" : "everywhere the collection covers"
+      } · Time: ${custom("temporal_extent") ? "custom (see advanced)" : "everything available"}`;
+      item.append(plain);
+    }
+    if (card === this.#saveCard && this.#resultStage().kind === "multi") {
+      // B6, explained before it can even be attempted: while the result
+      // is multi-band the colormap is greyed out and this line says why
+      // in the user's words (buildGraph also never sends it).
+      const plain = document.createElement("small");
+      plain.className = "swath-authoring-plain";
+      plain.id = `swath-authoring-${key}-composite-note`;
+      plain.textContent =
+        this.#loadBands.length === 3
+          ? "The three loaded bands become the picture's red, green, and blue. " +
+            "A colormap maps one gray value per pixel, so it does not apply here."
+          : "A colormap maps one gray value per pixel — add NDVI or a formula to " +
+            "combine the bands into one value first.";
+      item.append(plain);
     }
     if (advanced.length > 0) {
       const open =
-        step.advanced ||
+        card.advanced ||
         advanced.some(
           (param) =>
-            this.#serverNotes.has(`${step.key}-${param.name}`) ||
-            this.#fieldIssue(step, index, param) !== "",
+            this.#serverNotes.has(`${key}-${param.name}`) || this.#fieldIssue(card, param) !== "",
         );
       const toggle = document.createElement("button");
       toggle.type = "button";
@@ -1286,46 +1539,25 @@ export class SwathAuthoringPanel extends HTMLElement {
       toggle.textContent = `advanced (${advanced.length})`;
       toggle.setAttribute("aria-expanded", String(open));
       toggle.addEventListener("click", () => {
-        step.advanced = !step.advanced;
+        card.advanced = !card.advanced;
         this.#render();
       });
       item.append(toggle);
       if (open) {
         for (const param of advanced) {
-          item.append(...this.#renderField(step, index, param));
+          item.append(...this.#renderField(card, key, param));
         }
       }
     }
     return item;
   }
 
-  /** The band vocabulary in play: the first chosen collection's bands. */
-  #pipelineBands(): string[] {
-    for (const [index, step] of this.#steps.entries()) {
-      for (const param of step.process.parameters ?? []) {
-        if (
-          hasSubtype(param.schema, "collection-id") &&
-          this.#effectiveSource(step, index, param) === ""
-        ) {
-          const chosen = (step.values.get(param.name) ?? "").trim();
-          const collection = this.#collections.find((c) => c.id === chosen);
-          if (collection !== undefined) {
-            return collection.bands;
-          }
-        }
-      }
-    }
-    return [];
-  }
-
-  /** One generated field: an optional source select (steps after the
-   * first can wire any parameter to an earlier step's output), the
-   * literal widget the parameter's schema calls for, its inline
-   * validation note, and a band hint where the schema names bands. */
-  #renderField(step: Step, index: number, param: ProcessParameter): Element[] {
-    const fieldKey = `${step.key}-${param.name}`;
+  /** One generated field: the widget the parameter's schema (and the
+   * vocabulary) calls for, its plain-language one-liner, and its inline
+   * validation note. */
+  #renderField(card: Card, key: string, param: ProcessParameter): Element[] {
+    const fieldKey = `${key}-${param.name}`;
     const fieldId = `swath-authoring-${fieldKey}`;
-    const source = this.#effectiveSource(step, index, param);
 
     const label = document.createElement("label");
     label.htmlFor = fieldId;
@@ -1335,7 +1567,7 @@ export class SwathAuthoringPanel extends HTMLElement {
     }
     // The plain-language one-liner, visible by default (the served
     // description stays available as the tooltip above).
-    const help = fieldHelp(step.process.id, param.name);
+    const help = fieldHelp(card.process.id, param.name);
     if (help !== "") {
       const line = document.createElement("small");
       line.className = "swath-authoring-field-help";
@@ -1346,84 +1578,103 @@ export class SwathAuthoringPanel extends HTMLElement {
     const touch = (): void => {
       this.#touched.add(fieldKey);
       this.#serverNotes.delete(fieldKey);
-      this.#serverNotes.delete(step.key);
+      this.#serverNotes.delete(key);
       this.#updateValidity();
     };
-    const input = this.#renderValueInput(step, param, fieldId, touch);
-    input.disabled = source !== "";
 
-    const prior = this.#priorKeys(index);
-    if (prior.length > 0) {
-      const select = document.createElement("select");
-      select.id = `${fieldId}-source`;
-      select.setAttribute("aria-label", `${step.key} ${param.name} source`);
-      const literal = document.createElement("option");
-      literal.value = "";
-      literal.textContent = "value:";
-      select.append(literal);
-      for (const priorKey of prior) {
-        const option = document.createElement("option");
-        option.value = priorKey;
-        const priorStep = this.#steps.find((s) => s.key === priorKey);
-        option.textContent = `from ${priorKey} (${priorStep?.process.id ?? "?"})`;
-        select.append(option);
-      }
-      select.value = source;
-      select.addEventListener("change", () => {
-        step.sources.set(param.name, select.value);
-        input.disabled = select.value !== "";
-        touch();
-      });
-      label.append(select);
+    if (card === this.#loadCard && isBandArray(param.schema)) {
+      label.htmlFor = "";
+      label.append(this.#renderBandChecks(fieldId, touch));
+    } else {
+      label.append(this.#renderValueInput(card, key, param, fieldId, touch));
     }
 
-    label.append(input);
     const note = document.createElement("small");
     note.className = "swath-authoring-field-note";
     note.id = `${fieldId}-note`;
     label.append(note);
-    if (isBandName(param.schema)) {
-      const bands = this.#pipelineBands();
-      if (bands.length > 0) {
-        const hint = document.createElement("small");
-        hint.className = "swath-authoring-band-hint";
-        hint.textContent = `bands: ${bands.join(", ")}`;
-        label.append(hint);
-      }
-    }
     return [label];
   }
 
+  /** The Load card's bands: one checkbox per band of the CHOSEN
+   * collection — the vocabulary hint of #148 promoted into the widget
+   * itself, so an unknown band is unconstructible (B7). Tick order is
+   * loaded order. */
+  #renderBandChecks(fieldId: string, touch: () => void): Element {
+    const group = document.createElement("span");
+    group.className = "swath-authoring-bands";
+    group.id = fieldId;
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", "Bands to load");
+    const vocabulary = this.#collectionBands();
+    if (vocabulary.length === 0) {
+      const hint = document.createElement("small");
+      hint.className = "swath-authoring-plain";
+      hint.textContent = "Choose a dataset first — its bands appear here.";
+      group.append(hint);
+      return group;
+    }
+    for (const band of vocabulary) {
+      const wrap = document.createElement("label");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.id = `${fieldId}-${band}`;
+      box.dataset["band"] = band;
+      box.checked = this.#loadBands.includes(band);
+      box.addEventListener("change", () => {
+        if (box.checked) {
+          this.#loadBands.push(band);
+        } else {
+          this.#loadBands = this.#loadBands.filter((b) => b !== band);
+        }
+        touch();
+        this.#render(); // the loaded-band vocabulary feeds other widgets
+      });
+      const text = document.createElement("span");
+      text.textContent = band;
+      wrap.append(box, text);
+      group.append(wrap);
+    }
+    return group;
+  }
+
   #renderValueInput(
-    step: Step,
+    card: Card,
+    key: string,
     param: ProcessParameter,
     fieldId: string,
     touch: () => void,
   ): HTMLInputElement | HTMLSelectElement {
-    const stored = step.values.get(param.name) ?? "";
+    const stored = card.values.get(param.name) ?? "";
     const dropdown = (
       values: readonly string[],
-      placeholder: string,
+      placeholder: string | undefined,
       rerenderOnChange: boolean,
     ): HTMLSelectElement => {
       const select = document.createElement("select");
       select.id = fieldId;
-      const none = document.createElement("option");
-      none.value = "";
-      none.textContent = placeholder;
-      select.append(none);
+      if (placeholder !== undefined) {
+        const none = document.createElement("option");
+        none.value = "";
+        none.textContent = placeholder;
+        select.append(none);
+      }
       for (const value of values) {
         const option = document.createElement("option");
         option.value = value;
         option.textContent = value;
         select.append(option);
       }
-      select.value = values.includes(stored) ? stored : "";
+      select.value = values.includes(stored)
+        ? stored
+        : placeholder !== undefined
+          ? ""
+          : (values[0] ?? "");
       select.addEventListener("change", () => {
-        step.values.set(param.name, select.value);
+        card.values.set(param.name, select.value);
         touch();
         if (rerenderOnChange) {
-          this.#render(); // e.g. a collection choice refreshes band hints
+          this.#render(); // e.g. a collection choice refreshes band widgets
         }
       });
       return select;
@@ -1432,15 +1683,41 @@ export class SwathAuthoringPanel extends HTMLElement {
     if (hasSubtype(param.schema, "collection-id") && this.#collections.length > 0) {
       // The collection picker: served ids only — an unknown collection
       // cannot be submitted from here.
-      return dropdown(
+      const select = dropdown(
         this.#collections.map((collection) => collection.id),
         "(choose a collection)",
-        true,
+        false,
       );
+      select.addEventListener("change", () => {
+        // A new collection means a new band vocabulary: drop picks that
+        // no longer exist, then re-render the dependent widgets.
+        this.#loadBands = this.#loadBands.filter((band) => this.#collectionBands().includes(band));
+        this.#render();
+      });
+      return select;
     }
     if (hasSubtype(param.schema, "output-format-options")) {
-      // The one subtype-specialized widget: the Swath colormap select.
-      return dropdown(COLORMAPS, "(default colormap)", false);
+      // The subtype-specialized widget: the Swath colormap select. On a
+      // multi-band (composite) result it greys out with the reduce-first
+      // note (B6) — and buildGraph omits it, so the server rejection is
+      // unconstructible, not merely explained.
+      const select = dropdown(COLORMAPS, "(default colormap)", false);
+      if (this.#resultStage().kind === "multi") {
+        select.disabled = true;
+        select.title =
+          "A colormap maps one gray value per pixel — add NDVI or a formula to reduce " +
+          "the bands to one value first.";
+      }
+      return select;
+    }
+    if (hasSubtype(param.schema, "output-format")) {
+      // The profile's format vocabulary (B9): a select, no free text.
+      return dropdown(FORMATS, undefined, false);
+    }
+    if (isBandName(param.schema)) {
+      // Band parameters are selects over the LOADED bands (B7): the
+      // compiler resolves them against load_collection's band list.
+      return dropdown(this.#loadBands, "(pick a band)", false);
     }
     const enumerated = enumValues(param.schema);
     if (enumerated.length > 0) {
@@ -1454,10 +1731,236 @@ export class SwathAuthoringPanel extends HTMLElement {
     }
     input.value = stored;
     input.addEventListener("input", () => {
-      step.values.set(param.name, input.value);
+      card.values.set(param.name, input.value);
       touch();
+      if (card === this.#loadCard) {
+        this.#updateExtentSummary(key);
+      }
     });
     return input;
+  }
+
+  /** Keeps the Load card's plain area/time line honest while the expert
+   * extent fields are edited (no re-render, no lost focus). */
+  #updateExtentSummary(key: string): void {
+    const card = this.#loadCard;
+    const line = this.querySelector(`#swath-authoring-${key}-extent-summary`);
+    if (!card || !line) {
+      return;
+    }
+    const custom = (name: string): boolean => (card.values.get(name) ?? "").trim() !== "";
+    line.textContent = `Area: ${
+      custom("spatial_extent") ? "custom (see advanced)" : "everywhere the collection covers"
+    } · Time: ${custom("temporal_extent") ? "custom (see advanced)" : "everything available"}`;
+  }
+
+  // --- The formula builder (reduce_dimension's reducer child graph) ---
+
+  /** The formula card: lines of `left op right` over band selects,
+   * numbers, and earlier lines — the only place arithmetic and (via
+   * band operands) `array_element` exist, exactly where the compiler
+   * admits them (B2/B3). `dimension` is pinned to "bands" (the profile's
+   * only reducible dimension) and the reducer child graph is composed,
+   * never typed. */
+  #renderFormula(card: Card, key: string, item: Element): void {
+    const explain = document.createElement("small");
+    explain.className = "swath-authoring-plain";
+    explain.textContent =
+      "Each pixel's bands are combined into one value: build the calculation line by " +
+      "line — the last line is the result.";
+    item.append(explain);
+
+    card.rows.forEach((row, index) => {
+      item.append(this.#renderFormulaRow(card, key, row, index));
+    });
+
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "swath-authoring-formula-add";
+    add.textContent = "+ add a line";
+    add.addEventListener("click", () => {
+      // A new line starts from the previous line's result — the common
+      // "and then…" shape needs no select fiddling.
+      const left: Operand =
+        card.rows.length > 0 ? { kind: "row", index: card.rows.length - 1 } : { ...EMPTY_OPERAND };
+      card.rows.push({ op: "divide", left, right: { ...EMPTY_OPERAND } });
+      this.#render();
+    });
+    item.append(add);
+
+    const issues = document.createElement("small");
+    issues.className = "swath-authoring-field-note";
+    issues.id = `swath-authoring-${key}-formula-issues`;
+    item.append(issues);
+  }
+
+  #renderFormulaRow(card: Card, key: string, row: FormulaRow, index: number): Element {
+    const wrap = document.createElement("p");
+    wrap.className = "swath-authoring-formula-row";
+    const lineNo = document.createElement("span");
+    lineNo.className = "swath-authoring-formula-line";
+    lineNo.textContent = `line ${index + 1}${index === card.rows.length - 1 ? " =" : ""}`;
+    wrap.append(lineNo);
+
+    const touch = (): void => {
+      this.#serverNotes.delete(key);
+      this.#updateValidity();
+    };
+
+    wrap.append(this.#renderOperand(card, key, row, index, "left", touch));
+
+    const op = document.createElement("select");
+    op.className = "swath-authoring-formula-op";
+    op.id = `swath-authoring-${key}-row${index + 1}-op`;
+    op.setAttribute("aria-label", `line ${index + 1} operation`);
+    // Only SERVED arithmetic is offered — delete `divide` from the
+    // served definitions and it disappears here too (schema honesty).
+    const served = new Set(this.#processes.map((process) => process.id));
+    const symbols: Record<FormulaOp, string> = {
+      add: "+",
+      subtract: "−",
+      multiply: "×",
+      divide: "÷",
+    };
+    for (const candidate of FORMULA_OPS) {
+      if (!served.has(candidate)) {
+        continue;
+      }
+      const option = document.createElement("option");
+      option.value = candidate;
+      option.textContent = symbols[candidate];
+      option.title = candidate;
+      op.append(option);
+    }
+    op.value = row.op;
+    if (op.value !== row.op) {
+      // The stored op is no longer served; fall back to the first.
+      row.op = (op.value as FormulaOp) || "add";
+    }
+    op.addEventListener("change", () => {
+      row.op = op.value as FormulaOp;
+      touch();
+    });
+    wrap.append(op);
+
+    wrap.append(this.#renderOperand(card, key, row, index, "right", touch));
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "✕";
+    remove.setAttribute("aria-label", `Remove line ${index + 1} of ${key}`);
+    remove.addEventListener("click", () => {
+      card.rows.splice(index, 1);
+      // Later lines referencing at or past the removed one reset (the
+      // issues list explains); references above it just shift down.
+      for (const later of card.rows) {
+        for (const side of ["left", "right"] as const) {
+          const operand = later[side];
+          if (operand.kind === "row" && operand.index >= index) {
+            later[side] =
+              operand.index > index
+                ? { kind: "row", index: operand.index - 1 }
+                : { ...EMPTY_OPERAND };
+          }
+        }
+      }
+      this.#render();
+    });
+    wrap.append(remove);
+    return wrap;
+  }
+
+  /** One operand cell: a select over the loaded bands, earlier lines,
+   * and "a number…" (which reveals a number input beside it). */
+  #renderOperand(
+    card: Card,
+    key: string,
+    row: FormulaRow,
+    index: number,
+    side: "left" | "right",
+    touch: () => void,
+  ): Element {
+    const holder = document.createElement("span");
+    holder.style.display = "contents";
+    const operand = row[side];
+    const select = document.createElement("select");
+    select.id = `swath-authoring-${key}-row${index + 1}-${side}`;
+    select.setAttribute("aria-label", `line ${index + 1} ${side} value`);
+
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "(pick)";
+    select.append(none);
+    for (const band of this.#loadBands) {
+      const option = document.createElement("option");
+      option.value = `band:${band}`;
+      option.textContent = band;
+      select.append(option);
+    }
+    for (let earlier = 0; earlier < index; earlier += 1) {
+      const option = document.createElement("option");
+      option.value = `row:${earlier}`;
+      option.textContent = `line ${earlier + 1}`;
+      select.append(option);
+    }
+    const numberOption = document.createElement("option");
+    numberOption.value = "number";
+    numberOption.textContent = "a number…";
+    select.append(numberOption);
+
+    const number = document.createElement("input");
+    number.type = "number";
+    number.step = "any";
+    number.id = `swath-authoring-${key}-row${index + 1}-${side}-number`;
+    number.setAttribute("aria-label", `line ${index + 1} ${side} number`);
+    number.style.display = "none";
+
+    const reflect = (current: Operand): void => {
+      switch (current.kind) {
+        case "band":
+          select.value = current.band === "" ? "" : `band:${current.band}`;
+          if (select.value !== `band:${current.band}` && current.band !== "") {
+            select.value = ""; // the band is no longer loaded; the issues list explains
+          }
+          number.style.display = "none";
+          break;
+        case "number":
+          select.value = "number";
+          number.style.display = "";
+          number.value = current.text;
+          break;
+        case "row":
+          select.value = `row:${current.index}`;
+          number.style.display = "none";
+          break;
+      }
+    };
+    reflect(operand);
+
+    select.addEventListener("change", () => {
+      const value = select.value;
+      if (value === "number") {
+        row[side] = { kind: "number", text: number.value };
+        number.style.display = "";
+      } else if (value.startsWith("band:")) {
+        row[side] = { kind: "band", band: value.slice("band:".length) };
+        number.style.display = "none";
+      } else if (value.startsWith("row:")) {
+        row[side] = { kind: "row", index: Number(value.slice("row:".length)) };
+        number.style.display = "none";
+      } else {
+        row[side] = { ...EMPTY_OPERAND };
+        number.style.display = "none";
+      }
+      touch();
+    });
+    number.addEventListener("input", () => {
+      row[side] = { kind: "number", text: number.value };
+      touch();
+    });
+
+    holder.append(select, number);
+    return holder;
   }
 
   #renderServices(): Element[] {
