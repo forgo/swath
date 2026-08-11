@@ -174,14 +174,25 @@ interface Recorded {
   body: unknown;
 }
 
+/** A 1×1 PNG (the preview stub's default body — the panel only needs
+ * real image bytes to object-URL). */
+const PNG_BYTES = Uint8Array.from(
+  atob(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  ),
+  (char) => char.codePointAt(0) ?? 0,
+);
+
 /** A scripted same-shape fetch: the GET surfaces answer the given
- * documents; POST /services and DELETE answer the scripted response;
- * everything is recorded for assertions. */
+ * documents; POST /services, POST /result (the ADR 0014 preview), and
+ * DELETE answer the scripted response; everything is recorded for
+ * assertions. */
 function fetchStub(options: {
   processes?: ProcessDefinition[];
   collections?: unknown[];
   services?: { id: string; title?: string }[];
   post?: { status: number; body?: unknown; headers?: Record<string, string> };
+  result?: { status: number; body?: unknown };
   delete?: { status: number; body?: unknown };
 }): { impl: typeof fetch; requests: Recorded[] } {
   const requests: Recorded[] = [];
@@ -210,6 +221,16 @@ function fetchStub(options: {
     if (method === "POST" && url.endsWith("/services")) {
       const post = options.post ?? { status: 201 };
       return json(post.body, post.status, post.headers);
+    }
+    if (method === "POST" && url.endsWith("/result")) {
+      const result = options.result ?? { status: 200 };
+      if (result.status === 200) {
+        return new Response(new Blob([PNG_BYTES], { type: "image/png" }), {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        });
+      }
+      return json(result.body, result.status);
     }
     if (method === "DELETE") {
       const del = options.delete ?? { status: 204 };
@@ -668,8 +689,9 @@ test("publishing posts the composed graph and announces the created service", as
   submitButton(panel).click();
   expect(await created).toBe("xyz-abc123def456");
 
-  const post = stub.requests.find((request) => request.method === "POST");
-  expect(post?.url).toBe("/services");
+  const post = stub.requests.find(
+    (request) => request.method === "POST" && request.url === "/services",
+  );
   expect(post?.body).toEqual({
     type: "xyz",
     title: "NDVI (authored)",
@@ -821,4 +843,83 @@ test("published services list with a delete control that announces deletion", as
   expect(await deleted).toBe("xyz-abc123def456");
   const request = stub.requests.find((entry) => entry.method === "DELETE");
   expect(request?.url).toBe("/services/xyz-abc123def456");
+});
+
+// --- Preview before publish (issue #169, ADR 0014 — B11) -----------------
+
+/** The `POST /result` preview requests the stub saw. */
+function previewPosts(stub: { requests: Recorded[] }): Recorded[] {
+  return stub.requests.filter((request) => request.method === "POST" && request.url === "/result");
+}
+
+function previewImage(panel: SwathAuthoringPanel): HTMLImageElement | null {
+  return panel.querySelector<HTMLImageElement>("#swath-authoring-preview-image");
+}
+
+function previewNote(panel: SwathAuthoringPanel): string {
+  return panel.querySelector("#swath-authoring-preview-note")?.textContent ?? "";
+}
+
+test("B11 preview: a complete draft renders the POST /result image inline, debounced and keyed on the graph", async () => {
+  const stub = fetchStub({});
+  const panel = await mount(stub);
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-template")?.click();
+  // The debounced preview lands: the exact composed graph, spec-shaped.
+  await expect.poll(() => previewImage(panel)?.getAttribute("src") ?? "").toMatch(/^blob:/);
+  expect(previewImage(panel)?.hidden).toBe(false);
+  expect(previewNote(panel)).toContain("Preview");
+  expect(previewPosts(stub)).toHaveLength(1);
+  expect(previewPosts(stub)[0]?.body).toEqual({ process: { process_graph: NDVI_GRAPH } });
+  // An unchanged draft never refetches (keystroke churn re-runs
+  // validation constantly; the preview is keyed on the composed graph)…
+  fill(panel, "title", "only metadata"); // the title is not part of the graph
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  expect(previewPosts(stub)).toHaveLength(1);
+  // …while a real edit re-previews: the swapped-band draft (B11's
+  // canonical valid-and-wrong graph) gets its own ground-truth image.
+  choose(panel, "s2-nir", "b04");
+  choose(panel, "s2-red", "b8a");
+  await expect.poll(() => previewPosts(stub).length).toBe(2);
+  const swapped = previewPosts(stub)[1]?.body as {
+    process: { process_graph: Record<string, { arguments: Record<string, unknown> }> };
+  };
+  expect(swapped.process.process_graph["s2"]?.arguments["nir"]).toBe("b04");
+});
+
+test("B11 preview: the budget refusal explains itself in plain words and never gates publish", async () => {
+  const stub = fetchStub({
+    result: {
+      status: 400,
+      body: {
+        code: "ProcessGraphComplexity",
+        message: "The process is too complex for synchronous processing.",
+      },
+    },
+  });
+  const panel = await mount(stub);
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-template")?.click();
+  await expect.poll(() => previewNote(panel)).toContain("too much data to preview");
+  expect(previewNote(panel)).toContain("narrow the area");
+  expect(previewImage(panel)?.hidden).toBe(true);
+  // The budget bounds the preview, not the layer: publish stays enabled
+  // and no general inline error appears.
+  expect(submitButton(panel).disabled).toBe(false);
+  expect(panel.querySelector(".swath-authoring-error")).toBeNull();
+});
+
+test("B11 preview: incomplete drafts show no preview and make no request", async () => {
+  const stub = fetchStub({});
+  const panel = await mount(stub);
+  choose(panel, "s1-id", "hls-s30");
+  tickBand(panel, "b8a"); // one channel, submit gated — nothing to show
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  expect(previewPosts(stub)).toHaveLength(0);
+  expect(panel.querySelector<HTMLElement>("#swath-authoring-preview")?.hidden).toBe(true);
+  // Completing the pipeline flips the preview on; breaking it again
+  // clears the image rather than showing a stale draft.
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-template")?.click();
+  await expect.poll(() => previewImage(panel)?.getAttribute("src") ?? "").toMatch(/^blob:/);
+  tickBand(panel, "b04"); // untick a band NDVI still uses: draft breaks
+  expect(panel.querySelector<HTMLElement>("#swath-authoring-preview")?.hidden).toBe(true);
+  expect(previewImage(panel)?.getAttribute("src")).toBeNull();
 });

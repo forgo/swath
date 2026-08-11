@@ -18,6 +18,7 @@
 //! | `GET /collections` | openEO collections, derived from catalog [`Dataset`]s |
 //! | `GET /collections/{collection_id}` | one collection |
 //! | `GET /processes` | the compiler's supported subset, as pinned official definitions |
+//! | `POST /result` | preview-bounded synchronous subset (ADR 0014): one small PNG preview |
 //! | `GET /service_types` | the single service type: `xyz` |
 //! | `GET /services` · `POST /services` | list / create secondary services |
 //! | `GET /services/{service_id}` · `DELETE …` | describe / delete one service |
@@ -39,6 +40,20 @@
 //!   and the capabilities `endpoints` array lists only what exists.
 //! - **`PATCH /services` is omitted** (delete + re-create covers v0), as
 //!   are jobs, batch processing, user-defined processes, and files.
+//! - **`POST /result` is preview-bounded, not general synchronous
+//!   processing** (ADR 0014): the graph compiles through the same #32
+//!   path as `POST /services` (identical diagnostics — same codes for
+//!   the same graph on either route) and answers **one** small
+//!   overview-backed `image/png` render covering the graph's
+//!   `spatial_extent` (the collection extent when null/absent) — not the
+//!   spec's full extent at native resolution. The render is admitted
+//!   through the planner's `max_estimated_live_bytes` cost model; when
+//!   the estimate exceeds the preview budget and nothing cheaper can
+//!   serve, the server refuses with the spec's `ProcessGraphComplexity`
+//!   — never a silent downgrade, never an unbounded read. Nothing is
+//!   persisted: no service, no `swath:layers` write, no trace-bus event.
+//!   The capabilities description states the narrowing; no sync-
+//!   processing conformance class is claimed.
 //! - Process definitions are served verbatim from the pinned
 //!   openeo-processes 1.2.0 documents, with Swath's parameter narrowing
 //!   appended to the `description` (see `data/openeo-processes/README.md`).
@@ -55,15 +70,22 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::header::CONTENT_TYPE;
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use swath_core::catalog::stac::{STAC_VERSION, dataset_to_stac_collection};
-use swath_core::catalog::{Catalog, Dataset, DatasetId, Layer as DomainLayer};
+use swath_core::catalog::{Bbox, Catalog, Dataset, DatasetId, Layer as DomainLayer};
 use swath_core::planner::Budget;
-use swath_render::{CompileContext, CompileError, NodataPolicy, Resampling, compile, plan_for};
+use swath_core::reproject::Reproject;
+use swath_core::source::RasterSource;
+use swath_core::tile::TileCoord;
+use swath_render::{
+    CompileContext, CompileError, NodataPolicy, Resampling, TileError, compile, plan_for,
+    render_tile,
+};
 
 use crate::provider::{CatalogLayer, CatalogLayers};
 
@@ -81,6 +103,28 @@ const SERVICE_ID_PREFIX: &str = "xyz-";
 /// Tile sizes a service `configuration` may request.
 const TILE_SIZES: [u32; 2] = [256, 512];
 
+/// Side length of the preview render (ADR 0014): one classic tile.
+const PREVIEW_TILE_SIZE: u32 = 256;
+
+/// The preview budget's default `max_estimated_live_bytes` ceiling
+/// (ADR 0014: "strict budget, refusal over degradation"). A documented
+/// calibration point, not a fit: it admits any near-native live window a
+/// single 256-px preview can honestly need (a few MB of samples — e.g.
+/// two int16 bands of a ~1400 px window) while refusing the unbounded
+/// full-resolution read of a large extent whose source has no overviews.
+/// Overview-backed candidates are admitted by the planner regardless of
+/// this ceiling — a preview is exactly the workload overviews exist for.
+const PREVIEW_MAX_ESTIMATED_LIVE_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Deepest tile matrix a preview may select — the `WebMercatorQuad`
+/// registered definition's deepest matrix, same bound the tiles routes
+/// enforce on tile addresses.
+const PREVIEW_MAX_ZOOM: u8 = 24;
+
+/// Web Mercator's latitude domain bound; extents are clamped into it
+/// before tile selection (the projection is undefined beyond it).
+const WEB_MERCATOR_MAX_LAT: f64 = 85.051_128_779_806_59;
+
 /// Every openEO endpoint this surface serves, exactly as the capabilities
 /// `endpoints` array declares it (only what exists; the spec says the
 /// `GET /` entry itself is not listed). `/conformance` is the shared OGC
@@ -90,6 +134,7 @@ pub const OPENEO_ENDPOINTS: &[(&str, &[&str])] = &[
     ("/collections/{collection_id}", &["GET"]),
     ("/conformance", &["GET"]),
     ("/processes", &["GET"]),
+    ("/result", &["POST"]),
     ("/service_types", &["GET"]),
     ("/services", &["GET", "POST"]),
     ("/services/{service_id}", &["GET", "DELETE"]),
@@ -160,30 +205,60 @@ impl From<CompileError> for OpenEoError {
 
 /// Everything the openEO handlers need: the same [`CatalogLayers`] the
 /// tile handlers resolve through (clones share the layer set — a
-/// `POST`ed service serves on the next tile request) and the base URL links and
-/// service URLs are minted under.
+/// `POST`ed service serves on the next tile request), the two render
+/// ports the preview endpoint consumes (ADR 0014 — `POST /result`
+/// renders inline, exactly like the tile handler), and the base URL
+/// links and service URLs are minted under.
 #[derive(Debug)]
-pub struct OpenEoState<C> {
+pub struct OpenEoState<S, R, C> {
     provider: CatalogLayers<C>,
+    source: S,
+    reproject: R,
     base_url: String,
+    /// The preview budget's `max_estimated_live_bytes` ceiling
+    /// ([`PREVIEW_MAX_ESTIMATED_LIVE_BYTES`] unless overridden).
+    preview_ceiling: u64,
 }
 
-impl<C> OpenEoState<C> {
-    /// Wires the surface over the shared provider (trailing slashes of
-    /// `base_url` trimmed, as in [`ApiState::new`](crate::ApiState::new)).
-    pub fn new(provider: CatalogLayers<C>, base_url: impl Into<String>) -> Self {
+impl<S, R, C> OpenEoState<S, R, C> {
+    /// Wires the surface over the shared provider and the two render
+    /// ports (trailing slashes of `base_url` trimmed, as in
+    /// [`ApiState::new`](crate::ApiState::new)).
+    pub fn new(
+        provider: CatalogLayers<C>,
+        source: S,
+        reproject: R,
+        base_url: impl Into<String>,
+    ) -> Self {
         let mut base_url: String = base_url.into();
         while base_url.ends_with('/') {
             base_url.pop();
         }
-        Self { provider, base_url }
+        Self {
+            provider,
+            source,
+            reproject,
+            base_url,
+            preview_ceiling: PREVIEW_MAX_ESTIMATED_LIVE_BYTES,
+        }
+    }
+
+    /// Overrides the preview budget's byte ceiling — a calibration seam
+    /// (tests pin the refusal path with a tiny ceiling; the default is
+    /// [`PREVIEW_MAX_ESTIMATED_LIVE_BYTES`]).
+    #[must_use]
+    pub fn with_preview_ceiling(mut self, max_estimated_live_bytes: u64) -> Self {
+        self.preview_ceiling = max_estimated_live_bytes;
+        self
     }
 }
 
 /// The openEO router over `state`, to be merged with the OGC tiles router
 /// (the two surfaces share `/` and `/conformance`, which live there).
-pub fn openeo_router<C>(state: Arc<OpenEoState<C>>) -> axum::Router
+pub fn openeo_router<S, R, C>(state: Arc<OpenEoState<S, R, C>>) -> axum::Router
 where
+    S: RasterSource + 'static,
+    R: Reproject + 'static,
     C: Catalog + 'static,
 {
     axum::Router::new()
@@ -191,6 +266,7 @@ where
         .route("/collections", get(collections))
         .route("/collections/{collection_id}", get(collection))
         .route("/processes", get(processes))
+        .route("/result", axum::routing::post(preview_result))
         .route("/service_types", get(service_types))
         .route("/services", get(list_services).post(create_service))
         .route(
@@ -217,6 +293,16 @@ pub(crate) fn extend_capabilities(landing: &mut Value, base: &str) {
     doc.insert("id".into(), json!("swath"));
     doc.insert("production".into(), json!(false));
     doc.insert("endpoints".into(), json!(endpoints));
+    // The honest narrowing of `POST /result` (ADR 0014), declared where
+    // clients look for it: the capabilities document's description.
+    if let Some(Value::String(description)) = doc.get_mut("description") {
+        description.push_str(
+            " POST /result is a preview-bounded synchronous subset (not general synchronous \
+             processing): it renders one small overview-backed PNG preview of the process \
+             graph's spatial extent, and refuses requests over its preview budget with \
+             ProcessGraphComplexity.",
+        );
+    }
     if let Some(links) = doc.get_mut("links").and_then(Value::as_array_mut) {
         links.push(json!({
             "rel": "data",
@@ -228,7 +314,7 @@ pub(crate) fn extend_capabilities(landing: &mut Value, base: &str) {
 }
 
 /// `GET /.well-known/openeo` — version discovery: this one instance.
-async fn well_known<C>(State(app): State<Arc<OpenEoState<C>>>) -> Json<Value> {
+async fn well_known<S, R, C>(State(app): State<Arc<OpenEoState<S, R, C>>>) -> Json<Value> {
     Json(json!({
         "versions": [{
             "url": format!("{base}/", base = app.base_url),
@@ -298,8 +384,8 @@ fn collection_doc(dataset: &Dataset, base: &str) -> Value {
     doc
 }
 
-async fn collections<C: Catalog>(
-    State(app): State<Arc<OpenEoState<C>>>,
+async fn collections<S, R, C: Catalog>(
+    State(app): State<Arc<OpenEoState<S, R, C>>>,
 ) -> Result<Json<Value>, OpenEoError> {
     let datasets = app
         .provider
@@ -321,8 +407,8 @@ async fn collections<C: Catalog>(
     })))
 }
 
-async fn collection<C: Catalog>(
-    State(app): State<Arc<OpenEoState<C>>>,
+async fn collection<S, R, C: Catalog>(
+    State(app): State<Arc<OpenEoState<S, R, C>>>,
     Path(collection_id): Path<String>,
 ) -> Result<Json<Value>, OpenEoError> {
     let dataset = fetch_dataset(&app, &collection_id).await?;
@@ -330,7 +416,10 @@ async fn collection<C: Catalog>(
 }
 
 /// The collection, or the standardized `CollectionNotFound`.
-async fn fetch_dataset<C: Catalog>(app: &OpenEoState<C>, id: &str) -> Result<Dataset, OpenEoError> {
+async fn fetch_dataset<S, R, C: Catalog>(
+    app: &OpenEoState<S, R, C>,
+    id: &str,
+) -> Result<Dataset, OpenEoError> {
     app.provider
         .catalog()
         .get_dataset(&DatasetId::new(id))
@@ -422,7 +511,7 @@ fn process_list() -> &'static Vec<Value> {
     })
 }
 
-async fn processes<C>(State(app): State<Arc<OpenEoState<C>>>) -> Json<Value> {
+async fn processes<S, R, C>(State(app): State<Arc<OpenEoState<S, R, C>>>) -> Json<Value> {
     Json(json!({
         "processes": process_list(),
         "links": [{
@@ -435,7 +524,7 @@ async fn processes<C>(State(app): State<Arc<OpenEoState<C>>>) -> Json<Value> {
 
 // --- Secondary services (the authoring loop) ---
 
-async fn service_types<C>(State(_): State<Arc<OpenEoState<C>>>) -> Json<Value> {
+async fn service_types<S, R, C>(State(_): State<Arc<OpenEoState<S, R, C>>>) -> Json<Value> {
     Json(json!({
         SERVICE_TYPE: {
             "title": "XYZ tiled web map (slippy map)",
@@ -651,8 +740,8 @@ fn service_doc(base: &str, layer: &DomainLayer, full: bool) -> Value {
 /// Every persisted service layer (those carrying a `process` record),
 /// with its dataset, across all datasets — the catalog is the source of
 /// truth for what services exist.
-async fn service_layers<C: Catalog>(
-    app: &OpenEoState<C>,
+async fn service_layers<S, R, C: Catalog>(
+    app: &OpenEoState<S, R, C>,
 ) -> Result<Vec<(Dataset, DomainLayer)>, OpenEoError> {
     let datasets = app
         .provider
@@ -676,8 +765,8 @@ async fn service_layers<C: Catalog>(
         .collect())
 }
 
-async fn list_services<C: Catalog>(
-    State(app): State<Arc<OpenEoState<C>>>,
+async fn list_services<S, R, C: Catalog>(
+    State(app): State<Arc<OpenEoState<S, R, C>>>,
 ) -> Result<Json<Value>, OpenEoError> {
     let services: Vec<Value> = service_layers(&app)
         .await?
@@ -694,8 +783,8 @@ async fn list_services<C: Catalog>(
     })))
 }
 
-async fn describe_service<C: Catalog>(
-    State(app): State<Arc<OpenEoState<C>>>,
+async fn describe_service<S, R, C: Catalog>(
+    State(app): State<Arc<OpenEoState<S, R, C>>>,
     Path(service_id): Path<String>,
 ) -> Result<Json<Value>, OpenEoError> {
     let services = service_layers(&app).await?;
@@ -714,53 +803,88 @@ fn service_not_found(id: &str) -> OpenEoError {
     )
 }
 
-/// `POST /services` — the authoring loop in one motion (R3, ADR 0010):
-/// validate the graph through the compiler against the referenced
-/// collection's bands, persist the derived layer on the dataset
-/// (`swath:layers`), make it servable immediately, answer 201 with the
-/// service's location and identifier.
-async fn create_service<C: Catalog>(
-    State(app): State<Arc<OpenEoState<C>>>,
-    Json(body): Json<Value>,
-) -> Result<Response, OpenEoError> {
-    let request = ServiceRequest::parse(&body)?;
-
-    // Which collection is the graph authored against? (The compiler
-    // re-validates every load_collection node against this context.)
-    let collection = loaded_collection(&request.process).ok_or_else(|| {
+/// The collection a graph is authored against, resolved from its
+/// `load_collection` node — the shared pre-pass of `POST /services` and
+/// `POST /result` (the compiler re-validates every `load_collection`
+/// node against the compile context).
+async fn graph_dataset<S, R, C: Catalog>(
+    app: &OpenEoState<S, R, C>,
+    process: &Value,
+) -> Result<Dataset, OpenEoError> {
+    let collection = loaded_collection(process).ok_or_else(|| {
         OpenEoError::new(
             StatusCode::BAD_REQUEST,
             "ProcessGraphInvalid",
             "Invalid process graph specified: no load_collection node names a collection.",
         )
     })?;
-    let mut dataset = fetch_dataset(&app, collection).await?;
+    fetch_dataset(app, collection).await
+}
 
+/// **The** graph lowering (single construction site): compiles `process`
+/// through the whole #32 compiler against the dataset's bands, lowers
+/// the compiled product to the persisted layer vocabulary via the #95
+/// constructor, and derives the servable [`CatalogLayer`] template from
+/// the persisted form — exactly the `POST /services` motion, shared with
+/// `POST /result` so a preview renders precisely what publishing the
+/// same graph would serve.
+fn lower_graph(
+    dataset: &Dataset,
+    process: &Value,
+    id: String,
+    title: Option<String>,
+    description: Option<String>,
+    tile_size: u32,
+) -> Result<(DomainLayer, CatalogLayer), OpenEoError> {
     // Validate: the whole #32 compiler, against the collection's bands.
-    let product = compile(&request.process, &compile_context(&dataset))?;
+    let product = compile(process, &compile_context(dataset))?;
 
     // Lower the compiled product to the persisted layer vocabulary: the
     // single #95 constructor derives the metadata from the same spec the
     // plan was built from, so the two representations cannot disagree.
-    let id = service_id(&request.process);
     let (_, meta) = plan_for(&product.spec);
     let layer = DomainLayer {
         id: id.clone(),
-        title: request.title.unwrap_or_else(|| id.clone()),
-        description: request.description.unwrap_or_default(),
+        title: title.unwrap_or(id),
+        description: description.unwrap_or_default(),
         plan: meta.kind,
         rescale: meta.rescale,
         colormap: meta.colormap,
         resampling: swath_core::catalog::Resampling::Bilinear,
-        tile_size: request.tile_size,
-        process: Some(request.process.clone()),
+        tile_size,
+        process: Some(process.clone()),
     };
+    // One lowering for the live insert, every future rehydration, and
+    // the preview render.
+    let template = compile_service_layer(dataset, &layer)
+        .map_err(|err| OpenEoError::internal(format!("service template compile failed: {err}")))?;
+    Ok((layer, template))
+}
+
+/// `POST /services` — the authoring loop in one motion (R3, ADR 0010):
+/// validate the graph through the compiler against the referenced
+/// collection's bands, persist the derived layer on the dataset
+/// (`swath:layers`), make it servable immediately, answer 201 with the
+/// service's location and identifier.
+async fn create_service<S, R, C: Catalog>(
+    State(app): State<Arc<OpenEoState<S, R, C>>>,
+    Json(body): Json<Value>,
+) -> Result<Response, OpenEoError> {
+    let request = ServiceRequest::parse(&body)?;
+    let mut dataset = graph_dataset(&app, &request.process).await?;
+
+    let id = service_id(&request.process);
+    let (layer, template) = lower_graph(
+        &dataset,
+        &request.process,
+        id.clone(),
+        request.title,
+        request.description,
+        request.tile_size,
+    )?;
 
     // Persist on the dataset (replace-or-append: identical graph, same id
-    // — idempotent), then make it servable. One lowering for both the
-    // live insert and every future rehydration.
-    let template = compile_service_layer(&dataset, &layer)
-        .map_err(|err| OpenEoError::internal(format!("service template compile failed: {err}")))?;
+    // — idempotent), then make it servable.
     dataset.layers.retain(|existing| existing.id != id);
     dataset.layers.push(layer);
     app.provider
@@ -786,8 +910,8 @@ async fn create_service<C: Catalog>(
 /// `DELETE /services/{id}` — removes the persisted layer and stops
 /// serving it. Only service-authored layers are deletable here; config
 /// layers are not services.
-async fn delete_service<C: Catalog>(
-    State(app): State<Arc<OpenEoState<C>>>,
+async fn delete_service<S, R, C: Catalog>(
+    State(app): State<Arc<OpenEoState<S, R, C>>>,
     Path(service_id): Path<String>,
 ) -> Result<StatusCode, OpenEoError> {
     let services = service_layers(&app).await?;
@@ -807,6 +931,210 @@ async fn delete_service<C: Catalog>(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// --- Preview (ADR 0014: POST /result as a preview-bounded sync subset) ---
+
+/// `POST /result` — the preview-bounded synchronous subset (ADR 0014):
+/// the spec-shaped body (`{"process": {"process_graph": …}}`) compiles
+/// through [`lower_graph`], the exact `POST /services` path — same
+/// narrowing, same typed diagnostics — and answers **one** small
+/// overview-backed `image/png` render of [`preview_tile`] over the
+/// graph's `spatial_extent` (collection extent when null), under a
+/// budget whose `max_estimated_live_bytes` ceiling refuses over-budget
+/// live reads with the spec's `ProcessGraphComplexity`. Nothing is
+/// persisted and nothing is published to the trace bus: a preview has no
+/// side effects of any kind.
+///
+/// Debug headers (not part of the openEO contract, same instrument as
+/// the tile handler): `X-Swath-Trace` summarizes the render decision,
+/// and `X-Swath-Preview-Tile` names the rendered tile as
+/// `{tileMatrix}/{tileRow}/{tileCol}` — the address a published service
+/// would serve the identical bytes under.
+async fn preview_result<S, R, C>(
+    State(app): State<Arc<OpenEoState<S, R, C>>>,
+    Json(body): Json<Value>,
+) -> Result<Response, OpenEoError>
+where
+    S: RasterSource,
+    R: Reproject,
+    C: Catalog,
+{
+    let process = body.get("process").cloned().unwrap_or(Value::Null);
+    if process.get("process_graph").is_none_or(|g| !g.is_object()) {
+        return Err(OpenEoError::new(
+            StatusCode::BAD_REQUEST,
+            "ProcessGraphMissing",
+            "Invalid process specified. It doesn't contain a process graph.",
+        ));
+    }
+    let dataset = graph_dataset(&app, &process).await?;
+
+    // The single construction site: identical compile + lowering to
+    // `POST /services`, so the preview pixels are exactly what
+    // publishing this graph would serve. The template stays ephemeral —
+    // never persisted, never inserted into the provider.
+    let (_, mut template) = lower_graph(
+        &dataset,
+        &process,
+        "preview".to_owned(),
+        None,
+        None,
+        PREVIEW_TILE_SIZE,
+    )?;
+    template.budget = Budget {
+        max_estimated_live_bytes: Some(app.preview_ceiling),
+        ..Budget::default()
+    };
+
+    let bbox = preview_bbox(&process, &dataset)?;
+    let coord = preview_tile(&bbox);
+    let resolved = app
+        .provider
+        .resolve_template(&template)
+        .await
+        .map_err(preview_resolution_error)?;
+    let request = resolved.tile_request(coord);
+    let (encoded, trace) = render_tile(&app.source, &app.reproject, &request)
+        .await
+        .map_err(preview_render_error)?;
+
+    let mut response = (
+        StatusCode::OK,
+        [(CONTENT_TYPE, HeaderValue::from_static("image/png"))],
+        encoded.bytes,
+    )
+        .into_response();
+    if let Ok(value) = HeaderValue::from_str(&crate::routes::trace_debug_header(&trace)) {
+        response.headers_mut().insert("x-swath-trace", value);
+    }
+    let tile = format!("{z}/{row}/{col}", z = coord.z, row = coord.y, col = coord.x);
+    if let Ok(value) = HeaderValue::from_str(&tile) {
+        response.headers_mut().insert("x-swath-preview-tile", value);
+    }
+    Ok(response)
+}
+
+/// Preview resolution failures in the openEO vocabulary: a 404 (the
+/// collection has no ingested granule yet — there is nothing to render)
+/// keeps its status under the registry's generic `NotFound`; everything
+/// else is an `Internal` backend failure.
+fn preview_resolution_error(err: crate::error::ApiError) -> OpenEoError {
+    if err.status == StatusCode::NOT_FOUND {
+        OpenEoError::new(StatusCode::NOT_FOUND, "NotFound", err.detail)
+    } else {
+        OpenEoError::internal(err.detail)
+    }
+}
+
+/// Preview render failures: the planner's refusal (the live estimate
+/// exceeds the preview budget and nothing cheaper can serve) is the
+/// spec's `ProcessGraphComplexity` — refusal over degradation, ADR 0014;
+/// every other failure is an honest `Internal`.
+fn preview_render_error(err: TileError) -> OpenEoError {
+    match err {
+        TileError::BudgetExceeded {
+            estimated_live_bytes,
+            limit,
+        } => OpenEoError::new(
+            StatusCode::BAD_REQUEST,
+            "ProcessGraphComplexity",
+            format!(
+                "The process is too complex for synchronous processing: the preview would \
+                 read an estimated {estimated_live_bytes} bytes at full resolution (budget: \
+                 {limit} bytes) and no overview can serve it. Narrow the spatial extent."
+            ),
+        ),
+        other => OpenEoError::internal(format!("preview render failed: {other}")),
+    }
+}
+
+/// The preview window (ADR 0014): the graph's `spatial_extent` — read
+/// from its (first) `load_collection` node, the same node
+/// [`loaded_collection`] reads — when present and non-null, else the
+/// referenced collection's extent. A malformed extent is refused with
+/// the standardized `ProcessParameterInvalid` (the tile path ignores the
+/// argument, so only the preview validates it).
+fn preview_bbox(process: &Value, dataset: &Dataset) -> Result<Bbox, OpenEoError> {
+    let nodes = process.get("process_graph").unwrap_or(process).as_object();
+    let extent = nodes.and_then(|nodes| {
+        nodes.values().find_map(|node| {
+            (node.get("process_id")?.as_str()? == "load_collection")
+                .then(|| node.get("arguments")?.get("spatial_extent"))
+                .flatten()
+        })
+    });
+    let Some(extent) = extent.filter(|extent| !extent.is_null()) else {
+        return Ok(dataset.extent.bbox);
+    };
+    let invalid = |detail: String| {
+        OpenEoError::new(StatusCode::BAD_REQUEST, "ProcessParameterInvalid", detail)
+    };
+    let side = |name: &str| -> Result<f64, OpenEoError> {
+        extent
+            .get(name)
+            .and_then(Value::as_f64)
+            .filter(|value| value.is_finite())
+            .ok_or_else(|| {
+                invalid(format!(
+                    "invalid argument `spatial_extent`: `{name}` must be a finite number, \
+                     got {got}",
+                    got = extent.get(name).unwrap_or(&Value::Null),
+                ))
+            })
+    };
+    let (west, south) = (side("west")?, side("south")?);
+    let (east, north) = (side("east")?, side("north")?);
+    if west > east || south > north {
+        return Err(invalid(format!(
+            "invalid argument `spatial_extent`: west ≤ east and south ≤ north required, \
+             got west..east {west}..{east}, south..north {south}..{north}",
+        )));
+    }
+    Ok(Bbox {
+        west,
+        south,
+        east,
+        north,
+    })
+}
+
+/// The preview's target: the **deepest** `WebMercatorQuad` tile that
+/// fully contains the (Web-Mercator-clamped) bbox — one small render,
+/// never a mosaic. An extent straddling a tile boundary is served by the
+/// parent tile that contains it whole; descent stops at
+/// [`PREVIEW_MAX_ZOOM`], the tiling scheme's deepest matrix.
+fn preview_tile(bbox: &Bbox) -> TileCoord {
+    /// Web Mercator unit-square fractions of a lon/lat point, clamped
+    /// into the projection's domain.
+    fn fraction(lon: f64, lat: f64) -> (f64, f64) {
+        let lon = lon.clamp(-180.0, 180.0);
+        let lat = lat.clamp(-WEB_MERCATOR_MAX_LAT, WEB_MERCATOR_MAX_LAT);
+        let x = (lon + 180.0) / 360.0;
+        let y = (1.0 - lat.to_radians().tan().asinh() / std::f64::consts::PI) / 2.0;
+        (x.clamp(0.0, 1.0), y.clamp(0.0, 1.0))
+    }
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the fraction is clamped into [0, 1] and z ≤ 24, so \
+                  fraction × 2^z is a non-negative integer ≤ 2^24"
+    )]
+    fn index(fraction: f64, z: u8) -> u32 {
+        let scale = f64::from(1_u32 << z);
+        ((fraction * scale) as u32).min((1_u32 << z) - 1)
+    }
+    let (min_x, min_y) = fraction(bbox.west, bbox.north); // NW corner
+    let (max_x, max_y) = fraction(bbox.east, bbox.south); // SE corner
+    let mut chosen = TileCoord::new(0, 0, 0).expect("the z0 root tile is addressable");
+    for z in 1..=PREVIEW_MAX_ZOOM {
+        let (x, y) = (index(min_x, z), index(min_y, z));
+        if (x, y) != (index(max_x, z), index(max_y, z)) {
+            break;
+        }
+        chosen = TileCoord::new(z, x, y).expect("indices are within the matrix by construction");
+    }
+    chosen
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
@@ -817,8 +1145,11 @@ mod tests {
     use swath_render::ir::{Colormap as IrColormap, PixelOp};
     use swath_render::plan_for;
 
+    use swath_core::catalog::Bbox as DomainBbox;
+
     use super::{
-        DomainLayer, compile_context, compile_service_layer, loaded_collection, service_id,
+        DomainLayer, compile_context, compile_service_layer, loaded_collection, preview_bbox,
+        preview_tile, service_id,
     };
 
     #[test]
@@ -832,6 +1163,76 @@ mod tests {
         });
         assert_eq!(loaded_collection(&bare), Some("hls-s30"));
         assert_eq!(loaded_collection(&json!({ "process_graph": {} })), None);
+    }
+
+    /// The preview tile is the deepest `WebMercatorQuad` tile fully
+    /// containing the bbox (ADR 0014's "one small render"): pinned on
+    /// the committed HLS fixture extent, the world, boundary-straddling
+    /// extents, and a degenerate point.
+    #[test]
+    fn preview_tile_is_the_deepest_containing_tile() {
+        let bbox = |west, south, east, north| DomainBbox {
+            west,
+            south,
+            east,
+            north,
+        };
+        // The HLS fixture extent: z8 splits it across columns 52/53, so
+        // z7 (26, 48) is the deepest single containing tile.
+        let coord = preview_tile(&bbox(-105.537, 39.1954, -105.3581, 39.3345));
+        assert_eq!((coord.z, coord.x, coord.y), (7, 26, 48));
+        // The whole world only fits the root.
+        let coord = preview_tile(&bbox(-180.0, -90.0, 180.0, 90.0));
+        assert_eq!((coord.z, coord.x, coord.y), (0, 0, 0));
+        // An extent straddling the antimeridian tile boundary of every
+        // zoom (the prime-meridian column split) stays at the root.
+        let coord = preview_tile(&bbox(-1.0, 10.0, 1.0, 12.0));
+        assert_eq!((coord.z, coord.x, coord.y), (0, 0, 0));
+        // A degenerate point descends to the deepest matrix served.
+        let coord = preview_tile(&bbox(-105.4, 39.3, -105.4, 39.3));
+        assert_eq!(coord.z, super::PREVIEW_MAX_ZOOM);
+    }
+
+    /// `spatial_extent` selects the preview window; null/absent falls
+    /// back to the collection extent; malformed extents refuse with the
+    /// standardized code.
+    #[test]
+    fn preview_bbox_reads_the_spatial_extent_or_the_collection() {
+        let dataset = hls_dataset();
+        let graph = |extent: Value| {
+            json!({ "process_graph": {
+                "load": { "process_id": "load_collection", "arguments": {
+                    "id": "hls-s30", "bands": ["b8a"], "spatial_extent": extent,
+                }},
+            }})
+        };
+        // Explicit extent wins.
+        let explicit = preview_bbox(
+            &graph(json!({ "west": -105.5, "south": 39.2, "east": -105.4, "north": 39.3 })),
+            &dataset,
+        )
+        .expect("explicit extent parses");
+        assert_eq!((explicit.west, explicit.north), (-105.5, 39.3));
+        // Null and absent fall back to the collection extent.
+        for process in [
+            graph(Value::Null),
+            json!({ "process_graph": { "load": {
+                "process_id": "load_collection",
+                "arguments": { "id": "hls-s30", "bands": ["b8a"] },
+            }}}),
+        ] {
+            let fallback = preview_bbox(&process, &dataset).expect("fallback parses");
+            assert_eq!(fallback, dataset.extent.bbox);
+        }
+        // Malformed: a missing side, a non-numeric side, an inverted box.
+        for extent in [
+            json!({ "west": -105.5, "south": 39.2, "east": -105.4 }),
+            json!({ "west": "far", "south": 39.2, "east": -105.4, "north": 39.3 }),
+            json!({ "west": -105.4, "south": 39.2, "east": -105.5, "north": 39.3 }),
+        ] {
+            let err = preview_bbox(&graph(extent), &dataset).expect_err("malformed refuses");
+            assert_eq!(err.code, "ProcessParameterInvalid");
+        }
     }
 
     #[test]

@@ -454,6 +454,13 @@ pub(crate) fn hls_catalog_granule() -> Granule {
 /// mutations through the services surface are visible across requests)
 /// and the catalog for persistence assertions.
 pub(crate) fn openeo_app() -> (Router, MemoryCatalog) {
+    openeo_app_with_preview_ceiling(None)
+}
+
+/// [`openeo_app`] with the preview budget's `max_estimated_live_bytes`
+/// ceiling overridden — the refusal-path tests force the planner over
+/// budget with a tiny ceiling (the default admits every fixture render).
+pub(crate) fn openeo_app_with_preview_ceiling(ceiling: Option<u64>) -> (Router, MemoryCatalog) {
     use swath_api::{CatalogLayer, CatalogLayers, OpenEoState, openeo_router};
 
     let catalog = MemoryCatalog::default();
@@ -479,17 +486,23 @@ pub(crate) fn openeo_app() -> (Router, MemoryCatalog) {
         .collect();
     let provider = CatalogLayers::new(catalog.clone(), templates);
 
-    let store = LocalFileSystem::new_with_prefix(fixtures_dir()).expect("fixture dir exists");
+    let store: Arc<dyn object_store::ObjectStore> =
+        Arc::new(LocalFileSystem::new_with_prefix(fixtures_dir()).expect("fixture dir exists"));
     let state = ApiState::new(
         provider.clone(),
-        CogSource::new(Arc::new(store)),
+        CogSource::new(Arc::clone(&store)),
         Proj4rsReproject,
         BASE_URL,
     )
     .with_openeo();
-    let app = router(Arc::new(state)).merge(openeo_router(Arc::new(OpenEoState::new(
-        provider, BASE_URL,
-    ))));
+    // The openEO surface renders previews (ADR 0014) through its own
+    // clone of the same adapters — exactly the binary's wiring.
+    let mut openeo_state =
+        OpenEoState::new(provider, CogSource::new(store), Proj4rsReproject, BASE_URL);
+    if let Some(ceiling) = ceiling {
+        openeo_state = openeo_state.with_preview_ceiling(ceiling);
+    }
+    let app = router(Arc::new(state)).merge(openeo_router(Arc::new(openeo_state)));
     (app, catalog)
 }
 

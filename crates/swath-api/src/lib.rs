@@ -32,7 +32,8 @@
 //!
 //! Catalog-backed deployments additionally merge in the **openEO
 //! authoring surface** (ADR 0010, [`openeo`] module: capabilities,
-//! collections, processes, XYZ secondary services) — `GET /` then serves
+//! collections, processes, XYZ secondary services, and the
+//! preview-bounded `POST /result` of ADR 0014) — `GET /` then serves
 //! the OGC landing page and the openEO capabilities from one root
 //! ([`ApiState::with_openeo`]) — and the **granule browsing surface**
 //! (issue #107, [`granules`] module): read-only

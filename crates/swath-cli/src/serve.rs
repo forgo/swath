@@ -301,9 +301,13 @@ where
     let provider = CatalogLayers::new(catalog, mode.layers);
     // The openEO authoring surface (ADR 0010) over the same provider:
     // clones share the layer set, so a POSTed service serves on the next
-    // tile request.
+    // tile request. The preview endpoint (ADR 0014's POST /result)
+    // renders inline through the same composite source and reprojection
+    // adapters the tile handlers use — same store root, same pixels.
     let openeo = swath_api::openeo_router(Arc::new(swath_api::OpenEoState::new(
         provider.clone(),
+        CompositeSource::new(build_store(&cfg.store_root)?),
+        Proj4rsReproject,
         &cfg.base_url,
     )));
     run_server(
