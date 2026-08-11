@@ -3,30 +3,85 @@
 SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 SPDX-License-Identifier: Apache-2.0
 
-The <swath-map> demo: zero configuration on purpose. No server attribute
-(same origin — vite proxies the OGC routes to the compose stack on :8080),
-no layer (first tileset wins), no center/zoom (the view fits the layer's
-bounds from tileset metadata). Run `just e2e-web` for the full loop, or
-bring the stack up yourself and `pnpm exec vite dev`.
+The entry page (issue #108): a layer browser beside the <swath-map>
+viewer. Zero server configuration on purpose (same origin — vite proxies
+the OGC routes to the compose stack on :8080 in dev; the embedded bundle
+is served by the binary itself). View state semantics live in main.ts:
+the URL is the shareable representation, localStorage restores the last
+session, URL params beat storage. Run `just e2e-web` for the full loop,
+or bring the stack up yourself and `pnpm exec vite dev`.
 -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Swath viewer demo</title>
+    <title>Swath</title>
     <style>
       html,
       body {
         margin: 0;
         height: 100%;
       }
+      body {
+        display: flex;
+        background: #0f172a;
+        color: #e2e8f0;
+      }
+      .swath-rail {
+        flex: 0 0 248px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        padding: 16px 14px;
+        box-sizing: border-box;
+        overflow-y: auto;
+        border-right: 1px solid rgb(148 163 184 / 15%);
+      }
+      .swath-rail header h1 {
+        margin: 0;
+        font: 700 15px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+      }
+      .swath-rail header p {
+        margin: 4px 0 0;
+        font: 12px/1.5 system-ui, sans-serif;
+        color: rgb(148 163 184 / 90%);
+      }
+      .swath-rail footer {
+        margin-top: auto;
+        font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        color: rgb(148 163 184 / 70%);
+      }
       swath-map {
+        flex: 1;
         height: 100%;
+        min-width: 0;
+      }
+      @media (max-width: 640px) {
+        body {
+          flex-direction: column;
+        }
+        .swath-rail {
+          flex: 0 0 auto;
+          max-height: 40%;
+          border-right: none;
+          border-bottom: 1px solid rgb(148 163 184 / 15%);
+        }
       }
     </style>
     <script type="module" src="./main.ts"></script>
   </head>
   <body>
-    <swath-map></swath-map>
+    <aside class="swath-rail">
+      <header>
+        <h1>Swath</h1>
+        <p>Live tiles from freshly ingested granules. Pick a layer; the URL is the share link.</p>
+      </header>
+      <swath-layer-panel></swath-layer-panel>
+      <footer>granule → pixel</footer>
+    </aside>
+    <!-- switcher="off": the layer panel IS the switcher on this page. -->
+    <swath-map switcher="off"></swath-map>
   </body>
 </html>

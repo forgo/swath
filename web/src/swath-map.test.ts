@@ -237,6 +237,14 @@ test("built-in switcher renders accessible buttons with aria-pressed", async () 
   expect(pressed).toEqual(["false", "true"]);
 });
 
+test('switcher="off" omits the built-in control for hosts with their own layer UI', async () => {
+  const el = mount({ server: SERVER, layer: "truecolor", switcher: "off" });
+  await el.ready;
+  expect(el.querySelector(".swath-map-switcher")).toBeNull();
+  // The x-ray toggle is unaffected by the switcher opt-out.
+  expect(el.querySelector(".swath-map-xray-toggle")).not.toBeNull();
+});
+
 test("basemap style merges with the swath raster layer painted on top", async () => {
   // The demo-page fix (post-#35): without a basemap, everything outside the
   // fixture footprint is blank void; with one, the imagery gets a world for

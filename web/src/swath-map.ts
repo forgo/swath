@@ -15,6 +15,9 @@
  * - `layer`  — initial layer id (default: first entry of `/tilesets`).
  * - `center` — `"lon,lat"` initial view center.
  * - `zoom`   — initial zoom.
+ * - `switcher` — `"off"` omits the built-in layer-switcher control
+ *   (read at connect time only): for hosts that provide their own layer
+ *   UI, like the entry page's `<swath-layer-panel>` (issue #108).
  * - `xray`   — presence toggles the x-ray overlay (issue #34): per-tile
  *   decisions/timings from the `/traces` SSE stream, painted by the
  *   built-in [`XRayOverlay`] module (see swath-xray.ts for the design
@@ -34,6 +37,7 @@ import { type IControl, Map as MapLibreMap } from "maplibre-gl";
 import maplibreCss from "maplibre-gl/dist/maplibre-gl.css?inline";
 import { type EventSourceFactory, XRayOverlay } from "./swath-xray.js";
 import { centerTile } from "./tms.js";
+import { parseCenter, parseNumber } from "./view-state.js";
 
 /** One entry of the server's tilesets list, as `layers()` returns it. */
 export interface SwathLayer {
@@ -138,28 +142,6 @@ function injectStyles(doc: Document): void {
   style.id = STYLE_ELEMENT_ID;
   style.textContent = `${maplibreCss}\n${COMPONENT_CSS}`;
   doc.head.append(style);
-}
-
-/** Parses a `"lon,lat"` attribute; undefined when absent or malformed. */
-function parseCenter(value: string | null): [number, number] | undefined {
-  if (value === null) {
-    return undefined;
-  }
-  const parts = value.split(",").map((part) => Number(part.trim()));
-  const [lon, lat] = parts;
-  if (parts.length !== 2 || lon === undefined || lat === undefined) {
-    return undefined;
-  }
-  return Number.isFinite(lon) && Number.isFinite(lat) ? [lon, lat] : undefined;
-}
-
-/** Parses a numeric attribute; undefined when absent or malformed. */
-function parseNumber(value: string | null): number | undefined {
-  if (value === null) {
-    return undefined;
-  }
-  const parsed = Number(value.trim());
-  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 /** The layer id is the last path segment of a tileset's `self` link (the
@@ -328,8 +310,10 @@ export class SwathMap extends HTMLElement {
       center: center ?? [0, 0],
       zoom: zoom ?? 1,
     });
-    this.#switcher = new LayerSwitcherControl(this);
-    this.#map.addControl(this.#switcher, "top-right");
+    if (this.getAttribute("switcher") !== "off") {
+      this.#switcher = new LayerSwitcherControl(this);
+      this.#map.addControl(this.#switcher, "top-right");
+    }
     this.#xrayToggle = new XRayToggleControl(this);
     this.#map.addControl(this.#xrayToggle, "top-right");
     if (this.hasAttribute("xray")) {
@@ -546,8 +530,14 @@ export class SwathMap extends HTMLElement {
     this.#xray?.connect(`${this.server}/traces`);
     this.#xray?.setLayer(layerId);
     this.#switcher?.update(available, layerId);
+    // `layers` rides along (issue #108) so page chrome — the entry page's
+    // layer browser — can list what exists without a second /tilesets
+    // fetch that could disagree with the one this apply used.
     this.dispatchEvent(
-      new CustomEvent("layerchange", { detail: { layer: layerId }, bubbles: true }),
+      new CustomEvent("layerchange", {
+        detail: { layer: layerId, layers: available },
+        bubbles: true,
+      }),
     );
     this.#startLivenessProbe(layerId, epoch);
   }

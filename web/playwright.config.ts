@@ -25,6 +25,13 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: binaryMode ? "http://localhost:8080" : "http://localhost:5173",
+    // The entry page (issue #108) spends 248px on the layer rail, which
+    // used to shrink the map canvas below Playwright's 1280px default —
+    // narrow enough that the x-ray suite's badge clicks could land under
+    // the trace-feed overlay (seen on CI: "subtree intercepts pointer
+    // events"). Widen by exactly the rail so the canvas keeps its
+    // historical 1280x720 geometry in both modes.
+    viewport: { width: 1528, height: 720 },
   },
   ...(binaryMode
     ? {}
