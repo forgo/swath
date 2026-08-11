@@ -15,6 +15,12 @@
 //   interaction path against no-op writes).
 // - localStorage tracks every state change as "the last session", so a
 //   later paramless visit resumes where this one ended.
+import { type GranuleBbox, GranuleFootprints } from "../src/granule-footprints.js";
+import {
+  defineSwathDatasetPanel,
+  type GranuleListItem,
+  SwathDatasetPanel,
+} from "../src/swath-dataset-panel.js";
 import { defineSwathLayerPanel, SwathLayerPanel } from "../src/swath-layer-panel.js";
 import { defineSwathMap, type SwathLayer, SwathMap } from "../src/swath-map.js";
 import {
@@ -31,6 +37,7 @@ import {
 
 const mapElement = document.querySelector("swath-map");
 const panelElement = document.querySelector("swath-layer-panel");
+const datasetElement = document.querySelector("swath-dataset-panel");
 
 const storage = safeLocalStorage();
 const { state: initial } = resolveInitialState(location.search, storage);
@@ -56,9 +63,37 @@ if (basemap !== null) {
 
 defineSwathMap();
 defineSwathLayerPanel();
+defineSwathDatasetPanel();
 
 if (mapElement instanceof SwathMap && panelElement instanceof SwathLayerPanel) {
   wire(mapElement, panelElement);
+}
+
+if (mapElement instanceof SwathMap && datasetElement instanceof SwathDatasetPanel) {
+  wireDatasetBrowser(mapElement, datasetElement);
+}
+
+/** Routes the dataset browser (issue #110) to the map: announced granules
+ * become the footprint layer, a granule click becomes a bounds fit. The
+ * panel fetches lazily on its own; nothing here runs until it announces. */
+function wireDatasetBrowser(map: SwathMap, panel: SwathDatasetPanel): void {
+  let footprints: GranuleFootprints | undefined;
+  const paint = (): GranuleFootprints | undefined => {
+    const inner = map.map;
+    if (!inner) {
+      return undefined;
+    }
+    footprints ??= new GranuleFootprints(inner);
+    return footprints;
+  };
+  panel.addEventListener("swath-dataset-granules", (event) => {
+    const detail = (event as CustomEvent<{ dataset: string; granules: GranuleListItem[] }>).detail;
+    paint()?.set(detail.granules);
+  });
+  panel.addEventListener("swath-granule-zoom", (event) => {
+    const detail = (event as CustomEvent<{ bbox: GranuleBbox }>).detail;
+    paint()?.zoomTo(detail.bbox);
+  });
 }
 
 function wire(map: SwathMap, panel: SwathLayerPanel): void {
