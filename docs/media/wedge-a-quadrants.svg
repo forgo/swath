@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+SPDX-License-Identifier: Apache-2.0
+
+Wedge/thesis diagram, candidate A: "capability ladders" (plan decision #3,
+issue #114). Both axes are discrete capability ladders whose rungs are
+defined — and every placement defended with citations — in
+docs/media/wedge.notes.md. Opaque light background so it renders identically
+on GitHub light and dark.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 648" width="960" height="648"
+     font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+  <rect x="0" y="0" width="960" height="648" fill="#ffffff"/>
+
+  <text x="480" y="34" text-anchor="middle" font-size="19" font-weight="600" fill="#1f2328">Derived products &#215; live serving — where Swath sits</text>
+  <text x="480" y="56" text-anchor="middle" font-size="12.5" fill="#57606a">Both axes are capability ladders, not metrics &#183; every placement cited in docs/media/wedge.notes.md</text>
+
+  <!-- ============ plot area: x 150..910 (5 cols of 152), y 88..508 (4 rows of 105) ============ -->
+
+  <!-- the wedge: top row, columns 4-5 -->
+  <rect x="606" y="88" width="304" height="105" fill="#ddf4ff"/>
+
+  <!-- grid -->
+  <g stroke="#d0d7de" stroke-width="1">
+    <line x1="150" y1="88" x2="150" y2="508"/>
+    <line x1="302" y1="88" x2="302" y2="508"/>
+    <line x1="454" y1="88" x2="454" y2="508"/>
+    <line x1="606" y1="88" x2="606" y2="508"/>
+    <line x1="758" y1="88" x2="758" y2="508"/>
+    <line x1="910" y1="88" x2="910" y2="508"/>
+    <line x1="150" y1="88" x2="910" y2="88"/>
+    <line x1="150" y1="193" x2="910" y2="193"/>
+    <line x1="150" y1="298" x2="910" y2="298"/>
+    <line x1="150" y1="403" x2="910" y2="403"/>
+    <line x1="150" y1="508" x2="910" y2="508"/>
+  </g>
+
+  <!-- ============ y-axis (serving ladder) ============ -->
+  <text x="24" y="298" transform="rotate(-90 24 298)" text-anchor="middle" font-weight="600" fill="#1f2328">Dynamic tile serving &#8594;</text>
+  <g font-size="10.5" fill="#57606a" text-anchor="end">
+    <text x="140" y="137">dynamic tiles,</text>
+    <text x="140" y="151">measured + traced</text>
+    <text x="140" y="242">dynamic tiles</text>
+    <text x="140" y="256">by design</text>
+    <text x="140" y="347">on-demand services</text>
+    <text x="140" y="361">(where implemented)</text>
+    <text x="140" y="452">batch jobs /</text>
+    <text x="140" y="466">pre-computed</text>
+  </g>
+
+  <!-- ============ x-axis (authoring ladder) ============ -->
+  <g font-size="10.5" fill="#57606a" text-anchor="middle">
+    <text x="226" y="528">rendering &amp;</text>
+    <text x="226" y="542">styling only</text>
+    <text x="378" y="528">fixed band-math</text>
+    <text x="378" y="542">expressions</text>
+    <text x="530" y="528">operator-registered</text>
+    <text x="530" y="542">code (deploy-time)</text>
+    <text x="682" y="528">standard process</text>
+    <text x="682" y="542">graphs at runtime</text>
+    <text x="834" y="528">runtime graphs +</text>
+    <text x="834" y="542">arbitrary code (UDFs)</text>
+  </g>
+  <text x="530" y="572" text-anchor="middle" font-weight="600" fill="#1f2328">Derived products through the public API &#8594;</text>
+
+  <!-- ============ placements ============ -->
+
+  <!-- xpublish-tiles: rendering/styling only x dynamic by design -->
+  <circle cx="226" cy="246" r="7" fill="#6e7781"/>
+  <text x="226" y="230" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1f2328">xpublish-tiles</text>
+  <text x="226" y="268" text-anchor="middle" font-size="10.5" fill="#57606a">OGC Tiles &amp; WMS straight from</text>
+  <text x="226" y="281" text-anchor="middle" font-size="10.5" fill="#57606a">Xarray, no pre-rendering step</text>
+
+  <!-- TiTiler: operator-registered code x dynamic by design -->
+  <circle cx="530" cy="246" r="7" fill="#6e7781"/>
+  <text x="530" y="230" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1f2328">TiTiler</text>
+  <text x="530" y="268" text-anchor="middle" font-size="10.5" fill="#57606a">numexpr expressions +</text>
+  <text x="530" y="281" text-anchor="middle" font-size="10.5" fill="#57606a">algorithms registered at deploy time</text>
+
+  <!-- openEO backends: UDFs x on-demand services; dashed whisker to batch row -->
+  <line x1="834" y1="358" x2="834" y2="449" stroke="#6e7781" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <circle cx="834" cy="456" r="5" fill="#ffffff" stroke="#6e7781" stroke-width="1.5"/>
+  <circle cx="834" cy="351" r="7" fill="#6e7781"/>
+  <text x="818" y="341" text-anchor="end" font-size="12.5" font-weight="600" fill="#1f2328">openEO backends</text>
+  <text x="818" y="356" text-anchor="end" font-size="10.5" fill="#57606a">process graphs + UDFs; XYZ/WMS</text>
+  <text x="818" y="369" text-anchor="end" font-size="10.5" fill="#57606a">secondary services where implemented</text>
+  <text x="818" y="460" text-anchor="end" font-size="10.5" fill="#57606a">batch-first delivery</text>
+
+  <!-- Swath: runtime graphs x measured+traced -->
+  <path d="M 682 130 L 693 141 L 682 152 L 671 141 Z" fill="#0969da"/>
+  <text x="682" y="122" text-anchor="middle" font-size="14" font-weight="600" fill="#0969da">Swath</text>
+  <text x="682" y="166" text-anchor="middle" font-size="10.5" fill="#0969da">openEO graph in &#8594; measured,</text>
+  <text x="682" y="179" text-anchor="middle" font-size="10.5" fill="#0969da">traced live tiles out</text>
+
+  <!-- honest empty corner -->
+  <circle cx="834" cy="146" r="7" fill="none" stroke="#8250df" stroke-width="1.5" stroke-dasharray="3 3"/>
+  <text x="834" y="113" text-anchor="middle" font-size="10.5" fill="#8250df">open frontier: UDFs at</text>
+  <text x="834" y="126" text-anchor="middle" font-size="10.5" fill="#8250df">live latency (ADR 0010)</text>
+
+  <!-- ============ footnotes ============ -->
+  <text x="150" y="602" font-size="11" fill="#57606a">Ladder rungs are defined before placement; competitors sit at the highest rung their own documentation claims, Swath at rungs proven by committed</text>
+  <text x="150" y="618" font-size="11" fill="#57606a">artifacts (tests, perf evidence, ADRs). openEO&#8217;s authoring breadth exceeds Swath&#8217;s bounded profile &#8212; the wedge is the fused live loop, not breadth.</text>
+</svg>
