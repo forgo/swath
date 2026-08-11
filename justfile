@@ -443,6 +443,23 @@ load: (setup-ci "oha")
     tests/e2e/stack-up.sh
     tests/load/load.sh "$started"
 
+# `just load-h2h` (issue #121): Swath vs a digest-pinned TiTiler on the
+# ONE overlapping capability — serving a static COG as tiles. Same
+# machine, same committed fixture COGs, `just load`'s own scenario
+# parameters, both containers pinned to the same CPU quota (H2H_CPUS,
+# default 4), run one at a time. TiTiler is configured per its OWN
+# documented production guidance (citations in tests/load/h2h.py — no
+# strawman). Rewrites docs/perf/load-h2h-titiler.{json,md}: the committed,
+# honestly-framed publication (maintainer pre-commitment: published
+# regardless of which server wins). Laptop evidence, not capacity
+# planning; internal baselines stay the regression reference.
+load-h2h: (setup-ci "oha")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    started=$(date +%s)
+    trap 'docker compose down -v; docker rm -f swath-h2h-titiler >/dev/null 2>&1 || true' EXIT
+    tests/load/h2h.sh "$started"
+
 # THE stopwatch demo (issue #35, CHARTER.md §10 Phase 1): the same
 # north-star path the e2e asserts forever, run for human eyes. Brings up
 # the full stack (shared tests/e2e/stack-up.sh), serves the viewer, then

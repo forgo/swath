@@ -1,0 +1,148 @@
+{
+ "schema": "swath-h2h-titiler/1",
+ "generated": "2026-08-11T07:26:30Z",
+ "git_sha": "38c2140",
+ "oha_version": "1.15.0",
+ "titiler_image": "ghcr.io/developmentseed/titiler@sha256:bf753ccf0fe0f231bc51a0ddbaebf7c0c82253a26db8ab25d1c30ea417e704ff",
+ "titiler_tag": "2.2.1",
+ "cpus_pinned": 4,
+ "machine": {
+  "cpu": "Apple M2 Max",
+  "cores": 12,
+  "os": "Darwin 25.5.0 arm64"
+ },
+ "docker": {
+  "NCPU": "12",
+  "MemTotal": "8216776704",
+  "OperatingSystem": "Docker Desktop",
+  "ServerVersion": "29.3.1",
+  "Architecture": "aarch64"
+ },
+ "configuration": {
+  "resource_matching": "each server's container pinned to --cpus 4 (Docker CPU quota); memory unlimited for both; servers run ONE AT A TIME on an otherwise idle machine",
+  "swath": {
+   "image": "built from this commit's Dockerfile (cargo build --release)",
+   "config": "tests/e2e/swath-catalog.toml \u2014 the same compose stack `just e2e`/`just load` use (pgstac + minio sidecars up but idle-cost only; tiles read band COGs from a local mount)"
+  },
+  "titiler": {
+   "image": "ghcr.io/developmentseed/titiler@sha256:bf753ccf0fe0f231bc51a0ddbaebf7c0c82253a26db8ab25d1c30ea417e704ff (tag 2.2.1, multi-arch index digest \u2014 native binaries on amd64 and arm64)",
+   "command": "uvicorn titiler.application.main:app --workers <pinned CPUs> \u2014 the docs' documented command (https://developmentseed.org/titiler/) with MORE workers than its `--workers 1` example (one per pinned CPU)",
+   "gdal_env": {
+    "GDAL_CACHEMAX": "200",
+    "VSI_CACHE": "TRUE",
+    "VSI_CACHE_SIZE": "5000000",
+    "GDAL_BAND_BLOCK_CACHE": "HASHSET",
+    "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
+    "GDAL_HTTP_MERGE_CONSECUTIVE_RANGES": "YES"
+   },
+   "gdal_env_source": "https://developmentseed.org/titiler/advanced/performance_tuning/",
+   "data_access": "same committed fixture COGs, read-only local mount; multi-asset products via its /stac router over a local STAC item (its canonical multi-COG composition path)"
+  }
+ },
+ "duration_seconds": 240,
+ "sides": {
+  "swath": {
+   "scenarios": {
+    "healthz_idle": {
+     "tool": "oha",
+     "params": "GET /healthz, c=4, 5s, no other load",
+     "requests": 80807,
+     "errors": 0,
+     "rps": 16152.6,
+     "p50_ms": 0.24,
+     "p95_ms": 0.32,
+     "p99_ms": 0.38,
+     "max_ms": 2.81
+    },
+    "repeated_tile": {
+     "tool": "oha",
+     "params": "one truecolor z12 tile repeatedly, c=32, 20s (swath: asserted cache_hit)",
+     "requests": 26603,
+     "errors": 0,
+     "rps": 1328.6,
+     "p50_ms": 22.92,
+     "p95_ms": 34.86,
+     "p99_ms": 42.14,
+     "max_ms": 67.67
+    },
+    "cold_burst": {
+     "tool": "python-urllib (unique-URL driver; oha samples URL files randomly with replacement)",
+     "params": "128 unique z15 truecolor tiles, each exactly once, c=8",
+     "requests": 128,
+     "errors": 0,
+     "rps": 11.4,
+     "p50_ms": 669.81,
+     "p95_ms": 1159.13,
+     "p99_ms": 1204.0,
+     "max_ms": 1208.85,
+     "decisions": {
+      "live": 128
+     }
+    },
+    "heavy_storm": {
+     "tool": "oha",
+     "params": "6 heavy tiles (truecolor+ndvi z12 x2, z11 \u2014 full-footprint warps), c=16, 40s, cache cleared every 250 ms to stay on the Live path",
+     "requests": 1057,
+     "errors": 0,
+     "rps": 26.1,
+     "p50_ms": 818.13,
+     "p95_ms": 1285.7,
+     "p99_ms": 1391.09,
+     "max_ms": 1446.85,
+     "decision_probes": {
+      "live": 7,
+      "cache_hit": 8
+     }
+    }
+   }
+  },
+  "titiler": {
+   "scenarios": {
+    "healthz_idle": {
+     "tool": "oha",
+     "params": "GET /healthz, c=4, 5s, no other load",
+     "requests": 15945,
+     "errors": 0,
+     "rps": 3187.1,
+     "p50_ms": 1.14,
+     "p95_ms": 1.92,
+     "p99_ms": 2.67,
+     "max_ms": 221.78
+    },
+    "repeated_tile": {
+     "tool": "oha",
+     "params": "one truecolor z12 tile repeatedly, c=32, 20s (titiler: re-rendered per request, by design)",
+     "requests": 1329,
+     "errors": 0,
+     "rps": 65.3,
+     "p50_ms": 481.04,
+     "p95_ms": 645.55,
+     "p99_ms": 696.31,
+     "max_ms": 763.48
+    },
+    "cold_burst": {
+     "tool": "python-urllib (unique-URL driver; oha samples URL files randomly with replacement)",
+     "params": "128 unique z15 truecolor tiles, each exactly once, c=8",
+     "requests": 128,
+     "errors": 0,
+     "rps": 71.9,
+     "p50_ms": 77.97,
+     "p95_ms": 573.06,
+     "p99_ms": 679.29,
+     "max_ms": 679.51
+    },
+    "heavy_storm": {
+     "tool": "oha",
+     "params": "6 heavy tiles (truecolor+ndvi z12 x2, z11 \u2014 full-footprint warps), c=16, 40s",
+     "requests": 3061,
+     "errors": 0,
+     "rps": 76.2,
+     "p50_ms": 200.43,
+     "p95_ms": 380.42,
+     "p99_ms": 426.77,
+     "max_ms": 503.95
+    }
+   }
+  }
+ }
+}
