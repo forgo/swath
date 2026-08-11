@@ -4,10 +4,14 @@
 // The authoring panel's contract (issue #109): schema-driven throughout.
 // The palette and every form field come from the mocked `GET /processes`
 // response — REMOVE a definition from the mock and its palette entry and
-// form are gone (the no-hand-maintained-forms proof). Composition,
-// publish (success + inline openEO error), and delete are exercised
-// against a scripted fetch; no server involved. Real Custom Elements in
-// a real browser, like the rest of the suite.
+// form are gone (the no-hand-maintained-forms proof). The collection
+// picker is fed by `GET /collections`; validation blocks submit (with
+// reasons) until the graph is structurally valid; required fields flag
+// inline as the user types; server diagnostics map onto the offending
+// field. Composition, publish (success + inline openEO error), the NDVI
+// template, and delete are exercised against a scripted fetch; no
+// server involved. Real Custom Elements in a real browser, like the
+// rest of the suite.
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import {
   defineSwathAuthoringPanel,
@@ -91,6 +95,18 @@ const DEFINITIONS: ProcessDefinition[] = [
   },
 ];
 
+/** A collections document shaped like the openEO surface serves it:
+ * id plus datacube band values. */
+const COLLECTIONS = [
+  {
+    id: "hls-s30",
+    "cube:dimensions": {
+      x: { type: "spatial" },
+      bands: { type: "bands", values: ["b02", "b03", "b04", "b8a"] },
+    },
+  },
+];
+
 /** One recorded request the fetch stub saw. */
 interface Recorded {
   method: string;
@@ -98,11 +114,12 @@ interface Recorded {
   body: unknown;
 }
 
-/** A scripted same-shape fetch: GET /processes and GET /services answer
- * the given documents; POST /services and DELETE answer the scripted
- * response; everything is recorded for assertions. */
+/** A scripted same-shape fetch: the GET surfaces answer the given
+ * documents; POST /services and DELETE answer the scripted response;
+ * everything is recorded for assertions. */
 function fetchStub(options: {
   processes?: ProcessDefinition[];
+  collections?: unknown[];
   services?: { id: string; title?: string }[];
   post?: { status: number; body?: unknown; headers?: Record<string, string> };
   delete?: { status: number; body?: unknown };
@@ -123,6 +140,9 @@ function fetchStub(options: {
       });
     if (method === "GET" && url.endsWith("/processes")) {
       return json({ processes: options.processes ?? DEFINITIONS });
+    }
+    if (method === "GET" && url.endsWith("/collections")) {
+      return json({ collections: options.collections ?? COLLECTIONS });
     }
     if (method === "GET" && url.endsWith("/services")) {
       return json({ services: options.services ?? [] });
@@ -186,6 +206,43 @@ function fill(panel: SwathAuthoringPanel, id: string, value: string): void {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function choose(panel: SwathAuthoringPanel, id: string, value: string): void {
+  const select = field<HTMLSelectElement>(panel, id);
+  select.value = value;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function submitButton(panel: SwathAuthoringPanel): HTMLButtonElement {
+  const button = panel.querySelector<HTMLButtonElement>(".swath-authoring-submit");
+  if (!button) {
+    throw new Error("no submit button");
+  }
+  return button;
+}
+
+function submitReason(panel: SwathAuthoringPanel): string {
+  return panel.querySelector("#swath-authoring-submit-reason")?.textContent ?? "";
+}
+
+test("collapsed by default and lazy: no requests until opened", async () => {
+  const stub = fetchStub({});
+  const panel = document.createElement("swath-authoring-panel") as SwathAuthoringPanel;
+  panel.fetchImpl = stub.impl;
+  document.body.append(panel);
+  // Connected but closed: nothing fetched, only the toggle rendered.
+  expect(stub.requests).toEqual([]);
+  const toggle = panel.querySelector<HTMLButtonElement>(".swath-authoring-toggle");
+  expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+  // The first open loads the definitions (and renders the palette).
+  toggle?.click();
+  await expect.poll(() => paletteIds(panel).length).toBeGreaterThan(0);
+  expect(stub.requests.map((request) => request.url).sort()).toEqual([
+    "/collections",
+    "/processes",
+    "/services",
+  ]);
+});
+
 test("the palette lists exactly the served process definitions", async () => {
   const panel = await mount(fetchStub({}));
   expect(paletteIds(panel)).toEqual([
@@ -242,6 +299,20 @@ test("fields are generated from the parameter schemas, data flow included", asyn
   expect(field<HTMLSelectElement>(panel, "s3-x-source").value).toBe("s2");
 });
 
+test("the collection is a dropdown fed by GET /collections", async () => {
+  const panel = await mount(fetchStub({}));
+  addStep(panel, "load_collection");
+  const picker = field<HTMLSelectElement>(panel, "s1-id");
+  expect(picker.tagName).toBe("SELECT");
+  expect([...picker.options].map((option) => option.value)).toEqual(["", "hls-s30"]);
+  // Choosing the collection surfaces its band vocabulary as a hint on
+  // band-name fields (context from /collections, not hand-maintained).
+  choose(panel, "s1-id", "hls-s30");
+  expect(panel.querySelector('[data-step="s1"] .swath-authoring-band-hint')?.textContent).toContain(
+    "b02, b03, b04, b8a",
+  );
+});
+
 test("the colormap is selectable on save_result's options", async () => {
   const panel = await mount(fetchStub({}));
   addStep(panel, "save_result");
@@ -256,13 +327,44 @@ test("the colormap is selectable on save_result's options", async () => {
   ]);
 });
 
+test("submit stays disabled with spelled-out reasons until the graph is valid", async () => {
+  const panel = await mount(fetchStub({}));
+  addStep(panel, "load_collection");
+  // Required collection missing: blocked, and the reasons say so.
+  expect(submitButton(panel).disabled).toBe(true);
+  expect(submitReason(panel)).toContain("1 field needs a value");
+  expect(submitReason(panel)).toContain("no step loads a collection");
+  // Choosing the collection clears both reasons (spatial/temporal are
+  // nullable, bands optional): the graph is structurally valid.
+  choose(panel, "s1-id", "hls-s30");
+  expect(submitButton(panel).disabled).toBe(false);
+  expect(submitReason(panel)).toBe("");
+  // A disabled submit never POSTs — clicking earlier sent nothing.
+  expect(panel.buildGraph()["s1"]).toMatchObject({ process_id: "load_collection" });
+});
+
+test("required fields flag inline as the user types", async () => {
+  const panel = await mount(fetchStub({}));
+  addStep(panel, "load_collection");
+  addStep(panel, "save_result");
+  const note = () => panel.querySelector("#swath-authoring-s2-format-note")?.textContent;
+  // Untouched: the disabled submit counts it, but no wall of red.
+  expect(note()).toBe("");
+  expect(submitReason(panel)).toContain("fields need values");
+  // Type then clear: the field flags itself the moment it empties.
+  fill(panel, "s2-format", "png");
+  expect(note()).toBe("");
+  fill(panel, "s2-format", "");
+  expect(note()).toBe("required");
+});
+
 /** Drives the full NDVI authoring flow through the generated forms. */
 function authorNdvi(panel: SwathAuthoringPanel): void {
   addStep(panel, "load_collection");
   addStep(panel, "ndvi");
   addStep(panel, "linear_scale_range");
   addStep(panel, "save_result");
-  fill(panel, "s1-id", "hls-s30");
+  choose(panel, "s1-id", "hls-s30");
   fill(panel, "s1-bands", "b8a,b04");
   fill(panel, "s2-nir", "b8a");
   fill(panel, "s2-red", "b04");
@@ -271,10 +373,45 @@ function authorNdvi(panel: SwathAuthoringPanel): void {
   fill(panel, "s3-outputMin", "0");
   fill(panel, "s3-outputMax", "255");
   fill(panel, "s4-format", "png");
-  const colormap = field<HTMLSelectElement>(panel, "s4-options");
-  colormap.value = "rdylgn";
-  colormap.dispatchEvent(new Event("change", { bubbles: true }));
+  choose(panel, "s4-options", "rdylgn");
 }
+
+/** The graph [`authorNdvi`] composes — also what the NDVI template must
+ * produce over the mocked collection (b8a/b04 via the band heuristics). */
+const NDVI_GRAPH = {
+  s1: {
+    process_id: "load_collection",
+    arguments: {
+      id: "hls-s30",
+      spatial_extent: null,
+      temporal_extent: null,
+      bands: ["b8a", "b04"],
+    },
+  },
+  s2: {
+    process_id: "ndvi",
+    arguments: { data: { from_node: "s1" }, nir: "b8a", red: "b04" },
+  },
+  s3: {
+    process_id: "linear_scale_range",
+    arguments: {
+      x: { from_node: "s2" },
+      inputMin: -1,
+      inputMax: 1,
+      outputMin: 0,
+      outputMax: 255,
+    },
+  },
+  s4: {
+    process_id: "save_result",
+    arguments: {
+      data: { from_node: "s3" },
+      format: "png",
+      options: { colormap: "rdylgn" },
+    },
+    result: true,
+  },
+};
 
 test("publishing posts the composed graph and announces the created service", async () => {
   const stub = fetchStub({
@@ -283,6 +420,7 @@ test("publishing posts the composed graph and announces the created service", as
   const panel = await mount(stub);
   authorNdvi(panel);
   fill(panel, "title", "NDVI (authored)");
+  expect(submitButton(panel).disabled).toBe(false);
 
   const created = new Promise<string>((resolve) => {
     document.body.addEventListener(
@@ -291,7 +429,7 @@ test("publishing posts the composed graph and announces the created service", as
       { once: true },
     );
   });
-  panel.querySelector<HTMLButtonElement>(".swath-authoring-submit")?.click();
+  submitButton(panel).click();
   expect(await created).toBe("xyz-abc123def456");
 
   const post = stub.requests.find((request) => request.method === "POST");
@@ -299,61 +437,66 @@ test("publishing posts the composed graph and announces the created service", as
   expect(post?.body).toEqual({
     type: "xyz",
     title: "NDVI (authored)",
-    process: {
-      process_graph: {
-        s1: {
-          process_id: "load_collection",
-          arguments: {
-            id: "hls-s30",
-            spatial_extent: null,
-            temporal_extent: null,
-            bands: ["b8a", "b04"],
-          },
-        },
-        s2: {
-          process_id: "ndvi",
-          arguments: { data: { from_node: "s1" }, nir: "b8a", red: "b04" },
-        },
-        s3: {
-          process_id: "linear_scale_range",
-          arguments: {
-            x: { from_node: "s2" },
-            inputMin: -1,
-            inputMax: 1,
-            outputMin: 0,
-            outputMax: 255,
-          },
-        },
-        s4: {
-          process_id: "save_result",
-          arguments: {
-            data: { from_node: "s3" },
-            format: "png",
-            options: { colormap: "rdylgn" },
-          },
-          result: true,
-        },
-      },
-    },
+    process: { process_graph: NDVI_GRAPH },
   });
 });
 
-test("a rejected graph renders the server's openEO error inline", async () => {
+test("the NDVI template composes a valid, submittable pipeline", async () => {
+  const panel = await mount(fetchStub({}));
+  const template = panel.querySelector<HTMLButtonElement>(".swath-authoring-template");
+  expect(template).not.toBeNull();
+  template?.click();
+  // The template fills a graph that renders: the first collection,
+  // nir/red picked from its band vocabulary, the built-in NDVI scale
+  // and colormap — identical to the hand-authored pipeline.
+  expect(field<HTMLSelectElement>(panel, "s1-id").value).toBe("hls-s30");
+  expect(field<HTMLSelectElement>(panel, "s4-options").value).toBe("rdylgn");
+  expect(submitButton(panel).disabled).toBe(false);
+  expect(submitReason(panel)).toBe("");
+  expect(panel.buildGraph()).toEqual(NDVI_GRAPH);
+});
+
+test("the template is not offered when its processes are not all served", async () => {
+  const panel = await mount(
+    fetchStub({ processes: DEFINITIONS.filter((process) => process.id !== "ndvi") }),
+  );
+  expect(panel.querySelector(".swath-authoring-template")).toBeNull();
+});
+
+test("a server error naming a node and argument lands on that field", async () => {
+  const message =
+    "node `s3` (linear_scale_range): invalid argument `outputMin`: the Render IR quantizes " +
+    "to 8-bit; the output range must be exactly 0..255, got 0..1";
+  const stub = fetchStub({
+    post: { status: 400, body: { code: "ProcessParameterInvalid", message } },
+  });
+  const panel = await mount(stub);
+  authorNdvi(panel);
+  submitButton(panel).click();
+  await expect
+    .poll(() => panel.querySelector("#swath-authoring-s3-outputMin-note")?.textContent)
+    .toContain("the output range must be exactly 0..255");
+  // Mapped errors do not double up as the general inline error.
+  expect(panel.querySelector(".swath-authoring-error")).toBeNull();
+  // Editing the field clears the stale server note.
+  fill(panel, "s3-outputMin", "0");
+  expect(panel.querySelector("#swath-authoring-s3-outputMin-note")?.textContent).toBe("");
+});
+
+test("a rejected graph the panel cannot locate renders the general error inline", async () => {
   const stub = fetchStub({
     post: {
       status: 400,
-      body: {
-        code: "ProcessParameterInvalid",
-        message: "The value passed for parameter 'outputMax' is invalid.",
-      },
+      body: { code: "ServiceUnsupported", message: "Service type 'xyz' is not supported." },
     },
   });
   const panel = await mount(stub);
   addStep(panel, "load_collection");
-  panel.querySelector<HTMLButtonElement>(".swath-authoring-submit")?.click();
+  choose(panel, "s1-id", "hls-s30");
+  submitButton(panel).click();
   await expect
     .poll(() => panel.querySelector(".swath-authoring-error")?.textContent)
-    .toBe("ProcessParameterInvalid: The value passed for parameter 'outputMax' is invalid.");
+    .toBe("ServiceUnsupported: Service type 'xyz' is not supported.");
 });
 
 test("published services list with a delete control that announces deletion", async () => {

@@ -3,11 +3,14 @@
 
 // The authoring loop through the UI (issue #109, ADR 0010), against the
 // real stack in both modes: the panel's forms — generated from the
-// server's own GET /processes — compose the NDVI graph, publish it, and
-// the served tiles are BYTE-identical to the built-in NDVI layer (the
-// existing openeo_services.rs assertion, now UI-driven). Plus the two
-// failure/teardown flows: a rejected graph renders the server's openEO
-// error inline, and deleting a published service 404s its tile URL.
+// server's own GET /processes, the collection picker fed by GET
+// /collections — compose the NDVI graph, publish it, and the served
+// tiles are BYTE-identical to the built-in NDVI layer (the existing
+// openeo_services.rs assertion, now UI-driven). Validation gates submit
+// until the graph is structurally valid; a graph the server still
+// rejects renders its diagnostic on the offending field; deleting a
+// published service 404s its tile URL; and the NDVI template publishes
+// a working layer from one click.
 import { expect, type Page, test } from "@playwright/test";
 
 const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
@@ -27,6 +30,16 @@ function fieldById(page: Page, id: string) {
   return page.locator(`#swath-authoring-${id}`);
 }
 
+/** The panel is collapsed and lazy (fetches nothing until opened, like
+ * the dataset browser): every flow starts by toggling it open. */
+async function openPanel(page: Page): Promise<void> {
+  await page.locator("swath-authoring-panel .swath-authoring-toggle").click();
+}
+
+function submitButton(page: Page) {
+  return page.locator("swath-authoring-panel .swath-authoring-submit");
+}
+
 /** Composes the NDVI pipeline through the generated forms. The data-flow
  * selects need no touch: cube parameters (and each step's first required
  * parameter) wire to the previous step by schema-derived default. */
@@ -35,7 +48,8 @@ async function authorNdvi(page: Page, outputMax: string, colormap: string): Prom
   await paletteButton(page, "ndvi").click();
   await paletteButton(page, "linear_scale_range").click();
   await paletteButton(page, "save_result").click();
-  await fieldById(page, "s1-id").fill("hls-s30");
+  // The collection is a picker fed by GET /collections — no free text.
+  await fieldById(page, "s1-id").selectOption("hls-s30");
   await fieldById(page, "s1-bands").fill("b8a,b04");
   await fieldById(page, "s2-nir").fill("b8a");
   await fieldById(page, "s2-red").fill("b04");
@@ -53,7 +67,7 @@ async function publish(page: Page): Promise<string> {
   const created = page.waitForResponse(
     (response) => response.url().includes("/services") && response.request().method() === "POST",
   );
-  await page.locator("swath-authoring-panel .swath-authoring-submit").click();
+  await submitButton(page).click();
   const response = await created;
   expect(response.status()).toBe(201);
   const id = response.headers()["openeo-identifier"];
@@ -67,6 +81,7 @@ test("UI-authored NDVI serves tiles byte-identical to the built-in layer, no rel
   page,
 }) => {
   await page.goto(DEMO_PATH);
+  await openPanel(page);
   await expect(paletteButton(page, "load_collection")).toBeVisible();
 
   await authorNdvi(page, "255", "rdylgn");
@@ -92,24 +107,64 @@ test("UI-authored NDVI serves tiles byte-identical to the built-in layer, no rel
   expect(authoredBytes.equals(builtinBytes)).toBe(true);
 });
 
-test("a rejected graph renders the server's openEO error inline", async ({ page }) => {
+test("validation gates submit until the graph is structurally valid", async ({ page }) => {
   await page.goto(DEMO_PATH);
+  await openPanel(page);
   await expect(paletteButton(page, "load_collection")).toBeVisible();
 
-  // Identical pipeline, but the unsupported 0..1 output range: the
-  // compiler rejects it and the standardized error shows inline.
+  // A lone load_collection step with no collection chosen: submit is
+  // disabled and the reasons are spelled out — the server's "no
+  // load_collection node names a collection" rejection is unreachable.
+  await paletteButton(page, "load_collection").click();
+  await expect(submitButton(page)).toBeDisabled();
+  const reason = page.locator("#swath-authoring-submit-reason");
+  await expect(reason).toContainText("field needs a value");
+  await expect(reason).toContainText("no step loads a collection");
+
+  // Choosing from the /collections-fed picker satisfies both.
+  await fieldById(page, "s1-id").selectOption("hls-s30");
+  await expect(submitButton(page)).toBeEnabled();
+  await expect(reason).toBeEmpty();
+});
+
+test("a graph the server rejects renders its diagnostic on the offending field", async ({
+  page,
+}) => {
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+  await expect(paletteButton(page, "load_collection")).toBeVisible();
+
+  // Client-side valid, semantically wrong: the unsupported 0..1 output
+  // range. The compiler's diagnostic names node and argument, so it
+  // lands inline on exactly that field.
   await authorNdvi(page, "1", "rdylgn");
-  await page.locator("swath-authoring-panel .swath-authoring-submit").click();
-  const error = page.locator("swath-authoring-panel .swath-authoring-error");
-  await expect(error).toBeVisible();
-  await expect(error).toContainText("ProcessParameterInvalid");
-  await expect(error).toContainText("the output range must be exactly 0..255");
+  await expect(submitButton(page)).toBeEnabled();
+  await submitButton(page).click();
+  const note = page.locator("#swath-authoring-s3-outputMin-note");
+  await expect(note).toContainText("the output range must be exactly 0..255");
+  await expect(page.locator("swath-authoring-panel .swath-authoring-error")).toHaveCount(0);
+});
+
+test("the NDVI template publishes a working layer from one click", async ({ page }) => {
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+  const template = page.locator("swath-authoring-panel .swath-authoring-template");
+  await expect(template).toBeVisible();
+  await template.click();
+
+  // A start-from-working-graph: collection, bands, scale, and colormap
+  // prefilled from the server's own metadata — immediately submittable.
+  await expect(submitButton(page)).toBeEnabled();
+  const id = await publish(page);
+  const tile = await page.request.get(`/tilesets/${id}/tiles/${TILE}`);
+  expect(tile.status()).toBe(200);
 });
 
 test("deleting a published service 404s its tile URL and drops it from the browser", async ({
   page,
 }) => {
   await page.goto(DEMO_PATH);
+  await openPanel(page);
   await expect(paletteButton(page, "load_collection")).toBeVisible();
 
   // A distinct graph (grayscale) so this test owns its service id.
