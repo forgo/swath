@@ -20,7 +20,8 @@
 //! raw material (REQUIREMENTS.md R4) — not estimates derived from IFD offsets.
 //! Metadata reads (header + IFD walks) are *not* part of a window's
 //! provenance: they are per-asset bookkeeping, not pixel I/O, and will be
-//! amortized away by metadata caching without changing observable results.
+//! amortized away by metadata caching without changing observable results
+//! (deferral tracked in `docs/ROADMAP.md`).
 //!
 //! # Scope
 //!

@@ -45,6 +45,9 @@
 //!   with mosaics themselves; single-granule serving (`latest` wins) is
 //!   exactly right with the whole-version bump.
 //!
+//! Both deferrals (GC, partial-mosaic invalidation) are tracked in
+//! `docs/ROADMAP.md`'s deferral inventory, with revisit triggers.
+//!
 //! # The port
 //!
 //! [`TileCache`] follows the crate's native-AFIT port pattern (see

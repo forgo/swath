@@ -20,7 +20,8 @@
 //!   collection; `bands` is required in v0 and every entry must resolve
 //!   against the context's band bindings. `spatial_extent`,
 //!   `temporal_extent`, and `properties` are accepted and ignored: tile
-//!   serving decides the window and the granule, not the product graph.
+//!   serving decides the window and the granule, not the product graph
+//!   (the time dimension is a tracked deferral, `docs/ROADMAP.md`).
 //! * **`reduce_dimension`** — over `dimension: "bands"` only, with an
 //!   embedded reducer sub-graph (the standard NDVI idiom). Inside the
 //!   reducer, `from_parameter: "data"` is the band array.

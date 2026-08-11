@@ -285,7 +285,8 @@ pub enum PixelOp {
 /// deliberately enables only the `png` codec (every extra codec is
 /// supply-chain surface the license gate must carry), and lossless WebP
 /// encoding would pull in the `image-webp` crate via a new feature — a
-/// variant addition here when a consumer actually needs it.
+/// variant addition here when a consumer actually needs it. Deferral
+/// tracked in `docs/ROADMAP.md` (deferral inventory).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum TileFormat {

@@ -14,7 +14,8 @@
 //! GRIB2 arrays carry **no georef yet**: the grid-definition-template →
 //! CRS/transform mapping is real work with its own known-answer tests, and
 //! no GRIB dataset is on the serving path today (VNP09GA, the legacy-primary
-//! dataset, is HDF-EOS — ADR 0008). Recorded honestly rather than guessed.
+//! dataset, is HDF-EOS — ADR 0008). Recorded honestly rather than guessed;
+//! deferral tracked in `docs/ROADMAP.md`.
 
 use std::collections::HashMap;
 use std::path::Path;

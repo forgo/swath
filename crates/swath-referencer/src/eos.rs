@@ -23,7 +23,8 @@
 //! Other projections/origins are a loud [`ReferencerError::Unsupported`],
 //! never a guessed georef; swath/point structures (`SwathStructure`,
 //! `PointStructure`) are ignored. Widening this scope is deliberate work
-//! with new known-answer tests, not a parser tweak.
+//! with new known-answer tests, not a parser tweak (deferral tracked in
+//! `docs/ROADMAP.md`).
 
 use swath_core::ingest::ReferencerError;
 use swath_core::manifest::GeorefCrs;

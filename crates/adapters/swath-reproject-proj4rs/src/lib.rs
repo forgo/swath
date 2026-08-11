@@ -32,7 +32,8 @@
 //! [`ReprojectError::UnknownCrs`], deliberately a hard error, not a guess.
 //! The long tail remains the plan for a future PROJ C-binding adapter
 //! (feature-gated, per ADR 0002); it will pass the same accuracy suite
-//! this adapter does (`tests/common/`).
+//! this adapter does (`tests/common/`). Deferral tracked in
+//! `docs/ROADMAP.md`.
 //!
 //! # Units at the boundary (radians vs degrees)
 //!

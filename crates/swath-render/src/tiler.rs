@@ -25,7 +25,8 @@
 //!   never an unbounded read.
 //! - **The target CRS is fixed to Web Mercator** ([`Crs::WEB_MERCATOR`]):
 //!   `WebMercatorQuad` is the only TMS in Phase 1 (`TileCoord` is defined
-//!   on it). Other target TMSs widen [`TileRequest`] later.
+//!   on it). Other target TMSs widen [`TileRequest`] later (deferral
+//!   tracked in `docs/ROADMAP.md`).
 //! - **I/O is async, compute is synchronous** (ARCHITECTURE.md §11): source
 //!   reads await; warp/eval/encode run inline on the calling task.
 //!   `spawn_blocking`/`rayon` offload is an open question (§16.7) deferred
@@ -44,7 +45,8 @@
 //!   [`WindowData::bytes_read`] — window reads only. Header/metadata I/O
 //!   during `describe` is not counted: the `RasterSource` port reports
 //!   fetch provenance for pixel reads, not metadata (a future port
-//!   extension if header accounting is ever wanted).
+//!   extension if header accounting is ever wanted — deferral tracked in
+//!   `docs/ROADMAP.md`).
 //! - [`Trace::timings`] are **best-effort wall-clock measurements**
 //!   (`std::time::Instant`, taken here — swath-core stays clock-free) and
 //!   are inherently non-deterministic: tests assert presence and sanity,
@@ -670,7 +672,8 @@ async fn render_planned<S: RasterSource, R: Reproject + ?Sized>(
 ///
 /// Write-through policy deliberately stays here, not in the planner
 /// (spec §4): what to do with a fresh render is a serving concern; a
-/// budget-aware write policy is recorded future work.
+/// budget-aware write policy is recorded future work (deferral tracked
+/// in `docs/ROADMAP.md`).
 ///
 /// # Cache-failure policy (the port leaves it to this caller)
 ///

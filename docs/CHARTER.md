@@ -224,6 +224,9 @@ React/deck.gl frontend; superseded):*
 
 ## 10. Milestones
 
+_Delivery status against these phases — shipped milestones, the canonical deferral inventory,
+and the parked M7+ candidates — lives in [`ROADMAP.md`](ROADMAP.md)._
+
 **Phase 0 — Foundations. Done.**
 Charter, requirements, ADRs 0001-0007, build-vs-compose boundary, dev environment, the `just check`
 gate mirrored by CI (`ENGINEERING.md`), testing harness. Evidence: `docs/decisions/`, `.github/workflows/ci.yml`.

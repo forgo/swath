@@ -27,7 +27,8 @@ Everything in the platform optimizes and reports this number.
 
 ## Status
 
-Pre-alpha. Design phase.
+Pre-alpha. Design phase. Milestone status, the canonical deferral inventory, and the M7+
+candidate list live in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Install
 

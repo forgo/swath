@@ -31,7 +31,8 @@
 //! - live: the same at `f = 1`.
 //!
 //! Constants are documented calibration points (spec §2), never runtime
-//! fits; a learned model over Trace history is recorded future work.
+//! fits; a learned model over Trace history is recorded future work
+//! (deferral tracked in `docs/ROADMAP.md`).
 
 use std::borrow::Cow;
 

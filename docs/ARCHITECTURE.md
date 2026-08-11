@@ -481,7 +481,8 @@ there). ADRs are immutable; a Resolved/Closed item reopens only via a supersedin
    **content-derived** — a string built from the serving inputs (latest granule id + plan hash for
    catalog layers; plan hash alone for static layers), no persisted counters, no vector clock. A
    new granule or edited layer is a new version and therefore a clean whole-layer miss; superseded
-   entries are orphaned, not stale — GC is future operational work. Full semantics: the
+   entries are orphaned, not stale — GC is future operational work (tracked, with
+   partial-mosaic invalidation, in [`ROADMAP.md`](ROADMAP.md)'s deferral inventory). Full semantics: the
    `swath-core` `cache` module docs. What would resolve the remainder: multi-granule mosaic layers
    landing, plus measured re-render cost of whole-layer misses under a realistic granule cadence —
    that data decides whether per-footprint invalidation is worth its complexity.*
@@ -491,7 +492,8 @@ there). ADRs are immutable; a Resolved/Closed item reopens only via a supersedin
    (issue #37): **explicit per-layer knobs + transparent cost estimates** — `cache_enabled`,
    `overview_oversample`, `max_estimated_live_bytes` — with a documented, calibratable byte model and
    every candidate's estimate recorded in the Trace (`plan.considered`). A learned cost model fitted
-   from Trace history is recorded there as future work; the Trace already carries its training pairs.*
+   from Trace history is recorded there as future work (tracked in
+   [`ROADMAP.md`](ROADMAP.md)'s deferral inventory); the Trace already carries its training pairs.*
 5. **Control-plane domain model.** Exact `Dataset`/`Layer` schema that cleanly hides STAC yet round-trips
    to it losslessly. This is the "make STAC disappear" contract and deserves its own mini-spec.
    *Status: **Resolved** — by [`docs/design/catalog-domain.md`](design/catalog-domain.md):
