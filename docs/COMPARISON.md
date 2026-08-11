@@ -123,7 +123,7 @@ Reading the matrix honestly: no column is dominated. openEO out-authors Swath
 (5 vs. 4). TiTiler and xpublish-tiles are dynamic tile servers by design, same
 rung 3 as Swath's design center — Swath's grade-4 claim is "committed evidence
 and per-tile provenance", **not "faster than them"** (no numeric cross-project
-comparison appears here; see [pending head-to-head](#pending-titiler-head-to-head-issue-121)).
+comparison appears here; see [the TiTiler head-to-head](#titiler-head-to-head-issue-121)).
 The cell Swath exists for is the *conjunction* — all four columns in one system —
 which is exactly the README's claim: "Nobody compiles a data-scientist's process
 graph into a low-latency dynamic tile service with a cost-aware cache."
@@ -264,11 +264,19 @@ better hasn't looked hard enough.
   `wedge-b-frontier.svg`): its two axes are capability rows 1–2 with the same
   rung definitions; rows 3–4 are the "measured + traced" content of its top rung.
 
-## Pending: TiTiler head-to-head (issue #121)
+## TiTiler head-to-head (issue #121)
 
-The one honest overlapping capability — serving a static COG — gets its own
-numeric comparison: `just load-h2h` runs identical scenarios against Swath and a
-digest-pinned TiTiler configured per its own documented production settings, with
-results published **regardless of outcome**. Its committed artifact is planned at
-`docs/perf/load-h2h-titiler.md`; this link activates when #121 lands. Until then,
-this document makes **no** cross-project performance claim.
+The one honest overlapping capability — serving a static, already-ingested COG as
+WebMercatorQuad PNG tiles — has its own numeric comparison, committed at
+[`docs/perf/load-h2h-titiler.md`](perf/load-h2h-titiler.md): `just load-h2h` runs
+identical scenarios (parameters imported from `just load`'s own single source of
+truth) against Swath and a digest-pinned TiTiler v2.2.1 configured per its own
+documented production guidance, both containers pinned to the same CPU quota on
+the same machine, one at a time. Per the maintainer's pre-commitment, the results
+are published **regardless of outcome** — in the committed run TiTiler leads the
+render-vs-render scenarios, Swath leads the hot-tile (cache) path; the artifact
+carries the full environment disclosure and framing. That head-to-head tests
+**only** the overlap: it says nothing about TiTiler's breadth (arbitrary remote
+COGs/STAC/mosaics with zero pre-registration — not tested there) nor about
+Swath's distinguishing surface (rows 1, 3, and 4 of this matrix — not scored
+there). Capability claims stay in the matrix above, cell by cell, with citations.
