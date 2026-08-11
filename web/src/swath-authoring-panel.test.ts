@@ -58,8 +58,18 @@ const DEFINITIONS: ProcessDefinition[] = [
     summary: "Normalized Difference Vegetation Index",
     parameters: [
       { name: "data", schema: { type: "object", subtype: "raster-cube" } },
-      { name: "nir", optional: true, default: "nir", schema: { type: "string" } },
-      { name: "red", optional: true, default: "red", schema: { type: "string" } },
+      {
+        name: "nir",
+        optional: true,
+        default: "nir",
+        schema: { type: "string", subtype: "band-name" },
+      },
+      {
+        name: "red",
+        optional: true,
+        default: "red",
+        schema: { type: "string", subtype: "band-name" },
+      },
       {
         name: "target_band",
         optional: true,
@@ -224,6 +234,23 @@ function submitReason(panel: SwathAuthoringPanel): string {
   return panel.querySelector("#swath-authoring-submit-reason")?.textContent ?? "";
 }
 
+function openAdvanced(panel: SwathAuthoringPanel, stepKey: string): void {
+  const toggle = panel.querySelector<HTMLButtonElement>(
+    `[data-step="${stepKey}"] .swath-authoring-advanced-toggle`,
+  );
+  if (!toggle) {
+    throw new Error(`no advanced toggle on ${stepKey}`);
+  }
+  toggle.click();
+}
+
+function helpText(panel: SwathAuthoringPanel, id: string): string {
+  return (
+    panel.querySelector(`label[for="swath-authoring-${id}"] .swath-authoring-field-help`)
+      ?.textContent ?? ""
+  );
+}
+
 test("collapsed by default and lazy: no requests until opened", async () => {
   const stub = fetchStub({});
   const panel = document.createElement("swath-authoring-panel") as SwathAuthoringPanel;
@@ -276,7 +303,9 @@ test("fields are generated from the parameter schemas, data flow included", asyn
   addStep(panel, "load_collection");
   addStep(panel, "ndvi");
 
-  // load_collection: every schema parameter became a field.
+  // load_collection: every schema parameter became a field (the
+  // defaulted/nullable ones under the advanced toggle).
+  openAdvanced(panel, "s1");
   for (const name of ["id", "spatial_extent", "temporal_extent", "bands"]) {
     expect(panel.querySelector(`#swath-authoring-s1-${name}`)).not.toBeNull();
   }
@@ -285,10 +314,11 @@ test("fields are generated from the parameter schemas, data flow included", asyn
 
   // ndvi.data is a raster-cube: it defaults to the previous step's
   // output, and its literal input is disabled accordingly.
+  openAdvanced(panel, "s2");
   const dataSource = field<HTMLSelectElement>(panel, "s2-data-source");
   expect(dataSource.value).toBe("s1");
   expect(field<HTMLInputElement>(panel, "s2-data").disabled).toBe(true);
-  // Plain string parameters stay literal inputs, prefilled from defaults.
+  // Band-name parameters stay literal inputs, prefilled from defaults.
   expect(field<HTMLInputElement>(panel, "s2-nir").disabled).toBe(false);
 
   // Numbers render as number inputs (schema type, not a per-process map).
@@ -296,7 +326,52 @@ test("fields are generated from the parameter schemas, data flow included", asyn
   expect(field<HTMLInputElement>(panel, "s3-inputMin").type).toBe("number");
   // x is typed number, but as the first required parameter of a later
   // step it defaults to wiring from the previous step.
+  openAdvanced(panel, "s3");
   expect(field<HTMLSelectElement>(panel, "s3-x-source").value).toBe("s2");
+});
+
+test("every field carries a visible plain-language explainer", async () => {
+  const panel = await mount(fetchStub({}));
+  addStep(panel, "load_collection");
+  expect(helpText(panel, "s1-id")).toBe("Which dataset to compute from.");
+  openAdvanced(panel, "s1");
+  expect(helpText(panel, "s1-spatial_extent")).toBe(
+    "The map area to compute over — leave as is to use the whole collection.",
+  );
+  expect(helpText(panel, "s1-temporal_extent")).toBe(
+    "The time range to include — leave as is to use everything available.",
+  );
+});
+
+test("defaulted fields collapse under advanced and still publish correctly", async () => {
+  const panel = await mount(fetchStub({}));
+  addStep(panel, "load_collection");
+  addStep(panel, "linear_scale_range");
+  addStep(panel, "save_result");
+
+  // Collapsed by default: the nullable extents and the profile-pinned
+  // outputs/format are not in the default view...
+  for (const id of ["s1-spatial_extent", "s2-outputMax", "s3-format"]) {
+    expect(panel.querySelector(`#swath-authoring-${id}`)).toBeNull();
+  }
+  const toggle = panel.querySelector('[data-step="s1"] .swath-authoring-advanced-toggle');
+  expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+  // ...while the newcomer's choices stay visible.
+  for (const id of ["s1-id", "s1-bands", "s2-inputMin", "s3-options"]) {
+    expect(panel.querySelector(`#swath-authoring-${id}`)).not.toBeNull();
+  }
+
+  // Smart defaults make the hidden fields publishable with zero expert
+  // decisions: null extents, 0..255 output, png.
+  choose(panel, "s1-id", "hls-s30");
+  fill(panel, "s2-inputMin", "-1");
+  fill(panel, "s2-inputMax", "1");
+  expect(submitButton(panel).disabled).toBe(false);
+  const graph = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
+  expect(graph["s1"]?.arguments["spatial_extent"]).toBeNull();
+  expect(graph["s2"]?.arguments["outputMin"]).toBe(0);
+  expect(graph["s2"]?.arguments["outputMax"]).toBe(255);
+  expect(graph["s3"]?.arguments["format"]).toBe("png");
 });
 
 test("the collection is a dropdown fed by GET /collections", async () => {
@@ -347,18 +422,24 @@ test("required fields flag inline as the user types", async () => {
   const panel = await mount(fetchStub({}));
   addStep(panel, "load_collection");
   addStep(panel, "save_result");
+  // format arrives with the profile default (png) under advanced —
+  // no issue, and only load_collection's id blocks submit.
+  expect(submitReason(panel)).toContain("1 field needs a value");
+  openAdvanced(panel, "s2");
   const note = () => panel.querySelector("#swath-authoring-s2-format-note")?.textContent;
-  // Untouched: the disabled submit counts it, but no wall of red.
+  expect(field<HTMLInputElement>(panel, "s2-format").value).toBe("png");
   expect(note()).toBe("");
-  expect(submitReason(panel)).toContain("fields need values");
-  // Type then clear: the field flags itself the moment it empties.
-  fill(panel, "s2-format", "png");
-  expect(note()).toBe("");
+  // Clearing it flags the field the moment it empties.
   fill(panel, "s2-format", "");
   expect(note()).toBe("required");
+  expect(submitReason(panel)).toContain("2 fields need values");
+  fill(panel, "s2-format", "png");
+  expect(note()).toBe("");
 });
 
-/** Drives the full NDVI authoring flow through the generated forms. */
+/** Drives the full NDVI authoring flow through the generated forms —
+ * only the newcomer-visible fields: outputs, extents, and format ride
+ * their smart defaults (null/0..255/png) untouched. */
 function authorNdvi(panel: SwathAuthoringPanel): void {
   addStep(panel, "load_collection");
   addStep(panel, "ndvi");
@@ -370,9 +451,6 @@ function authorNdvi(panel: SwathAuthoringPanel): void {
   fill(panel, "s2-red", "b04");
   fill(panel, "s3-inputMin", "-1");
   fill(panel, "s3-inputMax", "1");
-  fill(panel, "s3-outputMin", "0");
-  fill(panel, "s3-outputMax", "255");
-  fill(panel, "s4-format", "png");
   choose(panel, "s4-options", "rdylgn");
 }
 
@@ -454,6 +532,19 @@ test("the NDVI template composes a valid, submittable pipeline", async () => {
   expect(submitButton(panel).disabled).toBe(false);
   expect(submitReason(panel)).toBe("");
   expect(panel.buildGraph()).toEqual(NDVI_GRAPH);
+});
+
+test("the narrative retells the pipeline in plain words, live", async () => {
+  const panel = await mount(fetchStub({}));
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-template")?.click();
+  const narrative = () => panel.querySelector("#swath-authoring-narrative")?.textContent;
+  expect(narrative()).toBe(
+    "Load hls-s30 (bands b8a,b04) → compute NDVI ((b8a − b04) / (b8a + b04)) → " +
+      "rescale -1..1 to 0..255 → save as png, colored with rdylgn.",
+  );
+  // Live: changing the colormap re-narrates without a re-render cycle.
+  choose(panel, "s4-options", "viridis");
+  expect(narrative()).toContain("colored with viridis");
 });
 
 test("the template is not offered when its processes are not all served", async () => {

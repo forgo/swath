@@ -49,6 +49,15 @@
  *   parameter descriptions as tooltips, and the chosen collection's
  *   band vocabulary (from `GET /collections`) hinted under band-name
  *   fields.
+ * - **Written for non-experts** (maintainer UX round 2): every field
+ *   carries a visible plain-language one-liner ([`FIELD_HELP`] — a
+ *   curated glossary over the served vocabulary, not a form
+ *   definition); fields that work when left alone (nullable extents,
+ *   profile-pinned values like PNG/0..255) get smart defaults and
+ *   collapse under a per-step "advanced" toggle; and an always-visible
+ *   narrative sentence retells the pipeline in plain words, live
+ *   ("Load hls-s30 (bands …) → compute NDVI (…) → … colored with
+ *   rdylgn").
  * - The empty state explains the pipeline model and offers a
  *   **start-from-working-graph** template: the NDVI pipeline over the
  *   first collection, nir/red picked from its band vocabulary by
@@ -73,6 +82,129 @@ const COLORMAPS = ["grayscale", "viridis", "magma", "rdylgn"] as const;
  * while every one of these is present in the served definitions — a
  * shortcut over the palette, not a parallel form source. */
 const NDVI_TEMPLATE = ["load_collection", "ndvi", "linear_scale_range", "save_result"] as const;
+
+/**
+ * Plain-language one-liners, visible under every field (not tooltips):
+ * what the field is and what happens when it is left alone — written
+ * for a non-expert. This is a curated GLOSSARY over the served
+ * vocabulary (keyed by process.parameter, `*` matching any process),
+ * not a form definition: which fields exist, their widgets, and their
+ * validation still come from the schemas alone.
+ */
+const FIELD_HELP: Record<string, string> = {
+  "load_collection.id": "Which dataset to compute from.",
+  "load_collection.spatial_extent":
+    "The map area to compute over — leave as is to use the whole collection.",
+  "load_collection.temporal_extent":
+    "The time range to include — leave as is to use everything available.",
+  "load_collection.bands":
+    "The channels to load, comma-separated — pick from the bands listed below.",
+  "load_collection.properties": "Extra metadata filters — safe to leave alone.",
+  "ndvi.data": "The imagery from the step it points at.",
+  "ndvi.nir": "The band that measures near-infrared light.",
+  "ndvi.red": "The band that measures red light.",
+  "ndvi.target_band": "Leave as is: the NDVI result replaces the bands.",
+  "linear_scale_range.x": "The values to rescale — usually the previous step's result.",
+  "linear_scale_range.inputMin": "The smallest value expected in the data (NDVI: -1).",
+  "linear_scale_range.inputMax": "The largest value expected in the data (NDVI: 1).",
+  "linear_scale_range.outputMin": "Keep at 0 — screen pixels run 0..255.",
+  "linear_scale_range.outputMax": "Keep at 255 — screen pixels run 0..255.",
+  "save_result.data": "The finished result from the step it points at.",
+  "save_result.format": "The image format tiles are served in — png.",
+  "save_result.options": "How numbers become colors on the map.",
+  "reduce_dimension.data": "The imagery from the step it points at.",
+  "reduce_dimension.reducer": "The formula applied across the bands.",
+  "reduce_dimension.dimension": "Which dimension to collapse — bands.",
+  "reduce_dimension.context": "Extra data for the reducer — safe to leave alone.",
+  "array_element.data": "The band list to pick from.",
+  "array_element.index": "The band's position, counting from 0.",
+  "array_element.label": "The band's name.",
+  "array_element.return_nodata": "Return no-data instead of failing for a missing band.",
+  "*.x": "A number, or an earlier step's result.",
+  "*.y": "A number, or an earlier step's result.",
+};
+
+function fieldHelp(processId: string, name: string): string {
+  return FIELD_HELP[`${processId}.${name}`] ?? FIELD_HELP[`*.${name}`] ?? "";
+}
+
+/**
+ * Swath-profile VALUE defaults for fields whose only right answer the
+ * server's narrowing notes already pin (the render path serves PNG and
+ * quantizes to 0..255) — smart defaults, mirroring the profile, so the
+ * non-expert path needs no expert decisions. Values only; the fields
+ * themselves still come from the schemas.
+ */
+const PROFILE_DEFAULTS: Record<string, string> = {
+  "linear_scale_range.outputMax": "255",
+  "save_result.format": "png",
+};
+
+/** Is this field tucked under the step's "advanced" toggle? Everything
+ * that works when left alone (optional, nullable, defaulted, or
+ * auto-wired) collapses; what stays visible is exactly the newcomer's
+ * choices — the collection, bands, the colormap, and required values
+ * without a default. Derived from the schemas, like the fields. */
+function isAdvancedParam(processId: string, param: ProcessParameter): boolean {
+  if (
+    hasSubtype(param.schema, "collection-id") ||
+    hasSubtype(param.schema, "output-format-options") ||
+    isBandName(param.schema)
+  ) {
+    return false;
+  }
+  if (isCube(param.schema)) {
+    return true; // auto-wired to the previous step
+  }
+  return (
+    param.optional === true ||
+    allowsNull(param.schema) ||
+    param.default !== undefined ||
+    PROFILE_DEFAULTS[`${processId}.${param.name}`] !== undefined
+  );
+}
+
+/** One step's phrase of the what-is-happening narrative, in plain
+ * words, from the current field values (another curated glossary over
+ * the served process vocabulary). */
+function narrativePhrase(processId: string, value: (name: string) => string): string {
+  switch (processId) {
+    case "load_collection": {
+      const id = value("id");
+      const bands = value("bands");
+      return `load ${id === "" ? "a collection" : id}${bands === "" ? "" : ` (bands ${bands})`}`;
+    }
+    case "ndvi": {
+      const nir = value("nir") === "" ? "nir" : value("nir");
+      const red = value("red") === "" ? "red" : value("red");
+      return `compute NDVI ((${nir} − ${red}) / (${nir} + ${red}))`;
+    }
+    case "linear_scale_range": {
+      const bound = (name: string, fallback: string): string =>
+        value(name) === "" ? fallback : value(name);
+      return `rescale ${bound("inputMin", "?")}..${bound("inputMax", "?")} to ${bound(
+        "outputMin",
+        "0",
+      )}..${bound("outputMax", "1")}`;
+    }
+    case "save_result": {
+      const format = value("format") === "" ? "an image" : value("format");
+      const colormap = value("options");
+      return `save as ${format}${colormap === "" ? "" : `, colored with ${colormap}`}`;
+    }
+    case "reduce_dimension":
+      return "combine the bands with a formula";
+    case "array_element":
+      return "pick one band";
+    case "add":
+    case "subtract":
+    case "multiply":
+    case "divide":
+      return `${processId} values`;
+    default:
+      return processId.replaceAll("_", " ");
+  }
+}
 
 /** Panel chrome, matching the layer panel's dark-telemetry look. */
 const PANEL_CSS = `
@@ -187,6 +319,38 @@ swath-authoring-panel button:focus-visible {
   outline-offset: 1px;
 }
 swath-authoring-panel input:disabled { opacity: 0.4; }
+swath-authoring-panel .swath-authoring-field-help {
+  display: block;
+  margin: 0 0 2px;
+  font: 11px/1.4 system-ui, sans-serif;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: rgb(148 163 184 / 75%);
+}
+swath-authoring-panel .swath-authoring-narrative {
+  margin: 0 0 10px;
+  padding: 6px 8px;
+  border-left: 2px solid rgb(74 222 128 / 45%);
+  font: italic 12px/1.5 system-ui, sans-serif;
+  color: rgb(226 232 240 / 90%);
+  overflow-wrap: anywhere;
+}
+swath-authoring-panel .swath-authoring-narrative:empty { display: none; }
+swath-authoring-panel .swath-authoring-advanced-toggle {
+  display: block;
+  margin: 2px 0 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: rgb(148 163 184 / 70%);
+}
+swath-authoring-panel .swath-authoring-advanced-toggle::before { content: "▸ "; }
+swath-authoring-panel .swath-authoring-advanced-toggle[aria-expanded="true"]::before {
+  content: "▾ ";
+}
 swath-authoring-panel .swath-authoring-field-note {
   display: block;
   margin: 1px 0 0;
@@ -346,6 +510,8 @@ interface Step {
   process: ProcessDefinition;
   sources: Map<string, string>;
   values: Map<string, string>;
+  /** Whether the step's advanced (defaulted/nullable) fields are shown. */
+  advanced: boolean;
 }
 
 /** A schema (or one-of list of schemas) as its list of alternatives. */
@@ -633,9 +799,13 @@ export class SwathAuthoringPanel extends HTMLElement {
       sources: new Map(),
       values: new Map(
         (process.parameters ?? [])
-          .map((param): [string, string] => [param.name, defaultText(param)])
+          .map((param): [string, string] => [
+            param.name,
+            PROFILE_DEFAULTS[`${process.id}.${param.name}`] ?? defaultText(param),
+          ])
           .filter(([, text]) => text !== ""),
       ),
+      advanced: false,
     };
     this.#steps.push(step);
     return step;
@@ -789,6 +959,20 @@ export class SwathAuthoringPanel extends HTMLElement {
       submit.disabled = issues.length > 0;
       reason.textContent = issues.length > 0 ? `To publish: ${issues.join("; ")}.` : "";
     }
+    const narrative = this.querySelector("#swath-authoring-narrative");
+    if (narrative) {
+      narrative.textContent = this.#narrative();
+    }
+  }
+
+  /** The pipeline in one plain sentence ("Load hls-s30 (bands …) →
+   * compute NDVI (…) → …"), from the current field values. */
+  #narrative(): string {
+    const phrases = this.#steps.map((step) =>
+      narrativePhrase(step.process.id, (name) => (step.values.get(name) ?? "").trim()),
+    );
+    const sentence = phrases.join(" → ");
+    return sentence === "" ? "" : `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
   }
 
   /** The composed openEO process graph: one node per step, arguments
@@ -1004,6 +1188,13 @@ export class SwathAuthoringPanel extends HTMLElement {
       return form;
     }
 
+    // The what-is-happening narrative: the pipeline in plain words,
+    // always visible, refreshed live as fields change.
+    const narrative = document.createElement("p");
+    narrative.className = "swath-authoring-narrative";
+    narrative.id = "swath-authoring-narrative";
+    form.append(narrative);
+
     const list = document.createElement("ol");
     list.className = "swath-authoring-steps";
     for (const [index, step] of this.#steps.entries()) {
@@ -1071,8 +1262,39 @@ export class SwathAuthoringPanel extends HTMLElement {
     stepError.setAttribute("role", "alert");
     item.append(stepError);
 
-    for (const param of step.process.parameters ?? []) {
+    // Progressive disclosure: fields that work when left alone collapse
+    // under the step's "advanced" toggle; the default view is only the
+    // choices a newcomer understands. A blocked or server-flagged
+    // advanced field forces the section open so its message is visible.
+    const parameters = step.process.parameters ?? [];
+    const basic = parameters.filter((param) => !isAdvancedParam(step.process.id, param));
+    const advanced = parameters.filter((param) => isAdvancedParam(step.process.id, param));
+    for (const param of basic) {
       item.append(...this.#renderField(step, index, param));
+    }
+    if (advanced.length > 0) {
+      const open =
+        step.advanced ||
+        advanced.some(
+          (param) =>
+            this.#serverNotes.has(`${step.key}-${param.name}`) ||
+            this.#fieldIssue(step, index, param) !== "",
+        );
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "swath-authoring-advanced-toggle";
+      toggle.textContent = `advanced (${advanced.length})`;
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.addEventListener("click", () => {
+        step.advanced = !step.advanced;
+        this.#render();
+      });
+      item.append(toggle);
+      if (open) {
+        for (const param of advanced) {
+          item.append(...this.#renderField(step, index, param));
+        }
+      }
     }
     return item;
   }
@@ -1110,6 +1332,15 @@ export class SwathAuthoringPanel extends HTMLElement {
     label.textContent = param.optional === true ? `${param.name} (optional)` : param.name;
     if (param.description !== undefined) {
       label.title = param.description;
+    }
+    // The plain-language one-liner, visible by default (the served
+    // description stays available as the tooltip above).
+    const help = fieldHelp(step.process.id, param.name);
+    if (help !== "") {
+      const line = document.createElement("small");
+      line.className = "swath-authoring-field-help";
+      line.textContent = help;
+      label.append(line);
     }
 
     const touch = (): void => {

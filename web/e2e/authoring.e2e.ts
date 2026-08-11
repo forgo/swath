@@ -55,10 +55,14 @@ async function authorNdvi(page: Page, outputMax: string, colormap: string): Prom
   await fieldById(page, "s2-red").fill("b04");
   await fieldById(page, "s3-inputMin").fill("-1");
   await fieldById(page, "s3-inputMax").fill("1");
-  await fieldById(page, "s3-outputMin").fill("0");
-  await fieldById(page, "s3-outputMax").fill(outputMax);
-  await fieldById(page, "s4-format").fill("png");
   await fieldById(page, "s4-options").selectOption(colormap);
+  // Extents, output range, and format ride their smart defaults
+  // (null / 0..255 / png) under the advanced toggles; only a non-default
+  // output range needs the s3 advanced section opened.
+  if (outputMax !== "255") {
+    await page.locator('[data-step="s3"] .swath-authoring-advanced-toggle').click();
+    await fieldById(page, "s3-outputMax").fill(outputMax);
+  }
 }
 
 /** Publishes the composed graph and returns the openEO service id from
@@ -121,7 +125,17 @@ test("validation gates submit until the graph is structurally valid", async ({ p
   await expect(reason).toContainText("field needs a value");
   await expect(reason).toContainText("no step loads a collection");
 
-  // Choosing from the /collections-fed picker satisfies both.
+  // The advanced (defaulted) fields are out of the default view: the
+  // nullable extents hide until the step's advanced toggle opens them,
+  // each with a visible plain-language explainer.
+  await expect(fieldById(page, "s1-spatial_extent")).toHaveCount(0);
+  await page.locator('[data-step="s1"] .swath-authoring-advanced-toggle').click();
+  await expect(fieldById(page, "s1-spatial_extent")).toBeVisible();
+  await expect(
+    page.locator('label[for="swath-authoring-s1-spatial_extent"] .swath-authoring-field-help'),
+  ).toContainText("leave as is to use the whole collection");
+
+  // Choosing from the /collections-fed picker satisfies both reasons.
   await fieldById(page, "s1-id").selectOption("hls-s30");
   await expect(submitButton(page)).toBeEnabled();
   await expect(reason).toBeEmpty();
@@ -153,8 +167,11 @@ test("the NDVI template publishes a working layer from one click", async ({ page
   await template.click();
 
   // A start-from-working-graph: collection, bands, scale, and colormap
-  // prefilled from the server's own metadata — immediately submittable.
+  // prefilled from the server's own metadata — immediately submittable,
+  // and narrated in plain words.
   await expect(submitButton(page)).toBeEnabled();
+  await expect(page.locator("#swath-authoring-narrative")).toContainText("compute NDVI");
+  await expect(page.locator("#swath-authoring-narrative")).toContainText("colored with rdylgn");
   const id = await publish(page);
   const tile = await page.request.get(`/tilesets/${id}/tiles/${TILE}`);
   expect(tile.status()).toBe(200);
