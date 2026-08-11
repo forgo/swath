@@ -1,9 +1,9 @@
 # Swath — Architecture
 
-_Working document. Draft v0.2 — August 2026. Written for refinement: the module layout and port
-signatures here are proposals to iterate on, not yet frozen. The charter (v0.2) has been reconciled
-with the ADRs; where any doc disagrees with an ADR, the ADR wins. Engineering standards (toolchains,
-CI, testing, release) live in `ENGINEERING.md`._
+_Working document. Draft v0.3 — August 2026. §§4, 6, 7 and 12 now describe the code as built and
+carry a "last verified against" commit; the remaining sections are design intent. The charter (v0.2)
+has been reconciled with the ADRs; where any doc disagrees with an ADR, the ADR wins. Engineering
+standards (toolchains, CI, testing, release) live in `ENGINEERING.md`._
 
 ---
 
@@ -35,7 +35,7 @@ is right, the scaffold is a transcription of it.
 | Layer                                                                                                            | Decision                             | Concretely                                                                            |
 | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------- |
 | Tiler brain (window/overview selection, warp+resample kernels, pixel ops, tile API, **per-tile decision hooks**) | **BUILD**                            | `swath-render`, `swath-core`                                                          |
-| Materialization planner, process compiler + IR, catalog/ingest orchestration, trace model                        | **BUILD**                            | `swath-core`                                                                          |
+| Materialization planner, catalog/ingest orchestration, trace model; process compiler + Render IR                 | **BUILD**                            | `swath-core` (planner, catalog, ingest, trace); `swath-render` (compiler + IR)        |
 | COG / Zarr / virtual-reference reading                                                                           | **ADOPT**                            | `async-geotiff`/`async-tiff`, `zarrs` (+`zarrs_icechunk`), `object_store`             |
 | Image encoding, HTTP, async runtime, vector/columnar                                                             | **ADOPT**                            | `image`/`png`/`webp`, `axum`, `tokio`, `geoarrow-rs`                                  |
 | Projection / datum math                                                                                          | **BIND** (prefer pure-Rust)          | `proj4rs` (common CRS); `proj` C-bindings feature-gated for the long tail             |
@@ -44,59 +44,83 @@ is right, the scaffold is a transcription of it.
 
 ## 4. Component model
 
+Every node below names a real crate or module (crate in the subgraph title, module or component in
+parentheses on the node). Nothing here is aspirational: deferred surfaces (Maps, Records, Processes,
+EDR, Features, embeddings) appear only in the §7 phase tables and in the standards map
+([`docs/media/standards-map.svg`](media/standards-map.svg), evidence ledger in
+[`standards-map.notes.md`](media/standards-map.notes.md)).
+
 ```mermaid
 flowchart TB
-  subgraph FE["Frontend — Web Components + MapLibre GL (no framework)"]
-    UI[Control plane UI]
-    MAP[Map viewer]
-    XRAY[X-ray overlay]
+  subgraph FE["Frontend — web/src (Web Components + MapLibre GL, no framework)"]
+    MAP["Map viewer (swath-map)"]
+    PANELS["Dataset / layer / authoring panels (swath-dataset-panel, swath-layer-panel, swath-authoring-panel)"]
+    XRAY["X-ray overlay + analytics (swath-xray, xray-analytics)"]
   end
 
-  subgraph IN["Inbound adapters — standards-shaped APIs (swath-api, axum)"]
-    TILES[OGC API - Tiles / Maps]
-    RECORDS[OGC API - Records]
-    PROC[OGC API - Processes / openEO graph]
-    EDR[OGC API - EDR]
-    FEAT[OGC API - Features]
-    CP[Control-plane REST + Trace stream SSE]
+  subgraph IN["Inbound adapter — swath-api (axum)"]
+    TILES["OGC API - Tiles (routes)"]
+    OEO["openEO authoring surface (openeo)"]
+    CP["Control plane: datasets/granules + Trace SSE (granules, traces)"]
+    UIA["Embedded UI assets (ui)"]
   end
 
-  subgraph CORE["swath-core / swath-render — pure Rust, depends only on ports"]
-    PLAN[Materialization planner]
-    TILER[Tiler engine]
-    COMP[Process-graph compiler → Render IR]
-    CAT[Catalog service - datasets/layers, hides STAC]
-    ING[Ingest orchestrator]
-    TRACE[(Trace model)]
+  subgraph RENDER["swath-render — tiler engine"]
+    TILER["render_tile / render_tile_cached (tiler)"]
+    WARP["Warp/resample kernels (warp, window, grid)"]
+    COMP["Process compiler: openEO graph → Render IR (process)"]
+    IRX["Render IR + evaluator (ir)"]
+    ENC["Tile encoder (encode, colormaps)"]
   end
 
-  subgraph PORTS["Ports (traits)"]
-    P_SRC[[RasterSource]]
-    P_RPJ[[Reproject]]
-    P_CAT[[Catalog]]
-    P_CACHE[[TileCache / ArtifactStore]]
-    P_PROC[[ProcessRegistry]]
-    P_EVT[[EventSource]]
-    P_EMB[[EmbeddingModel / VectorIndex]]
+  subgraph CORE["swath-core — pure domain, no I/O"]
+    PLAN["Materialization planner (planner)"]
+    CATD["Catalog domain + STAC converters (catalog)"]
+    ING["Ingest registration step (ingest)"]
+    MANI["Virtual-manifest schema v1 (manifest)"]
+    TMS["Tile / TMS / raster math (tile, crs, raster)"]
+    TRACE[("Trace model (trace)")]
   end
 
-  subgraph ADS["Adapters"]
-    A_COG[async-geotiff COG]
-    A_ZARR[zarrs Zarr]
-    A_VIRT[virtual-ref NetCDF/HDF]
-    A_PROJ[proj4rs / PROJ]
-    A_PG[pgstac Postgres]
-    A_OS[object_store S3/local]
-    A_OEO[openeo-processes / OGC Processes backend]
-    A_EVT[S3 events / CMR / file-drop]
-    A_EMB[Clay/Prithvi/AlphaEarth + vector index]
+  subgraph PORTS["Ports — traits in swath-core"]
+    P_SRC[["RasterSource (source)"]]
+    P_RPJ[["Reproject (reproject)"]]
+    P_CAT[["Catalog (catalog)"]]
+    P_CACHE[["TileCache (cache)"]]
+    P_EVT[["EventSource (events)"]]
+    P_REF[["IngestReferencer (ingest)"]]
   end
 
-  EXT[(External: object storage, Postgres/pgstac, data granules, models)]
+  subgraph ADS["Adapter crates — crates/adapters/* + swath-referencer"]
+    A_COG["swath-source-cog"]
+    A_VIRT["swath-source-virtual"]
+    A_PROJ["swath-reproject-proj4rs"]
+    A_PG["swath-catalog-pgstac"]
+    A_OS["swath-cache-objectstore"]
+    A_EVT["swath-events-filedrop"]
+    A_REF["swath-referencer"]
+  end
 
-  FE --> IN --> CORE --> PORTS --> ADS --> EXT
-  TRACE -. streamed .-> XRAY
+  CLI["swath-cli — the swath binary: wires adapters, serve + filedrop ingest loop"]
+  EXT[("External: object storage, Postgres/pgstac, granule files")]
+
+  FE --> IN
+  IN --> RENDER
+  IN --> CORE
+  RENDER --> CORE
+  RENDER --> PORTS
+  CORE --> PORTS
+  PORTS --> ADS
+  ADS --> EXT
+  CLI -. wires adapters into .-> IN
+  TRACE -. streamed over SSE .-> XRAY
 ```
+
+All nodes are implemented (no planned/phantom nodes remain, so no implemented-vs-planned styling is
+needed). The Python `VirtualiZarr` sidecar (`python/sidecars/referencer`) is deliberately absent: it
+is the conformance *reference* for `swath-referencer` (ADR 0006), not a runtime component.
+
+_Last verified against `c944a41`._
 
 ## 5. The Core (pure logic)
 
@@ -115,86 +139,174 @@ flowchart TB
   upserts the catalog, optionally warms overviews. Owns the ingest-to-pixel timer.
 - **Trace model**: a first-class structured record (see §9) returned with every render and streamed to the UI.
 
-## 6. Ports — representative trait sketches (illustrative, for refinement)
+## 6. Ports — trait signatures (verbatim from source)
+
+The signatures below are copied verbatim from the named files (doc comments and method bodies
+elided); the rustdoc on each trait and its module is the normative contract. Design points that
+supersede the v0.1 sketches:
+
+- **Native async-in-trait** (`impl Future … + Send`), not `#[async_trait]`. The async ports are
+  deliberately **not dyn-compatible**; consumers are generic over them. `Reproject`,
+  `CoordTransform`, and `IngestReferencer` are sync and dyn-compatible on purpose.
+- **`Catalog` is domain-shaped** (`Dataset`/`Granule`), not STAC-shaped — STAC types appear only
+  inside adapters ([`docs/design/catalog-domain.md`](design/catalog-domain.md), §16.5).
+- **`EventSource` is pull-shaped** (`&mut self`, one event per call), not a subscribed stream.
+- **There is no `ProcessRegistry` port.** The openEO compiler resolves its bounded process subset
+  against a `CompileContext` (ADR 0010); process definitions are data, not an adapter seam.
+- **`IngestReferencer` is a port the sketches lacked** — virtual-reference generation (ADR 0006).
 
 ```rust
-/// Read windowed samples from a source asset. Async + cancellation-friendly.
-#[async_trait]
+// crates/swath-core/src/source.rs
 pub trait RasterSource: Send + Sync {
-    async fn describe(&self, asset: &AssetRef) -> Result<RasterInfo>; // CRS, bounds, bands, dtype, overviews
-    async fn read_window(&self, asset: &AssetRef, req: WindowRequest) -> Result<WindowData>; // + provenance
+    fn describe(
+        &self,
+        asset: &AssetRef,
+    ) -> impl Future<Output = Result<RasterInfo, SourceError>> + Send;
+
+    fn read_window(
+        &self,
+        asset: &AssetRef,
+        window: WindowRequest,
+        band: BandSelection,
+        level: ReadLevel,
+    ) -> impl Future<Output = Result<WindowData, SourceError>> + Send;
 }
 
-/// Coordinate transforms. Kept minimal; warp/resample live in the core, not here.
+// crates/swath-core/src/reproject.rs
+pub trait CoordTransform: Send + Sync {
+    fn transform(&self, x: f64, y: f64) -> Result<(f64, f64), ReprojectError>;
+
+    fn transform_slice(&self, points: &mut [(f64, f64)]) -> Result<(), ReprojectError> { /* default: per-point loop */ }
+}
+
 pub trait Reproject: Send + Sync {
-    fn transformer(&self, from: &Crs, to: &Crs) -> Result<Box<dyn CoordTransform>>;
+    fn transformer(&self, from: &Crs, to: &Crs) -> Result<Box<dyn CoordTransform>, ReprojectError>;
 }
 
-/// Catalog CRUD, STAC-shaped contract. The core speaks Datasets/Layers above this.
-#[async_trait]
+// crates/swath-core/src/catalog.rs
 pub trait Catalog: Send + Sync {
-    async fn upsert_collection(&self, c: &Collection) -> Result<()>;
-    async fn upsert_items(&self, items: &[Item]) -> Result<()>;
-    async fn search(&self, q: &SearchQuery) -> Result<ItemPage>;
+    fn upsert_dataset(
+        &self,
+        dataset: &Dataset,
+    ) -> impl Future<Output = Result<(), CatalogError>> + Send;
+
+    fn upsert_granules(
+        &self,
+        granules: &[Granule],
+    ) -> impl Future<Output = Result<(), CatalogError>> + Send;
+
+    fn get_dataset(
+        &self,
+        id: &DatasetId,
+    ) -> impl Future<Output = Result<Option<Dataset>, CatalogError>> + Send;
+
+    fn list_datasets(&self) -> impl Future<Output = Result<Vec<Dataset>, CatalogError>> + Send;
+
+    fn find_granules(
+        &self,
+        dataset: &DatasetId,
+        query: &GranuleQuery,
+    ) -> impl Future<Output = Result<Vec<Granule>, CatalogError>> + Send;
 }
 
-/// Encoded-tile cache and materialized-artifact (overview) store.
-#[async_trait]
+// crates/swath-core/src/cache.rs — no TTL by design: content-derived keys
+// never go stale (§10, §16.3)
 pub trait TileCache: Send + Sync {
-    async fn get(&self, key: &TileKey) -> Result<Option<EncodedTile>>;
-    async fn put(&self, key: &TileKey, tile: &EncodedTile, ttl: Option<Duration>) -> Result<()>;
+    fn get(
+        &self,
+        key: &TileKey,
+    ) -> impl Future<Output = Result<Option<CachedTile>, CacheError>> + Send;
+
+    fn put(
+        &self,
+        key: &TileKey,
+        bytes: &[u8],
+        content_type: &str,
+    ) -> impl Future<Output = Result<(), CacheError>> + Send;
 }
 
-/// Resolve process definitions/semantics (openEO processes catalog).
-pub trait ProcessRegistry: Send + Sync {
-    fn resolve(&self, id: &ProcessId) -> Result<ProcessDef>;
+// crates/swath-core/src/events.rs
+pub trait EventSource: Send {
+    fn next_event(
+        &mut self,
+    ) -> impl Future<Output = Result<Option<GranuleEvent>, EventError>> + Send;
 }
 
-/// Ingest triggers.
-#[async_trait]
-pub trait EventSource: Send + Sync {
-    async fn subscribe(&self) -> Result<BoxStream<'static, GranuleEvent>>;
+// crates/swath-core/src/ingest.rs
+pub trait IngestReferencer: Send + Sync {
+    fn handles(&self, granule: &Path) -> bool;
+
+    fn generate(&self, granule: &Path) -> Result<VirtualManifest, ReferencerError>;
 }
 ```
 
-Core entry points (not ports — this is the logic itself):
+Core entry points (not ports — this is the logic itself; same files are normative):
 
 ```rust
-pub fn compile(graph: &ProcessGraph, reg: &dyn ProcessRegistry) -> Result<RenderPlan>;
+// crates/swath-core/src/planner.rs — PlanChoice is
+// CacheHit | Overview { factor } | Live | Refuse { .. } (#[non_exhaustive])
+pub fn plan(budget: &Budget, availability: &Availability) -> Plan;
 
-pub enum Strategy { CacheHit(TileKey), Overview { level: u8 }, Live }
-pub fn plan(layer: &ResolvedLayer, coord: TileCoord, budget: &Budget, avail: &Availability) -> Strategy;
+// crates/swath-render/src/process.rs (Json = serde_json::Value)
+pub fn compile(graph: &Json, ctx: &CompileContext) -> Result<CompiledProduct, CompileError>;
 
-impl Tiler {
-    pub async fn render_tile(&self, layer: &ResolvedLayer, coord: TileCoord, spec: &RenderSpec)
-        -> Result<(EncodedTile, Trace)>;
-}
+// crates/swath-render/src/tiler.rs — free functions generic over the ports,
+// not a Tiler struct; the cached variant owns the probe + write-through
+pub async fn render_tile<S: RasterSource, R: Reproject + ?Sized>(
+    source: &S,
+    reproject: &R,
+    request: &TileRequest,
+) -> Result<(EncodedTile, Trace), TileError>;
+
+pub async fn render_tile_cached<S, R, C>(
+    source: &S,
+    reproject: &R,
+    cache: &C,
+    key: &TileKey,
+    request: &TileRequest,
+) -> Result<(EncodedTile, Trace), TileError>
+where
+    S: RasterSource,
+    R: Reproject + ?Sized,
+    C: TileCache;
 ```
+
+_Last verified against `c944a41`._
 
 ## 7. Adapters and inbound APIs
 
 **Adapters (outbound, behind ports):**
 
-| Port                           | Phase-1 adapter             | Later adapters                                                      |
-| ------------------------------ | --------------------------- | ------------------------------------------------------------------- |
-| `RasterSource`                 | `async-geotiff` (COG, HLS)  | `zarrs` (Zarr), virtual-ref (NetCDF/HDF via VirtualiZarr manifests) |
-| `Reproject`                    | `proj4rs` (UTM↔WebMercator) | `proj` C-bindings (geostationary/exotic)                            |
-| `Catalog`                      | `pgstac`                    | —                                                                   |
-| `TileCache`/`ArtifactStore`    | `object_store` (local/S3)   | Redis hot-tile cache                                                |
-| `ProcessRegistry`              | built-in openEO subset      | external OGC Processes backend (batch materialization)              |
-| `EventSource`                  | file-drop / manual register | S3 notifications, CMR polling                                       |
-| `EmbeddingModel`/`VectorIndex` | —                           | Clay/Prithvi/AlphaEarth + vector index (frontier)                   |
+| Port                           | Implemented adapter (crate)                                                                                     | Planned adapters                                  |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `RasterSource`                 | `swath-source-cog` (COG/HLS over `object_store`); `swath-source-virtual` (virtual-reference manifests)           | `zarrs` (native Zarr stores)                      |
+| `Reproject`                    | `swath-reproject-proj4rs` (pure Rust)                                                                            | `proj` C-bindings (geostationary/exotic)          |
+| `Catalog`                      | `swath-catalog-pgstac` (Postgres + pgstac)                                                                       | —                                                 |
+| `TileCache`                    | `swath-cache-objectstore` (local/S3)                                                                             | Redis hot-tile cache                              |
+| `EventSource`                  | `swath-events-filedrop` (watched drop directory)                                                                 | S3 notifications, CMR polling                     |
+| `IngestReferencer`             | `swath-referencer` (pure Rust: HDF-EOS, GRIB2; Python `VirtualiZarr` sidecar as conformance reference, ADR 0006) | HDF5/NetCDF4 breadth                              |
+| `EmbeddingModel`/`VectorIndex` | — (frontier; no port trait defined yet)                                                                          | Clay/Prithvi/AlphaEarth + vector index            |
 
-**Inbound APIs (standards), by phase:**
+There is no `ProcessRegistry` port (see §6): the openEO process subset is compiled in-core against
+a `CompileContext` (ADR 0010). An external OGC Processes backend for batch materialization remains
+a possible later seam and would get its own port when it lands.
 
-| API                                | Purpose                             | Target phase |
-| ---------------------------------- | ----------------------------------- | ------------ |
-| OGC API - Tiles / Maps             | raster + derived-product tiles      | 1            |
-| Control-plane REST + Trace SSE     | datasets/layers mgmt + x-ray stream | 1            |
-| OGC API - Records                  | catalog/discovery                   | 2            |
-| OGC API - Processes / openEO graph | product authoring                   | 2            |
-| OGC API - EDR                      | point/time-series from cubes        | 3            |
-| OGC API - Features                 | vector/GeoParquet                   | 3            |
+**Inbound APIs (standards), by phase** (implementation status per the standards map,
+[`docs/media/standards-map.svg`](media/standards-map.svg) /
+[`standards-map.notes.md`](media/standards-map.notes.md)):
+
+| API                                     | Purpose                             | Target phase | Status                                          |
+| --------------------------------------- | ----------------------------------- | ------------ | ----------------------------------------------- |
+| OGC API - Tiles                         | raster + derived-product tiles      | 1            | implemented (core, tileset, tilesets-list, dataset-tilesets, png) |
+| Control-plane REST + Trace SSE          | datasets/layers mgmt + x-ray stream | 1            | implemented                                     |
+| openEO (bounded authoring profile)      | product authoring (ADR 0010)        | 1            | implemented                                     |
+| OGC API - Maps                          | styled map imagery                  | deferred     | not implemented — an earlier draft paired it with Tiles at phase 1, but no endpoints, conformance classes, or tests exist; the standards map records the final call |
+| OGC API - Records                       | catalog/discovery                   | 2            | not started                                     |
+| OGC API - Processes                     | batch/externalized processing       | 2            | not started (authoring is openEO-only, ADR 0010) |
+| OGC API - EDR                           | point/time-series from cubes        | 3            | not started                                     |
+| OGC API - Features                      | vector/GeoParquet                   | 3            | not started                                     |
+
+_Last verified against `c944a41`._
 
 ## 8. Data flows
 
@@ -275,29 +387,37 @@ with bounded concurrency and backpressure. Cancellation propagates from dropped 
 reads. Single process; horizontal scale by running N stateless instances behind a load balancer (state lives
 in Postgres + object store + optional Redis).
 
-## 12. Crate / repo layout (proposed)
+## 12. Crate / repo layout (as built)
 
 ```
-swath/                      # Cargo workspace
+swath/                          # Cargo workspace
   crates/
-    swath-core/             # domain types, port traits, planner, compiler+IR, tiler orchestration, Trace — no I/O
-    swath-render/           # warp/resample kernels, pixel ops, encoding (depends on core + image/proj crates)
-    swath-api/              # inbound: axum, OGC APIs, openEO endpoint, control-plane, Trace SSE
-    swath-ingest/           # ingest orchestrator + timer
-    swath-cli/              # single binary: `swath serve` / `swath ingest` / `swath register`
+    swath-core/                 # domain types, port traits, planner, tile/TMS math, manifest schema, Trace — no I/O
+    swath-render/               # warp/resample kernels, Render IR + evaluator, openEO process compiler, tiler, encoding
+    swath-api/                  # inbound axum surface: OGC API - Tiles, openEO authoring, control plane + Trace SSE, embedded UI
+    swath-cli/                  # the `swath` binary: `swath serve` (catalog mode runs the filedrop ingest loop) / `swath ingest`
+    swath-referencer/           # pure-Rust virtual-reference generator (`IngestReferencer` impl: HDF-EOS, GRIB2; ADR 0006)
+    swath-e2e/                  # end-to-end assertion harness over the live compose stack (`just e2e`)
+    swath-testkit/              # perceptual-diff library + `pdiff` binary for oracle comparisons (never shipped)
+    swath-testsupport/          # shared test plumbing: GDAL/h5py truth tables, temp dirs, env-gated skips (never shipped)
     adapters/
-      swath-source-cog/     swath-source-zarr/     swath-source-virtual/
-      swath-reproject-proj4rs/   swath-reproject-proj/   (feature-gated)
-      swath-catalog-pgstac/ swath-store-objectstore/
-      swath-events-s3/      swath-events-cmr/      swath-events-filedrop/
-  ui/                       # Web Components + MapLibre GL (TypeScript, no framework)
-  py/                       # thin ingest-time sidecars (VirtualiZarr reference generation)
-  tests/                    # oracle (perceptual-diff vs GDAL) + OGC conformance
-  docs/
+      swath-source-cog/         # `RasterSource`: COG over object_store
+      swath-source-virtual/     # `RasterSource`: virtual-reference manifests
+      swath-reproject-proj4rs/  # `Reproject`: pure-Rust proj4rs
+      swath-catalog-pgstac/     # `Catalog`: Postgres + pgstac
+      swath-cache-objectstore/  # `TileCache`: object_store (local/S3)
+      swath-events-filedrop/    # `EventSource`: watched drop directory
+  web/                          # Web Components + MapLibre GL frontend (TypeScript, no framework; ADR 0011)
+  python/                       # uv workspace: ingest-time sidecars (VirtualiZarr conformance reference)
+  tests/                        # e2e stack scripts, oracle + referencer-equivalence fixtures, load
+  prototypes/                   # dated experiments, immutable once concluded
+  docs/                         # requirements, architecture, ADRs, design docs, media
 ```
 
-Adapters are wired at the binary via Cargo features (default set = out-of-the-box). See §14 for third-party
-extension beyond compile-time features.
+Phase-1 adapters are direct dependencies of the binary (Cargo features gate the embedded UI bundle
+and HDF5 support, not adapter selection). See §14 for third-party extension beyond compile time.
+
+_Last verified against `c944a41`._
 
 ## 13. Frontend architecture
 
