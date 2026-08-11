@@ -178,7 +178,7 @@ pub(crate) struct CatalogMode {
 /// a typo must fail loudly, not silently fall back to a default).
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
-struct ConfigFile {
+pub(crate) struct ConfigFile {
     /// Socket address to listen on.
     bind: Option<SocketAddr>,
     /// Base URL minted into OGC links.

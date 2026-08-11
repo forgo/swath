@@ -1,0 +1,228 @@
+// SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+//! The docs-drift gate (issue #119): `docs/CONFIG.md` is verified
+//! MECHANICALLY against the two sources of configuration truth — the clap
+//! command tree (flags, env vars, positionals) and the serde TOML schema
+//! (`config::ConfigFile` and everything under it).
+//!
+//! The doc carries `<!-- config-check:begin <scope> -->` /
+//! `<!-- config-check:end <scope> -->` marker pairs around each reference
+//! table; these tests extract the backticked key in each table row and
+//! assert **set equality** with what the code actually accepts — zero
+//! undocumented keys, zero phantom keys, in every scope. A new flag, TOML
+//! key, or enum variant fails `just test` (and CI) until the reference
+//! documents it; a documented key the code dropped fails the same way.
+//!
+//! Field names come from the schema itself, not a hand-kept list: serde's
+//! `deny_unknown_fields` / enum errors name every accepted field
+//! ("unknown field `zzz`, expected one of ..."), so probing each level
+//! with a bogus key yields the authoritative vocabulary. The clap side
+//! walks `Cli::command()` recursively, so a new subcommand with any
+//! argument needs its own documented block too.
+
+use std::collections::BTreeSet;
+
+use clap::CommandFactory as _;
+
+use crate::Cli;
+use crate::config::ConfigFile;
+
+/// The config reference, relative to this crate's manifest.
+const DOC_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/CONFIG.md");
+
+/// Reads `docs/CONFIG.md` (the file under test).
+fn doc() -> String {
+    std::fs::read_to_string(DOC_PATH).unwrap_or_else(|err| panic!("cannot read {DOC_PATH}: {err}"))
+}
+
+/// The text between the `config-check` markers for `scope`.
+fn block(doc: &str, scope: &str) -> String {
+    let begin = format!("<!-- config-check:begin {scope} -->");
+    let end = format!("<!-- config-check:end {scope} -->");
+    let start = doc
+        .find(&begin)
+        .unwrap_or_else(|| panic!("docs/CONFIG.md has no `{begin}` marker"));
+    let rest = &doc[start + begin.len()..];
+    let stop = rest
+        .find(&end)
+        .unwrap_or_else(|| panic!("docs/CONFIG.md has no `{end}` marker"));
+    rest[..stop].to_owned()
+}
+
+/// The documented keys of a block: the first backticked token of every
+/// table row, with flag dashes and positional angle brackets stripped
+/// (`--bind` -> `bind`, `<granule>` -> `granule`).
+fn documented_keys(block: &str) -> BTreeSet<String> {
+    block
+        .lines()
+        .filter(|line| line.trim_start().starts_with("| `"))
+        .map(|line| {
+            line.split('`')
+                .nth(1)
+                .expect("table row has a backticked key")
+                .trim_start_matches("--")
+                .trim_start_matches('<')
+                .trim_end_matches('>')
+                .to_owned()
+        })
+        .collect()
+}
+
+/// Every backticked `SWATH_*` token in a block (the documented env vars).
+fn documented_envs(block: &str) -> BTreeSet<String> {
+    block
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .filter(|token| token.starts_with("SWATH_"))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Asserts documented == actual, naming the drift in both directions.
+fn assert_same(scope: &str, documented: &BTreeSet<String>, actual: &BTreeSet<String>) {
+    let undocumented: Vec<&String> = actual.difference(documented).collect();
+    let phantom: Vec<&String> = documented.difference(actual).collect();
+    assert!(
+        undocumented.is_empty() && phantom.is_empty(),
+        "docs/CONFIG.md block `{scope}` has drifted from the code:\n  \
+         undocumented (in code, not in docs): {undocumented:?}\n  \
+         phantom (in docs, not in code): {phantom:?}"
+    );
+}
+
+/// The field/variant vocabulary serde accepts at the schema position the
+/// probe TOML addresses: parse a document carrying a bogus key or variant
+/// there and read the names out of the `deny_unknown_fields` /
+/// unknown-variant error ("expected one of `a`, `b`, ..." — the list is
+/// generated from the struct/enum itself, so it cannot go stale).
+fn schema_vocabulary(probe_toml: &str) -> BTreeSet<String> {
+    let err = toml::from_str::<ConfigFile>(probe_toml)
+        .expect_err("the probe document must be rejected")
+        .to_string();
+    let tail = &err[err
+        .rfind("expected")
+        .unwrap_or_else(|| panic!("not an unknown-field/variant error: {err}"))..];
+    let names: BTreeSet<String> = tail
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_owned)
+        .collect();
+    assert!(!names.is_empty(), "no field names parsed from: {err}");
+    names
+}
+
+// --- The TOML schema blocks ---
+
+#[test]
+fn file_keys_match_the_serde_schema() {
+    let doc = doc();
+    assert_same(
+        "file",
+        &documented_keys(&block(&doc, "file")),
+        &schema_vocabulary("zzz-bogus = 1"),
+    );
+}
+
+#[test]
+fn budget_keys_match_the_serde_schema() {
+    let doc = doc();
+    assert_same(
+        "budget",
+        &documented_keys(&block(&doc, "budget")),
+        &schema_vocabulary("[budget]\nzzz-bogus = 1"),
+    );
+}
+
+#[test]
+fn layer_keys_match_the_serde_schema() {
+    let doc = doc();
+    let actual = schema_vocabulary("[[layers]]\nzzz-bogus = 1");
+    assert_same("layer", &documented_keys(&block(&doc, "layer")), &actual);
+    // `[[datasets.layers]]` deserializes through the same struct; the doc
+    // says so in prose, and this pins that the schemas really are one.
+    assert_eq!(
+        actual,
+        schema_vocabulary("[[datasets]]\nid = \"d\"\n[[datasets.layers]]\nzzz-bogus = 1"),
+        "[[layers]] and [[datasets.layers]] no longer share a schema — \
+         docs/CONFIG.md documents them as one table"
+    );
+}
+
+#[test]
+fn dataset_keys_match_the_serde_schema() {
+    let doc = doc();
+    assert_same(
+        "dataset",
+        &documented_keys(&block(&doc, "dataset")),
+        &schema_vocabulary("[[datasets]]\nzzz-bogus = 1"),
+    );
+}
+
+#[test]
+fn enum_values_match_the_serde_schema() {
+    let doc = doc();
+    for (scope, probe) in [
+        ("enum kind", "[[layers]]\nkind = \"zzz-bogus\""),
+        ("enum colormap", "[[layers]]\ncolormap = \"zzz-bogus\""),
+        ("enum resampling", "[[layers]]\nresampling = \"zzz-bogus\""),
+    ] {
+        assert_same(
+            scope,
+            &documented_keys(&block(&doc, scope)),
+            &schema_vocabulary(probe),
+        );
+    }
+}
+
+// --- The clap tree blocks ---
+
+/// The non-builtin arguments of one command: long flags and positionals
+/// (as one key set) plus env var names.
+fn command_args(cmd: &clap::Command) -> (BTreeSet<String>, BTreeSet<String>) {
+    let mut keys = BTreeSet::new();
+    let mut envs = BTreeSet::new();
+    for arg in cmd.get_arguments() {
+        let id = arg.get_id().as_str();
+        if id == "help" || id == "version" {
+            continue;
+        }
+        if let Some(long) = arg.get_long() {
+            keys.insert(long.to_owned());
+        } else if arg.is_positional() {
+            keys.insert(id.to_owned());
+        }
+        if let Some(env) = arg.get_env() {
+            envs.insert(env.to_string_lossy().into_owned());
+        }
+    }
+    (keys, envs)
+}
+
+/// Recursively asserts every command with arguments has a matching,
+/// exact `flags <path>` block (env vars included).
+fn assert_command_documented(doc: &str, cmd: &clap::Command, path: &str) {
+    let (keys, envs) = command_args(cmd);
+    if !keys.is_empty() {
+        let scope = format!("flags {path}");
+        let body = block(doc, &scope);
+        assert_same(&scope, &documented_keys(&body), &keys);
+        assert_same(&format!("{scope} (env)"), &documented_envs(&body), &envs);
+    }
+    for sub in cmd.get_subcommands() {
+        if sub.get_name() == "help" {
+            continue;
+        }
+        assert_command_documented(doc, sub, &format!("{path} {name}", name = sub.get_name()));
+    }
+}
+
+#[test]
+fn cli_flags_and_env_vars_match_the_clap_tree() {
+    let doc = doc();
+    let mut cli = Cli::command();
+    cli.build();
+    assert_command_documented(&doc, &cli, "swath");
+}
