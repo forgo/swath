@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "swath-source-inmem"
+description = "RasterSource adapter: a deterministic in-memory raster — the docs/EXTENDING.md walkthrough toy, kept unmerged as evidence."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+swath-core = { path = "../../swath-core", version = "0.1.0-alpha.1" }
+
+[dev-dependencies]
+serde = { workspace = true }
+swath-testsupport = { path = "../../swath-testsupport", version = "0.1.0-alpha.1" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

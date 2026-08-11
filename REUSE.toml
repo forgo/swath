@@ -49,6 +49,7 @@ path = [
     "crates/swath-core/tests/*.proptest-regressions",
     "crates/adapters/swath-reproject-proj4rs/tests/data/*.json",
     "crates/adapters/swath-source-cog/tests/data/*.json",
+    "crates/adapters/swath-source-inmem/tests/data/*.json",
     "crates/adapters/swath-source-virtual/tests/data/*.json",
     "crates/swath-render/tests/data/*.png",
     "crates/swath-render/tests/data/openeo/graphs/*.json",

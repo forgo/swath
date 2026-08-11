@@ -68,6 +68,8 @@ swath-referencer = { path = "../swath-referencer", version = "0.1.0-alpha.1", de
 swath-render = { path = "../swath-render", version = "0.1.0-alpha.1" }
 swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.1.0-alpha.1" }
 swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.1.0-alpha.1" }
+# The docs/EXTENDING.md walkthrough toy (issue #125, evidence branch only).
+swath-source-inmem = { path = "../adapters/swath-source-inmem", version = "0.1.0-alpha.1" }
 swath-source-virtual = { path = "../adapters/swath-source-virtual", version = "0.1.0-alpha.1" }
 thiserror = { workspace = true }
 # The binary owns the runtime (ARCHITECTURE.md §11): multi-thread tokio,

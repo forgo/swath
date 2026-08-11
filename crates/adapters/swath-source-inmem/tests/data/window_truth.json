@@ -1,0 +1,142 @@
+{
+  "cases": [
+    {
+      "asset": "inmem:demo",
+      "window_name": "full",
+      "requested": {
+        "col_off": 0,
+        "row_off": 0,
+        "width": 6,
+        "height": 4
+      },
+      "clipped": {
+        "col_off": 0,
+        "row_off": 0,
+        "width": 6,
+        "height": 4
+      },
+      "dtype": "uint8",
+      "nodata": 255.0,
+      "nodata_count": 2,
+      "valid_sum": 690,
+      "first8": [
+        0,
+        3,
+        6,
+        9,
+        12,
+        15,
+        16,
+        19
+      ],
+      "last8": [
+        255,
+        47,
+        48,
+        51,
+        54,
+        57,
+        60,
+        63
+      ],
+      "sha256_le": "f0aa022f8bc2e41a6b21b24f42dd50e968ef6b58f265c46ccfb91ec5393415de"
+    },
+    {
+      "asset": "inmem:demo",
+      "window_name": "interior",
+      "requested": {
+        "col_off": 2,
+        "row_off": 1,
+        "width": 3,
+        "height": 2
+      },
+      "clipped": {
+        "col_off": 2,
+        "row_off": 1,
+        "width": 3,
+        "height": 2
+      },
+      "dtype": "uint8",
+      "nodata": 255.0,
+      "nodata_count": 2,
+      "valid_sum": 132,
+      "first8": [
+        255,
+        25,
+        28,
+        38,
+        41,
+        255
+      ],
+      "last8": [
+        255,
+        25,
+        28,
+        38,
+        41,
+        255
+      ],
+      "sha256_le": "2f31d026109fb507e6e592bd23fb3571dc0a3357b0b22083a6506eef36cac725"
+    },
+    {
+      "asset": "inmem:demo",
+      "window_name": "one_pixel",
+      "requested": {
+        "col_off": 3,
+        "row_off": 2,
+        "width": 1,
+        "height": 1
+      },
+      "clipped": {
+        "col_off": 3,
+        "row_off": 2,
+        "width": 1,
+        "height": 1
+      },
+      "dtype": "uint8",
+      "nodata": 255.0,
+      "nodata_count": 0,
+      "valid_sum": 41,
+      "first8": [
+        41
+      ],
+      "last8": [
+        41
+      ],
+      "sha256_le": "ba5ec51d07a4ac0e951608704431d59a02b21a4e951acc10505a8dc407c501ee"
+    },
+    {
+      "asset": "inmem:demo",
+      "window_name": "oob_clipped",
+      "requested": {
+        "col_off": 4,
+        "row_off": 2,
+        "width": 10,
+        "height": 10
+      },
+      "clipped": {
+        "col_off": 4,
+        "row_off": 2,
+        "width": 2,
+        "height": 2
+      },
+      "dtype": "uint8",
+      "nodata": 255.0,
+      "nodata_count": 1,
+      "valid_sum": 170,
+      "first8": [
+        255,
+        47,
+        60,
+        63
+      ],
+      "last8": [
+        255,
+        47,
+        60,
+        63
+      ],
+      "sha256_le": "3eb887ae9205c370b828d60caa787d5f429a9c795d1b1a65c50d0c8fbe21969f"
+    }
+  ]
+}

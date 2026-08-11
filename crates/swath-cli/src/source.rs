@@ -24,28 +24,36 @@ use object_store::ObjectStore;
 use swath_core::raster::{AssetRef, RasterInfo, WindowRequest};
 use swath_core::source::{BandSelection, RasterSource, ReadLevel, SourceError, WindowData};
 use swath_source_cog::CogSource;
+use swath_source_inmem::InMemSource;
 use swath_source_virtual::VirtualSource;
 
-/// COG + virtual-cube reads over one object store, dispatched per asset.
+/// COG + virtual-cube + in-memory-demo reads over one port instance,
+/// dispatched per asset.
 #[derive(Debug, Clone)]
 pub(crate) struct CompositeSource {
     cog: CogSource,
     virtual_cube: VirtualSource,
+    /// The docs/EXTENDING.md walkthrough toy (`inmem:` scheme, issue #125).
+    inmem: InMemSource,
 }
 
 impl CompositeSource {
-    /// Both adapters over the same store — one storage root, two formats.
+    /// Both storage adapters over the same store — one storage root, two
+    /// formats — plus the storage-free in-memory demo.
     pub(crate) fn new(store: Arc<dyn ObjectStore>) -> Self {
         Self {
             cog: CogSource::new(Arc::clone(&store)),
             virtual_cube: VirtualSource::new(store),
+            inmem: InMemSource::demo(),
         }
     }
 }
 
 impl RasterSource for CompositeSource {
     async fn describe(&self, asset: &AssetRef) -> Result<RasterInfo, SourceError> {
-        if VirtualSource::handles(asset) {
+        if InMemSource::handles(asset) {
+            self.inmem.describe(asset).await
+        } else if VirtualSource::handles(asset) {
             self.virtual_cube.describe(asset).await
         } else {
             self.cog.describe(asset).await
@@ -59,7 +67,9 @@ impl RasterSource for CompositeSource {
         band: BandSelection,
         level: ReadLevel,
     ) -> Result<WindowData, SourceError> {
-        if VirtualSource::handles(asset) {
+        if InMemSource::handles(asset) {
+            self.inmem.read_window(asset, window, band, level).await
+        } else if VirtualSource::handles(asset) {
             self.virtual_cube
                 .read_window(asset, window, band, level)
                 .await

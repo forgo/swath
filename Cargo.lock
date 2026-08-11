@@ -3224,6 +3224,7 @@ dependencies = [
  "swath-render",
  "swath-reproject-proj4rs",
  "swath-source-cog",
+ "swath-source-inmem",
  "swath-source-virtual",
  "swath-testsupport",
  "thiserror 2.0.20",
@@ -3321,6 +3322,16 @@ dependencies = [
  "object_store",
  "serde",
  "serde_json",
+ "swath-core",
+ "swath-testsupport",
+ "tokio",
+]
+
+[[package]]
+name = "swath-source-inmem"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "serde",
  "swath-core",
  "swath-testsupport",
  "tokio",

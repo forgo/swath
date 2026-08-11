@@ -10,6 +10,7 @@ members = [
     "crates/adapters/swath-events-filedrop",
     "crates/adapters/swath-reproject-proj4rs",
     "crates/adapters/swath-source-cog",
+    "crates/adapters/swath-source-inmem",
     "crates/adapters/swath-source-virtual",
     "crates/swath-api",
     "crates/swath-cli",
