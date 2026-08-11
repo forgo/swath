@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+SPDX-License-Identifier: Apache-2.0
+
+Hand-crafted diagram: the materialization planner's decision loop, with a
+real captured plan.considered (docs/media/planner-trace.capture.json).
+Provenance: docs/media/planner-decision-loop.notes.md. Opaque light
+background so it renders identically on GitHub light and dark.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 660" width="960" height="660"
+     font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#57606a"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="660" fill="#ffffff"/>
+
+  <text x="480" y="34" text-anchor="middle" font-size="19" font-weight="600" fill="#1f2328">Materialization planner — every candidate weighed, chosen or not</text>
+  <text x="480" y="56" text-anchor="middle" font-size="12" fill="#57606a">plan() in swath-core: pure, deterministic, no I/O · the payload on the right is a real capture from the fixture stack, not a mock</text>
+
+  <!-- ============ decision loop (left) ============ -->
+  <rect x="40" y="80" width="250" height="56" rx="7" fill="#f6f8fa" stroke="#57606a" stroke-width="1.5"/>
+  <text x="165" y="101" text-anchor="middle" font-weight="600" fill="#1f2328">Inputs: Budget + Availability</text>
+  <text x="165" y="118" text-anchor="middle" font-size="10.5" fill="#57606a">probe is a result, never a request</text>
+
+  <line x1="165" y1="136" x2="165" y2="160" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <polygon points="165,164 280,200 165,236 50,200" fill="#fff8c5" stroke="#9a6700" stroke-width="1.5"/>
+  <text x="165" y="196" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2328">probe is Hit and</text>
+  <text x="165" y="211" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2328">cache enabled?</text>
+
+  <line x1="280" y1="200" x2="298" y2="200" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="289" y="192" text-anchor="middle" font-size="10.5" fill="#57606a">yes</text>
+  <rect x="300" y="160" width="170" height="80" rx="7" fill="#f6f8fa" stroke="#57606a" stroke-width="1.5"/>
+  <text x="385" y="180" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2328">Terminal: CacheHit</text>
+  <text x="385" y="196" text-anchor="middle" font-size="10.5" fill="#1f2328">cost = payload bytes;</text>
+  <text x="385" y="210" text-anchor="middle" font-size="10.5" fill="#57606a">overview + live marked "not</text>
+  <text x="385" y="224" text-anchor="middle" font-size="10.5" fill="#57606a">estimated: … short-circuits"</text>
+
+  <line x1="165" y1="236" x2="165" y2="252" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="178" y="250" font-size="10.5" fill="#57606a">no</text>
+
+  <rect x="40" y="254" width="250" height="46" rx="7" fill="#f6f8fa" stroke="#57606a" stroke-width="1.5"/>
+  <text x="165" y="273" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2328">1 · cache_hit — recorded inadmissible</text>
+  <text x="165" y="290" text-anchor="middle" font-size="10.5" fill="#57606a">no cache configured / disabled / miss</text>
+
+  <line x1="165" y1="300" x2="165" y2="316" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="40" y="318" width="250" height="64" rx="7" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+  <text x="165" y="337" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2328">2 · overview — coarsest common factor</text>
+  <text x="165" y="353" text-anchor="middle" font-size="10.5" fill="#1f2328">f ≤ desired ratio × oversample, all bands</text>
+  <text x="165" y="368" text-anchor="middle" font-size="10.5" fill="#1f2328">cost = Σ ceil(cols/f)·ceil(rows/f)·bytes</text>
+
+  <line x1="165" y1="382" x2="165" y2="398" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="40" y="400" width="250" height="48" rx="7" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+  <text x="165" y="419" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2328">3 · live — cost at f = 1</text>
+  <text x="165" y="436" text-anchor="middle" font-size="10.5" fill="#1f2328">inadmissible over max_estimated_live_bytes</text>
+
+  <line x1="165" y1="448" x2="165" y2="466" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <polygon points="165,470 280,506 165,542 50,506" fill="#fff8c5" stroke="#9a6700" stroke-width="1.5"/>
+  <text x="165" y="510" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2328">any admissible?</text>
+
+  <line x1="280" y1="506" x2="298" y2="506" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="289" y="498" text-anchor="middle" font-size="10.5" fill="#57606a">no</text>
+  <rect x="300" y="474" width="170" height="64" rx="7" fill="#ffebe9" stroke="#cf222e" stroke-width="1.5"/>
+  <text x="385" y="496" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2328">Refuse: BudgetExceeded</text>
+  <text x="385" y="512" text-anchor="middle" font-size="10.5" fill="#57606a">no Trace emitted</text>
+  <text x="385" y="526" text-anchor="middle" font-size="10.5" fill="#57606a">(estimate + limit reported)</text>
+
+  <line x1="165" y1="542" x2="165" y2="560" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="178" y="556" font-size="10.5" fill="#57606a">yes</text>
+
+  <rect x="40" y="562" width="250" height="56" rx="7" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.5"/>
+  <text x="165" y="582" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2328">Choose cheapest admissible</text>
+  <text x="165" y="598" text-anchor="middle" font-size="10.5" fill="#1f2328">ties break by fixed order:</text>
+  <text x="165" y="611" text-anchor="middle" font-size="10.5" fill="#1f2328">cache_hit, overview, live</text>
+
+  <line x1="290" y1="590" x2="298" y2="590" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="300" y="562" width="170" height="56" rx="7" fill="#f6f8fa" stroke="#57606a" stroke-width="1.5"/>
+  <text x="385" y="582" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2328">Trace.plan =</text>
+  <text x="385" y="597" text-anchor="middle" font-size="10.5" fill="#1f2328">chosen + considered[3]</text>
+  <text x="385" y="611" text-anchor="middle" font-size="10.5" fill="#57606a">rides GET /traces SSE</text>
+
+  <path d="M 385 240 C 385 252 385 252 385 252 L 385 340 L 292 340" fill="none" stroke="#57606a" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <text x="392" y="300" font-size="10" fill="#57606a">still records</text>
+  <text x="392" y="313" font-size="10" fill="#57606a">all 3 candidates</text>
+
+  <!-- ============ captured payload (right) ============ -->
+  <rect x="500" y="84" width="420" height="446" rx="8" fill="#f6f8fa" stroke="#57606a" stroke-width="1.5"/>
+  <text x="710" y="108" text-anchor="middle" font-weight="600" fill="#1f2328">Captured plan.considered — committed, verbatim</text>
+  <text x="710" y="125" text-anchor="middle" font-size="10.5" fill="#57606a">tile 11/424/780 · layer truecolor · fixture stack, no cache configured</text>
+  <text x="710" y="140" text-anchor="middle" font-size="10.5" fill="#57606a">docs/media/planner-trace.capture.json · events[0]</text>
+
+  <rect x="520" y="154" width="380" height="86" rx="6" fill="#ffffff" stroke="#57606a" stroke-width="1.2"/>
+  <text x="536" y="176" font-size="12" font-weight="600" fill="#1f2328">1 · cache_hit</text>
+  <text x="884" y="176" text-anchor="end" font-size="11" font-weight="600" fill="#cf222e">inadmissible</text>
+  <text x="536" y="197" font-size="11" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" fill="#1f2328">estimated_cost_bytes: 0</text>
+  <text x="536" y="216" font-size="10.5" fill="#57606a">reason: "no cache configured"</text>
+
+  <rect x="520" y="252" width="380" height="104" rx="6" fill="#dafbe1" stroke="#1a7f37" stroke-width="2"/>
+  <text x="536" y="274" font-size="12" font-weight="600" fill="#1f2328">2 · overview { factor: 2 }</text>
+  <text x="884" y="274" text-anchor="end" font-size="11" font-weight="600" fill="#1a7f37">✓ CHOSEN</text>
+  <text x="536" y="295" font-size="11" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" fill="#1f2328">estimated_cost_bytes: 385 572</text>
+  <text x="536" y="314" font-size="10.5" fill="#57606a">reason: "coarsest overview within the oversample threshold"</text>
+  <text x="536" y="336" font-size="10.5" fill="#1a7f37">executed decision in the same trace: overview { level: 2 }</text>
+
+  <rect x="520" y="368" width="380" height="86" rx="6" fill="#ffffff" stroke="#57606a" stroke-width="1.2"/>
+  <text x="536" y="390" font-size="12" font-weight="600" fill="#1f2328">3 · live</text>
+  <text x="884" y="390" text-anchor="end" font-size="11" fill="#1a7f37">admissible</text>
+  <text x="536" y="411" font-size="11" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" fill="#1f2328">estimated_cost_bytes: 1 542 288</text>
+  <text x="536" y="430" font-size="10.5" fill="#57606a">reason: "full-resolution read"</text>
+
+  <text x="710" y="482" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2328">cheapest admissible wins: 385 572 &lt; 1 542 288 bytes</text>
+  <text x="710" y="503" text-anchor="middle" font-size="10.5" fill="#57606a">events[1] (ndvi z12) shows the other outcome: chosen live —</text>
+  <text x="710" y="517" text-anchor="middle" font-size="10.5" fill="#57606a">"no overview factor eligible at this zoom"</text>
+
+  <!-- footer -->
+  <line x1="40" y1="632" x2="920" y2="632" stroke="#d0d7de" stroke-width="1"/>
+  <text x="480" y="652" text-anchor="middle" font-size="11" fill="#57606a">invariant: exactly 3 candidates, always ordered cache_hit, overview, live — asserted on every path · provenance: docs/media/planner-decision-loop.notes.md</text>
+</svg>
