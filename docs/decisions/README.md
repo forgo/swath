@@ -24,3 +24,4 @@ that produced the evidence).
 | 0011 | 2026-08-10 | UI ships inside the binary (`embedded-ui`); CORS opt-in, default off | Accepted |
 | 0012 | 2026-08-10 | Render stays inline on the async runtime (resolves §16.7 with load evidence) | Accepted |
 | 0013 | 2026-08-10 | Extension = compile-time features + openEO process graphs (closes §16.6/§14) | Accepted |
+| 0014 | 2026-08-11 | Preview: openEO `POST /result` as a preview-bounded sync subset (extends 0010) | Accepted |
