@@ -279,7 +279,7 @@ _Last verified against `9ab35b8`._
 
 | Port                           | Implemented adapter (crate)                                                                                     | Planned adapters                                  |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `RasterSource`                 | `swath-source-cog` (COG/HLS over `object_store`); `swath-source-virtual` (virtual-reference manifests)           | `zarrs` (native Zarr stores)                      |
+| `RasterSource`                 | `swath-source-cog` (COG/HLS over `object_store`); `swath-source-virtual` (virtual-reference manifests); `swath-pyramid-objectstore` (materialized-pyramid overlay over either) | `zarrs` (native Zarr stores)                      |
 | `Reproject`                    | `swath-reproject-proj4rs` (pure Rust)                                                                            | `proj` C-bindings (geostationary/exotic)          |
 | `Catalog`                      | `swath-catalog-pgstac` (Postgres + pgstac)                                                                       | —                                                 |
 | `TileCache`                    | `swath-cache-objectstore` (local/S3)                                                                             | Redis hot-tile cache                              |
@@ -375,8 +375,12 @@ encoded tile to a GDAL-rendered reference.
 
 - **Cache key** = hash of `(layer_version, render_spec, tile_coord, tms)`. A `layer_version` bump (new data
   or new graph) invalidates cleanly — no scattered invalidation.
-- **Overview/artifact store**: pre-computed GeoZarr pyramids / COG overviews per layer, produced by the
-  batch-materialization path; the planner prefers an overview at low zoom to avoid full-res reads.
+- **Overview/artifact store** (shipped, issue #183): per-asset GeoZarr-shaped pyramids (plain Zarr v2
+  over `object_store`, `pyramids/` under the store root), produced by `swath materialize` — batch,
+  idempotent, resumable (`crates/adapters/swath-pyramid-objectstore`). The `PyramidSource` overlay
+  merges materialized factors into `describe` and serves them from stored chunks, so the planner
+  prefers an overview at low zoom without any planner change; COG-embedded overviews keep serving
+  from the asset itself and are never duplicated.
 - **Budget**: per-layer policy trading storage vs latency; the planner's cost estimate (bytes × warp cost)
   vs. overview/cache availability decides `Live | Overview | CacheHit`. Every choice is traced.
 

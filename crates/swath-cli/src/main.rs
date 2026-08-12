@@ -25,6 +25,7 @@ mod config;
 #[cfg(test)]
 mod docs_check;
 mod ingest;
+mod materialize;
 mod serve;
 mod source;
 
@@ -103,6 +104,9 @@ enum Command {
     /// Ingest utilities (manual/testing): `reference` generates a legacy
     /// granule's virtual manifest (ADR 0006).
     Ingest(ingest::IngestArgs),
+    /// Materialize overview pyramids for configured layers' assets into
+    /// the store root (batch, idempotent, resumable).
+    Materialize(materialize::MaterializeArgs),
 }
 
 fn main() -> ExitCode {
@@ -111,6 +115,7 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Serve(args) => report(serve::run(&args)),
         Command::Ingest(args) => report(ingest::run(&args)),
+        Command::Materialize(args) => report(materialize::run(&args)),
     }
 }
 

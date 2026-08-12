@@ -60,6 +60,7 @@ swath-cache-objectstore = { path = "../adapters/swath-cache-objectstore", versio
 swath-catalog-pgstac = { path = "../adapters/swath-catalog-pgstac", version = "0.1.0-alpha.1" }
 swath-core = { path = "../swath-core", version = "0.1.0-alpha.1" }
 swath-events-filedrop = { path = "../adapters/swath-events-filedrop", version = "0.1.0-alpha.1" }
+swath-pyramid-objectstore = { path = "../adapters/swath-pyramid-objectstore", version = "0.1.0-alpha.1" }
 # The production referencer behind the IngestReferencer port (ADR 0006):
 # `swath ingest reference` and the serve-time filedrop legacy path.
 # default-features = false so this crate's own `legacy-hdf5` feature (above,

@@ -83,6 +83,30 @@ path performs automatically at ingest.
 
 <!-- config-check:end flags swath ingest reference -->
 
+## `swath materialize` — flags
+
+Materializes overview pyramids for the configured layers' assets into
+`pyramids/` under the store root (issue #183; layout documented in
+`crates/adapters/swath-pyramid-objectstore`). Reads the same config file
+as `swath serve` and resolves layer assets identically — static layers
+directly, catalog layers from each dataset's latest ingested granule.
+Idempotent and resumable: existing chunks are probed and skipped, so
+rerunning after new granules arrive materializes only what is missing,
+and the serving process picks new levels up on its next describe with no
+restart. `nearest` layers get nearest-aggregated pyramids (categorical
+data); everything else averages, nodata-aware.
+
+<!-- config-check:begin flags swath materialize -->
+
+| Flag | Value | Meaning |
+|---|---|---|
+| `--config` | `PATH` | TOML config file (the same file `swath serve` reads). |
+| `--store-root` | `ROOT` | Object-store root, overriding the config file's `store-root`. |
+| `--layer` | `ID` | Materialize only this layer's assets. Default: every layer. |
+| `--min-dim` | `PIXELS` | Coarsest-level bound: the ladder stops at the first level whose larger axis fits this many pixels. Default 256 (GDAL's overview-build default). |
+
+<!-- config-check:end flags swath materialize -->
+
 ## The TOML config file
 
 Kebab-case keys; **unknown keys are rejected** (`deny_unknown_fields`) —

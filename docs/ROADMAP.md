@@ -64,7 +64,7 @@ it. "Deferred" means *decided against for now with a named revisit condition* �
 | 3 | **Partial-mosaic invalidation** | `crates/swath-core/src/cache.rs`, `docs/design/materialization-planner.md` §6, `ARCHITECTURE.md` §16.3 | Single-granule serving (latest wins) makes the whole-version bump exactly right; per-footprint invalidation buys nothing yet | Multi-granule mosaic layers land, plus measured re-render cost of whole-layer misses under a realistic granule cadence |
 | 4 | **Learned planner cost model** | `docs/design/materialization-planner.md` §6, `ARCHITECTURE.md` §16.4, `crates/swath-core/src/planner.rs` | The x-ray contract (R4) demands explainable choices; three explicit knobs + a checkable byte model deliver that today, and the Trace already carries the training pairs | An accumulated Trace corpus shows the fixed estimate constants materially wrong |
 | 5 | **Budget-aware (planner-owned) write policy** | `docs/design/materialization-planner.md` §6, `crates/swath-render/src/tiler.rs` | Write-through is unconditional at the tiler; "cache only tiles whose live cost exceeds X" earns nothing until storage pressure is real | Real storage pressure on the tile cache |
-| 6 | **Overview *generation* (GeoZarr pyramids / batch materialization)** | `docs/design/materialization-planner.md` §6, `ARCHITECTURE.md` §10 | The planner chooses among overviews that exist (COG-internal today); deciding what to pre-compute is a separate pipeline with its own storage story | Low-zoom live renders exceed budget on a real (non-fixture) dataset |
+| 6 | ~~**Overview *generation* (GeoZarr pyramids / batch materialization)**~~ — **closed by #183**: `swath materialize` + `crates/adapters/swath-pyramid-objectstore` (GeoZarr-shaped Zarr v2 pyramids over `object_store`; idempotent, resumable) | `docs/design/materialization-planner.md` §6, `ARCHITECTURE.md` §10 (both updated to the shipped state) | — | — |
 | 7 | **Time dimension (temporal selection in graphs and serving)** | `crates/swath-render/src/process.rs` (`temporal_extent` accepted-and-ignored), `crates/swath-cli/src/serve.rs` (latest granule wins) | Tile serving resolves "which granule" as *latest*; time-series semantics deserve a designed surface (and pave the road to EDR), not an ad-hoc query param | A dataset where "latest" is wrong (animation, historical comparison) is actually served |
 | 8 | **Non-WebMercator target TMS / multi-CRS mosaics** | `crates/swath-render/src/tiler.rs` | `WebMercatorQuad` is the only TMS every current client asks for; widening `TileRequest` is mechanical once demanded | A client needs another target TMS, or mosaics spanning source CRSs land |
 | 9 | **COG metadata caching** | `crates/adapters/swath-source-cog/src/lib.rs` | Header + IFD walks are per-asset bookkeeping, not pixel I/O; amortizing them changes no observable result, so it waits for evidence | Trace/`describe` overhead visible at realistic asset counts |
@@ -114,7 +114,8 @@ this file carries the approval checkbox).
 3. **Time dimension** (inventory row 7). The charter promises "animate a time series"; it is
    the largest capability gap a user can *see*, and it is the prerequisite for EDR.
 4. **Overview generation** (row 6). Completes the planner's third strategy with real GeoZarr
-   pyramids — the planner brain exists; give it something to choose.
+   pyramids — the planner brain exists; give it something to choose. *Shipped by #183 (row 6
+   closed).*
 5. **#151 — authoring UX rethink** (guided flow, live preview-before-publish). The wedge is
    the product; M5 review found the ceiling of form-based UX for non-experts.
 6. **Dataset-creation API.** Datasets today come from config files; an API (and UI) for
