@@ -69,18 +69,20 @@ def fixture_name(band: str) -> str:
     return f"hlss30-t13sdd-2024158-{band.lower()}.tif"
 
 
-def write_fixture(src_path: Path, out_path: Path, band: str) -> dict[str, object]:
+def write_fixture(
+    src_path: Path, out_path: Path, band: str, window: Window = WINDOW
+) -> dict[str, object]:
     """Window one source band into a fresh deterministic COG; return manifest entry."""
     with rasterio.open(src_path) as src:
-        data = src.read(1, window=WINDOW)
+        data = src.read(1, window=window)
         profile = {
             "driver": "COG",
             "dtype": src.dtypes[0],
             "count": 1,
-            "width": int(WINDOW.width),
-            "height": int(WINDOW.height),
+            "width": int(window.width),
+            "height": int(window.height),
             "crs": src.crs,
-            "transform": src.window_transform(WINDOW),
+            "transform": src.window_transform(window),
             "nodata": src.nodata,
             "compress": "deflate",
             "blocksize": 256,
@@ -101,6 +103,30 @@ def write_fixture(src_path: Path, out_path: Path, band: str) -> dict[str, object
             "nodata": chk.nodata,
             "transform": list(chk.transform)[:6],
         }
+
+
+def write_integrity(updates: dict[str, dict[str, object]]) -> None:
+    """Merge ``updates`` into manifest.json and rewrite SHA256SUMS over the union.
+
+    Each generation script owns its manifest keys and never touches the
+    others' — merging (rather than overwriting) keeps every committed
+    fixture family's entries intact whichever script reran last. Committed
+    quicklook PNGs (non-raster documentation artifacts, manifest-exempt)
+    are checksummed too.
+    """
+    manifest_path = FIXTURE_DIR / "manifest.json"
+    manifest: dict[str, dict[str, object]] = (
+        json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    )
+    manifest.update(updates)
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+    quicklooks = [p.name for p in FIXTURE_DIR.glob("*.png")]
+    sums = []
+    for name in sorted([*manifest, "manifest.json", *quicklooks]):
+        digest = hashlib.sha256((FIXTURE_DIR / name).read_bytes()).hexdigest()
+        sums.append(f"{digest}  {name}")
+    (FIXTURE_DIR / "SHA256SUMS").write_text("\n".join(sums) + "\n")
 
 
 def main() -> int:
@@ -135,15 +161,8 @@ def main() -> int:
         size = (FIXTURE_DIR / name).stat().st_size
         print(f"wrote {name} ({size} bytes)")
 
-    manifest_path = FIXTURE_DIR / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-
-    sums = []
-    for name in sorted([*manifest, "manifest.json"]):
-        digest = hashlib.sha256((FIXTURE_DIR / name).read_bytes()).hexdigest()
-        sums.append(f"{digest}  {name}")
-    (FIXTURE_DIR / "SHA256SUMS").write_text("\n".join(sums) + "\n")
-    print(f"wrote manifest.json + SHA256SUMS ({len(manifest)} fixtures)")
+    write_integrity(manifest)
+    print(f"wrote manifest.json + SHA256SUMS ({len(manifest)} fixtures updated)")
     return 0
 
 

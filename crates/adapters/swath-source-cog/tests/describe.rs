@@ -36,7 +36,11 @@ fn manifest() -> BTreeMap<String, ManifestEntry> {
 async fn describe_matches_fixture_manifest() {
     let source = common::local_source();
     let entries = manifest();
-    assert_eq!(entries.len(), 5, "expected the five HLS fixtures");
+    assert_eq!(
+        entries.len(),
+        29,
+        "expected 29 HLS fixtures (5 single-date + 24 fire-series)"
+    );
     for (file, want) in entries {
         let info = source
             .describe(&AssetRef::new(&file))

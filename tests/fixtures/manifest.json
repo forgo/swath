@@ -1,4 +1,412 @@
 {
+  "hlss30-t10tfk-2024159-b04.tif": {
+    "band": "B04",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024159-b12.tif": {
+    "band": "B12",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024159-b8a.tif": {
+    "band": "B8A",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024159-fmask.tif": {
+    "band": "Fmask",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "uint8",
+    "height": 256,
+    "nodata": 255.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024204-b04.tif": {
+    "band": "B04",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024204-b12.tif": {
+    "band": "B12",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024204-b8a.tif": {
+    "band": "B8A",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024204-fmask.tif": {
+    "band": "Fmask",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "uint8",
+    "height": 256,
+    "nodata": 255.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024229-b04.tif": {
+    "band": "B04",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024229-b12.tif": {
+    "band": "B12",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024229-b8a.tif": {
+    "band": "B8A",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024229-fmask.tif": {
+    "band": "Fmask",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "uint8",
+    "height": 256,
+    "nodata": 255.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024249-b04.tif": {
+    "band": "B04",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024249-b12.tif": {
+    "band": "B12",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024249-b8a.tif": {
+    "band": "B8A",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024249-fmask.tif": {
+    "band": "Fmask",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "uint8",
+    "height": 256,
+    "nodata": 255.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024274-b04.tif": {
+    "band": "B04",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024274-b12.tif": {
+    "band": "B12",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024274-b8a.tif": {
+    "band": "B8A",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024274-fmask.tif": {
+    "band": "Fmask",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "uint8",
+    "height": 256,
+    "nodata": 255.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024289-b04.tif": {
+    "band": "B04",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024289-b12.tif": {
+    "band": "B12",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024289-b8a.tif": {
+    "band": "B8A",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "int16",
+    "height": 256,
+    "nodata": -9999.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
+  "hlss30-t10tfk-2024289-fmask.tif": {
+    "band": "Fmask",
+    "count": 1,
+    "crs": "EPSG:32610",
+    "dtype": "uint8",
+    "height": 256,
+    "nodata": 255.0,
+    "transform": [
+      30.0,
+      0.0,
+      607680.0,
+      0.0,
+      -30.0,
+      4434720.0
+    ],
+    "width": 256
+  },
   "hlss30-t13sdd-2024158-b02.tif": {
     "band": "B02",
     "count": 1,
