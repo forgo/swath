@@ -1,8 +1,8 @@
-# Load baseline (`just load`, issue #101)
+# Load evidence — 2-CPU pinned rerun (`just load`, §16.7 / issue #102)
 
-Generated 2026-08-10T15:15:28Z at `dfaa7f0` — Apple M2 Max (12 cores), Darwin 25.5.0 arm64, oha 1.15.0. Recipe wall time to this point: 90s.
+Generated 2026-08-10T15:15:28Z at `dfaa7f0` — Apple M2 Max host, Darwin 25.5.0 arm64, oha 1.15.0, **server pinned to 2 CPUs** (the constrained-VM shape of ADR 0012's maintainer-requested rerun; this run's numbers are the "2 CPUs (pinned)" column of that ADR's decision table). Recipe wall time to this point: 90s.
 
-Regenerate with `just load` (parameters and rationale: `tests/load/load.py`; scenarios: `tests/load/load.sh`). This file and `load-baseline.json` are the committed evidence for ARCHITECTURE §16.7 (async-vs-blocking render boundary, issue #102).
+Regenerate with `just load` under the same 2-CPU pin (parameters and rationale: `tests/load/load.py`; scenarios: `tests/load/load.sh`). This file and the 12-core `load-baseline.json` are the committed evidence for ARCHITECTURE §16.7 (async-vs-blocking render boundary, issue #102), resolved by [ADR 0012](../decisions/0012-render-stays-inline-async.md).
 
 | scenario | requests | errors | rps | p50 ms | p95 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|---:|---:|

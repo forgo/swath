@@ -125,8 +125,10 @@ rung 3 as Swath's design center — Swath's grade-4 claim is "committed evidence
 and per-tile provenance", **not "faster than them"** (no numeric cross-project
 comparison appears here; see [the TiTiler head-to-head](#titiler-head-to-head-issue-121)).
 The cell Swath exists for is the *conjunction* — all four columns in one system —
-which is exactly the README's claim: "Nobody compiles a data-scientist's process
-graph into a low-latency dynamic tile service with a cost-aware cache."
+which is exactly the README's positioning claim (the wedge-quadrant paragraph):
+"Swath does both — a standard openEO graph in, live measured tiles out." Rows 1–2
+are that sentence's two axes; rows 3–4 are the committed evidence behind
+"live measured tiles".
 
 ## Citations
 
@@ -256,10 +258,9 @@ better hasn't looked hard enough.
 
 ## Relationship to other documents
 
-- **README positioning sentence** ("Nobody compiles a data-scientist's process
-  graph into a low-latency dynamic tile service with a cost-aware cache") is the
-  conjunction claim of this matrix; if any cell here changes, re-check that
-  sentence.
+- **README positioning sentence** ("Swath does both — a standard openEO graph in,
+  live measured tiles out", the wedge-quadrant paragraph) is the conjunction claim
+  of this matrix; if any cell here changes, re-check that sentence.
 - **Wedge diagram** (`docs/media/wedge.notes.md`, `wedge-a-quadrants.svg`,
   `wedge-b-frontier.svg`): its two axes are capability rows 1–2 with the same
   rung definitions; rows 3–4 are the "measured + traced" content of its top rung.
