@@ -33,6 +33,7 @@ jobs:
       pull-requests: read # paths-filter lists PR changed files via the API
     outputs:
       rust: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.rust }}
+      docs: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.docs }}
       stack: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.stack }}
       web: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.web }}
       python: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.python }}
@@ -51,6 +52,16 @@ jobs:
         uses: step-security/paths-filter@9098a7821b83402dbe267c0c801e7d580ce74f92 # v4.0.2
         with:
           filters: |
+            docs:
+              - 'docs/**'
+              - 'README.md'
+              - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'justfile'
+              - '.config/nextest.toml'
+              - '.github/**'
             rust:
               - 'crates/**'
               - 'Cargo.toml'
@@ -132,6 +143,26 @@ jobs:
         with:
           tools: "nextest"
       - run: just test
+
+  # The docs-drift gate (issues #119/#173) on its own trigger: docs-only PRs
+  # must run it too (the rust filter skips them). Full history + the
+  # require-git env: the sha-stamp freshness checks may skip on shallow
+  # checkouts elsewhere (rust-test's matrix), but never here.
+  docs-check:
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-rust
+        with:
+          tools: "nextest"
+      - run: just docs-check
+        env:
+          SWATH_DOCS_CHECK_REQUIRE_GIT: "1"
 
   rust-deny:
     needs: changes
@@ -365,7 +396,7 @@ jobs:
   # was skipped by the path filter; red on any failure, cancellation, or a
   # failed `changes` job (which would silently skip everything downstream).
   ci-ok:
-    needs: [changes, rust-fmt, rust-lint, rust-test, rust-deny, rust-msrv, rust-check-fast, rust-coverage, zizmor, reuse, e2e, e2e-web, web, python, oracle]
+    needs: [changes, rust-fmt, rust-lint, rust-test, docs-check, rust-deny, rust-msrv, rust-check-fast, rust-coverage, zizmor, reuse, e2e, e2e-web, web, python, oracle]
     if: always()
     runs-on: ubuntu-latest
     steps:

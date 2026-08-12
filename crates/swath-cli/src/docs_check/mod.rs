@@ -1,10 +1,29 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! The docs-drift gate (issue #119): `docs/CONFIG.md` is verified
-//! MECHANICALLY against the two sources of configuration truth — the clap
-//! command tree (flags, env vars, positionals) and the serde TOML schema
-//! (`config::ConfigFile` and everything under it).
+//! The docs-drift gate (issues #119 and #173): documentation that makes
+//! mechanical claims about the code is verified MECHANICALLY against the
+//! code. This module (the original #119 gate) checks `docs/CONFIG.md`
+//! against the two sources of configuration truth — the clap command tree
+//! (flags, env vars, positionals) and the serde TOML schema
+//! (`config::ConfigFile` and everything under it). The submodules extend
+//! the same pattern (issue #173):
+//!
+//! - [`routes`] — `docs/ENDPOINTS.md`'s route table vs the axum routers.
+//! - [`stamps`] — `_Last verified against_` sha stamps vs git history of
+//!   each stamped section's referenced source files.
+//! - [`deferrals`] — prose deferral language must point at
+//!   `docs/ROADMAP.md`'s deferral inventory (or the governing ADR).
+//! - [`claims`] — cross-document claims (quoted sentences, §-citations,
+//!   committed perf numbers, evidence-file headers) vs their canonical
+//!   sources.
+//! - [`mutation`] — the acceptance bar: each of the six documentation
+//!   drifts fixed by the #172 sweep (PR #214) is re-introduced in memory
+//!   and the gate must fail on every one.
+//!
+//! Escape hatch policy: a legitimate exception goes on an explicit,
+//! reason-carrying allowlist next to the check it exempts (and a stale
+//! allowlist entry is itself a failure) — checks are never loosened.
 //!
 //! The doc carries `<!-- config-check:begin <scope> -->` /
 //! `<!-- config-check:end <scope> -->` marker pairs around each reference
@@ -21,12 +40,72 @@
 //! walks `Cli::command()` recursively, so a new subcommand with any
 //! argument needs its own documented block too.
 
+mod claims;
+mod deferrals;
+mod mutation;
+mod routes;
+mod stamps;
+
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 use clap::CommandFactory as _;
 
 use crate::Cli;
 use crate::config::ConfigFile;
+
+/// The repository root (the docs live at `<root>/docs`), resolved from
+/// this crate's manifest so the gate works from any working directory.
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("repo root resolves")
+}
+
+/// Reads a repo-relative file (the doc or source under test), with line
+/// endings normalized to `\n` — a Windows checkout with `autocrlf` must
+/// see the same text every `\n`-anchored check and fixture sees on
+/// Linux/macOS.
+fn read_repo(rel: &str) -> String {
+    let path = repo_root().join(rel);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("cannot read {path}: {err}", path = path.display()))
+        .replace("\r\n", "\n")
+}
+
+/// The text between `<!-- docs-check:begin <scope> -->` /
+/// `<!-- docs-check:end <scope> -->` markers, or an error naming the
+/// missing marker (the generic twin of the CONFIG-specific [`block`]).
+fn marker_block(doc_label: &str, doc: &str, scope: &str) -> Result<String, String> {
+    let begin = format!("<!-- docs-check:begin {scope} -->");
+    let end = format!("<!-- docs-check:end {scope} -->");
+    let start = doc
+        .find(&begin)
+        .ok_or_else(|| format!("{doc_label} has no `{begin}` marker"))?;
+    let rest = &doc[start + begin.len()..];
+    let stop = rest
+        .find(&end)
+        .ok_or_else(|| format!("{doc_label} has no `{end}` marker"))?;
+    Ok(rest[..stop].to_owned())
+}
+
+/// Whitespace-normalized text: every run of whitespace (line breaks
+/// included) collapsed to one space — so quoted sentences match across
+/// the hard wrapping both documents apply.
+fn normalize_ws(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// `text` with fenced code blocks (``` … ```) removed — prose checks must
+/// not trip over example commands or captured output.
+fn strip_code_fences(text: &str) -> String {
+    text.split("```")
+        .enumerate()
+        .filter_map(|(i, part)| (i % 2 == 0).then_some(part))
+        .collect::<Vec<_>>()
+        .join("")
+}
 
 /// The config reference, relative to this crate's manifest.
 const DOC_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/CONFIG.md");

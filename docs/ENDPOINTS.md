@@ -30,6 +30,12 @@ Conventions, once:
 
 ## Route table
 
+The block below is mechanically checked against the axum routers by the
+docs gate (`crates/swath-cli/src/docs_check/routes.rs`, `just docs-check`):
+every mounted route must appear here — method set and mounting included —
+and no phantom rows survive.
+
+<!-- docs-check:begin routes -->
 | Method | Path | Mounted | Purpose |
 |---|---|---|---|
 | GET | `/` | always | Landing page: OGC (+ openEO capabilities in catalog mode); HTML UI for browsers |
@@ -50,6 +56,7 @@ Conventions, once:
 | GET | `/service_types` | catalog mode | Secondary service types (`xyz`) |
 | GET, POST | `/services` | catalog mode | List / publish secondary services |
 | GET, DELETE | `/services/{service_id}` | catalog mode | Describe / delete one service |
+<!-- docs-check:end routes -->
 
 ## OGC API - Tiles + control plane
 

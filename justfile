@@ -865,5 +865,14 @@ perf-doc:
     print(f"regenerated {len(blocks)} generated blocks in {doc}")
     EOF
 
+# The docs-drift gate alone (issues #119/#173): CONFIG.md vs the clap/serde
+# schemas, ENDPOINTS.md vs the axum routers, sha-stamp freshness, deferral
+# pointers, cross-doc claims — mutation verification included. The same tests
+# run inside `just test` (they live in swath-cli); this recipe is the fast
+# docs-only loop and what CI's docs-check job runs (with full git history:
+# SWATH_DOCS_CHECK_REQUIRE_GIT=1 forbids the shallow-checkout skip there).
+docs-check:
+    cargo nextest run -p swath-cli -E 'test(docs_check)'
+
 # The one-command gate: everything CI enforces.
 check: fmt-check lint machete test deny zizmor reuse
