@@ -48,7 +48,7 @@ Swath's serving path composes no external tiler. TiTiler, rio-tiler, GDAL, and m
 relate to Swath as validation oracles: the test suite renders the same tiles and tile-matrix
 math through them and pixel-diffs the results against committed goldens
 ([`tests/oracle/`](tests/oracle/), `just oracle-verify`; the history of this decision is in
-[`docs/CHARTER.md`](docs/CHARTER.md) §7 and [`docs/COMPARISON.md`](docs/COMPARISON.md)).
+[`docs/CHARTER.md`](docs/CHARTER.md) §8 and [`docs/COMPARISON.md`](docs/COMPARISON.md)).
 
 ## Measured, not promised
 

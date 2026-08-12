@@ -46,6 +46,7 @@ Conventions, once:
 | GET | `/collections` | catalog mode | openEO/STAC collections (one per dataset) |
 | GET | `/collections/{collection_id}` | catalog mode | One collection document |
 | GET | `/processes` | catalog mode | The supported openEO process subset |
+| POST | `/result` | catalog mode | Preview: one bounded synchronous render of a process graph (PNG) |
 | GET | `/service_types` | catalog mode | Secondary service types (`xyz`) |
 | GET, POST | `/services` | catalog mode | List / publish secondary services |
 | GET, DELETE | `/services/{service_id}` | catalog mode | Describe / delete one service |
@@ -74,6 +75,7 @@ curl -s http://localhost:8080/
     { "methods": ["GET"], "path": "/collections/{collection_id}" },
     { "methods": ["GET"], "path": "/conformance" },
     { "methods": ["GET"], "path": "/processes" },
+    { "methods": ["POST"], "path": "/result" },
     { "methods": ["GET"], "path": "/service_types" },
     { "methods": ["GET", "POST"], "path": "/services" },
     { "methods": ["GET", "DELETE"], "path": "/services/{service_id}" }
@@ -422,6 +424,64 @@ definitions):
   ]
 }
 ```
+
+### `POST /result`
+
+The preview: the openEO synchronous-execute endpoint, implemented as a
+**preview-bounded subset** ([ADR 0014](decisions/0014-preview-bounded-sync-result.md)
+— added by #170). The spec-shaped body (`{"process": {"process_graph": …}}`)
+compiles through the exact `POST /services` path — same narrowing, same
+typed diagnostics — and answers **one** small overview-backed `image/png`
+render covering the graph's `spatial_extent` (the referenced collection's
+extent when null). Nothing is persisted: no service, no catalog write, no
+trace-bus event. Two debug headers (not part of the openEO contract):
+`x-swath-trace` summarizes the render, and `x-swath-preview-tile` names
+the rendered tile — the address a published service would serve the
+identical bytes under.
+
+```sh
+curl -s -D - -o preview.png -X POST http://localhost:8080/result \
+  -H 'content-type: application/json' \
+  --data '{
+    "process": { "process_graph": {
+      "load": { "process_id": "load_collection", "arguments": {
+        "id": "hls-s30",
+        "spatial_extent": { "west": -105.537, "south": 39.1954, "east": -105.3581, "north": 39.3345 },
+        "temporal_extent": null,
+        "bands": ["b8a", "b04"] } },
+      "ndvi": { "process_id": "ndvi", "arguments": {
+        "data": { "from_node": "load" }, "nir": "b8a", "red": "b04" } },
+      "save": { "process_id": "save_result", "arguments": {
+        "data": { "from_node": "ndvi" }, "format": "png" }, "result": true }
+    } }
+  }'
+```
+
+```
+HTTP/1.1 200 OK
+content-type: image/png
+x-swath-trace: {"decision":"overview","bytes_read":139581,"total_ms":152,"ingest_to_pixel_ms":33441}
+x-swath-preview-tile: 7/48/26
+content-length: 883
+```
+
+Compile failures answer the same registry codes as `POST /services`
+(`ProcessGraphInvalid`, `ProcessParameterInvalid`, …) — identical codes
+for identical graphs on either endpoint. A body with no graph:
+
+```sh
+curl -s -X POST http://localhost:8080/result \
+  -H 'content-type: application/json' --data '{"process":{}}'
+```
+
+```json
+{"code":"ProcessGraphMissing","message":"Invalid process specified. It doesn't contain a process graph."}
+```
+
+When the preview's live estimate exceeds the bounded budget and no
+overview can serve it, the server refuses with the spec's
+`ProcessGraphComplexity` (400) — refusal over degradation; it never
+silently renders a different extent than requested.
 
 ### `GET /service_types`
 

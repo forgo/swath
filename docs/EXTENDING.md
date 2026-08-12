@@ -198,12 +198,15 @@ dependency), keep it default-ON so the shipped binary stays batteries-included, 
 the dependent tests so both profiles compile, and document the opt-out in the justfile. The
 full gate (`just check`) always runs the default profile.
 
-_Last verified against `32fad75`._
+_Last verified against `9ab35b8`._
 
 ## 3. A new openEO process (within the bounded profile)
 
 A derived *product* needs no code at all — that is the point of ADR 0010: publish a process
-graph via `POST /services` and it serves as a live XYZ layer. Extend the *process set* only
+graph via `POST /services` and it serves as a live XYZ layer; since
+[ADR 0014](decisions/0014-preview-bounded-sync-result.md) the same compiler path also backs
+`POST /result` previews, so a process added here is previewable and publishable through both
+endpoints with identical diagnostics. Extend the *process set* only
 when a product cannot be expressed with the current subset. The compiler entry point, verbatim
 from [`crates/swath-render/src/process.rs`](../crates/swath-render/src/process.rs):
 
@@ -263,7 +266,7 @@ introduce new data sources (that is §2), decide windows or granules (`spatial_e
 requests. Products needing more than the IR's producing/transforming pipeline are the reopen
 territory recorded in ADR 0013.
 
-_Last verified against `32fad75`._
+_Last verified against `9ab35b8`._
 
 ## 4. A new colormap
 
@@ -320,7 +323,7 @@ applies to gray results only; the plan validator rejects it on composites.
 - **Diagnostics** — the compiler snapshots that enumerate accepted palette names, and the
   config-file error tests (`crates/swath-cli/src/config.rs`).
 
-_Last verified against `32fad75`._
+_Last verified against `9ab35b8`._
 
 ## 5. The proof: a toy adapter built from §2
 

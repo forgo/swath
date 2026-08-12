@@ -60,11 +60,10 @@ marked inline — and clicking a line opens that tile's inspector.
 
 ## Current measured numbers
 
-| Where               | ingest-to-pixel | Notes                                |
-| ------------------- | --------------- | ------------------------------------ |
-| Local (dev laptop)  | 297 ms, 801 ms  | two runs, issue #35                  |
-| CI (GitHub runner)  | 535 ms          | `just e2e`, issue #35                |
-| **Asserted budget** | **10 000 ms**   | ~20x headroom over the CI number     |
+| Where                  | ingest-to-pixel | Notes                                                            |
+| ---------------------- | --------------- | ---------------------------------------------------------------- |
+| **Committed baseline** | **646 ms**      | `just perf-i2p`, stamped at `27deca2` — [`docs/perf/i2p-baseline.json`](perf/i2p-baseline.json), method in [`PERFORMANCE.md`](PERFORMANCE.md) §4 |
+| **Asserted budget**    | **10 000 ms**   | ~15x headroom over the committed baseline                        |
 
 ## The regression guarantee
 

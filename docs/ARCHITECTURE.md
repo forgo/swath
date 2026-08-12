@@ -120,7 +120,7 @@ All nodes are implemented (no planned/phantom nodes remain, so no implemented-vs
 needed). The Python `VirtualiZarr` sidecar (`python/sidecars/referencer`) is deliberately absent: it
 is the conformance *reference* for `swath-referencer` (ADR 0006), not a runtime component.
 
-_Last verified against `c944a41`._
+_Last verified against `9ab35b8`._
 
 ## 5. The Core (pure logic)
 
@@ -271,7 +271,7 @@ where
     C: TileCache;
 ```
 
-_Last verified against `c944a41`._
+_Last verified against `9ab35b8`._
 
 ## 7. Adapters and inbound APIs
 
@@ -299,14 +299,14 @@ a possible later seam and would get its own port when it lands.
 | --------------------------------------- | ----------------------------------- | ------------ | ----------------------------------------------- |
 | OGC API - Tiles                         | raster + derived-product tiles      | 1            | implemented (core, tileset, tilesets-list, dataset-tilesets, png) |
 | Control-plane REST + Trace SSE          | datasets/layers mgmt + x-ray stream | 1            | implemented                                     |
-| openEO (bounded authoring profile)      | product authoring (ADR 0010)        | 1            | implemented                                     |
+| openEO (bounded authoring profile)      | product authoring (ADR 0010); preview `POST /result` (ADR 0014) | 1            | implemented                                     |
 | OGC API - Maps                          | styled map imagery                  | deferred     | not implemented — an earlier draft paired it with Tiles at phase 1, but no endpoints, conformance classes, or tests exist; the standards map records the final call |
 | OGC API - Records                       | catalog/discovery                   | 2            | not started                                     |
 | OGC API - Processes                     | batch/externalized processing       | 2            | not started (authoring is openEO-only, ADR 0010) |
 | OGC API - EDR                           | point/time-series from cubes        | 3            | not started                                     |
 | OGC API - Features                      | vector/GeoParquet                   | 3            | not started                                     |
 
-_Last verified against `c944a41`._
+_Last verified against `9ab35b8`._
 
 ## 8. Data flows
 
@@ -419,7 +419,7 @@ swath/                          # Cargo workspace
 Phase-1 adapters are direct dependencies of the binary (Cargo features gate the embedded UI bundle
 and HDF5 support, not adapter selection). See §14 for third-party extension beyond compile time.
 
-_Last verified against `c944a41`._
+_Last verified against `9ab35b8`._
 
 ## 13. Frontend architecture
 
