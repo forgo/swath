@@ -87,8 +87,8 @@ offload** (`ARCHITECTURE.md` §16.2 — GDAL stays test-oracle-only); **deck.gl*
 
 ### Icechunk (first written record)
 
-Until this document, Icechunk existed in Swath only as charter vocabulary (`CHARTER.md` §§2, 7,
-8) and a "zero code hits" row in the standards-map evidence ledger — no decision had ever been
+Until this document, Icechunk existed in Swath only as charter vocabulary (`CHARTER.md` §§2, 7)
+and a "zero code hits" row in the standards-map evidence ledger — no decision had ever been
 written down. Recording it now: an **Icechunk adapter** would be a `RasterSource` (or future
 cube-source) adapter over `zarrs` + `zarrs_icechunk`, reading versioned, transactional Zarr
 stores — including virtual references *committed to an Icechunk repo* rather than shipped as

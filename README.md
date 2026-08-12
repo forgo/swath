@@ -91,7 +91,7 @@ Read in this order:
 1. [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) — the north star: mission, non-negotiable
    requirements (R1-R10), success criteria. Changes rarely and deliberately.
 2. [`docs/CHARTER.md`](docs/CHARTER.md) — the full vision: why now, the wedge, pillars,
-   milestones, positioning.
+   milestone phases.
 3. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — ports & adapters, the build/adopt/bind
    boundary, component model, data flows.
 4. [`docs/ENGINEERING.md`](docs/ENGINEERING.md) — repo standards: toolchains, linting,
