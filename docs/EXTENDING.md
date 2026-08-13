@@ -198,7 +198,7 @@ dependency), keep it default-ON so the shipped binary stays batteries-included, 
 the dependent tests so both profiles compile, and document the opt-out in the justfile. The
 full gate (`just check`) always runs the default profile.
 
-_Last verified against `9ab35b8`._
+_Last verified against `a1e77e4`._
 
 ## 3. A new openEO process (within the bounded profile)
 
@@ -268,7 +268,7 @@ the spatial window stays tile serving's decision (`spatial_extent` is accepted a
 Products needing more than the IR's producing/transforming pipeline are the reopen territory
 recorded in ADR 0013.
 
-_Last verified against `6b83794`._
+_Last verified against `a1e77e4`._
 
 ## 4. A new colormap
 
@@ -325,7 +325,7 @@ applies to gray results only; the plan validator rejects it on composites.
 - **Diagnostics** — the compiler snapshots that enumerate accepted palette names, and the
   config-file error tests (`crates/swath-cli/src/config.rs`).
 
-_Last verified against `9ab35b8`._
+_Last verified against `a1e77e4`._
 
 ## 5. The proof: a toy adapter built from §2
 
