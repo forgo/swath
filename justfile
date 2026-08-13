@@ -1044,12 +1044,13 @@ perf-doc:
     EOF
 
 # The docs-drift gate alone (issues #119/#173/#174): CONFIG.md vs the
-# clap/serde schemas, ENDPOINTS.md vs the axum routers, sha-stamp freshness,
-# deferral pointers, cross-doc claims, inline headline-number markers vs the
-# perf artifacts — mutation verification included. The same tests
-# run inside `just test` (they live in swath-cli); this recipe is the fast
-# docs-only loop and what CI's docs-check job runs (with full git history:
-# SWATH_DOCS_CHECK_REQUIRE_GIT=1 forbids the shallow-checkout skip there).
+# clap/serde schemas, ENDPOINTS.md vs the axum routers, source-fingerprint
+# stamp freshness, deferral pointers, cross-doc claims, inline
+# headline-number markers vs the perf artifacts — mutation verification
+# included. The same tests run inside `just test` (they live in swath-cli);
+# this recipe is the fast docs-only loop and what CI's docs-check job runs
+# (with full git history: SWATH_DOCS_CHECK_REQUIRE_GIT=1 forbids the
+# shallow-checkout skip of the gate's history-dependent tests there).
 docs-check:
     cargo nextest run -p swath-cli -E 'test(docs_check)'
 

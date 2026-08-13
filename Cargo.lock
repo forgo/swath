@@ -3215,6 +3215,7 @@ dependencies = [
  "object_store",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "swath-api",
  "swath-cache-objectstore",
  "swath-catalog-pgstac",

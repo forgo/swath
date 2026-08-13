@@ -1,7 +1,13 @@
 # Swath — Architecture
 
 _Working document. Draft v0.3 — August 2026. §§4, 6, 7 and 12 now describe the code as built and
-carry a "last verified against" commit; the remaining sections are design intent. The charter (v0.2)
+carry a "last verified against sources" fingerprint — a content hash of the section's referenced
+source files, checked by the docs gate (`crates/swath-cli/src/docs_check/stamps.rs`). Because the
+stamp names content rather than a commit, it survives squash-merges unchanged (the squash commit
+carries the PR's tree verbatim), so re-verifying a section needs no post-merge follow-up: if the
+sources are content-identical the existing stamp is already fresh, and if they changed, the gate's
+failure message prints the new fingerprint to paste after re-verifying. The remaining sections are
+design intent. The charter (v0.2)
 has been reconciled with the ADRs; where any doc disagrees with an ADR, the ADR wins. Engineering
 standards (toolchains, CI, testing, release) live in `ENGINEERING.md`._
 
@@ -121,7 +127,7 @@ All nodes are implemented (no planned/phantom nodes remain, so no implemented-vs
 needed). The Python `VirtualiZarr` sidecar (`python/sidecars/referencer`) is deliberately absent: it
 is the conformance *reference* for `swath-referencer` (ADR 0006), not a runtime component.
 
-_Last verified against `a1e77e4`._
+_Last verified against sources `1b3ad18f21ea`._
 
 ## 5. The Core (pure logic)
 
@@ -265,7 +271,7 @@ where
     C: TileCache;
 ```
 
-_Last verified against `a1e77e4`._
+_Last verified against sources `1bb2d692dd3a`._
 
 ## 7. Adapters and inbound APIs
 
@@ -300,7 +306,7 @@ a possible later seam and would get its own port when it lands.
 | OGC API - EDR                           | point/time-series from cubes        | 3            | not started                                     |
 | OGC API - Features                      | vector/GeoParquet                   | 3            | not started                                     |
 
-_Last verified against `86262cf`._
+_Last verified against sources `2fb686d18506`._
 
 ## 8. Data flows
 
@@ -417,7 +423,7 @@ swath/                          # Cargo workspace
 Phase-1 adapters are direct dependencies of the binary (Cargo features gate the embedded UI bundle
 and HDF5 support, not adapter selection). See §14 for third-party extension beyond compile time.
 
-_Last verified against `a1e77e4`._
+_Last verified against sources `1b3ad18f21ea`._
 
 ## 13. Frontend architecture
 
