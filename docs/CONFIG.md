@@ -3,28 +3,22 @@
 Every knob the `swath` binary accepts: CLI flags, `SWATH_*` environment
 variables, and the `--config` TOML file. The in-binary help remains the
 source of truth; **this file is kept synchronized mechanically** — the
-tables between `config-check` markers are diffed against the actual clap
-command tree and serde config schema by `swath-cli`'s docs-drift tests
-(`crates/swath-cli/src/docs_check.rs`, run by `just test` and CI). A key
-added, renamed, or removed without updating this file fails the build;
-so does documenting a key the code does not accept.
-
-Companion docs: [`OPERATIONS.md`](OPERATIONS.md) (what the knobs mean
-operationally), [`ENDPOINTS.md`](ENDPOINTS.md) (the HTTP surface they
-configure).
+tables between `config-check` markers are diffed against the clap tree
+and serde schema by the docs-drift tests
+(`crates/swath-cli/src/docs_check.rs`): a key added, renamed, or removed
+without updating this file fails the build, and so does a phantom key.
+Companions: [`OPERATIONS.md`](OPERATIONS.md), [`ENDPOINTS.md`](ENDPOINTS.md).
 
 ## Precedence
 
-Configuration is layered, later layers overriding earlier ones scalar by
-scalar: **built-in defaults** (loopback bind `127.0.0.1:8080`, base URL
-`http://localhost:<port>`, no cache, no catalog, CORS off) → the **TOML
-file** (`--config`; layers and datasets live *only* here) →
-**environment / flags** (each scalar flag has a `SWATH_*` variable;
-either outranks the file). `--fixtures` conflicts with `--config` and
-serves the built-in HLS demo registry from `./tests/fixtures`. The
-materialization budget resolves knob by knob: defaults → `[budget]` →
-the global flags/env → per-layer `[layers.budget]`, most specific
-wins.
+Layered, later layers overriding earlier scalar by scalar: **built-in
+defaults** (loopback bind `127.0.0.1:8080`, no cache, no catalog, CORS
+off) → the **TOML file** (`--config`; layers and datasets live *only*
+here) → **environment / flags** (each scalar flag has a `SWATH_*`
+variable). `--fixtures` conflicts with `--config` and serves the
+built-in HLS registry from `./tests/fixtures`. The budget resolves knob
+by knob: defaults → `[budget]` → the global flags/env → per-layer
+`[layers.budget]`, most specific wins.
 
 ## `swath serve` — flags and environment
 
@@ -32,17 +26,17 @@ wins.
 
 | Flag | Env | Value | Meaning |
 |---|---|---|---|
-| `--config` | — | `PATH` | TOML config file (schema below). Conflicts with `--fixtures`. |
-| `--fixtures` | — | — | Serve the built-in HLS demo layers (`truecolor`, `ndvi`) from `./tests/fixtures`, zero config. |
+| `--config` | — | `PATH` | TOML config file (schema below); conflicts with `--fixtures`. |
+| `--fixtures` | — | — | Serve the built-in HLS demo layers from `./tests/fixtures`, zero config. |
 | `--bind` | `SWATH_BIND` | `ADDR:PORT` | Socket address to listen on. Default `127.0.0.1:8080`. |
 | `--base-url` | `SWATH_BASE_URL` | `URL` | Base URL minted into OGC/openEO links. Default `http://localhost:<port>`. |
-| `--store-root` | `SWATH_STORE_ROOT` | `ROOT` | Object-store root: a local directory or `s3://bucket[/prefix]`. Required unless `--fixtures`. |
-| `--catalog` | `SWATH_CATALOG` | `URL` | Catalog mode: postgres URL of a pgstac database. Layers then come from `[[datasets]]`. Conflicts with `--fixtures`. |
-| `--watch-dir` | `SWATH_WATCH_DIR` | `PATH` | Watch this directory for `<granule-id>.json` manifests (catalog mode only). Conflicts with `--fixtures`. |
-| `--cache` | `SWATH_CACHE` | `ROOT` | Tile-cache root (same grammar as the store root). Absent: no cache is consulted. |
-| `--overview-oversample` | `SWATH_OVERVIEW_OVERSAMPLE` | `RATIO` | Global default for the planner's overview eligibility slack (default 1.2, GDAL's rule). |
-| `--max-estimated-live-bytes` | `SWATH_MAX_ESTIMATED_LIVE_BYTES` | `BYTES` | Global default live-render ceiling: refuse tiles estimated over this many bytes when nothing cheaper can serve. Absent: never refuse. |
-| `--cors-allowed-origins` | `SWATH_CORS_ALLOWED_ORIGINS` | `ORIGINS` | Comma-separated exact origins, or `*` for any. Default: empty — no CORS headers at all. |
+| `--store-root` | `SWATH_STORE_ROOT` | `ROOT` | Object-store root: local directory or `s3://bucket[/prefix]`; required unless `--fixtures`. |
+| `--catalog` | `SWATH_CATALOG` | `URL` | Catalog mode: pgstac postgres URL; layers then come from `[[datasets]]`. |
+| `--watch-dir` | `SWATH_WATCH_DIR` | `PATH` | Watch this directory for `<granule-id>.json` manifests (catalog mode only). |
+| `--cache` | `SWATH_CACHE` | `ROOT` | Tile-cache root (same grammar as the store root); absent: no cache. |
+| `--overview-oversample` | `SWATH_OVERVIEW_OVERSAMPLE` | `RATIO` | Global overview eligibility slack (default 1.2, GDAL's rule). |
+| `--max-estimated-live-bytes` | `SWATH_MAX_ESTIMATED_LIVE_BYTES` | `BYTES` | Global live-render ceiling: refuse tiles estimated over this when nothing cheaper can serve; absent: never refuse. |
+| `--cors-allowed-origins` | `SWATH_CORS_ALLOWED_ORIGINS` | `ORIGINS` | Comma-separated exact origins, or `*`; default empty — no CORS headers. |
 
 <!-- config-check:end flags swath serve -->
 
@@ -58,8 +52,7 @@ endpoint come from the standard `object_store` AWS environment
 ## `swath ingest reference` — flags
 
 Generates a legacy granule's virtual-reference manifest (ADR 0006) — the
-same generation the filedrop legacy path performs automatically at
-ingest.
+same generation the filedrop legacy path performs at ingest.
 
 <!-- config-check:begin flags swath ingest reference -->
 
@@ -73,11 +66,10 @@ ingest.
 ## `swath materialize` — flags
 
 Materializes overview pyramids into `pyramids/` under the store root
-(issue #183; layout in `crates/adapters/swath-pyramid-objectstore`),
-reading the same config file as `swath serve`. Idempotent and resumable;
-the serving process picks new levels up with no restart. `nearest`
-layers get nearest-aggregated pyramids; everything else averages,
-nodata-aware.
+(#183; layout in `crates/adapters/swath-pyramid-objectstore`), reading
+the same config as `swath serve`. Idempotent and resumable; the serving
+process picks new levels up with no restart; `nearest` layers aggregate
+nearest, everything else averages, nodata-aware.
 
 <!-- config-check:begin flags swath materialize -->
 
@@ -93,7 +85,7 @@ nodata-aware.
 ## The TOML config file
 
 Kebab-case keys; **unknown keys are rejected** (`deny_unknown_fields`) —
-a typo fails loudly at startup, never silently falls back to a default.
+a typo fails loudly at startup.
 
 ### Top-level keys
 
@@ -116,30 +108,30 @@ a typo fails loudly at startup, never silently falls back to a default.
 
 Validation at startup: catalog mode requires `[[datasets]]` (and vice
 versa, as does `watch-dir`); static `[[layers]]` and catalog mode are
-mutually exclusive; layer ids are unique across all datasets (shared URL
+mutually exclusive; layer ids are unique across datasets (shared URL
 space), dataset ids unique.
 
 ### `[budget]` — and `[layers.budget]` / `[datasets.layers.budget]`
 
-Every knob is optional at every level; resolution is knob by knob with
-per-layer values outranking the global default (see Precedence above).
+Every knob is optional at every level; per-layer values outrank the
+global default knob by knob (see Precedence).
 
 <!-- config-check:begin budget -->
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `cache-enabled` | bool | `true` | Consult/fill the tile cache for this layer (only effective when a cache root is configured at all). |
+| `cache-enabled` | bool | `true` | Consult/fill the tile cache for this layer (needs a configured cache root). |
 | `overview-oversample` | float | `1.2` | Overview eligibility slack: an overview factor is eligible when `factor <= desired ratio × this value`. |
-| `max-estimated-live-bytes` | integer | none (never refuse) | Refuse live renders estimated over this many bytes. Per-layer values can set or tighten a global ceiling, not clear it. |
+| `max-estimated-live-bytes` | integer | none (never refuse) | Refuse live renders estimated over this; per-layer values can set or tighten the ceiling, not clear it. |
 
 <!-- config-check:end budget -->
 
 ### `[[layers]]` — and `[[datasets.layers]]`
 
-One schema, two contexts (the drift test pins that they stay one
-schema): in static `[[layers]]`, `bands` values are **asset URIs under
-the store root**; in `[[datasets.layers]]` they are **dataset band
-names**, resolved per tile from the latest ingested granule.
+One schema, two contexts (the drift test pins it): static `[[layers]]`
+`bands` values are **asset URIs under the store root**;
+`[[datasets.layers]]` values are **dataset band names**, resolved per
+tile from the latest ingested granule.
 
 <!-- config-check:begin layer -->
 
@@ -149,16 +141,16 @@ names**, resolved per tile from the latest ingested granule.
 | `title` | string | the id | Human-readable title. |
 | `description` | string | `""` | Tileset-metadata description. |
 | `kind` | string | — (required) | The pixel pipeline: `truecolor` \| `ndvi` (values below). |
-| `bands` | table | — (required) | Band role → asset URI (static) or dataset band name (catalog). `truecolor` consumes `r`,`g`,`b`; `ndvi` consumes `nir`,`red` — exactly. |
-| `rescale` | `[min, max]` | `truecolor`: none (raw values clamp); `ndvi`: `[-1, 1]` | Linear rescale of pipeline output to 0..255. |
-| `colormap` | string | `ndvi`: `rdylgn` | Colormap applied to the gray result — `ndvi` only (`truecolor` renders RGB directly and rejects the key). |
+| `bands` | table | — (required) | Band role → asset URI (static) or dataset band name (catalog); `truecolor` consumes `r`,`g`,`b`, `ndvi` consumes `nir`,`red` — exactly. |
+| `rescale` | `[min, max]` | `truecolor`: none; `ndvi`: `[-1, 1]` | Linear rescale of pipeline output to 0..255. |
+| `colormap` | string | `ndvi`: `rdylgn` | Colormap applied to the gray result — `ndvi` only (`truecolor` rejects the key). |
 | `resampling` | string | `bilinear` | Warp kernel (values below). |
 | `tile-size` | integer | `256` | Tile side length in pixels. |
-| `budget` | table | resolved global default | This layer's materialization budget (`[layers.budget]`, keys above), overriding the global default knob by knob. |
+| `budget` | table | resolved global default | This layer's budget (`[layers.budget]`), overriding the global default knob by knob. |
 
 <!-- config-check:end layer -->
 
-Enum vocabularies (an unknown spelling fails at parse):
+Enum vocabularies (unknown spellings fail at parse):
 
 <!-- config-check:begin enum kind -->
 
@@ -184,13 +176,13 @@ Enum vocabularies (an unknown spelling fails at parse):
 
 | Value (resampling) | Meaning |
 |---|---|
-| `bilinear` | Bilinear, nodata excluded and weights renormalized (the continuous-band kernel of the golden suites). The default. |
+| `bilinear` | Bilinear, nodata excluded, weights renormalized. The default. |
 | `nearest` | Nearest neighbor (categorical bands). |
 
 <!-- config-check:end enum resampling -->
 
-(`kind` is the walking-skeleton vocabulary for operator-authored layers;
-arbitrary pipelines are authored through `POST /services`, ADR 0010.)
+(`kind` is the walking-skeleton vocabulary; arbitrary pipelines are
+authored through `POST /services`, ADR 0010.)
 
 ### `[[datasets]]` (catalog mode)
 
@@ -214,25 +206,20 @@ ingest and require their dataset to pre-exist.
 
 The compose stack's config ([`tests/e2e/swath-catalog.toml`](../tests/e2e/swath-catalog.toml))
 is the living example; in miniature (a static-layers file is the same minus
-`catalog`/`watch-dir`/`[[datasets]]`, with `[[layers]]` whose `bands` values
-are asset URIs under the store root):
+`catalog`/`watch-dir`/`[[datasets]]`, with `[[layers]]` whose `bands` are asset
+URIs under the store root):
 
 ```toml
-bind = "0.0.0.0:8080"
-base-url = "http://localhost:8080"
 store-root = "/data"            # or "s3://bucket/prefix" (AWS_* env)
 cache = "/cache"
 catalog = "postgres://swath:swath-local-dev@pgstac:5432/swath"
 watch-dir = "/data/drop"
 
 [budget]
-overview-oversample = 1.2
 max-estimated-live-bytes = 50000000
 
 [[datasets]]
 id = "hls-s30"
-title = "HLS Sentinel-2 (S30)"
-license = "CC0-1.0"
 
 [[datasets.layers]]
 id = "ndvi"

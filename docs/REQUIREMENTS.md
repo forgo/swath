@@ -1,8 +1,8 @@
 # Swath — Requirements & Vision (North Star)
 
 *The enduring reference; it changes rarely and deliberately. Everything else may evolve freely
-but should always be checkable against what is written here — drift means either a conscious,
-dated amendment in §10 or a course correction. Read this first, forever.*
+but should always be checkable against what is written here — drift means a conscious, dated
+amendment in §10 or a course correction. Read this first, forever.*
 
 **Status:** v1.0 — 2026-08-08; amended through 2026-08-11 (§10).
 
@@ -10,24 +10,24 @@ dated amendment in §10 or a course correction. Read this first, forever.*
 
 ## 1. Mission (one sentence)
 
-**Satellite data comes in, and is immediately available on a map — from a single pane of glass —
-and anyone can derive a new product from the live data flow and publish it the same way.**
+**Satellite data comes in and is immediately available on a map — from a single pane of glass —
+and anyone can derive a new product from the live flow and publish it the same way.**
 
 ## 2. The problem we exist to solve
 
-The cloud-native geospatial primitives (dynamic tilers, STAC, cube formats, virtualization) are
-mature, but no product fuses them into one managed, low-latency, observable loop. Standing that
-up today means hand-wiring several projects per deployment. Swath is that missing product layer.
+The cloud-native geospatial primitives are mature, but no product fuses them into one managed,
+low-latency, observable loop — standing that up means hand-wiring several projects per
+deployment. Swath is that missing product layer.
 
 ## 3. North-star metric
 
-**Ingest-to-pixel latency** — the time from *"a new granule arrives"* to *"a correct tile is
-visible on the map."* Every subsystem is measured against it; the platform reports it
-continuously and honestly.
+**Ingest-to-pixel latency** — from *"a new granule arrives"* to *"a correct tile is visible on
+the map."* Every subsystem is measured against it; the platform reports it continuously and
+honestly.
 
 ## 4. Non-negotiable requirements
 
-These are the durable commitments. Numbered so we can reference them in reviews and ADRs.
+The durable commitments, numbered for reference in reviews and ADRs.
 
 - **R1 — Immediacy.** New data becomes visible on a map with no manual per-granule work. The happy path is
   automatic: arrive → catalog → serve.
@@ -55,8 +55,8 @@ These are the durable commitments. Numbered so we can reference them in reviews 
 
 ### R1–R10 status (annotated 2026-08-11, issue #123)
 
-A dated snapshot, not a rewrite: the requirement texts above are unchanged; scope evolutions are
-the §10 amendments (A1–A4). "Met" means evidence exists in the tree and is linked.
+A dated snapshot, not a rewrite — the requirement texts above are unchanged; scope evolutions
+are the §10 amendments. "Met" means linked evidence exists in the tree.
 
 | Req | Status | Evidence |
 |---|---|---|
@@ -73,28 +73,25 @@ the §10 amendments (A1–A4). "Met" means evidence exists in the tree and is li
 
 ## 5. What we are building (pillars)
 
-1. **Ground-segment ingest spine** — event-driven ingest that also absorbs legacy file archives
-   without rewriting them.
-2. **Data-scientist product loop** — author a product as a standard process graph; the
-   materialization engine compiles it into low-latency dynamic tiles.
-3. **Single-pane control plane** — datasets/layers over the OGC API family; STAC hidden.
-4. **Frontier: geo-embeddings** — embeddings as a first-class product type.
+**Ground-segment ingest spine** (event-driven, absorbing legacy archives without rewrites);
+the **data-scientist product loop** (a standard process graph compiled into low-latency
+dynamic tiles); the **single-pane control plane** (datasets/layers over the OGC API family,
+STAC hidden); the **geo-embeddings frontier** (embeddings as a first-class product type).
 
 ## 6. How we build (principles)
 
-Hexagonal core (ports & adapters). Standards-as-interfaces. Pure-Rust, single-binary core.
-Glass-box by construction (the trace is the test oracle). Go deep on a vertical before going
-wide. Priorities, in order: **correctness → performance/memory → UX → safety → docs → standards
-breadth.**
+Hexagonal core. Standards-as-interfaces. Pure-Rust, single-binary core. Glass-box by
+construction (the trace is the test oracle). Deep before wide. Priorities, in order:
+**correctness → performance/memory → UX → safety → docs → standards breadth.**
 
 ## 7. Success criteria (the "are we still on vision?" checklist)
 
 On-vision means answering *yes* to each: zero-manual-step granules with a stated
-ingest-to-pixel latency (R1, R3); a non-expert never sees "STAC" (R2); one-motion product
-publishing (R3); the x-ray explains every tile and a test asserts the same fact (R4);
-standards-validated interfaces (R5); a vanished upstream tool costs one adapter (R6); the
-differentiating logic is ours, oracle-tested (R7); one command stands up the system (R8);
-extension without touching the core (R9).
+ingest-to-pixel latency (R1, R3); a non-expert never sees "STAC" (R2); one-motion publishing
+(R3); the x-ray explains every tile and a test asserts the same fact (R4); standards-validated
+interfaces (R5); a vanished upstream tool costs one adapter (R6); the differentiating logic is
+ours, oracle-tested (R7); one command stands up the system (R8); extension without touching the
+core (R9).
 
 ## 8. Non-goals
 
@@ -110,35 +107,33 @@ own merits.
 
 ## 10. Amendments log
 
-Changes to this north star are recorded here, dated, with rationale. If this log grows quickly,
-we are either learning fast or drifting — and either way it should be a conscious, visible act.
+Changes to this north star are recorded here, dated, with rationale — a conscious, visible
+act.
 
 - 2026-08-08 — v1.0 established.
 
-- **2026-08-11 — A1: R2 scope as built (openEO clients see STAC; Swath's own pane never does).**
-  R2's "never STAC" is scoped to Swath's own control plane and UI; the openEO authoring surface
-  serves STAC-based collection metadata because openEO collections *are* STAC — at a standards
-  boundary, R5 governs. *Where decided:* ADR 0010, `docs/design/catalog-domain.md`.
-  *Maintainer sign-off:* PR #157.
+- **2026-08-11 — A1: R2 scope as built.** "Never STAC" is scoped to Swath's own control plane
+  and UI; the openEO surface serves STAC-based collection metadata because openEO collections
+  *are* STAC — at a standards boundary, R5 governs. *Decided:* ADR 0010,
+  `docs/design/catalog-domain.md`. *Sign-off:* PR #157.
 
 - **2026-08-11 — A2: compose-to-oracle demotion.** §2's premise implied composing the existing
   serving primitives; as built, Swath owns the tiler, planner, compiler, trace, and
   orchestration in pure Rust, composes pgstac and object storage, binds proj4rs, and demotes
-  the rest to correctness oracles (`tests/oracle/`); VirtualiZarr is the ingest-time conformance
-  reference (ADR 0006). Owning the hot path proved out once measured
-  (<!-- number:i2p-ms -->646 ms<!-- /number:i2p-ms --> ingest-to-pixel;
+  the rest to correctness oracles (`tests/oracle/`; VirtualiZarr is the ingest-time conformance
+  reference, ADR 0006). Owning the hot path proved out once measured
+  (<!-- number:i2p-ms -->646 ms<!-- /number:i2p-ms -->;
   <!-- number:ref-ratio-approx -->~40×<!-- /number:ref-ratio-approx --> referencer), and
-  validating against the ecosystem is a stronger correctness claim than inheriting from it.
-  *Where decided:* ADR 0002, the oracle harness (#19), ADRs 0006/0008. *Sign-off:* PR #157.
+  validating against the ecosystem is a stronger claim than inheriting from it. *Decided:*
+  ADR 0002, the oracle harness (#19), ADRs 0006/0008. *Sign-off:* PR #157.
 
 - **2026-08-11 — A3: R5 bounded-profile honesty.** R5 is satisfied at *documented bounded
-  profiles*: each surface implements its standard to an honest subset whose capabilities
-  document advertises **only what exists**; full-breadth conformance is roadmap, not implied.
-  *Where decided:* ADR 0010; conformance tests `crates/swath-api/tests/`.
-  *Maintainer sign-off:* PR #157.
+  profiles*: each surface implements an honest subset whose capabilities document advertises
+  **only what exists**; full-breadth conformance is roadmap, not implied. *Decided:* ADR 0010;
+  conformance tests `crates/swath-api/tests/`. *Sign-off:* PR #157.
 
-- **2026-08-11 — A4: R8 one command, from checkout (and a no-checkout demo one-liner).** Defined
-  pre-1.0 as: from a fresh checkout, one command stands up the system (`docker compose up` /
-  `just demo`), and with no checkout, one CI-smoke-tested command runs the demo container.
-  Installers and platform packages are graduation-tier (`docs/RELEASING.md`). *Where decided:*
-  issue #104; ENGINEERING §7. *Maintainer sign-off:* PR #157.
+- **2026-08-11 — A4: R8 one command, from checkout.** Defined pre-1.0 as: from a fresh
+  checkout, one command stands up the system (`docker compose up` / `just demo`), and with no
+  checkout, one CI-smoke-tested command runs the demo container; installers are
+  graduation-tier (`docs/RELEASING.md`). *Decided:* issue #104; ENGINEERING §7. *Sign-off:*
+  PR #157.
