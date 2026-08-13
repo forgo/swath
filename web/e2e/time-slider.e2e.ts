@@ -55,17 +55,26 @@ declare global {
   }
 }
 
-/** The test's own subscription — opened before the overlay's so its
- * stream is a superset of what the overlay saw. */
+/** The test's own subscription, awaited until the stream is OPEN —
+ * not just constructed. The distinction is load-bearing on CI: the
+ * fire view's initial load saturates the browser's per-origin
+ * connection budget with ~28 tile requests, and a still-queued
+ * EventSource misses every envelope published before it connects (SSE
+ * has no replay) — the badge/stream agreement below could then never
+ * complete. Locally the tiles drain fast enough to mask it. */
 async function subscribeToTraces(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const received: Envelope[] = [];
-    window.__timeReceived = received;
-    const source = new EventSource("/traces");
-    source.addEventListener("trace", (event) => {
-      received.push(JSON.parse((event as MessageEvent<string>).data) as Envelope);
-    });
-  });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        const received: Envelope[] = [];
+        window.__timeReceived = received;
+        const source = new EventSource("/traces");
+        source.addEventListener("trace", (event) => {
+          received.push(JSON.parse((event as MessageEvent<string>).data) as Envelope);
+        });
+        source.addEventListener("open", () => resolve(), { once: true });
+      }),
+  );
 }
 
 /** Waits until the zero-config bounds fit has landed and settled. */
