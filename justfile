@@ -1054,5 +1054,15 @@ perf-doc:
 docs-check:
     cargo nextest run -p swath-cli -E 'test(docs_check)'
 
+# The word-count measurement behind the per-doc budgets (issue #177):
+# whitespace-delimited words (`wc -w`) per doc over README.md + docs/*.md,
+# plus the total — the same counting rule the budget gate applies
+# (crates/swath-cli/src/docs_check/budgets.rs uses split_whitespace, which
+# agrees with `wc -w` on every committed doc).
+docs-words:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    wc -w README.md docs/*.md | sort -n
+
 # The one-command gate: everything CI enforces.
 check: fmt-check lint machete test deny zizmor reuse
