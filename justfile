@@ -480,6 +480,33 @@ load-h2h: (setup-ci "oha")
     trap 'docker compose down -v; docker rm -f swath-h2h-titiler >/dev/null 2>&1 || true' EXIT
     tests/load/h2h.sh "$started"
 
+# `just load-temporal` (issue #184): the M7 measurement — temporal
+# frame-serving over the six-date Park Fire series (ADR 0015 / #223) and
+# overview-backed tile serving through the materialized pyramid path
+# (#183/#218). Brings up the SAME compose stack (tests/e2e/stack-up.sh —
+# the single owner of lifecycle; its full path drops the single-date
+# granule and polls the proven tile live) and builds the release binary
+# (materialize runs host-side — the container's /data mount is read-only,
+# writers live outside), then tests/load/temporal.sh runs the pinned
+# scenarios: (d) the fire drop + the `datetime=` frame loop, cold (every
+# dated frame a Live render) then hot (every frame a granule-scoped cache
+# hit); (e) an overview zoom ladder around a timed `swath materialize`,
+# every rung decision-probed (x-swath-trace header + SSE envelope levels).
+# Distills the committed baseline docs/perf/temporal-baseline.{json,md}.
+load-temporal:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Same port discipline as `just demo`: refuse to collide with a live
+    # sibling stack (a running e2e/demo shares :8080 and the compose project).
+    if curl -sf http://localhost:8080/healthz >/dev/null 2>&1; then
+        echo "FAIL: a swath stack is already up on :8080 — 'docker compose down -v' first"; exit 1
+    fi
+    started=$(date +%s)
+    cargo build --release -q -p swath-cli
+    trap 'docker compose down -v' EXIT
+    tests/e2e/stack-up.sh
+    tests/load/temporal.sh "$started"
+
 # THE stopwatch demo (issue #35, CHARTER.md §10 Phase 1): the same
 # north-star path the e2e asserts forever, run for human eyes. Brings up
 # the full stack (shared tests/e2e/stack-up.sh), serves the viewer, then
@@ -802,6 +829,7 @@ perf-doc:
     load = json.loads((perf / "load-baseline.json").read_text())
     i2p = json.loads((perf / "i2p-baseline.json").read_text())
     ref = json.loads((perf / "referencer-baseline.json").read_text())
+    temporal = json.loads((perf / "temporal-baseline.json").read_text())
 
     def human_ns(ns: float) -> str:
         if ns < 1_000:
@@ -820,6 +848,7 @@ perf-doc:
             f"| stage benches (`just bench-baseline`) | `docs/perf/bench-baseline.json` | `{bench['git_sha'][:7]}` | {bench['captured']} |",
             f"| load scenarios (`just load`) | `docs/perf/load-baseline.json` | `{load['git_sha']}` | {load['generated']} |",
             f"| referencer (`just perf-referencer`) | `docs/perf/referencer-baseline.json` | `{ref['git_sha'][:7]}` | {ref['captured']} |",
+            f"| temporal + overview (`just load-temporal`) | `docs/perf/temporal-baseline.json` | `{temporal['git_sha']}` | {temporal['generated']} |",
         ]
     )
 
@@ -879,6 +908,37 @@ perf-doc:
     )
     blocks["referencer"] = "\n".join(rows)
 
+    rows = [
+        "| scenario | requests | errors | rps | p50 ms | p95 ms | p99 ms | max ms |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    labels = {
+        "frames_cold": "(d) frame loop, cold (all Live)",
+        "frames_hot": "(d) frame loop, hot (all cache hits)",
+        "overview_live_z12": "(e) z12 — Live (full resolution)",
+        "overview_embedded_z10": "(e) z10 pre-materialize (embedded ov. ×2)",
+        "overview_pyramid_z11": "(e) z11 post-materialize (pyramid ov. ×2)",
+        "overview_pyramid_z10": "(e) z10 post-materialize (pyramid ov. ×4)",
+    }
+    for key, label in labels.items():
+        s = temporal["scenarios"][key]
+        rows.append(
+            f"| {label} | {s['requests']} | {s['errors']} | {s['rps']} "
+            f"| {s['p50_ms']} | {s['p95_ms']} | {s['p99_ms']} | {s['max_ms']} |"
+        )
+    ladder = "; ".join(
+        f"{key.split('_', 1)[1]} {json.dumps(temporal['scenarios'][key]['sse_decisions'])}"
+        for key in labels
+        if key.startswith("overview_")
+    )
+    rows.append(
+        f"\nFrame decisions (`x-swath-trace`): cold "
+        f"{json.dumps(temporal['scenarios']['frames_cold']['decisions'])}, hot "
+        f"{json.dumps(temporal['scenarios']['frames_hot']['decisions'])}. "
+        f"Overview-rung decisions (SSE envelopes, level included): {ladder}."
+    )
+    blocks["temporal"] = "\n".join(rows)
+
     doc = pathlib.Path("docs/PERFORMANCE.md")
     text = doc.read_text()
     for name, body in blocks.items():
@@ -935,6 +995,11 @@ perf-doc:
         "2cpu-hot-rps": f"{comma(hot2[3])} req/s",
         "2cpu-cold-p50": f"{cold2[4]} ms",
         "2cpu-healthz-p99": f"{healthz2[6]} ms",
+        "frame-cold-p50-approx": f"~{sig2(temporal['scenarios']['frames_cold']['p50_ms'])} ms",
+        "frame-hot-p50-approx": f"~{sig2(temporal['scenarios']['frames_hot']['p50_ms'])} ms",
+        "ov-live-p50-approx": f"~{sig2(temporal['scenarios']['overview_live_z12']['p50_ms'])} ms",
+        "ov-pyramid-p50-approx": f"~{sig2(temporal['scenarios']['overview_pyramid_z10']['p50_ms'])} ms",
+        "materialize-ms": f"{temporal['materialize']['wall_ms']} ms",
     }
 
     marker_docs = [

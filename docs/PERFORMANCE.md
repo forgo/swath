@@ -10,7 +10,7 @@ re-run. Where a historic claim did not reproduce as stated, the honest number is
 Every figure below traces to one of these artifacts. The sha is the commit the measurement ran on;
 `just perf-doc` regenerates all tables in this document — and every inline `number:<key>`
 marker-pair headline figure here and in the README, `DEMO.md`, `CHARTER.md`, `REQUIREMENTS.md`,
-`ARCHITECTURE.md`, `COMPARISON.md`, and the wedge notes (syntax in §9) — from
+`ARCHITECTURE.md`, `COMPARISON.md`, and the wedge notes (syntax in §10) — from
 the committed artifacts. Headline numbers are never hand-typed outside a marker; the docs-check
 gate (`just docs-check`) fails on a stale or missing marker and on any naked headline literal.
 
@@ -21,12 +21,14 @@ gate (`just docs-check`) fails on a stale or missing marker and on any naked hea
 | stage benches (`just bench-baseline`) | `docs/perf/bench-baseline.json` | `27deca2` | 2026-08-10 |
 | load scenarios (`just load`) | `docs/perf/load-baseline.json` | `27deca2` | 2026-08-10T17:52:37Z |
 | referencer (`just perf-referencer`) | `docs/perf/referencer-baseline.json` | `27deca2` | 2026-08-10 |
+| temporal + overview (`just load-temporal`) | `docs/perf/temporal-baseline.json` | `3f44d55` | 2026-08-13T08:18:58Z |
 <!-- /table:stamp -->
 
 ## 1. Method, before numbers
 
 1. **One recipe per instrument.** Each class of measurement has exactly one entry point
-   (`just perf-i2p`, `just bench-baseline`, `just load`, `just perf-referencer`). What CI or a
+   (`just perf-i2p`, `just bench-baseline`, `just load`, `just load-temporal`,
+   `just perf-referencer`). What CI or a
    reviewer runs is what produced the tables here — there is no separate "benchmark script for the
    docs".
 2. **Committed artifacts are the ground truth.** The recipes distill raw output into JSON under
@@ -65,6 +67,7 @@ Not controlled: thermal state, background processes, page-cache contents. "Cold"
 | Render-stage benches | `just bench-baseline` (runs `just bench`) | Criterion microbenches over the committed HLS fixtures — planner (`swath-core`) plus render stages (`swath-render`): source window read, warp, IR eval, PNG encode, full-tile composite. No network. Median + MAD (ns) distilled per bench | `docs/perf/bench-baseline.json` |
 | Concurrency / load | `just load` | Same compose stack as e2e (`tests/e2e/stack-up.sh`), then pinned scenarios (`tests/load/load.sh`, parameters in `tests/load/load.py`): (a) hot-cache tile storm, (b) cold live-render burst (unique tiles, each exactly once), (c) mixed storm of the heaviest live warps while a second oha measures `/healthz` and curl holds an SSE `/traces` subscription | `docs/perf/load-baseline.json` (+ `.md` rendering) |
 | Referencer latency | `just perf-referencer` | Production Rust generator (release `swath ingest reference`) vs the VirtualiZarr sidecar (`python/sidecars/referencer`) on the pinned VNP09GA granule; full-process wall clock, run 1 = cold, warm = median of the remaining 9 runs | `docs/perf/referencer-baseline.json` |
+| Temporal frames + overviews | `just load-temporal` | Same compose stack, plus the six-date Park Fire series dropped mid-run: (d) the `datetime=` frame loop cold (all Live) then hot (all cache hits), (e) an overview zoom ladder around a timed `swath materialize` — every request decision-probed via `x-swath-trace`, overview levels pinned via SSE envelopes (`tests/load/temporal.{sh,py}`) | `docs/perf/temporal-baseline.json` (+ `.md` rendering) |
 
 ## 4. Ingest-to-pixel (the headline)
 
@@ -189,7 +192,57 @@ process — so per-invocation is the operationally honest unit. But stated plain
 architecture result (no interpreter, no warm-up, 4.5 MB static binary vs a ~273 MB venv), not a
 claim that Rust scans HDF5 chunk indexes <!-- number:ref-ratio-approx -->~40×<!-- /number:ref-ratio-approx --> faster than h5py once Python is already warm.
 
-## 8. What we don't claim
+## 8. Temporal frame-serving and overview-backed tiles
+
+The M7 measurement (`just load-temporal`): the time slider's serving path (ADR 0015, issue #223)
+and the materialized overview path (`swath materialize`, issues #183/#218). Environment: the §2
+laptop and compose stack (the artifact records its own machine stamp), with one addition to the
+serve dataset — the six-date Park Fire fixture series (`tests/fixtures/README.md`, 24 COGs,
+~2.3 MB, one 256×256-pixel window across six 2024 acquisitions) is dropped mid-run through the
+same filedrop path the e2e uses, and is cataloged as its own dataset. Scenario parameters and
+rationale: `tests/load/temporal.py`; orchestration: `tests/load/temporal.sh`. Every request's
+render decision is recorded from the `x-swath-trace` header, and the report *fails* unless the
+decision mix is exactly what each scenario is defined by — the latencies below are proven to be
+the paths they claim to measure, not assumed.
+
+**(d) Animation frames.** The frame loop a time-slider scrub replays: every interior z14 tile of
+the fire footprint (the animation viewport), requested with `datetime=<acquisition instant>` for
+each of the six dates in order. Cold — a fresh tile cache, so every dated frame is a live
+render — p50 <!-- number:frame-cold-p50-approx -->~350 ms<!-- /number:frame-cold-p50-approx -->
+per tile; the same loop again is all granule-scoped cache hits at p50
+<!-- number:frame-hot-p50-approx -->~8 ms<!-- /number:frame-hot-p50-approx --> — the temporal cache
+identity (granule id, not the datetime string) is what makes a replayed animation this cheap.
+
+**(e) The overview ladder.** One tile per zoom rung, rendered repeatedly with the tile cache
+cleared before every request, so each rung measures its *render* path. At z12 the planner runs
+full-resolution live (p50 <!-- number:ov-live-p50-approx -->~260 ms<!-- /number:ov-live-p50-approx -->).
+Before materialization, the z10 rung already serves the fixtures' embedded ×2 overview; after
+`swath materialize` (<!-- number:materialize-ms -->578 ms<!-- /number:materialize-ms --> for every
+layer of both datasets, run mid-scenario) the same z10 tile plans the materialized ×4 pyramid
+level at p50 <!-- number:ov-pyramid-p50-approx -->~130 ms<!-- /number:ov-pyramid-p50-approx -->. The
+overview *level* served by each rung is pinned from the SSE trace envelopes (the header's
+`decision` says only `overview`; the envelope carries `{"overview":{"level":…}}`).
+
+<!-- table:temporal (generated by `just perf-doc` — edit the artifact, not this block) -->
+| scenario | requests | errors | rps | p50 ms | p95 ms | p99 ms | max ms |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| (d) frame loop, cold (all Live) | 54 | 0 | 14.6 | 345.99 | 606.77 | 619.69 | 619.69 |
+| (d) frame loop, hot (all cache hits) | 54 | 0 | 150.7 | 7.91 | 270.43 | 271.12 | 271.12 |
+| (e) z12 — Live (full resolution) | 24 | 0 | 3.7 | 259.24 | 269.31 | 288.11 | 288.11 |
+| (e) z10 pre-materialize (embedded ov. ×2) | 24 | 0 | 4.0 | 230.59 | 257.88 | 290.6 | 290.6 |
+| (e) z11 post-materialize (pyramid ov. ×2) | 24 | 0 | 3.7 | 246.59 | 296.56 | 317.68 | 317.68 |
+| (e) z10 post-materialize (pyramid ov. ×4) | 24 | 0 | 6.6 | 134.75 | 146.19 | 162.52 | 162.52 |
+
+Frame decisions (`x-swath-trace`): cold {"live": 54}, hot {"cache_hit": 54}. Overview-rung decisions (SSE envelopes, level included): live_z12 {"live": 24}; embedded_z10 {"overview:2": 24}; pyramid_z11 {"overview:2": 24}; pyramid_z10 {"overview:4": 24}.
+<!-- /table:temporal -->
+
+Reading it: a dated frame pays the ordinary live-render price on first touch and the ordinary
+cache-hit price on replay — the datetime resolves to a granule before the render path even
+starts; and overview-backed rungs are served from decimated grids (the SSE-pinned levels prove
+which), with the materialized ×4 level reading a quarter the pixels of the embedded ×2 fallback.
+Compare re-runs against `docs/perf/temporal-baseline.json`.
+
+## 9. What we don't claim
 
 Bounded honesty, in the spirit of the requirements' "reports it continuously and honestly":
 
@@ -217,11 +270,12 @@ Several of these gaps are intended future work, not permanent posture — real-i
 behavior, multi-node scale, and larger-than-fixture datasets are on the M7+ candidate list in
 [`ROADMAP.md`](ROADMAP.md).
 
-## 9. Regenerating this document
+## 10. Regenerating this document
 
 ```bash
 just bench-baseline    # re-run all criterion benches, rewrite docs/perf/bench-baseline.json
 just load              # bring up the stack, run load scenarios, rewrite docs/perf/load-baseline.{json,md}
+just load-temporal     # fire-series frame loop + overview ladder, rewrite docs/perf/temporal-baseline.{json,md}
 just perf-i2p          # run the typed e2e, commit its metrics as docs/perf/i2p-baseline.json
 just perf-referencer   # re-measure the referencer bake-off, rewrite docs/perf/referencer-baseline.json
 just perf-doc          # regenerate every table above AND every inline number marker across the docs

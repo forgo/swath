@@ -1,0 +1,122 @@
+{
+ "schema": "swath-temporal-baseline/1",
+ "generated": "2026-08-13T08:18:58Z",
+ "git_sha": "3f44d55",
+ "machine": {
+  "cpu": "Apple M2 Max",
+  "cores": 12,
+  "os": "Darwin 25.5.0 arm64"
+ },
+ "duration_seconds": 211,
+ "fire_dates": [
+  "2024-06-07T19:03:00Z",
+  "2024-07-22T19:03:00Z",
+  "2024-08-16T19:03:00Z",
+  "2024-09-05T19:03:00Z",
+  "2024-09-30T19:03:00Z",
+  "2024-10-15T19:03:00Z"
+ ],
+ "materialize": {
+  "wall_ms": 578,
+  "command": "swath materialize --min-dim 64",
+  "min_dim": 64
+ },
+ "scenarios": {
+  "frames_cold": {
+   "tool": "python-urllib (tests/load/temporal.py frames)",
+   "params": "9 interior z14 park-fire-ndvi tiles x 6 dated frames (datetime=<acquisition instant>), chronological, c=6, fresh tile cache",
+   "requests": 54,
+   "errors": 0,
+   "rps": 14.6,
+   "p50_ms": 345.99,
+   "p95_ms": 606.77,
+   "p99_ms": 619.69,
+   "max_ms": 619.69,
+   "decisions": {
+    "live": 54
+   }
+  },
+  "frames_hot": {
+   "tool": "python-urllib (tests/load/temporal.py frames)",
+   "params": "9 interior z14 park-fire-ndvi tiles x 6 dated frames (datetime=<acquisition instant>), chronological, c=6, same loop again, cache warm",
+   "requests": 54,
+   "errors": 0,
+   "rps": 150.7,
+   "p50_ms": 7.91,
+   "p95_ms": 270.43,
+   "p99_ms": 271.12,
+   "max_ms": 271.12,
+   "decisions": {
+    "cache_hit": 54
+   }
+  },
+  "overview_live_z12": {
+   "tool": "python-urllib (tests/load/temporal.py overview; SSE capture via curl)",
+   "params": "GET /tilesets/truecolor/tiles/12/1561/848, 24 sequential renders, tile cache cleared before each",
+   "requests": 24,
+   "errors": 0,
+   "rps": 3.7,
+   "p50_ms": 259.24,
+   "p95_ms": 269.31,
+   "p99_ms": 288.11,
+   "max_ms": 288.11,
+   "decisions": {
+    "live": 24
+   },
+   "sse_decisions": {
+    "live": 24
+   }
+  },
+  "overview_embedded_z10": {
+   "tool": "python-urllib (tests/load/temporal.py overview; SSE capture via curl)",
+   "params": "GET /tilesets/truecolor/tiles/10/390/212, 24 sequential renders, tile cache cleared before each",
+   "requests": 24,
+   "errors": 0,
+   "rps": 4.0,
+   "p50_ms": 230.59,
+   "p95_ms": 257.88,
+   "p99_ms": 290.6,
+   "max_ms": 290.6,
+   "decisions": {
+    "overview": 24
+   },
+   "sse_decisions": {
+    "overview:2": 24
+   }
+  },
+  "overview_pyramid_z11": {
+   "tool": "python-urllib (tests/load/temporal.py overview; SSE capture via curl)",
+   "params": "GET /tilesets/truecolor/tiles/11/780/424, 24 sequential renders, tile cache cleared before each",
+   "requests": 24,
+   "errors": 0,
+   "rps": 3.7,
+   "p50_ms": 246.59,
+   "p95_ms": 296.56,
+   "p99_ms": 317.68,
+   "max_ms": 317.68,
+   "decisions": {
+    "overview": 24
+   },
+   "sse_decisions": {
+    "overview:2": 24
+   }
+  },
+  "overview_pyramid_z10": {
+   "tool": "python-urllib (tests/load/temporal.py overview; SSE capture via curl)",
+   "params": "GET /tilesets/truecolor/tiles/10/390/212, 24 sequential renders, tile cache cleared before each",
+   "requests": 24,
+   "errors": 0,
+   "rps": 6.6,
+   "p50_ms": 134.75,
+   "p95_ms": 146.19,
+   "p99_ms": 162.52,
+   "max_ms": 162.52,
+   "decisions": {
+    "overview": 24
+   },
+   "sse_decisions": {
+    "overview:4": 24
+   }
+  }
+ }
+}
