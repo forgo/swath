@@ -57,6 +57,11 @@ const DOCS: [(&str, &[&str]); 10] = [
             "ref-sidecar-warm-ms",
             "ref-ratio",
             "ref-ratio-approx",
+            "frame-cold-p50-approx",
+            "frame-hot-p50-approx",
+            "ov-live-p50-approx",
+            "ov-pyramid-p50-approx",
+            "materialize-ms",
         ],
     ),
     // ARCHITECTURE's §16 ledger (#220) links its load evidence instead of
@@ -179,6 +184,7 @@ pub(super) fn expected() -> Result<BTreeMap<&'static str, String>, String> {
     let i2p = parse("docs/perf/i2p-baseline.json")?;
     let load = parse("docs/perf/load-baseline.json")?;
     let referencer = parse("docs/perf/referencer-baseline.json")?;
+    let temporal = parse("docs/perf/temporal-baseline.json")?;
     let evidence = read_repo("docs/perf/load-2cpu-16.7-evidence.md");
 
     let i2p_value = i2p["value"]
@@ -216,6 +222,29 @@ pub(super) fn expected() -> Result<BTreeMap<&'static str, String>, String> {
     let hot2 = twocpu_row(&evidence, "(a) hot-cache tile storm")?;
     let cold2 = twocpu_row(&evidence, "(b) cold live-render burst")?;
     let healthz2 = twocpu_row(&evidence, "(c) healthz UNDER WARPS")?;
+    let frame_cold = f64_at(
+        "temporal-baseline.json",
+        &temporal,
+        &["scenarios", "frames_cold", "p50_ms"],
+    )?;
+    let frame_hot = f64_at(
+        "temporal-baseline.json",
+        &temporal,
+        &["scenarios", "frames_hot", "p50_ms"],
+    )?;
+    let ov_live = f64_at(
+        "temporal-baseline.json",
+        &temporal,
+        &["scenarios", "overview_live_z12", "p50_ms"],
+    )?;
+    let ov_pyramid = f64_at(
+        "temporal-baseline.json",
+        &temporal,
+        &["scenarios", "overview_pyramid_z10", "p50_ms"],
+    )?;
+    let materialize_ms = temporal["materialize"]["wall_ms"]
+        .as_u64()
+        .ok_or("temporal-baseline.json has no integer `materialize.wall_ms`")?;
 
     Ok(BTreeMap::from([
         ("i2p-ms", format!("{i2p_value} ms")),
@@ -231,6 +260,11 @@ pub(super) fn expected() -> Result<BTreeMap<&'static str, String>, String> {
         ("2cpu-hot-rps", format!("{} req/s", comma(&hot2[3]))),
         ("2cpu-cold-p50", format!("{} ms", cold2[4])),
         ("2cpu-healthz-p99", format!("{} ms", healthz2[6])),
+        ("frame-cold-p50-approx", format!("~{} ms", sig2(frame_cold))),
+        ("frame-hot-p50-approx", format!("~{} ms", sig2(frame_hot))),
+        ("ov-live-p50-approx", format!("~{} ms", sig2(ov_live))),
+        ("ov-pyramid-p50-approx", format!("~{} ms", sig2(ov_pyramid))),
+        ("materialize-ms", format!("{materialize_ms} ms")),
     ]))
 }
 
@@ -350,6 +384,29 @@ fn detectors(expected: &BTreeMap<&'static str, String>) -> Result<Vec<String>, S
             let value = f64_at(
                 "load-baseline.json",
                 &load,
+                &["scenarios", scenario, percentile],
+            )?;
+            tokens.push(value.to_string());
+        }
+    }
+    // The temporal + overview scenarios' published percentiles (issue
+    // #184), same rule: no p50/p95/p99 of any committed row may reappear
+    // hand-typed.
+    let temporal =
+        serde_json::from_str::<serde_json::Value>(&read_repo("docs/perf/temporal-baseline.json"))
+            .map_err(|err| format!("temporal-baseline.json is not JSON: {err}"))?;
+    for scenario in [
+        "frames_cold",
+        "frames_hot",
+        "overview_live_z12",
+        "overview_embedded_z10",
+        "overview_pyramid_z11",
+        "overview_pyramid_z10",
+    ] {
+        for percentile in ["p50_ms", "p95_ms", "p99_ms"] {
+            let value = f64_at(
+                "temporal-baseline.json",
+                &temporal,
                 &["scenarios", scenario, percentile],
             )?;
             tokens.push(value.to_string());
