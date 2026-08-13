@@ -146,8 +146,9 @@ jobs:
 
   # The docs-drift gate (issues #119/#173) on its own trigger: docs-only PRs
   # must run it too (the rust filter skips them). Full history + the
-  # require-git env: the sha-stamp freshness checks may skip on shallow
-  # checkouts elsewhere (rust-test's matrix), but never here.
+  # require-git env: the stamp gate's history-dependent tests (mutation
+  # drift 6, the squash simulation) may skip on shallow checkouts elsewhere
+  # (rust-test's matrix), but never here.
   docs-check:
     needs: changes
     if: needs.changes.outputs.docs == 'true'

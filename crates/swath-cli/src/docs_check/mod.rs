@@ -10,8 +10,10 @@
 //! the same pattern (issue #173):
 //!
 //! - [`routes`] — `docs/ENDPOINTS.md`'s route table vs the axum routers.
-//! - [`stamps`] — `_Last verified against_` sha stamps vs git history of
-//!   each stamped section's referenced source files.
+//! - [`stamps`] — `_Last verified against sources_` fingerprint stamps
+//!   vs the current content of each stamped section's referenced source
+//!   files (content-addressed, so squash-merges cannot stale them —
+//!   issue #224).
 //! - [`deferrals`] — prose deferral language must point at
 //!   `docs/ROADMAP.md`'s deferral inventory (or the governing ADR).
 //! - [`claims`] — cross-document claims (quoted sentences, §-citations,

@@ -9,10 +9,16 @@ Two disciplines keep this document true:
   step-by-step to build a real toy adapter; the resulting diff lives on the unmerged evidence
   branch [`demo/125-toy-source-inmem`](https://github.com/forgo/swath/tree/demo/125-toy-source-inmem)
   (§5). If a step below had been missing, that branch could not have passed the full gate.
-- **Verified against a commit.** Every signature block is copied verbatim from the named source
-  file and carries a `_Last verified against_` marker, the same drift discipline as
-  ARCHITECTURE.md §6. The rustdoc on the named files is the normative contract; where this guide
-  and the rustdoc disagree, the rustdoc wins.
+- **Verified against the sources.** Every signature block is copied verbatim from the named source
+  file and carries a `_Last verified against sources_` marker — a content fingerprint of the
+  section's referenced files, checked by the docs gate (`crates/swath-cli/src/docs_check/stamps.rs`),
+  the same drift discipline as ARCHITECTURE.md §6. Fingerprinting content instead of a commit makes
+  the stamp squash-merge-proof (a squash preserves the PR's tree verbatim, so a stamp that was green
+  on the branch is green on `main` — no post-merge re-stamp, ever): a PR that re-verifies a section
+  whose sources are content-identical needs no stamp change at all, and a PR that changes a
+  referenced source just pastes the new fingerprint the failing gate prints. The rustdoc on the
+  named files is the normative contract; where this guide and the rustdoc disagree, the rustdoc
+  wins.
 
 ## 1. The extension model — and what is deliberately NOT supported
 
@@ -198,7 +204,7 @@ dependency), keep it default-ON so the shipped binary stays batteries-included, 
 the dependent tests so both profiles compile, and document the opt-out in the justfile. The
 full gate (`just check`) always runs the default profile.
 
-_Last verified against `a1e77e4`._
+_Last verified against sources `2d91eaf957ed`._
 
 ## 3. A new openEO process (within the bounded profile)
 
@@ -268,7 +274,7 @@ the spatial window stays tile serving's decision (`spatial_extent` is accepted a
 Products needing more than the IR's producing/transforming pipeline are the reopen territory
 recorded in ADR 0013.
 
-_Last verified against `a1e77e4`._
+_Last verified against sources `0d7b4874aa0b`._
 
 ## 4. A new colormap
 
@@ -325,7 +331,7 @@ applies to gray results only; the plan validator rejects it on composites.
 - **Diagnostics** — the compiler snapshots that enumerate accepted palette names, and the
   config-file error tests (`crates/swath-cli/src/config.rs`).
 
-_Last verified against `a1e77e4`._
+_Last verified against sources `3f53388813c3`._
 
 ## 5. The proof: a toy adapter built from §2
 
@@ -349,5 +355,5 @@ exactly the guide's step list and nothing else:
 
 No step outside this list was needed; every step in the list was needed. When the port
 signatures or the wiring pattern change, rebuilding this toy (or repeating the exercise for
-the changed kind) is the cheapest way to re-verify the guide before bumping its
-`_Last verified against_` markers.
+the changed kind) is the cheapest way to re-verify the guide before updating its
+`_Last verified against sources_` markers.

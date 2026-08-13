@@ -111,22 +111,31 @@ fn reintroducing_the_load_2cpu_header_misattribution_fails() {
         .expect_err("the pre-sweep 12-core header must fail");
 }
 
-/// Drift 6 (ARCHITECTURE.md + EXTENDING.md): the pre-sweep sha stamps
-/// (`c944a41` / `32fad75`), under which commits have since touched the
-/// stamped sections' referenced sources. Skipped (like the gate itself)
-/// where git history is unavailable — CI's docs job requires it.
+/// Drift 6 (ARCHITECTURE.md + EXTENDING.md): the pre-sweep stamps —
+/// reconstructed as the fingerprints the referenced sources had at the
+/// docs' pre-sweep verification commits (`c944a41` / `32fad75`), under
+/// which the sources have since changed. Needs git history to read the
+/// historical content, so it skips (with a notice) on shallow/git-less
+/// checkouts — CI's docs job sets `SWATH_DOCS_CHECK_REQUIRE_GIT` and
+/// never skips.
 #[test]
-fn reintroducing_the_stale_sha_stamps_fails() {
+fn reintroducing_the_stale_pre_sweep_stamps_fails() {
     if !stamps::history_available().unwrap() {
         return;
     }
-    for (doc_label, current_sha, pre_sweep_sha) in [
-        ("docs/ARCHITECTURE.md", "a1e77e4", "c944a41"),
-        ("docs/EXTENDING.md", "a1e77e4", "32fad75"),
+    for (doc_label, pre_sweep_sha) in [
+        ("docs/ARCHITECTURE.md", "c944a41"),
+        ("docs/EXTENDING.md", "32fad75"),
     ] {
         let doc = read_repo(doc_label);
         stamps::check_doc(doc_label, &doc).expect("the unmutated stamps must pass");
-        let mutated = reintroduce(&doc, current_sha, pre_sweep_sha);
+        let mutated = stamps::restamped_at(doc_label, &doc, pre_sweep_sha)
+            .expect("the pre-sweep fingerprints must be computable from history");
+        assert_ne!(
+            mutated, doc,
+            "no referenced source changed since {pre_sweep_sha} — the fixture \
+             no longer reintroduces a drift ({doc_label})"
+        );
         let err =
             stamps::check_doc(doc_label, &mutated).expect_err("the pre-sweep stamps must be stale");
         assert!(

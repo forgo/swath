@@ -1,26 +1,50 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! The sha-stamp freshness gate (issue #173): every
-//! `_Last verified against `<sha>`._` stamp in `docs/ARCHITECTURE.md` and
-//! `docs/EXTENDING.md` is checked against git history. The stamped sha
-//! must (a) exist, (b) be an ancestor of `HEAD`, and (c) postdate the
-//! last commit touching the section's **referenced source files** — the
+//! The source-fingerprint freshness gate (issues #173 and #224): every
+//! `_Last verified against sources `<fingerprint>`._` stamp in
+//! `docs/ARCHITECTURE.md` and `docs/EXTENDING.md` must equal the current
+//! fingerprint of the section's **referenced source files** — the
 //! explicit, per-section file sets in [`SECTIONS`], which name exactly
-//! the files whose content each section quotes or mirrors. A commit that
-//! touches a referenced file after the stamp fails the gate until the
-//! section is re-verified and re-stamped.
+//! the files whose content each section quotes or mirrors. The
+//! fingerprint is the first [`FINGERPRINT_LEN`] hex digits of SHA-256
+//! over each referenced file's path and newline-normalized content, so
+//! it depends on nothing but the bytes in the checkout: any edit to a
+//! referenced file changes it (the gate fails, printing the new value,
+//! until the section is re-verified and re-stamped), and nothing else
+//! ever does.
+//!
+//! Content, not commit shas (issue #224): the gate originally stamped a
+//! commit sha and asked git whether later commits touched the sources.
+//! Squash-merging broke that design structurally — the in-PR sha a PR
+//! had to stamp is discarded by the squash: it is neither an ancestor of
+//! the new `main` nor even an *object* in a fresh `refs/heads`-only
+//! clone (which is exactly what CI's `fetch-depth: 0` checkout is), so
+//! `main` went red until a follow-up re-stamp (#219, #225, #228). A
+//! content fingerprint is invariant under history rewrites: the squash
+//! commit carries the PR's tree verbatim, so a stamp that was green on
+//! the PR branch is green on `main` with no follow-up, and a stamp only
+//! goes stale when the sources' content actually changes
+//! ([`stamps_survive_squash_merge`] pins both halves).
 //!
 //! The map is closed in both directions: a stamp with no [`SECTIONS`]
 //! entry fails (new stamped sections must declare their sources here),
 //! and a [`SECTIONS`] entry whose stamp disappeared fails too.
 //!
-//! Git availability: the gate needs real history. On a shallow or
-//! git-less checkout it skips with a notice — except when
-//! `SWATH_DOCS_CHECK_REQUIRE_GIT` is set (CI's dedicated docs job checks
-//! out full history and sets it, so CI can never skip silently).
+//! Git availability: the freshness check itself needs no git at all — it
+//! runs on shallow and git-less checkouts alike. [`history_available`]
+//! remains for the tests that DO need history (the mutation drift that
+//! reconstructs pre-sweep source content from historical commits, the
+//! squash simulation): on a shallow or git-less checkout they skip with
+//! a notice — except when `SWATH_DOCS_CHECK_REQUIRE_GIT` is set (CI's
+//! dedicated docs job checks out full history and sets it, so CI can
+//! never skip silently).
 
+use std::fmt::Write as _;
+use std::path::Path;
 use std::process::Command;
+
+use sha2::Digest as _;
 
 use super::{read_repo, repo_root};
 
@@ -28,7 +52,7 @@ use super::{read_repo, repo_root};
 struct Section {
     /// The section heading prefix (unique within the doc), e.g. `## 6.`.
     heading: &'static str,
-    /// Repo-relative files whose history invalidates the stamp.
+    /// Repo-relative files whose content the stamp fingerprints.
     files: &'static [&'static str],
 }
 
@@ -108,10 +132,47 @@ const SECTIONS: [(&str, &[Section]); 2] = [
 ];
 
 /// The stamp marker as it appears in the docs.
-const STAMP_PREFIX: &str = "_Last verified against `";
+const STAMP_PREFIX: &str = "_Last verified against sources `";
 
-/// Runs git in the repo root, returning trimmed stdout or the failure.
-fn git(args: &[&str]) -> Result<String, String> {
+/// Hex digits kept from the SHA-256 digest — 48 bits, plenty for a
+/// drift detector (collisions would have to be engineered, and an
+/// engineered collision defeats only the author's own gate).
+const FINGERPRINT_LEN: usize = 12;
+
+/// The fingerprint of a file set under `read`: the first
+/// [`FINGERPRINT_LEN`] hex digits of SHA-256 over each file's path and
+/// content (NUL-separated, in declaration order), line endings
+/// normalized to `\n` so autocrlf checkouts fingerprint identically.
+fn fingerprint<F>(files: &[&str], read: F) -> Result<String, String>
+where
+    F: Fn(&str) -> Result<String, String>,
+{
+    let mut hasher = sha2::Sha256::new();
+    for file in files {
+        hasher.update(file.as_bytes());
+        hasher.update([0]);
+        hasher.update(read(file)?.replace("\r\n", "\n").as_bytes());
+        hasher.update([0]);
+    }
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(FINGERPRINT_LEN);
+    for byte in digest.iter().take(FINGERPRINT_LEN / 2) {
+        write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    Ok(hex)
+}
+
+/// The fingerprint of `files` as checked out under `root`.
+fn checkout_fingerprint(root: &Path, files: &[&str]) -> Result<String, String> {
+    fingerprint(files, |file| {
+        let path = root.join(file);
+        std::fs::read_to_string(&path)
+            .map_err(|err| format!("cannot read referenced source {file}: {err}"))
+    })
+}
+
+/// Runs git in the repo root, returning raw stdout or the failure.
+fn git_stdout(args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")
         .arg("-C")
         .arg(repo_root())
@@ -119,7 +180,7 @@ fn git(args: &[&str]) -> Result<String, String> {
         .output()
         .map_err(|err| format!("cannot run git: {err}"))?;
     if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
         Err(format!(
             "git {args:?} failed: {}",
@@ -128,7 +189,14 @@ fn git(args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// Whether full git history is available for freshness checks. `Err`
+/// [`git_stdout`] with the output trimmed (for ref-shaped answers).
+fn git(args: &[&str]) -> Result<String, String> {
+    git_stdout(args).map(|out| out.trim().to_owned())
+}
+
+/// Whether full git history is available for the history-dependent tests
+/// (the mutation drift reconstructing pre-sweep content, the squash
+/// simulation — the freshness check itself no longer needs git). `Err`
 /// when it is not but `SWATH_DOCS_CHECK_REQUIRE_GIT` demands it.
 #[expect(
     clippy::print_stderr,
@@ -143,16 +211,25 @@ pub(super) fn history_available() -> Result<bool, String> {
     if std::env::var_os("SWATH_DOCS_CHECK_REQUIRE_GIT").is_some() {
         Err(format!(
             "SWATH_DOCS_CHECK_REQUIRE_GIT is set but {reason} — \
-             the sha-stamp gate cannot run"
+             the stamp gate's history-dependent tests cannot run"
         ))
     } else {
-        eprintln!("docs_check::stamps skipped: {reason}");
+        eprintln!("docs_check::stamps history-dependent tests skipped: {reason}");
         Ok(false)
     }
 }
 
-/// The stamp sha of `section` in `doc`: the first stamp line after the
-/// section's heading and before the next `## ` heading.
+/// The section map of `doc_label`, or an error for an unmapped doc.
+fn doc_sections(doc_label: &str) -> Result<&'static [Section], String> {
+    SECTIONS
+        .iter()
+        .find(|(label, _)| *label == doc_label)
+        .map(|(_, sections)| *sections)
+        .ok_or_else(|| format!("{doc_label} has no section map"))
+}
+
+/// The stamp fingerprint of `section` in `doc`: the first stamp line
+/// after the section's heading and before the next `## ` heading.
 fn section_stamp(doc_label: &str, doc: &str, heading: &str) -> Result<String, String> {
     let start = doc
         .find(&format!("\n{heading}"))
@@ -165,23 +242,16 @@ fn section_stamp(doc_label: &str, doc: &str, heading: &str) -> Result<String, St
     let stamp = section
         .find(STAMP_PREFIX)
         .ok_or_else(|| format!("{doc_label} `{heading}` has no `{STAMP_PREFIX}…` stamp"))?;
-    let sha = &section[stamp + STAMP_PREFIX.len()..];
-    let sha = &sha[..sha
+    let token = &section[stamp + STAMP_PREFIX.len()..];
+    let token = &token[..token
         .find('`')
         .ok_or_else(|| format!("{doc_label} `{heading}` stamp is not backtick-terminated"))?];
-    Ok(sha.to_owned())
+    Ok(token.to_owned())
 }
 
 /// The freshness check for one document's text against its section map.
 pub(super) fn check_doc(doc_label: &str, doc: &str) -> Result<(), String> {
-    if !history_available()? {
-        return Ok(());
-    }
-    let sections = SECTIONS
-        .iter()
-        .find(|(label, _)| *label == doc_label)
-        .map(|(_, sections)| *sections)
-        .ok_or_else(|| format!("{doc_label} has no section map"))?;
+    let sections = doc_sections(doc_label)?;
 
     // Both directions closed: every stamp mapped, every mapping stamped.
     let stamp_count = doc.matches(STAMP_PREFIX).count();
@@ -197,27 +267,13 @@ pub(super) fn check_doc(doc_label: &str, doc: &str) -> Result<(), String> {
     let mut drift = Vec::new();
     for section in sections {
         let heading = section.heading;
-        let sha = section_stamp(doc_label, doc, heading)?;
-        if git(&["cat-file", "-e", &format!("{sha}^{{commit}}")]).is_err() {
-            drift.push(format!("`{heading}` stamp `{sha}` is not a commit"));
-            continue;
-        }
-        if git(&["merge-base", "--is-ancestor", &sha, "HEAD"]).is_err() {
+        let stamp = section_stamp(doc_label, doc, heading)?;
+        let expected = checkout_fingerprint(&repo_root(), section.files)?;
+        if stamp != expected {
             drift.push(format!(
-                "`{heading}` stamp `{sha}` is not an ancestor of HEAD"
-            ));
-            continue;
-        }
-        let range = format!("{sha}..HEAD");
-        let mut args: Vec<&str> = vec!["log", "--format=%h %s", &range, "--"];
-        args.extend(section.files.iter().copied());
-        let touching = git(&args)?;
-        if !touching.is_empty() {
-            drift.push(format!(
-                "`{heading}` stamp `{sha}` is stale — commits since it touch the \
-                 section's referenced sources {:?}:\n    {}",
-                section.files,
-                touching.replace('\n', "\n    ")
+                "`{heading}` stamp `{stamp}` is stale — the section's referenced \
+                 sources {:?} currently fingerprint to `{expected}`",
+                section.files
             ));
         }
     }
@@ -225,11 +281,27 @@ pub(super) fn check_doc(doc_label: &str, doc: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "{doc_label} sha stamps have gone stale (re-verify each section \
-             against the named sources, then re-stamp):\n  {}",
+            "{doc_label} source-fingerprint stamps have gone stale (re-verify each \
+             section against the named sources, then re-stamp with the printed \
+             fingerprint):\n  {}",
             drift.join("\n  ")
         ))
     }
+}
+
+/// `doc` with every section's stamp replaced by the fingerprint its
+/// referenced sources had at commit `sha` — the mutation tests' way of
+/// reconstructing a genuinely pre-sweep stamp set (needs git history).
+pub(super) fn restamped_at(doc_label: &str, doc: &str, sha: &str) -> Result<String, String> {
+    let mut out = doc.to_owned();
+    for section in doc_sections(doc_label)? {
+        let current = section_stamp(doc_label, doc, section.heading)?;
+        let historical = fingerprint(section.files, |file| {
+            git_stdout(&["show", &format!("{sha}:{file}")])
+        })?;
+        out = out.replace(&format!("`{current}`"), &format!("`{historical}`"));
+    }
+    Ok(out)
 }
 
 #[test]
@@ -240,4 +312,89 @@ fn architecture_stamps_are_fresh() {
 #[test]
 fn extending_stamps_are_fresh() {
     check_doc("docs/EXTENDING.md", &read_repo("docs/EXTENDING.md")).unwrap();
+}
+
+/// The issue #224 acceptance scenario, run against a scratch repository:
+/// a stamp minted on a PR branch survives the squash-merge that discards
+/// the PR's commits (sha still an object, no longer an ancestor — the
+/// exact shape that reddened `main` under the sha-stamp design in #219,
+/// #225 and #228), and still goes stale when a source genuinely changes
+/// afterwards.
+#[test]
+fn stamps_survive_squash_merge() {
+    if !history_available().unwrap() {
+        return; // needs a usable git binary; CI's docs job never skips
+    }
+    let tmp = swath_testsupport::TempDir::new("squash-sim");
+    let root = tmp.path();
+    let run = |args: &[&str]| {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .expect("git runs");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    run(&["init", "-q", "-b", "main"]);
+    run(&["config", "user.email", "gate@invalid"]);
+    run(&["config", "user.name", "gate"]);
+    std::fs::write(root.join("port.rs"), "pub fn port() {}\n").unwrap();
+    run(&["add", "."]);
+    run(&["commit", "-qm", "seed"]);
+
+    // The PR branch changes the referenced source and mints a stamp.
+    run(&["checkout", "-qb", "pr"]);
+    std::fs::write(root.join("port.rs"), "pub fn port(v2: u8) {}\n").unwrap();
+    run(&["add", "."]);
+    run(&["commit", "-qm", "feat: widen the port"]);
+    let pr_sha = run(&["rev-parse", "HEAD"]);
+    let stamp = checkout_fingerprint(root, &["port.rs"]).unwrap();
+
+    // Squash-merge: main gains ONE new commit carrying the PR's tree
+    // verbatim; the PR branch (and its shas) are discarded.
+    run(&["checkout", "-q", "main"]);
+    run(&["merge", "--squash", "-q", "pr"]);
+    run(&["commit", "-qm", "feat: widen the port (#1)"]);
+    run(&["branch", "-qD", "pr"]);
+    assert!(
+        Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["cat-file", "-e", &format!("{pr_sha}^{{commit}}")])
+            .status()
+            .unwrap()
+            .success(),
+        "the discarded PR sha must still exist as a local object for the simulation"
+    );
+    assert!(
+        !Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["merge-base", "--is-ancestor", &pr_sha, "HEAD"])
+            .status()
+            .unwrap()
+            .success(),
+        "the squash must have discarded the PR sha from main's ancestry"
+    );
+
+    // The content fingerprint survives the squash unchanged...
+    assert_eq!(
+        checkout_fingerprint(root, &["port.rs"]).unwrap(),
+        stamp,
+        "a stamp minted in-PR must stay fresh after the squash-merge"
+    );
+
+    // ...and still reddens when the source genuinely changes afterwards.
+    std::fs::write(root.join("port.rs"), "pub fn port(v3: u16) {}\n").unwrap();
+    assert_ne!(
+        checkout_fingerprint(root, &["port.rs"]).unwrap(),
+        stamp,
+        "a genuine source change must still invalidate the stamp"
+    );
 }
