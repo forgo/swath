@@ -233,7 +233,9 @@ where
     // over before the upsert and recompile them into serving templates,
     // so published products survive a restart.
     for dataset in &mut mode.datasets {
+        let mut preexisting = false;
         if let Some(existing) = catalog.get_dataset(&dataset.id).await? {
+            preexisting = true;
             for layer in existing.layers {
                 let is_service = layer.process.is_some();
                 let conflicts = dataset.layers.iter().any(|own| own.id == layer.id);
@@ -262,6 +264,20 @@ where
                     ),
                 }
             }
+        }
+        // Derived temporal extent (ADR 0015): the config compiles an
+        // open "no granule yet" interval; the served truth is the
+        // min/max acquisition datetime of what has actually been
+        // ingested. Re-deriving from all granules at registration also
+        // heals any drift the incremental per-ingest widening (the
+        // core's `ingest_granule`) could leave behind. Only a dataset
+        // the catalog already holds can have granules — `find_granules`
+        // on an unregistered collection is a hard DatasetNotFound.
+        if preexisting {
+            let granules = catalog
+                .find_granules(&dataset.id, &swath_core::catalog::GranuleQuery::default())
+                .await?;
+            dataset.extent.interval = swath_core::catalog::temporal_interval(&granules);
         }
         catalog.upsert_dataset(dataset).await?;
         tracing::info!(
@@ -610,6 +626,14 @@ mod tests {
             dataset: &DatasetId,
             _query: &GranuleQuery,
         ) -> Result<Vec<Granule>, CatalogError> {
+            // Like pgstac: querying a collection that was never
+            // registered is a hard error, not an empty set — the
+            // startup registration order depends on this contract.
+            if !self.datasets.lock().unwrap().contains_key(dataset.as_str()) {
+                return Err(CatalogError::DatasetNotFound {
+                    id: dataset.clone(),
+                });
+            }
             Ok(self
                 .granules
                 .lock()
@@ -982,6 +1006,22 @@ mod tests {
             .upsert_dataset(&existing)
             .await
             .expect("seed dataset");
+        // Granules from earlier runs: registration must derive the
+        // dataset's temporal extent from them (ADR 0015) rather than
+        // re-registering the config's open placeholder interval.
+        for (id, datetime) in [
+            ("g-jun", "2024-06-07T19:03:00Z"),
+            ("g-oct", "2024-10-15T19:03:00Z"),
+            ("g-aug", "2024-08-16T19:03:00Z"),
+        ] {
+            let mut granule = granule_event("hls-s30").granule;
+            granule.id = GranuleId::new(id);
+            granule.datetime = Datetime::new(datetime).expect("valid datetime");
+            catalog
+                .upsert_granules(std::slice::from_ref(&granule))
+                .await
+                .expect("seed granule");
+        }
 
         let shared = Shared {
             bind: cfg.bind,
@@ -1004,6 +1044,14 @@ mod tests {
             ids,
             ["truecolor", "ndvi", "xyz-restored"],
             "config layers plus the restored service; broken/colliding/stale dropped"
+        );
+        assert_eq!(
+            stored.extent.interval,
+            TimeRange {
+                start: Some(Datetime::new("2024-06-07T19:03:00Z").expect("valid datetime")),
+                end: Some(Datetime::new("2024-10-15T19:03:00Z").expect("valid datetime")),
+            },
+            "registration derives the temporal extent from ingested granules (ADR 0015)"
         );
     }
 

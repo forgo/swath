@@ -267,6 +267,7 @@ mod tests {
             // renders carry `Some(PlanTrace)`; the wire shape of the
             // plan payload is pinned in swath-core (trace.rs).
             plan: None,
+            temporal: None,
         }
     }
 
@@ -334,6 +335,7 @@ mod tests {
             },
             ingest_to_pixel_ms: None,
             plan: None,
+            temporal: None,
         };
         let envelope = Envelope {
             tile: "12/848/1561",

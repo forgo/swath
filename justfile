@@ -211,6 +211,16 @@ render-goldens:
             --input "$F-b8a.tif" --input "$F-b04.tif" \
             --expression "(b1 - b2) / (b1 + b2)" --rescale=-1,1 --resampling bilinear
     done
+    # Time-dimension goldens (ADR 0015 / issue #180): the Park Fire series'
+    # proven z13 tile (fully inside the t10tfk fixture window) at a pre-fire
+    # and a fresh-burn-scar date — grayscale NDVI, matched by the e2e
+    # datetime= frame checks and the swath-api tiles_datetime suite.
+    FIRE=tests/fixtures/hlss30-t10tfk
+    for day in 2024204 2024229; do
+        compose 13 1326 3100 "$D/fire-ndvi-13-1326-3100-$day.png" \
+            --input "$FIRE-$day-b8a.tif" --input "$FIRE-$day-b04.tif" \
+            --expression "(b1 - b2) / (b1 + b2)" --rescale=-1,1 --resampling bilinear
+    done
 
 # Regenerate the web TMS truth table (web/src/tms_truth.json) from the pinned
 # morecantile oracle (issue #106; the TS twin of the swath-core table). The

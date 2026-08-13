@@ -238,6 +238,7 @@ fn sample_trace() -> Trace {
         timings: Timings::default(),
         ingest_to_pixel_ms: None,
         plan: None,
+        temporal: None,
     }
 }
 

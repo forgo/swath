@@ -105,12 +105,16 @@ pub trait IngestReferencer: Send + Sync {
 }
 
 /// Registers one arrived granule: stamps `ingested_at` from the event's
-/// arrival time and upserts it through the catalog port. Returns the granule
-/// as persisted.
+/// arrival time, upserts it through the catalog port, and widens the
+/// dataset's **derived temporal extent** to include the granule's
+/// acquisition datetime (ADR 0015: `Extent.interval` is maintained from
+/// ingested granules — min/max acquisition time — and served wherever
+/// extents already flow, so clients can see what times are askable).
+/// Returns the granule as persisted.
 ///
 /// # Errors
 ///
-/// Any [`CatalogError`] from the upsert; notably
+/// Any [`CatalogError`] from the upserts; notably
 /// [`CatalogError::DatasetNotFound`] when the event names a dataset the
 /// catalog does not contain (see the module docs for why that is not
 /// auto-created).
@@ -123,6 +127,18 @@ pub async fn ingest_granule<C: Catalog>(
     catalog
         .upsert_granules(std::slice::from_ref(&granule))
         .await?;
+    // Temporal-extent maintenance (ADR 0015). Widening is monotone (a
+    // bound only ever moves outward), so a concurrent ingest can at worst
+    // re-apply the same widening. `serve` additionally re-derives the
+    // interval from all granules at startup registration, which heals any
+    // drift this incremental rule could leave.
+    if let Some(mut dataset) = catalog.get_dataset(&granule.dataset).await? {
+        let widened = dataset.extent.interval.including(&granule.datetime);
+        if widened != dataset.extent.interval {
+            dataset.extent.interval = widened;
+            catalog.upsert_dataset(&dataset).await?;
+        }
+    }
     Ok(granule)
 }
 
@@ -147,7 +163,9 @@ mod tests {
 
     impl Catalog for MemoryCatalog {
         async fn upsert_dataset(&self, dataset: &Dataset) -> Result<(), CatalogError> {
-            self.datasets.lock().unwrap().push(dataset.clone());
+            let mut datasets = self.datasets.lock().unwrap();
+            datasets.retain(|d| d.id != dataset.id);
+            datasets.push(dataset.clone());
             Ok(())
         }
 
@@ -253,6 +271,56 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(found, vec![stored]);
+        });
+    }
+
+    /// ADR 0015: each ingest widens the dataset's derived temporal extent
+    /// to the min/max acquisition datetime seen — the recorded half of
+    /// "temporal extents become real".
+    #[test]
+    fn ingest_widens_the_datasets_derived_temporal_extent() {
+        async fn interval(catalog: &MemoryCatalog) -> crate::catalog::TimeRange {
+            catalog
+                .get_dataset(&DatasetId::new("hls-s30"))
+                .await
+                .unwrap()
+                .unwrap()
+                .extent
+                .interval
+        }
+
+        let catalog = MemoryCatalog::default();
+        futures_executor(async {
+            catalog.upsert_dataset(&dataset("hls-s30")).await.unwrap();
+            let at = |granule_datetime: &str| {
+                let mut event = event("hls-s30");
+                event.granule.datetime = Datetime::new(granule_datetime).unwrap();
+                event.granule.id = GranuleId::new(format!("g-{granule_datetime}"));
+                event
+            };
+            // First granule closes both sides at its instant.
+            ingest_granule(&catalog, &at("2024-07-22T19:03:00Z"))
+                .await
+                .unwrap();
+            let first = interval(&catalog).await;
+            let dt = |s: &str| Some(Datetime::new(s).unwrap());
+            assert_eq!(first.start, dt("2024-07-22T19:03:00Z"));
+            assert_eq!(first.end, dt("2024-07-22T19:03:00Z"));
+
+            // Earlier and later granules move exactly one bound each; an
+            // interior granule moves nothing.
+            ingest_granule(&catalog, &at("2024-06-07T19:03:00Z"))
+                .await
+                .unwrap();
+            ingest_granule(&catalog, &at("2024-10-15T19:03:00Z"))
+                .await
+                .unwrap();
+            ingest_granule(&catalog, &at("2024-08-16T19:03:00Z"))
+                .await
+                .unwrap();
+            let widened = interval(&catalog).await;
+            assert_eq!(widened.start, dt("2024-06-07T19:03:00Z"));
+            assert_eq!(widened.end, dt("2024-10-15T19:03:00Z"));
         });
     }
 

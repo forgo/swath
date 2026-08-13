@@ -35,7 +35,7 @@ use std::path::Path;
 use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use swath_core::trace::{Strategy, Trace};
+use swath_core::trace::{Strategy, TemporalRule, Trace};
 use swath_testkit::{DiffPolicy, diff, load_png};
 
 /// The proven tile, OGC request order (`z/row/col`).
@@ -50,6 +50,26 @@ const PROBE_LON_LAT: (f64, f64) = (-105.4248, 39.27);
 const TRUECOLOR_GOLDEN: &str = "crates/swath-render/tests/data/truecolor-12-848-1561.png";
 const NDVI_COLORMAPPED_GOLDEN: &str = "crates/swath-render/tests/data/ndvi-rdylgn-12-848-1561.png";
 const NDVI_GRAYSCALE_GOLDEN: &str = "crates/swath-render/tests/data/ndvi-12-848-1561.png";
+
+// --- The time dimension (ADR 0015, issue #180): the Park Fire series ---
+
+/// The proven fire tile (z13, fully inside the T10TFK fixture window),
+/// OGC request order (`z/row/col`).
+const FIRE_TILE: &str = "/tilesets/park-fire-ndvi/tiles/13/3100/1326";
+/// The same fire tile in the SSE envelope's XYZ order (`z/x/y`).
+const FIRE_TILE_XYZ: &str = "13/1326/3100";
+/// An instant between the July (2024-07-22) and August (2024-08-16)
+/// acquisitions: latest-at-or-before must select pre-fire July.
+const FIRE_PRE_INSTANT: &str = "2024-08-01T00:00:00Z";
+/// An instant between August and September: the fresh burn scar.
+const FIRE_POST_INSTANT: &str = "2024-08-20T00:00:00Z";
+const FIRE_PRE_GRANULE: &str = "hlss30-t10tfk-2024204";
+const FIRE_POST_GRANULE: &str = "hlss30-t10tfk-2024229";
+const FIRE_PRE_GOLDEN: &str = "crates/swath-render/tests/data/fire-ndvi-13-1326-3100-2024204.png";
+const FIRE_POST_GOLDEN: &str = "crates/swath-render/tests/data/fire-ndvi-13-1326-3100-2024229.png";
+/// The derived temporal extent of the six dropped dates
+/// (drop-fire-granules.sh) — what `/collections/hls-s30-fire` must serve.
+const FIRE_EXTENT: [&str; 2] = ["2024-06-07T19:03:00Z", "2024-10-15T19:03:00Z"];
 
 /// The north-star budget (issue #35): measured 297 ms and 801 ms locally,
 /// 535 ms in CI, so 10000 ms is ~20x headroom over the CI number — tight
@@ -175,7 +195,342 @@ fn run() -> Result<(), Failure> {
     truecolor_matches_oracle_golden()?;
     let ndvi_bytes = sse_and_ndvi_checks()?;
     openeo_checks(&ndvi_bytes)?;
-    tileset_bounds_contain_proven_tile()
+    tileset_bounds_contain_proven_tile()?;
+    fire_time_dimension_checks()
+}
+
+// --- The time dimension (ADR 0015 / issue #180) over the fire series ---
+
+/// The whole temporal story against the live stack: honest 404 before
+/// the fire drop, the six-granule drop, `datetime=` frame selection with
+/// oracle-pinned pixels per date, granule-scoped cache identity, the
+/// temporal decision on the SSE trace, the RFC 7807 / refusal taxonomy,
+/// and the derived temporal extent on the collection document.
+fn fire_time_dimension_checks() -> Result<(), Failure> {
+    fire_tile_404_before_drop()?;
+    drop_fire_granules()?;
+    fire_series_fully_ingested_within_60s()?;
+
+    let mut subscriber = sse::Subscriber::connect().map_err(|e| {
+        Failure::new(
+            "fire_sse_carries_temporal_decision",
+            "/traces",
+            "an SSE subscription",
+            e,
+        )
+    })?;
+    let latest = fire_absent_datetime_is_latest_and_cache_shared()?;
+    let pre = fire_frame_matches_golden(
+        "fire_pre_frame_matches_oracle_golden",
+        FIRE_PRE_INSTANT,
+        FIRE_PRE_GOLDEN,
+        "fire-pre.png",
+    )?;
+    let post = fire_frame_matches_golden(
+        "fire_post_frame_matches_oracle_golden",
+        FIRE_POST_INSTANT,
+        FIRE_POST_GOLDEN,
+        "fire-post.png",
+    )?;
+    if pre == post || pre == latest {
+        return Err(Failure::new(
+            "fire_frames_differ_across_dates",
+            FIRE_TILE,
+            "different pixels for different resolved granules",
+            "identical bytes across dates",
+        ));
+    }
+    pass(
+        "fire_frames_differ_across_dates",
+        "same tile, two dates, different oracle-pinned pixels (the burn scar is visible)",
+    );
+    fire_sse_carries_temporal_decision(&mut subscriber)?;
+    fire_datetime_error_taxonomy()?;
+    fire_collection_serves_derived_temporal_extent()
+}
+
+/// The fire layer exists (it is in the tilesets list) but its dataset has
+/// no granules yet: exactly 404 — the same honest shape the main drop
+/// path proves for `truecolor`.
+fn fire_tile_404_before_drop() -> Result<(), Failure> {
+    const CHECK: &str = "fire_tile_404_before_drop";
+    let resp = get(CHECK, FIRE_TILE)?;
+    if resp.status != 404 {
+        return Err(Failure::new(
+            CHECK,
+            FIRE_TILE,
+            "404 before the fire drop (dataset empty)",
+            format!("{}", resp.status),
+        ));
+    }
+    pass(CHECK, "fire tile is 404 before its drop (dataset empty)");
+    Ok(())
+}
+
+/// Lifecycle stimulus: the six-date Park Fire drop, via the shared script.
+fn drop_fire_granules() -> Result<(), Failure> {
+    const SCRIPT: &str = "tests/e2e/drop-fire-granules.sh";
+    let status = Command::new("bash")
+        .arg(SCRIPT)
+        .status()
+        .map_err(|e| Failure::new("fire_drop", SCRIPT, "drop script runs", e.to_string()))?;
+    if !status.success() {
+        return Err(Failure::new(
+            "fire_drop",
+            SCRIPT,
+            "exit 0",
+            format!("exit {:?}", status.code()),
+        ));
+    }
+    Ok(())
+}
+
+/// Polls the granules route until all six fire dates are cataloged, so
+/// every later frame request resolves against the complete series
+/// ("latest" must mean 2024-10-15, not whichever granule ingested first).
+fn fire_series_fully_ingested_within_60s() -> Result<(), Failure> {
+    const CHECK: &str = "fire_series_fully_ingested_within_60s";
+    const ENDPOINT: &str = "/datasets/hls-s30-fire/granules?limit=1";
+    let deadline = Instant::now() + Duration::from_mins(1);
+    let matched = loop {
+        let last = match http::get(ENDPOINT) {
+            Ok(resp) if resp.status == 200 => {
+                let doc: serde_json::Value =
+                    serde_json::from_slice(&resp.body).unwrap_or(serde_json::Value::Null);
+                let matched = doc["numberMatched"].as_u64().unwrap_or(0);
+                if matched >= 6 {
+                    break matched;
+                }
+                format!("200 with numberMatched={matched}")
+            }
+            Ok(resp) => resp.status.to_string(),
+            Err(e) => e,
+        };
+        if Instant::now() >= deadline {
+            return Err(Failure::new(
+                CHECK,
+                ENDPOINT,
+                "numberMatched >= 6 within 60s of the fire drop",
+                format!("last: {last}"),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    };
+    pass(CHECK, format_args!("all {matched} fire granules cataloged"));
+    Ok(())
+}
+
+/// Absent `datetime` = latest, and cache identity is granule-scoped: an
+/// explicit instant resolving to the same latest granule serves the very
+/// bytes the absent-parameter render cached (decision `cache_hit`) — the
+/// datetime string is provably not in the key. Returns the latest bytes.
+fn fire_absent_datetime_is_latest_and_cache_shared() -> Result<Vec<u8>, Failure> {
+    const CHECK: &str = "fire_absent_datetime_is_latest_and_cache_shared";
+    let absent = get(CHECK, FIRE_TILE)?;
+    if absent.status != 200 {
+        return Err(Failure::new(
+            CHECK,
+            FIRE_TILE,
+            "200 for the parameterless (latest) frame",
+            format!("{}", absent.status),
+        ));
+    }
+    let explicit_path = format!("{FIRE_TILE}?datetime=2030-01-01T00:00:00Z");
+    let explicit = get(CHECK, &explicit_path)?;
+    if explicit.status != 200 {
+        return Err(Failure::new(
+            CHECK,
+            &explicit_path,
+            "200",
+            format!("{}", explicit.status),
+        ));
+    }
+    if explicit.body != absent.body {
+        return Err(Failure::new(
+            CHECK,
+            &explicit_path,
+            "bytes identical to the absent-datetime frame (same resolved granule)",
+            "differing payload",
+        ));
+    }
+    let header = parse_trace_header(CHECK, &explicit_path, &explicit)?;
+    if header.decision != "cache_hit" {
+        return Err(Failure::new(
+            CHECK,
+            &explicit_path,
+            "decision \"cache_hit\" (same granule -> same key -> shared entry)",
+            format!("decision {:?}", header.decision),
+        ));
+    }
+    pass(
+        CHECK,
+        "absent datetime = latest; an explicit instant resolving to the same granule \
+         hits the same cache entry with identical bytes",
+    );
+    Ok(absent.body)
+}
+
+/// Fetches one dated frame, writes it as an artifact, and pins it against
+/// the committed rio-tiler oracle golden. Returns the served bytes.
+fn fire_frame_matches_golden(
+    check: &'static str,
+    instant: &str,
+    golden: &str,
+    artifact: &str,
+) -> Result<Vec<u8>, Failure> {
+    let path = format!("{FIRE_TILE}?datetime={instant}");
+    let resp = get(check, &path)?;
+    if resp.status != 200 {
+        return Err(Failure::new(
+            check,
+            &path,
+            "200",
+            format!("{}", resp.status),
+        ));
+    }
+    let served = format!("{ARTIFACT_DIR}/{artifact}");
+    fs::write(&served, &resp.body)
+        .map_err(|e| Failure::new(check, &path, "artifact written", e.to_string()))?;
+    pdiff_check(check, &path, Path::new(&served), golden)?;
+    pass(
+        check,
+        format_args!("datetime={instant} matches the oracle golden {golden}"),
+    );
+    Ok(resp.body)
+}
+
+/// The temporal decision is on the trace stream: both dated frames'
+/// envelopes carry `temporal` with the resolved granule id and the
+/// `latest_at_or_before` rule (typed via the shared core `Trace`).
+fn fire_sse_carries_temporal_decision(subscriber: &mut sse::Subscriber) -> Result<(), Failure> {
+    const CHECK: &str = "fire_sse_carries_temporal_decision";
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut seen: Vec<(String, String)> = Vec::new();
+    loop {
+        let granule_seen = |granule: &str| seen.iter().any(|(g, _)| g == granule);
+        if granule_seen(FIRE_PRE_GRANULE) && granule_seen(FIRE_POST_GRANULE) {
+            break;
+        }
+        let frame = subscriber.next_frame(deadline).map_err(|e| {
+            Failure::new(
+                CHECK,
+                "/traces",
+                "trace events for both dated fire frames within 15s",
+                format!("{e}; temporal decisions so far: {seen:?}"),
+            )
+        })?;
+        if frame.is_keepalive() || frame.event.as_deref() == Some("lagged") {
+            continue;
+        }
+        let data = frame.data.join("\n");
+        let envelope: TraceEnvelope = serde_json::from_str(&data).map_err(|e| {
+            Failure::new(
+                CHECK,
+                "/traces",
+                "trace data deserializes as the envelope around a core Trace",
+                format!("{e}; data: {data}"),
+            )
+        })?;
+        if envelope.layer != "park-fire-ndvi" || envelope.tile != FIRE_TILE_XYZ {
+            continue;
+        }
+        let Some(temporal) = envelope.trace.temporal else {
+            return Err(Failure::new(
+                CHECK,
+                "/traces",
+                "a temporal decision on every catalog-backed fire render",
+                format!(
+                    "trace without `temporal` (decision {:?})",
+                    envelope.trace.decision
+                ),
+            ));
+        };
+        seen.push((temporal.granule_id.clone(), format!("{:?}", temporal.rule)));
+        if matches!(
+            temporal.granule_id.as_str(),
+            FIRE_PRE_GRANULE | FIRE_POST_GRANULE
+        ) && temporal.rule != TemporalRule::LatestAtOrBefore
+        {
+            return Err(Failure::new(
+                CHECK,
+                "/traces",
+                "rule latest_at_or_before for an instant datetime",
+                format!("{:?} for {}", temporal.rule, temporal.granule_id),
+            ));
+        }
+    }
+    pass(
+        CHECK,
+        format_args!("SSE traces record the temporal decision (granule + rule): {seen:?}"),
+    );
+    Ok(())
+}
+
+/// Malformed `datetime` → 400 RFC 7807 naming the parameter; a window
+/// before the first acquisition → the established 404 refusal shape.
+fn fire_datetime_error_taxonomy() -> Result<(), Failure> {
+    const CHECK: &str = "fire_datetime_error_taxonomy";
+    let bad_path = format!("{FIRE_TILE}?datetime=yesterday");
+    let resp = get(CHECK, &bad_path)?;
+    let body = String::from_utf8_lossy(&resp.body).into_owned();
+    if resp.status != 400 || !body.contains("\"status\":400") || !body.contains("datetime") {
+        return Err(Failure::new(
+            CHECK,
+            &bad_path,
+            "400 with an RFC 7807 body naming `datetime`",
+            format!("{} with body {body:?}", resp.status),
+        ));
+    }
+    let empty_path = format!("{FIRE_TILE}?datetime=2020-01-01T00:00:00Z");
+    let resp = get(CHECK, &empty_path)?;
+    let body = String::from_utf8_lossy(&resp.body).into_owned();
+    if resp.status != 404 || !body.contains("acquisition datetime within") {
+        return Err(Failure::new(
+            CHECK,
+            &empty_path,
+            "404 with the empty-window refusal naming the window",
+            format!("{} with body {body:?}", resp.status),
+        ));
+    }
+    pass(
+        CHECK,
+        "malformed datetime is an RFC 7807 400; an empty window the honest 404 refusal",
+    );
+    Ok(())
+}
+
+/// The derived temporal extent is served where clients look for it: the
+/// collection document's temporal dimension spans exactly the six
+/// dropped acquisitions (deferral row 15's temporal half, made real).
+fn fire_collection_serves_derived_temporal_extent() -> Result<(), Failure> {
+    const CHECK: &str = "fire_collection_serves_derived_temporal_extent";
+    const ENDPOINT: &str = "/collections/hls-s30-fire";
+    let resp = get(CHECK, ENDPOINT)?;
+    if resp.status != 200 {
+        return Err(Failure::new(
+            CHECK,
+            ENDPOINT,
+            "200",
+            format!("{}", resp.status),
+        ));
+    }
+    let doc: serde_json::Value = serde_json::from_slice(&resp.body)
+        .map_err(|e| Failure::new(CHECK, ENDPOINT, "a JSON collection document", e.to_string()))?;
+    let extent = &doc["cube:dimensions"]["t"]["extent"];
+    let expected = serde_json::json!(FIRE_EXTENT);
+    if extent != &expected {
+        return Err(Failure::new(
+            CHECK,
+            ENDPOINT,
+            format!("temporal extent {expected} derived from the ingested granules"),
+            format!("{extent}"),
+        ));
+    }
+    pass(
+        CHECK,
+        format_args!("collection serves the derived temporal extent {expected}"),
+    );
+    Ok(())
 }
 
 /// Was: `curl -sf "$base/" | grep -q '"title":"Swath"'` (stack-up.sh).

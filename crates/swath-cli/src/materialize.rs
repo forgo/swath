@@ -228,14 +228,16 @@ where
     }
     let mut pairs = Vec::new();
     for identity in identities {
-        let resolved =
-            provider
-                .resolve(&identity.id)
-                .await
-                .map_err(|err| MaterializeCliError::Resolve {
-                    layer: identity.id.clone(),
-                    detail: err.to_string(),
-                })?;
+        let resolved = provider
+            // Materialization pyramids serve every frame; building
+            // them from the latest granule's assets (open window) is
+            // unchanged by ADR 0015.
+            .resolve(&identity.id, None)
+            .await
+            .map_err(|err| MaterializeCliError::Resolve {
+                layer: identity.id.clone(),
+                detail: err.to_string(),
+            })?;
         for asset in resolved.layer.bands.values() {
             pairs.push((asset.clone(), resolved.layer.resampling));
         }

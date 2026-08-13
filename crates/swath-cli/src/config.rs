@@ -507,11 +507,15 @@ fn compile_catalog_mode(
             title: config.title.clone().unwrap_or_else(|| config.id.clone()),
             description: config.description.clone().unwrap_or_default(),
             license: config.license.clone().unwrap_or_else(|| "other".to_owned()),
-            // A whole-world, open-ended placeholder extent: honest for a
-            // dataset whose coverage is defined by whatever granules
-            // arrive. Deriving/maintaining real extents from ingested
-            // granules is deliberate future work (noted, not built;
-            // deferral tracked in docs/ROADMAP.md).
+            // The compiled extent is a starting point, not the served
+            // truth. Temporal: an open interval meaning "no granule
+            // recorded yet" — serve registration re-derives it from
+            // ingested granules (min/max acquisition datetime) and each
+            // ingest widens it (ADR 0015; the temporal half of ROADMAP
+            // deferral row 15). Spatial: a whole-world placeholder,
+            // honest for a dataset whose coverage is whatever granules
+            // arrive — deriving real spatial extents stays deferred
+            // (docs/ROADMAP.md row 15, Records trigger).
             extent: domain::Extent {
                 bbox: domain::Bbox {
                     west: -180.0,
