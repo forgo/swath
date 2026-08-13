@@ -144,7 +144,10 @@ async function expectFrameBadges(page: Page, frame: string, kind: string): Promi
       return badges.length;
     },
     { frame, kind, layer: LAYER },
-    { timeout: 30_000 },
+    // Generous per-frame budget: a frame is a viewport of live NDVI
+    // renders, and CI's 2-core runner shares them with the browser and
+    // the dev server (observed >30 s there; seconds locally).
+    { timeout: 120_000 },
   );
   return (await handle.jsonValue()) as number;
 }
@@ -225,8 +228,9 @@ test("the signature loop: first pass renders live, second pass replays from cach
   page,
 }) => {
   // Deliberately generous: the first pass live-renders every frame's
-  // visible tiles (six frames of real NDVI math).
-  test.setTimeout(180_000);
+  // visible tiles (six frames of real NDVI math), and CI's 2-core
+  // runner needs real headroom per frame.
+  test.setTimeout(600_000);
   const frames = await granuleFrames(page);
 
   await page.goto(`${DEMO_PATH}?xray&layer=${LAYER}&center=${CENTER}&zoom=${ZOOM}`);
