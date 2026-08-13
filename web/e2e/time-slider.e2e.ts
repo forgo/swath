@@ -208,10 +208,10 @@ async function expectFrameBadges(page: Page, frame: string, kind: string): Promi
       { timeout: 120_000 },
     )
     .catch(async (error: unknown) => {
-      // The stall's anatomy, in the test output: which badge disagrees,
-      // what the stream last said about it, and what the overlay shows.
-      console.log(`expectFrameBadges stalled: ${await dump()}`);
-      throw error;
+      // The stall's anatomy rides the failure itself: which badge
+      // disagrees, what the stream last said about it, and what the
+      // overlay shows.
+      throw new Error(`expectFrameBadges stalled (${String(error)}): ${await dump()}`);
     });
   return (await handle.jsonValue()) as number;
 }
