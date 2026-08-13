@@ -1,9 +1,10 @@
 # Swath — Project Charter
 
-*Working document. v0.3 — August 2026. Reconciled with the shipped system and ADRs 0001-0013;
-§8 and §10 are written in achieved tense with evidence links where the thing exists. Where this
-charter and an ADR disagree, the ADR wins; the north-star requirements live in `REQUIREMENTS.md`
-(scope changes are recorded as dated amendments in its §10).*
+*Working document. v0.4 — August 2026. Vision, principles, and phases. Delivery status lives
+in `ROADMAP.md`; the build/adopt/bind/never inventory in `ARCHITECTURE.md` §3; positioning and
+founder framing in `PITCH.md` (outside the contributor reading path). Where this charter and an
+ADR disagree, the ADR wins; the north-star requirements live in `REQUIREMENTS.md` (scope changes
+are recorded as dated amendments in its §10).*
 
 ---
 
@@ -151,34 +152,8 @@ Architect for it now (embeddings = a product type + a vector index); ship it in 
 
 The single most important discipline for finishing this: build only the defensible core; stand on the
 shoulders of everything else. The v0.1 draft planned "~5 things to build"; all five were built. The
-full build/adopt/bind/never table, verified against the tree, is `ARCHITECTURE.md` §3.
-
-**Built (the defensible core — the 5 things):**
-
-1. The **process-graph → tile-ops compiler** — openEO process-graph JSON lowered to the Render IR and
-   served live (`crates/swath-render` `process`/`ir`; authoring surface per ADR 0010, conformance-tested
-   in `crates/swath-api/tests/openeo_conformance.rs`).
-2. The **cost-aware materialization planner** — live vs. overview vs. cache per tile, explicit
-   per-layer budgets, every considered candidate's cost estimate recorded in the trace
-   (`crates/swath-core` `planner`; spec: `docs/design/materialization-planner.md`; property-tested,
-   benchmarked in `PERFORMANCE.md` §5 — planning costs tens of nanoseconds).
-3. The **single-pane control plane** — datasets/layers API + Web-Components UI; writes pgstac
-   underneath; STAC hidden (`crates/swath-api`, `web/src`, `crates/adapters/swath-catalog-pgstac`;
-   domain contract: `docs/design/catalog-domain.md`).
-4. The **glass-box observability / x-ray harness** — the per-tile trace model (decision, bytes read,
-   chunk/byte-range provenance, timings), its SSE stream, and the overlay; and it is the test oracle:
-   the e2e harness asserts against the same trace the overlay renders (`crates/swath-core` `trace`,
-   `crates/swath-e2e`; `ARCHITECTURE.md` §9).
-5. The **legacy virtualization ingest orchestration** — event-driven filedrop ingest plus a pure-Rust
-   virtual-reference generator (`crates/swath-referencer`; ADRs 0006/0008), conformance-gated against
-   the VirtualiZarr sidecar it replaced (`just test-referencer`) and ~40× faster per invocation
-   (`PERFORMANCE.md` §7).
-
-**Composed (as built):** less than the v0.1 draft planned, and the claim is stronger for it —
-**pgstac** (Postgres) for the catalog and **object storage** (`object_store`; MinIO in the local
-stack) for tiles, plus adopted reader/encoder/runtime crates (`async-tiff`, `image`/`png`, `axum`,
-`tokio`; `zarrs` when the native-Zarr source lands) and **MapLibre GL** in the frontend. Projection
-math is **bound**, never rewritten: `proj4rs` (ADR 0002).
+full build/adopt/bind/never table — what was built, what was composed, what is bound, what is
+never reimplemented — verified against the tree, is `ARCHITECTURE.md` §3.
 
 **Demoted to test oracles:** the v0.1 draft composed TiTiler + rio-tiler, `xpublish-tiles`,
 stac-fastapi, morecantile, and openEO reference tooling into the serving path; the pure-Rust core
@@ -193,25 +168,10 @@ eoAPI (catalog + serve). Each solves a slice; none fuses ingest + a low-latency 
 serving + a single pane. That fusion is ours — and it is measured, not promised: ingest-to-pixel is
 646 ms end to end, budget-enforced on every commit (`PERFORMANCE.md` §4).
 
-**Stack** *(as shipped; ADRs 0002, 0005, 0006 — the original draft described a Python core and a
-React/deck.gl frontend; superseded):*
-
-- **Core:** **pure Rust, single static binary** (`tokio` + `axum`) — the tiler, materialization planner,
-  process compiler, control plane, and trace model are owned Rust IP. Adopted reader/codec crates
-  (`async-tiff`, `object_store`); bound projection math (`proj4rs`; PROJ C-bindings feature-gated for
-  the long tail); GDAL/PROJ never reimplemented. (ADR 0002)
-- **Ingest sidecars:** the staged Python→Rust plan of ADR 0006 completed — the production
-  virtual-reference generator is Rust (`swath-referencer`); the thin **Python** (`uv` + `ruff`)
-  VirtualiZarr sidecar is retained as its conformance reference.
-- **Catalog / state:** pgstac (Postgres); object store for tiles; Icechunk/GeoZarr cubes are ahead
-  (§10 Phase 3+).
-- **Frontend:** TypeScript **Web Components** (no framework) + **MapLibre GL**; deck.gl deferred. (ADR 0005)
-- **Deploy:** one-command local (`docker compose`) and a no-checkout GHCR demo one-liner exist;
-  cloud IaC (Terraform / Helm) and the documented "layer onto an existing eoAPI/pgstac deployment"
-  path are still ahead (§10 Phase 3).
-- **Testing:** property-based tests (`proptest`) on the planner; pixel-diff goldens for rendered tiles
-  vs the GDAL/rio-tiler oracle (`tests/oracle/`); the x-ray trace as the assertion layer
-  (`crates/swath-e2e`). All running in CI today.
+**Stack:** the shipped component-by-component inventory (pure-Rust single-binary core,
+Web-Components + MapLibre frontend, pgstac/object-store state; ADRs 0002, 0005, 0006 — the
+original draft's Python core and React/deck.gl frontend are superseded) is `ARCHITECTURE.md`
+§§3-4 and §12.
 
 ## 9. Reference datasets
 
@@ -224,65 +184,36 @@ React/deck.gl frontend; superseded):*
 
 ## 10. Milestones
 
-_Delivery status against these phases — shipped milestones, the canonical deferral inventory,
-and the parked M7+ candidates — lives in [`ROADMAP.md`](ROADMAP.md)._
+_These are the phases as scope — what each one is. Delivery status against them — shipped
+milestones with exit evidence, the canonical deferral inventory, and the parked M7+ candidates —
+lives in [`ROADMAP.md`](ROADMAP.md) §1._
 
-**Phase 0 — Foundations. Done.**
+**Phase 0 — Foundations.**
 Charter, requirements, ADRs 0001-0007, build-vs-compose boundary, dev environment, the `just check`
-gate mirrored by CI (`ENGINEERING.md`), testing harness. Evidence: `docs/decisions/`, `.github/workflows/ci.yml`.
+gate mirrored by CI (`ENGINEERING.md`), testing harness.
 
-**Phase 1 — MVP: "granule → live tile". Done — the stopwatch demo exists and is enforced.**
+**Phase 1 — MVP: "granule → live tile".**
 HLS ingest → true-color + NDVI derived on the fly → served via OGC API - Tiles → MapLibre viewer with
-datasets/layers panels (STAC hidden). X-ray v0 shipped with the ingest-to-pixel timer and live/cache
-indicator. The stopwatch number: **646 ms** arrival-to-correct-pixel, measured end to end through the
-real stack and asserted under budget on every commit (`PERFORMANCE.md` §4; `crates/swath-e2e`). NDVI
-is computed on the fly and pixel-verified against oracle goldens — not pre-baked.
+datasets/layers panels (STAC hidden). X-ray v0 with the ingest-to-pixel timer and live/cache
+indicator; the stopwatch demo, asserted under budget on every commit.
 
-**Phase 2 — The materialization brain + legacy ingest + DS authoring. Done.**
+**Phase 2 — The materialization brain + legacy ingest + DS authoring.**
 Cost-aware planner (live vs. overview vs. cache under explicit budgets) —
-`docs/design/materialization-planner.md`, benchmarked in `PERFORMANCE.md` §5. Legacy path proven on
-VIIRS (VNP09GA, ADR 0008) — and a step beyond the plan: virtualization by the pure-Rust referencer,
-with VirtualiZarr demoted to conformance reference (ADR 0006, `PERFORMANCE.md` §7). openEO product
-authoring compiled through the engine (ADR 0010; end-to-end from the authoring panel,
-`web/e2e/authoring.e2e.ts`). The x-ray overlay carries the chunk/byte-range provenance and
-planner decision-trace views (`ARCHITECTURE.md` §9).
+`docs/design/materialization-planner.md`. Legacy path on VIIRS (VNP09GA, ADR 0008), virtualized
+by the pure-Rust referencer with VirtualiZarr as its conformance reference (ADR 0006). openEO
+product authoring compiled through the engine (ADR 0010). The x-ray overlay carries the
+chunk/byte-range provenance and planner decision-trace views (`ARCHITECTURE.md` §9).
 
-**Phase 3 — Platform breadth + turnkey deploy. In progress.**
-Shipped: versioned GHCR images with a CI-smoke-tested no-checkout docker one-liner, one-command local
-stack, and the pre-release pipeline (`docs/RELEASING.md`). Ahead: OGC API breadth (EDR time-series,
-Features/GeoParquet vector), auth (OIDC/RBAC), multi-tenant, cloud IaC deploy, and the documented
-"adopt on top of your existing eoAPI" path.
+**Phase 3 — Platform breadth + turnkey deploy.**
+Versioned images with a no-checkout one-liner, one-command local stack, and the release pipeline
+(`docs/RELEASING.md`); OGC API breadth (EDR time-series, Features/GeoParquet vector); auth
+(OIDC/RBAC); multi-tenant; cloud IaC deploy; the documented "adopt on top of your existing
+eoAPI" path.
 
-**Phase 4 — Frontier: geo-embeddings. Not started.**
+**Phase 4 — Frontier: geo-embeddings.**
 Embeddings as a first-class product type; a vector index; semantic/similarity search over the catalog.
 
-## 11. Positioning & monetization
-
-**Open-core.** A permissive, genuinely useful, self-hostable core (the platform, the engine, the control
-plane, the x-ray tooling) that earns adoption and stars on its own. A commercial layer on top for teams
-who don't want to run it themselves or need enterprise/government features:
-
-- **Managed / hosted Swath** (the single pane + materialization SLAs, run for you).
-- **Enterprise features:** SSO/SAML, fine-grained RBAC, audit, multi-tenant governance.
-- **Government readiness:** compliance posture (FedRAMP-style controls), air-gapped/on-prem support.
-- **Premium connectors & support:** priority data-source integrations, SLAs, professional services.
-
-This mirrors proven models in the space — Development Seed's services around eoAPI, and Earthmover's
-Arraylake around open-source Icechunk — but Swath's commercial wedge is distinct: the **managed single
-pane + the materialization guarantees**, which is precisely the part that is hardest to operate well.
-
-## 12. How this complements the founder conversation
-
-This charter is framed as an independent open-source project, but it is deliberately the productized
-platform layer that an EO-products government contractor most needs. Being the maintainer of the OSS core
-makes its author the technical center of gravity for exactly that problem — more valuable than a second
-pair of hands. And because Swath layers onto an existing pgstac/TiTiler deployment (e.g. a fire portal
-already using that stack), it's adoptable there with near-zero migration cost. It is a way to *exceed*
-the "just orchestrate what exists" framing by owning the two things that framing misses: making the loop
-**standards-native** (openEO/OGC) and **embedding-aware**, plus the cost-aware materialization brain that
-turns "assemble the tilers" into an actual product.
-
-## 13. Open decisions
+## 11. Open decisions
 
 Decided since v0.1 (see `docs/decisions/`):
 
@@ -301,7 +232,7 @@ Still open:
 
 - **Embedding model for the frontier:** Clay vs. Prithvi vs. AlphaEarth-style — decide when Phase 4 nears.
 
-## 14. Glossary
+## 12. Glossary
 
 - **STAC** — SpatioTemporal Asset Catalog; the standard for describing geospatial assets. Swath hides it.
 - **COG** — Cloud-Optimized GeoTIFF; a 2D raster whose header lets a tiler byte-range-fetch just the tile it needs.
@@ -313,7 +244,7 @@ Still open:
 - **Ingest-to-pixel** — Swath's north-star metric: arrival of a granule → visible correct tile.
 - **Geo-embeddings** — learned vectors from a foundation model over imagery; enable semantic/similarity search.
 
-## 15. References
+## 13. References
 
 - eoAPI — https://eoapi.dev/ · https://developmentseed.org/projects/eoapi/
 - TiTiler — https://developmentseed.org/titiler/ · titiler-cmr HLS guide — https://developmentseed.org/titiler-cmr/dev/datasets/hls_tiling/
