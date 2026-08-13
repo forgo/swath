@@ -44,7 +44,7 @@ fn reintroducing_demos_stale_measured_numbers_fails() {
         &doc,
         "| Where                  | ingest-to-pixel | Notes                                                            |\n\
          | ---------------------- | --------------- | ---------------------------------------------------------------- |\n\
-         | **Committed baseline** | **646 ms**      | `just perf-i2p`, stamped at `27deca2` — [`docs/perf/i2p-baseline.json`](perf/i2p-baseline.json), method in [`PERFORMANCE.md`](PERFORMANCE.md) §4 |\n\
+         | **Committed baseline** | **<!-- number:i2p-ms -->646 ms<!-- /number:i2p-ms -->** | `just perf-i2p`, stamped at <!-- number:i2p-sha -->`27deca2`<!-- /number:i2p-sha --> — [`docs/perf/i2p-baseline.json`](perf/i2p-baseline.json), method in [`PERFORMANCE.md`](PERFORMANCE.md) §4 |\n\
          | **Asserted budget**    | **10 000 ms**   | ~15x headroom over the committed baseline                        |",
         "| Where               | ingest-to-pixel | Notes                                |\n\
          | ------------------- | --------------- | ------------------------------------ |\n\

@@ -16,7 +16,7 @@
 //! - `docs/perf/load-2cpu-16.7-evidence.md`'s header must describe the
 //!   2-CPU pinned run its filename and data claim (ADR 0012's rerun).
 
-use super::{normalize_ws, read_repo, strip_code_fences};
+use super::{normalize_ws, read_repo, strip_code_fences, strip_number_tags};
 
 /// Quoted spans shorter than this are not treated as verbatim quotes
 /// (short fragments like process names are legitimately paraphrased).
@@ -25,6 +25,9 @@ const MIN_QUOTE_LEN: usize = 20;
 /// `docs/DEMO.md` vs `docs/perf/i2p-baseline.json`: the committed
 /// baseline row must exist and carry the artifact's value and git sha.
 pub(super) fn demo_quotes_the_i2p_baseline(demo: &str) -> Result<(), String> {
+    // The row's figures sit inside generated `number:` markers (issue
+    // #174); this check reads the prose as rendered.
+    let demo = strip_number_tags(demo);
     let baseline: serde_json::Value =
         serde_json::from_str(&read_repo("docs/perf/i2p-baseline.json"))
             .map_err(|err| format!("docs/perf/i2p-baseline.json is not JSON: {err}"))?;

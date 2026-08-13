@@ -17,6 +17,10 @@
 //! - [`claims`] — cross-document claims (quoted sentences, §-citations,
 //!   committed perf numbers, evidence-file headers) vs their canonical
 //!   sources.
+//! - [`numbers`] — inline `number:<key>` headline-figure markers (issue
+//!   #174) vs the committed perf artifacts: marker content current,
+//!   required markers present, and no naked headline literal anywhere
+//!   outside a marker (`just perf-doc` regenerates; this verifies).
 //! - [`mutation`] — the acceptance bar: each of the six documentation
 //!   drifts fixed by the #172 sweep (PR #214) is re-introduced in memory
 //!   and the gate must fail on every one.
@@ -43,6 +47,7 @@
 mod claims;
 mod deferrals;
 mod mutation;
+mod numbers;
 mod routes;
 mod stamps;
 
@@ -95,6 +100,30 @@ fn marker_block(doc_label: &str, doc: &str, scope: &str) -> Result<String, Strin
 /// the hard wrapping both documents apply.
 fn normalize_ws(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// `text` with the inline `<!-- number:<key> -->` / `<!-- /number:<key> -->`
+/// tags removed and their content kept — checks that quote doc sentences
+/// verbatim must see the prose as it renders, not the marker plumbing
+/// (the [`numbers`] module checks the markers themselves).
+fn strip_number_tags(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    loop {
+        let begin = rest.find("<!-- number:");
+        let end = rest.find("<!-- /number:");
+        let Some(start) = begin.map_or(end, |b| Some(end.map_or(b, |e| b.min(e)))) else {
+            out.push_str(rest);
+            return out;
+        };
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let Some(stop) = rest.find("-->") else {
+            out.push_str(rest);
+            return out;
+        };
+        rest = &rest[stop + "-->".len()..];
+    }
 }
 
 /// `text` with fenced code blocks (``` … ```) removed — prose checks must

@@ -779,9 +779,17 @@ perf-referencer runs="10":
     EOF
 
 # Regenerate the results tables and measurement stamp in docs/PERFORMANCE.md
-# from the committed artifacts (docs/perf/*.json). Everything between the
-# `table:*` HTML-comment markers is owned by this recipe; the prose around
-# the markers is hand-written. Run after any baseline artifact changes.
+# AND every inline headline figure across the docs from the committed
+# artifacts (docs/perf/*.json + docs/perf/load-2cpu-16.7-evidence.md).
+# Everything between the `table:*` HTML-comment markers is owned by this
+# recipe, and so is the content of every inline
+# `<!-- number:<key> -->…<!-- /number:<key> -->` pair (README.md, DEMO.md,
+# CHARTER.md, REQUIREMENTS.md, PERFORMANCE.md, ARCHITECTURE.md,
+# COMPARISON.md, media/wedge.notes.md); the prose around the markers is
+# hand-written. Idempotent — rerunning without artifact changes is a no-op.
+# The docs-check gate (crates/swath-cli/src/docs_check/numbers.rs) verifies
+# marker content against the same artifacts and rejects naked headline
+# literals. Run after any baseline artifact changes.
 perf-doc:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -883,11 +891,97 @@ perf-doc:
         text = head + begin + "\n" + body + "\n" + end + tail
     doc.write_text(text)
     print(f"regenerated {len(blocks)} generated blocks in {doc}")
+
+    # --- Inline headline-number markers (issue #174) ---
+    # One rendered string per key; docs quote a key inside
+    # `<!-- number:<key> -->…<!-- /number:<key> -->` and this recipe owns the
+    # content. Rendering rules must match docs_check/numbers.rs exactly.
+
+    def sig2(v: float) -> int:
+        # Two significant figures, as an integer (23.33 -> 23, 660.61 -> 660).
+        # Half rounds away from zero (matches Rust's f64::round in the
+        # docs-check twin, docs_check/numbers.rs).
+        import math
+        scale = 10 ** max(0, math.floor(math.log10(abs(v))) - 1)
+        return int(v / scale + 0.5) * scale
+
+    def comma(s: str) -> str:
+        whole, _, frac = s.partition(".")
+        grouped = f"{int(whole):,}"
+        return f"{grouped}.{frac}" if frac else grouped
+
+    # The 2-CPU load evidence is a committed markdown table; keep its figures
+    # as written (strings), never re-formatted through floats.
+    twocpu_rows = {}
+    for line in pathlib.Path("docs/perf/load-2cpu-16.7-evidence.md").read_text().splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) == 8:
+            twocpu_rows[cells[0]] = cells
+    hot2 = twocpu_rows["(a) hot-cache tile storm"]
+    cold2 = twocpu_rows["(b) cold live-render burst"]
+    healthz2 = twocpu_rows["(c) healthz UNDER WARPS"]
+
+    numbers = {
+        "i2p-ms": f"{i2p['value']} ms",
+        "i2p-sha": f"`{i2p['git_sha'][:7]}`",
+        "hot-p50-approx": f"~{sig2(load['scenarios']['hot_cache_storm']['p50_ms'])} ms",
+        "cold-p50-approx": f"~{sig2(load['scenarios']['cold_live_burst']['p50_ms'])} ms",
+        "ref-warm-ms": f"{ref['generators']['referencer-rs']['warm_median_ms']} ms",
+        "ref-sidecar-warm-ms": f"{ref['generators']['virtualizarr-sidecar']['warm_median_ms']} ms",
+        "ref-ratio": f"{ref['warm_ratio_rust_advantage']}×",
+        "ref-ratio-approx": f"~{int(ref['warm_ratio_rust_advantage'] + 0.5)}×",
+        "2cpu-hot-p50": f"{hot2[4]} ms",
+        "2cpu-hot-p95": f"{hot2[5]} ms",
+        "2cpu-hot-rps": f"{comma(hot2[3])} req/s",
+        "2cpu-cold-p50": f"{cold2[4]} ms",
+        "2cpu-healthz-p99": f"{healthz2[6]} ms",
+    }
+
+    marker_docs = [
+        "README.md",
+        "docs/DEMO.md",
+        "docs/CHARTER.md",
+        "docs/REQUIREMENTS.md",
+        "docs/PERFORMANCE.md",
+        "docs/ARCHITECTURE.md",
+        "docs/COMPARISON.md",
+        "docs/media/wedge.notes.md",
+    ]
+    def fill(rel: str, segment: str) -> tuple[str, int]:
+        out = []
+        rest = segment
+        n = 0
+        while True:
+            head, sep, rest = rest.partition("<!-- number:")
+            out.append(head)
+            if not sep:
+                break
+            key, sep, rest = rest.partition(" -->")
+            assert sep, f"{rel}: unterminated `<!-- number:{key}` begin marker"
+            assert key in numbers, f"{rel}: unknown number marker key `{key}`"
+            end = f"<!-- /number:{key} -->"
+            _, sep, rest = rest.partition(end)
+            assert sep, f"{rel}: missing `{end}`"
+            out.append(f"<!-- number:{key} -->{numbers[key]}{end}")
+            n += 1
+        return "".join(out), n
+
+    total = 0
+    for rel in marker_docs:
+        path = pathlib.Path(rel)
+        # Fenced code blocks (odd segments) are examples, not live markers.
+        segments = path.read_text().split("```")
+        for i in range(0, len(segments), 2):
+            segments[i], n = fill(rel, segments[i])
+            total += n
+        path.write_text("```".join(segments))
+    print(f"filled {total} inline number markers across {len(marker_docs)} docs")
     EOF
 
-# The docs-drift gate alone (issues #119/#173): CONFIG.md vs the clap/serde
-# schemas, ENDPOINTS.md vs the axum routers, sha-stamp freshness, deferral
-# pointers, cross-doc claims — mutation verification included. The same tests
+# The docs-drift gate alone (issues #119/#173/#174): CONFIG.md vs the
+# clap/serde schemas, ENDPOINTS.md vs the axum routers, sha-stamp freshness,
+# deferral pointers, cross-doc claims, inline headline-number markers vs the
+# perf artifacts — mutation verification included. The same tests
 # run inside `just test` (they live in swath-cli); this recipe is the fast
 # docs-only loop and what CI's docs-check job runs (with full git history:
 # SWATH_DOCS_CHECK_REQUIRE_GIT=1 forbids the shallow-checkout skip there).

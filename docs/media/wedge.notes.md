@@ -97,8 +97,8 @@ The rung is proven, not claimed: the CI-gated test
 `post_service_serves_tiles_byte_identical_to_the_builtin_ndvi`
 (`crates/swath-api/tests/openeo_services.rs`) POSTs an NDVI graph and asserts the served
 tiles are byte-identical to the built-in NDVI layer. Y4: committed load evidence
-(`docs/perf/load-2cpu-16.7-evidence.md`) records hot-cache tile storm p50 23.46 ms / p95
-37.68 ms at 1,277.6 req/s, cold live-render p50 965.6 ms, and control-plane p99 1.44 ms under
+(`docs/perf/load-2cpu-16.7-evidence.md`) records hot-cache tile storm p50 <!-- number:2cpu-hot-p50 -->23.46 ms<!-- /number:2cpu-hot-p50 --> / p95
+<!-- number:2cpu-hot-p95 -->37.68 ms<!-- /number:2cpu-hot-p95 --> at <!-- number:2cpu-hot-rps -->1,277.6 req/s<!-- /number:2cpu-hot-rps -->, cold live-render p50 <!-- number:2cpu-cold-p50 -->965.57 ms<!-- /number:2cpu-cold-p50 -->, and control-plane p99 <!-- number:2cpu-healthz-p99 -->1.44 ms<!-- /number:2cpu-healthz-p99 --> under
 concurrent warps; per-tile decision provenance (live vs. cache) streams over SSE `/traces`
 and is itself CI-gated (`crates/swath-api/tests/trace_stream.rs`,
 `crates/swath-api/tests/tiles_cache.rs`), satisfying the "measured + traced" rung

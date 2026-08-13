@@ -55,17 +55,17 @@ math through them and pixel-diffs the results against committed goldens
 Method, environment, and regeneration recipes for every figure:
 [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
 
-- **Ingest-to-pixel: 646 ms** — from "a new granule lands" to "a correct, pixel-verified tile
+- **Ingest-to-pixel: <!-- number:i2p-ms -->646 ms<!-- /number:i2p-ms -->** — from "a new granule lands" to "a correct, pixel-verified tile
   on the map," through the real stack. The north-star metric
   ([`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) §3), enforced under a 10 s budget by
   `just e2e` on every commit ([`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) §4, artifact:
   [`docs/perf/i2p-baseline.json`](docs/perf/i2p-baseline.json)).
-- **Hot-tile serving: p50 ~23 ms** at 32-way concurrency from the write-through cache; cold
-  live renders of never-seen z15 tiles land at p50 ~660 ms
+- **Hot-tile serving: p50 <!-- number:hot-p50-approx -->~23 ms<!-- /number:hot-p50-approx -->** at 32-way concurrency from the write-through cache; cold
+  live renders of never-seen z15 tiles land at p50 <!-- number:cold-p50-approx -->~660 ms<!-- /number:cold-p50-approx -->
   ([`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) §6, artifact:
   [`docs/perf/load-baseline.md`](docs/perf/load-baseline.md)).
-- **Referencer: 13.8 ms warm** to generate the virtual-reference manifest for a 1,551-chunk
-  VIIRS HDF-EOS5 granule — **39.5×** faster than the VirtualiZarr sidecar it replaced, which
+- **Referencer: <!-- number:ref-warm-ms -->13.8 ms<!-- /number:ref-warm-ms --> warm** to generate the virtual-reference manifest for a 1,551-chunk
+  VIIRS HDF-EOS5 granule — **<!-- number:ref-ratio -->39.5×<!-- /number:ref-ratio -->** faster than the VirtualiZarr sidecar it replaced, which
   remains the conformance reference ([`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) §7,
   artifact: [`docs/perf/referencer-baseline.json`](docs/perf/referencer-baseline.json)).
 - **Head-to-head with TiTiler, honestly:** on the stateless render-vs-render scenarios —
