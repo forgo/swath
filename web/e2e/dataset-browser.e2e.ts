@@ -82,20 +82,29 @@ test("granule fetch is lazy: zero browse requests until the panel opens", async 
   await page.goto(DEMO_PATH);
   await waitForFittedView(page);
   // The page is fully up — map, tiles, layer panel — and the closed
-  // dataset browser has added NOTHING to the request log.
+  // dataset browser has added NOTHING to the request log. The one
+  // granules request that IS here belongs to the map, not the panel:
+  // since issue #182 every catalog-backed layer apply reads its
+  // dataset's granule listing once — the time slider's domain (which
+  // for this single-date layer resolves to "hidden").
   await expect(panelToggle(page)).toBeVisible();
-  expect(hits).toEqual([]);
+  expect(hits.filter((path) => path.endsWith("/collections"))).toEqual([]);
+  expect(hits).toEqual(["/datasets/hls-s30/granules"]);
 
-  // Opening fetches the dataset listing exactly once, still no granules.
+  // Opening fetches the dataset listing exactly once, still no further
+  // granules requests — the panel stays lazy.
   await panelToggle(page).click();
   await expect(datasetButton(page, "hls-s30")).toBeVisible();
   expect(hits.filter((path) => path.endsWith("/collections"))).toHaveLength(1);
-  expect(hits.filter((path) => path.includes("granules"))).toHaveLength(0);
+  expect(hits.filter((path) => path.includes("granules"))).toHaveLength(1);
 
-  // Expanding the dataset fetches its granules exactly once.
+  // Expanding the dataset fetches its granules exactly once more.
   await datasetButton(page, "hls-s30").click();
   await expect(page.locator("swath-dataset-panel button[data-granule]").first()).toBeVisible();
-  expect(hits.filter((path) => path.includes("granules"))).toEqual(["/datasets/hls-s30/granules"]);
+  expect(hits.filter((path) => path.includes("granules"))).toEqual([
+    "/datasets/hls-s30/granules",
+    "/datasets/hls-s30/granules",
+  ]);
 });
 
 test("expanding renders footprint outlines as a MapLibre layer", async ({ page }) => {

@@ -48,6 +48,11 @@ if [ "$countdown" -gt 0 ]; then
     printf '\r%45s\r' ''
 fi
 tests/e2e/drop-granule.sh
+# The six-date Park Fire series too (issue #182): the web suites and the
+# demo need the temporal layer (park-fire-ndvi) so the time slider has
+# frames to scrub/play across. `just e2e` never reaches this path
+# (SWATH_STACK_UP_ONLY=1); its Rust harness owns the fire drop itself.
+tests/e2e/drop-fire-granules.sh
 # Arrive -> catalog -> serve, automatically: poll until the tile is live
 # (readiness for the Playwright suite / the demo — the e2e ASSERTION of
 # this path lives in swath-e2e's tile_live_within_60s_of_drop).
@@ -61,3 +66,18 @@ for _ in $(seq 1 120); do
 done
 [ "$code" = "200" ] || { echo "FAIL: tile not servable within 60s of the drop (last: $code)"; exit 1; }
 echo "swath: tile went live with zero manual steps (R1)"
+# Same readiness for the fire series — all SIX granules cataloged (the
+# slider's domain is the granule listing; fewer would race the ingest)
+# and the proven z13 tile (OGC z/row/col) actually serving.
+ok=0
+for _ in $(seq 1 120); do
+    if curl -s "$base/datasets/hls-s30-fire/granules" | grep -q '"numberMatched":6' \
+        && [ "$(curl -s -o /dev/null -w '%{http_code}' \
+            "$base/tilesets/park-fire-ndvi/tiles/13/3100/1326")" = "200" ]; then
+        ok=1
+        break
+    fi
+    sleep 0.5
+done
+[ "$ok" = "1" ] || { echo "FAIL: park fire series not fully servable within 60s of the drop"; exit 1; }
+echo "swath: park fire series live (time dimension ready)"

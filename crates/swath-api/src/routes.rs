@@ -416,6 +416,21 @@ where
         .title(format!("{} tiles (PNG)", identity.title))
         .templated(),
     );
+    // Catalog-backed layers advertise their granule listing (ADR 0015):
+    // the granules' acquisition datetimes are the frames `datetime=` can
+    // select, so this link is how a client (the web time slider) learns
+    // the layer's temporal domain. Static layers are a single timeless
+    // frame — no dataset, no link.
+    if let Some(dataset) = &identity.dataset {
+        links.push(
+            Link::new(
+                format!("{base}/datasets/{dataset}/granules", base = app.base_url),
+                "granules",
+            )
+            .media_type("application/json")
+            .title(format!("Granules of dataset {dataset}")),
+        );
+    }
 
     Ok(Json(TileSetMetadata {
         title: item.title,

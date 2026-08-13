@@ -12,6 +12,7 @@ import {
   formatZoom,
   hasViewParams,
   loadViewState,
+  parseTime,
   parseViewState,
   resolveInitialState,
   STORAGE_KEY,
@@ -96,8 +97,44 @@ test("precedence: empty storage falls through to the zero-config default", () =>
 test("hasViewParams triggers on exactly the owned params", () => {
   expect(hasViewParams("?layer=x")).toBe(true);
   expect(hasViewParams("?xray")).toBe(true);
+  expect(hasViewParams("?t=2024-08-16T19:03:00Z")).toBe(true);
   expect(hasViewParams("?basemap=demo")).toBe(false);
   expect(hasViewParams("")).toBe(false);
+});
+
+test("t joins the owned params: parsed, written verbatim, round-tripped (issue #182)", () => {
+  // Parse: an RFC 3339 UTC instant, exactly the tile route's grammar.
+  expect(parseTime("2024-08-16T19:03:00Z")).toBe("2024-08-16T19:03:00Z");
+  expect(parseTime("2024-08-16T19:03:00.500Z")).toBe("2024-08-16T19:03:00.500Z");
+  // Malformed values degrade to "latest" — and can never smuggle a
+  // reserved character into the query string the writer emits verbatim.
+  for (const bad of [null, "", "yesterday", "2024-08-16", "2024-08-16T19:03:00+00:00", "a&b=c"]) {
+    expect(parseTime(bad)).toBeUndefined();
+  }
+  expect(parseViewState("?layer=park-fire-ndvi&t=2024-08-16T19:03:00Z")).toEqual({
+    layer: "park-fire-ndvi",
+    time: "2024-08-16T19:03:00Z",
+    xray: false,
+  });
+  expect(parseViewState("?t=nope")).toEqual({ xray: false });
+
+  // Write: verbatim (no percent-encoded colons — the hand-written
+  // deep-link style), and the round trip is the identity.
+  const state: ViewState = { layer: "park-fire-ndvi", time: "2024-08-16T19:03:00Z", xray: true };
+  const query = withViewState("", state);
+  expect(query).toBe("?layer=park-fire-ndvi&t=2024-08-16T19:03:00Z&xray");
+  expect(parseViewState(query)).toEqual(state);
+
+  // Equality: a different (or missing) frame is a different view.
+  expect(viewStatesEqual(state, { ...state })).toBe(true);
+  expect(viewStatesEqual(state, { ...state, time: "2024-09-05T19:03:00Z" })).toBe(false);
+  expect(viewStatesEqual(state, { layer: "park-fire-ndvi", xray: true })).toBe(false);
+
+  // Storage: time round-trips; junk shapes are dropped, never kept.
+  saveViewState(localStorage, state);
+  expect(loadViewState(localStorage)).toEqual(state);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ time: "yesterday", xray: false }));
+  expect(loadViewState(localStorage)).toEqual({ xray: false });
 });
 
 test("storage codec survives corruption and junk shapes", () => {

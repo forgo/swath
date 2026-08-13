@@ -332,3 +332,39 @@ async fn malformed_is_rfc7807_400_and_empty_window_the_404_refusal() {
     let without = common::body_bytes(common::get("/tilesets/ndvi/tiles/12/1561/848").await).await;
     assert_eq!(with, without);
 }
+
+/// Temporal-domain discovery (the time-slider seam): a catalog-backed
+/// layer's tileset metadata links its dataset's granule listing — the
+/// acquisition datetimes there are the frames `datetime=` can select.
+/// Static layers are a single timeless frame and carry no such link.
+#[tokio::test]
+async fn tileset_metadata_links_the_backing_datasets_granules() {
+    let app = fire_app();
+    let response = get(&app, "/tilesets/fire-ndvi").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = common::body_json(response).await;
+    let granules = body["links"]
+        .as_array()
+        .expect("links array")
+        .iter()
+        .find(|link| link["rel"] == "granules")
+        .expect("catalog-backed tileset metadata links its granules");
+    assert_eq!(
+        granules["href"],
+        format!("{}/datasets/hls-s30-fire/granules", common::BASE_URL)
+    );
+    assert_eq!(granules["type"], "application/json");
+
+    // The static fixtures app: no dataset behind the layer, no link.
+    let response = common::get("/tilesets/ndvi").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = common::body_json(response).await;
+    assert!(
+        !body["links"]
+            .as_array()
+            .expect("links array")
+            .iter()
+            .any(|link| link["rel"] == "granules"),
+        "a static layer has no time dimension to advertise"
+    );
+}

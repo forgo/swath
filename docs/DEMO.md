@@ -58,6 +58,38 @@ admissibility, reason). A collapsible **trace feed** drawer (bottom-right) strea
 line per received trace — bounded at 200 lines with a dropped counter, pausable, lagged gaps
 marked inline — and clicking a line opens that tile's inspector.
 
+## Watch a fire season evolve
+
+The time dimension, live (ADR 0015, issue #182). The demo stack also ingests the **six-date
+2024 Park Fire series** (HLS T10TFK subsets over Chico, CA — `tests/fixtures/README.md`), so the
+same `just demo` session can scrub a real fire season:
+
+1. In the layer rail, switch to **Park Fire NDVI**. A **time slider** appears bottom-center —
+   its stops are the dataset's six acquisition dates, read straight from
+   `GET /datasets/hls-s30-fire/granules` (a layer with a single date shows no slider at all,
+   which is why the landing page looks exactly as before).
+2. Scrub oldest → newest with the x-ray on. Every frame is one `datetime=` request re-pointing
+   the raster source at the granule that was current then (latest-at-or-before — the server's
+   rule, not the client's guess). Watch the vegetation index collapse between July 22 and
+   August 16 as the burn scar appears, then barely recover through October.
+3. The glass-box moment: on the **first pass**, every badge says `live` — each frame is rendered
+   from source bytes the moment you ask for it, and the analytics card's **frame line** narrates
+   the current frame's own plan mix (`frame 2024-08-16… · live N · …`). Scrub the season
+   **again**: every badge flips to `cache_hit` — frames cache under the granule they resolved
+   to, so the second loop replays instantly from the tile cache. Click any badge: the inspector
+   names the frame (granule id, acquisition datetime, resolution rule).
+4. Press **play**: the loop advances a frame per beat and prefetches the next frame's tiles
+   before showing them, so once the season has been seen the animation cycles without a
+   stutter.
+5. The URL carries the frame: scrubbing writes `t=<instant>` into the share link
+   (e.g. `?layer=park-fire-ndvi&t=2024-08-16T19:03:00Z&xray`), and that link alone reproduces
+   the exact frame anywhere — byte-for-byte, like every other deep link on the page.
+
+The regression guarantee extends here too: `just e2e` asserts `datetime=` frame selection
+against committed oracle goldens, and the Playwright suite (`just e2e-web`,
+`web/e2e/time-slider.e2e.ts`) drives this exact scrub-twice loop, asserting the first pass live
+and the second cached through the same trace stream the overlay paints from.
+
 ## Current measured numbers
 
 | Where                  | ingest-to-pixel | Notes                                                            |

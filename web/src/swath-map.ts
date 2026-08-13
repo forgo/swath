@@ -22,6 +22,13 @@
  *   decisions/timings from the `/traces` SSE stream, painted by the
  *   built-in [`XRayOverlay`] module (see swath-xray.ts for the design
  *   rationale). A toggle button control mirrors the attribute.
+ * - `datetime` — the viewed frame (issue #182, ADR 0015): an RFC 3339
+ *   UTC instant appended to tile requests as `datetime=`; changing it
+ *   re-points the raster source in place (no style rebuild, no bounds
+ *   refit). The built-in [`TimeSlider`] control mirrors it: its domain
+ *   comes from the granules listing the layer's tileset metadata links
+ *   (`rel: granules`, catalog-backed layers only), and it stays hidden
+ *   for layers with fewer than two acquisition dates.
  *
  * When neither `center` nor `zoom` is given, the view fits the layer's
  * geographic bounds from `/tilesets/{id}` metadata — a bare
@@ -33,9 +40,10 @@
  * be `{y}` (row): `/tiles/{z}/{y}/{x}`.
  */
 
-import { type IControl, Map as MapLibreMap } from "maplibre-gl";
+import { type IControl, Map as MapLibreMap, type RasterTileSource } from "maplibre-gl";
 import maplibreCss from "maplibre-gl/dist/maplibre-gl.css?inline";
 import { type EventSourceFactory, XRayOverlay } from "./swath-xray.js";
+import { parseGranuleDatetimes, TimeSlider } from "./time-slider.js";
 import { centerTile } from "./tms.js";
 import { parseCenter, parseNumber } from "./view-state.js";
 
@@ -59,6 +67,19 @@ interface LonLatBounds {
 interface OgcLink {
   href?: string;
   rel?: string;
+}
+
+/** What the component reads off `/tilesets/{id}` metadata: the data
+ * bounds (zero-config fit) and, for catalog-backed layers, the backing
+ * dataset id from the granules link (issue #182). The id, not the raw
+ * href, deliberately: metadata links are absolute against the server's
+ * `base-url`, while the component must fetch through its own `server`
+ * origin (the vite dev proxy in dev — CORS stays opt-in and off), the
+ * same reason `layerIdFromSelfLink` parses ids instead of following
+ * hrefs. */
+interface LayerMetadata {
+  bounds?: LonLatBounds;
+  dataset?: string;
 }
 
 /** Subset of a tilesets-list item the component reads. */
@@ -131,6 +152,44 @@ swath-map .swath-map-xray-toggle button[aria-pressed="true"] {
   font-weight: 700;
   background: rgb(22 163 74 / 15%);
 }
+/* The time slider (issue #182): bottom-center, between the x-ray
+ * readouts (bottom-left) and the trace feed (bottom-right), styled like
+ * the overlay's dark-telemetry cards. */
+swath-map .swath-map-time {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 75%);
+  color: #e2e8f0;
+  font: 11px/1.5 ui-monospace, monospace;
+}
+swath-map .swath-map-time[hidden] { display: none; }
+swath-map .swath-map-time-play {
+  border: 0;
+  margin: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgb(255 255 255 / 12%);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+swath-map .swath-map-time-play[aria-pressed="true"] {
+  color: #4ade80;
+  font-weight: 700;
+}
+swath-map .swath-map-time input[type="range"] {
+  width: 180px;
+  accent-color: #4ade80;
+}
+swath-map .swath-map-time-label { white-space: nowrap; }
 `;
 
 /** Injects MapLibre's CSS + the component chrome once per document. */
@@ -245,7 +304,7 @@ export class SwathMap extends HTMLElement {
   static readonly tagName = "swath-map";
 
   static get observedAttributes(): readonly string[] {
-    return ["server", "layer", "center", "zoom", "xray", "basemap"];
+    return ["server", "layer", "center", "zoom", "datetime", "xray", "basemap"];
   }
 
   #map: MapLibreMap | undefined;
@@ -260,6 +319,7 @@ export class SwathMap extends HTMLElement {
   #switcher: LayerSwitcherControl | undefined;
   #xrayToggle: XRayToggleControl | undefined;
   #xray: XRayOverlay | undefined;
+  #time: TimeSlider | undefined;
   /** The layer id the last successful apply painted — what the x-ray
    * overlay filters its badges on. */
   #activeLayer = "";
@@ -316,6 +376,15 @@ export class SwathMap extends HTMLElement {
     }
     this.#xrayToggle = new XRayToggleControl(this);
     this.#map.addControl(this.#xrayToggle, "top-right");
+    this.#time = new TimeSlider(this.ownerDocument, {
+      scrubTo: (datetime) => {
+        this.setAttribute("datetime", datetime);
+      },
+      prefetch: (datetime) => {
+        this.#prefetchFrame(datetime);
+      },
+    });
+    this.append(this.#time.element);
     if (this.hasAttribute("xray")) {
       this.#enableXRay();
     }
@@ -334,6 +403,8 @@ export class SwathMap extends HTMLElement {
       this.#retryTimer = undefined;
     }
     this.#disableXRay();
+    this.#time?.dispose();
+    this.#time = undefined;
     this.#map?.remove();
     this.#map = undefined;
     this.#switcher = undefined;
@@ -365,6 +436,9 @@ export class SwathMap extends HTMLElement {
         }
         break;
       }
+      case "datetime":
+        this.#repointTime(newValue);
+        break;
       case "xray":
         if (newValue === null) {
           this.#disableXRay();
@@ -428,7 +502,89 @@ export class SwathMap extends HTMLElement {
   /** OGC `{tileMatrix}/{tileRow}/{tileCol}` is z/y/x, so MapLibre's
    * XYZ-named template must carry `{y}` (row) in the middle segment. */
   #tileTemplate(layerId: string): string {
-    return `${this.server}/tilesets/${layerId}/tiles/{z}/{y}/{x}`;
+    return `${this.server}/tilesets/${layerId}/tiles/{z}/{y}/{x}${this.#tileQuery()}`;
+  }
+
+  /** The tile template's query string: the viewed frame (`datetime=`,
+   * ADR 0015) and the liveness-probe recovery version (`v=`, which must
+   * make the source template genuinely different — see `#retrySeq`). */
+  #tileQuery(): string {
+    const parts: string[] = [];
+    const datetime = this.getAttribute("datetime");
+    if (datetime !== null && datetime !== "") {
+      parts.push(`datetime=${encodeURIComponent(datetime)}`);
+    }
+    if (this.#retrySeq > 0) {
+      parts.push(`v=${this.#retrySeq}`);
+    }
+    return parts.length === 0 ? "" : `?${parts.join("&")}`;
+  }
+
+  /**
+   * The `datetime` fast path (issue #182): scrubbing re-points the
+   * raster source in place — `setTiles` refetches at the new frame with
+   * no style rebuild, no bounds refit, no `/tilesets` round trip. Before
+   * the first apply lands there is no source yet and the pending apply
+   * reads the attribute itself. The slider mirrors the attribute; the
+   * bubbling `swath-timechange` is the page shell's URL-sync seam.
+   */
+  #repointTime(datetime: string | null): void {
+    const map = this.#map;
+    if (this.#activeLayer !== "" && map) {
+      const repoint = (): void => {
+        const source = map.getSource(SOURCE_ID) as RasterTileSource | undefined;
+        // The template re-reads the datetime attribute, so a deferred
+        // re-point always applies the LATEST frame, never a stale one.
+        source?.setTiles([this.#tileTemplate(this.#activeLayer)]);
+      };
+      if (map.getSource(SOURCE_ID)) {
+        repoint();
+      } else {
+        // Style mid-apply (a scrub can land inside setStyle's diff
+        // window, where the source is momentarily unreachable): apply
+        // the frame as soon as the style lands instead of silently
+        // dropping it — the stuck-forever failure mode the screenshot
+        // suite exposed.
+        map.once("styledata", repoint);
+      }
+    }
+    this.#time?.setActive(datetime);
+    this.dispatchEvent(
+      new CustomEvent("swath-timechange", { detail: { datetime }, bubbles: true }),
+    );
+  }
+
+  /** Bound on play-mode prefetch: at most this many tiles per frame (a
+   * 1528px viewport shows ~24 tiles; more means the view is mid-zoom
+   * and warming it all buys nothing). */
+  static readonly #PREFETCH_MAX = 32;
+
+  /** Warms one frame (play mode): fetches the viewport's visible tile
+   * URLs at the displayed tile zoom with the frame's `datetime=`, so
+   * the server's write-through cache holds them before the frame
+   * displays. Fire-and-forget; failures are the next request's problem. */
+  #prefetchFrame(datetime: string): void {
+    const map = this.#map;
+    const layer = this.#activeLayer;
+    if (!map || layer === "") {
+      return;
+    }
+    // A 256px raster source displays z = style-zoom + 1 tiles (the same
+    // arithmetic the x-ray overlay badges by).
+    const z = Math.round(map.getZoom()) + 1;
+    const bounds = map.getBounds();
+    const nw = centerTile(bounds.getWest(), bounds.getNorth(), z);
+    const se = centerTile(bounds.getEast(), bounds.getSouth(), z);
+    const path = `${this.server}/tilesets/${layer}/tiles`;
+    const query = `datetime=${encodeURIComponent(datetime)}`;
+    let budget = SwathMap.#PREFETCH_MAX;
+    for (let y = nw.y; y <= se.y && budget > 0; y += 1) {
+      for (let x = nw.x; x <= se.x && budget > 0; x += 1) {
+        budget -= 1;
+        // OGC path order z/row/col = z/y/x.
+        fetch(`${path}/${z}/${y}/${x}?${query}`).catch(() => undefined);
+      }
+    }
   }
 
   /** Kicks off an async (re)apply of server+layer; `ready` tracks it. */
@@ -466,10 +622,12 @@ export class SwathMap extends HTMLElement {
       return;
     }
 
-    // Zero-config view: no explicit center/zoom means "fit the layer's
-    // data" — read its geographic bounds off the tileset metadata.
+    // The tileset metadata carries both the geographic bounds (the
+    // zero-config fit below) and, for catalog-backed layers, the
+    // granules link the time slider's domain comes from (issue #182).
     const fit = this.getAttribute("center") === null && this.getAttribute("zoom") === null;
-    const bounds = fit ? await this.#layerBounds(layerId) : undefined;
+    const metadata = await this.#layerMetadata(layerId);
+    const bounds = fit ? metadata?.bounds : undefined;
 
     // Optional basemap under the imagery: fetch (cached) and merge our raster
     // source/layer ON TOP of its sources/layers. Failure → bare style.
@@ -485,10 +643,9 @@ export class SwathMap extends HTMLElement {
       return;
     }
 
-    const retrySuffix = this.#retrySeq > 0 ? `?v=${this.#retrySeq}` : "";
     const swathSource = {
       type: "raster",
-      tiles: [`${this.#tileTemplate(layerId)}${retrySuffix}`],
+      tiles: [this.#tileTemplate(layerId)],
       tileSize: 256,
     };
     const swathLayer = { id: RASTER_LAYER_ID, type: "raster", source: SOURCE_ID };
@@ -540,6 +697,13 @@ export class SwathMap extends HTMLElement {
       }),
     );
     this.#startLivenessProbe(layerId, epoch);
+    // The slider's domain loads LAST, after the probe kicked off: the
+    // probe's timing relative to MapLibre's first tile fetches is part
+    // of the painted result (its no-store fetch renders through the
+    // cache, so reordering it flips a badge between live and cache_hit),
+    // while the temporal domain only feeds the slider. `ready` still
+    // covers it — tests may await and then inspect the control.
+    await this.#applyTemporalDomain(metadata?.dataset, epoch);
   }
 
   /** Self-healing tiles for the "viewer open before the data exists" flow
@@ -595,9 +759,10 @@ export class SwathMap extends HTMLElement {
     void probe();
   }
 
-  /** Geographic bounds from `/tilesets/{id}` metadata; undefined when the
-   * layer is not resolvable yet (e.g. empty catalog: an honest 404). */
-  async #layerBounds(layerId: string): Promise<LonLatBounds | undefined> {
+  /** Geographic bounds + granules link from `/tilesets/{id}` metadata;
+   * undefined when the layer is not resolvable yet (e.g. empty catalog:
+   * an honest 404) — the apply then proceeds without a fit or a slider. */
+  async #layerMetadata(layerId: string): Promise<LayerMetadata | undefined> {
     const response = await fetch(`${this.server}/tilesets/${layerId}`, {
       headers: { accept: "application/json" },
     });
@@ -606,15 +771,49 @@ export class SwathMap extends HTMLElement {
     }
     const body = (await response.json()) as {
       boundingBox?: { lowerLeft?: number[]; upperRight?: number[] };
+      links?: OgcLink[];
     };
+    const metadata: LayerMetadata = {};
     const lower = body.boundingBox?.lowerLeft;
     const upper = body.boundingBox?.upperRight;
     const [west, south] = lower ?? [];
     const [east, north] = upper ?? [];
-    if (west === undefined || south === undefined || east === undefined || north === undefined) {
-      return undefined;
+    if (west !== undefined && south !== undefined && east !== undefined && north !== undefined) {
+      metadata.bounds = { west, south, east, north };
     }
-    return { west, south, east, north };
+    // `/datasets/{id}/granules` — the dataset id is the second-to-last
+    // path segment of the granules link.
+    const granules = body.links?.find((link) => link.rel === "granules")?.href;
+    const dataset = granules?.split("/").filter(Boolean).at(-2);
+    if (dataset !== undefined) {
+      metadata.dataset = dataset;
+    }
+    return metadata;
+  }
+
+  /** Feeds the time slider (issue #182): fetches the layer's granule
+   * listing (when its metadata linked one) and hands the acquisition
+   * datetimes to the control. No link, a fetch failure, or fewer than
+   * two dates all mean the same thing — nothing to scrub, slider
+   * hidden. Failures are tolerated: time is a bonus dimension, never a
+   * reason the imagery fails to paint. */
+  async #applyTemporalDomain(dataset: string | undefined, epoch: number): Promise<void> {
+    let frames: string[] = [];
+    if (dataset !== undefined) {
+      try {
+        const url = `${this.server}/datasets/${encodeURIComponent(dataset)}/granules`;
+        const response = await fetch(url, { headers: { accept: "application/json" } });
+        if (response.ok) {
+          frames = parseGranuleDatetimes(await response.json());
+        }
+      } catch {
+        frames = [];
+      }
+    }
+    if (epoch !== this.#epoch) {
+      return;
+    }
+    this.#time?.setDomain(frames, this.getAttribute("datetime"));
   }
 }
 

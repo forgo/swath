@@ -75,19 +75,49 @@ export class TraceAnalytics {
   /** Insertion-ordered `total_ms` samples, bounded to the window. */
   readonly #samples: number[] = [];
   readonly #mix: DecisionMix = { live: 0, overview: 0, cache_hit: 0 };
+  /** Per-frame decision mixes (issue #182), keyed on the temporal
+   * decision's `granule_datetime`. Bounded by the layer's granule count
+   * in practice (a handful of frames), so no eviction. */
+  readonly #frames = new Map<string, DecisionMix>();
+  #latestFrame: string | undefined;
 
   constructor(windowSize: number = ANALYTICS_WINDOW) {
     this.#window = windowSize;
   }
 
   /** Folds one trace in: `total_ms` into the rolling window (oldest
-   * sample out once full), its decision kind into the all-time mix. */
-  record(decision: TraceDecision, totalMs: number): void {
+   * sample out once full), its decision kind into the all-time mix —
+   * and, when the trace carries a temporal decision, into that frame's
+   * own mix (`frame` is the trace's `temporal.granule_datetime`). */
+  record(decision: TraceDecision, totalMs: number, frame?: string): void {
     this.#samples.push(totalMs);
     if (this.#samples.length > this.#window) {
       this.#samples.shift();
     }
-    this.#mix[decisionKind(decision)] += 1;
+    const kind = decisionKind(decision);
+    this.#mix[kind] += 1;
+    if (frame !== undefined) {
+      let mix = this.#frames.get(frame);
+      if (!mix) {
+        mix = { live: 0, overview: 0, cache_hit: 0 };
+        this.#frames.set(frame, mix);
+      }
+      mix[kind] += 1;
+      this.#latestFrame = frame;
+    }
+  }
+
+  /** The most recently traced frame's `granule_datetime`; undefined
+   * until a temporal trace arrives. */
+  get latestFrame(): string | undefined {
+    return this.#latestFrame;
+  }
+
+  /** The decision mix of one frame (a copy); undefined for a frame
+   * never traced. */
+  frameMix(frame: string): DecisionMix | undefined {
+    const mix = this.#frames.get(frame);
+    return mix ? { ...mix } : undefined;
   }
 
   /** Samples currently in the window (≤ the window size). */
@@ -143,6 +173,7 @@ export class AnalyticsPanel {
   readonly #overview: HTMLSpanElement;
   readonly #cache: HTMLSpanElement;
   readonly #hit: HTMLSpanElement;
+  readonly #frame: HTMLDivElement;
 
   constructor(doc: Document, analytics: TraceAnalytics = new TraceAnalytics()) {
     this.#analytics = analytics;
@@ -162,15 +193,23 @@ export class AnalyticsPanel {
     this.#hit = span("swath-xray-analytics-hit");
     const dot = (): Text => doc.createTextNode(" · ");
     mixLine.append(this.#live, dot(), this.#overview, dot(), this.#cache, dot(), this.#hit);
-    this.element.append(this.#percentiles, mixLine);
+    // The per-frame plan-mix line (issue #182): the latest traced
+    // frame's own decision mix — during an animation loop this is the
+    // "this frame rendered live / from cache" narration. Hidden until a
+    // temporal trace arrives, so static layers keep the old card.
+    this.#frame = doc.createElement("div");
+    this.#frame.className = "swath-xray-analytics-frame";
+    this.#frame.hidden = true;
+    this.element.append(this.#percentiles, mixLine, this.#frame);
     this.#render();
   }
 
   /** Folds one trace in and refreshes the card (a handful of text
    * nodes — per-trace update is well within budget, as the feed's
-   * per-trace line already is). */
-  record(decision: TraceDecision, totalMs: number): void {
-    this.#analytics.record(decision, totalMs);
+   * per-trace line already is). `frame` is the trace's temporal
+   * `granule_datetime`, when it carries one. */
+  record(decision: TraceDecision, totalMs: number, frame?: string): void {
+    this.#analytics.record(decision, totalMs, frame);
     this.#render();
   }
 
@@ -204,6 +243,24 @@ export class AnalyticsPanel {
     } else {
       this.#hit.textContent = `hit ${(hitRate * 100).toFixed(1)}%`;
       dataset.hitRate = String(hitRate);
+    }
+    const frame = this.#analytics.latestFrame;
+    const frameMix = frame === undefined ? undefined : this.#analytics.frameMix(frame);
+    if (frame === undefined || frameMix === undefined) {
+      this.#frame.hidden = true;
+      delete dataset.frame;
+      delete dataset.frameLive;
+      delete dataset.frameOverview;
+      delete dataset.frameCacheHit;
+    } else {
+      this.#frame.hidden = false;
+      this.#frame.textContent =
+        `frame ${frame} · live ${frameMix.live} · ` +
+        `ovr ${frameMix.overview} · cache ${frameMix.cache_hit}`;
+      dataset.frame = frame;
+      dataset.frameLive = String(frameMix.live);
+      dataset.frameOverview = String(frameMix.overview);
+      dataset.frameCacheHit = String(frameMix.cache_hit);
     }
   }
 }

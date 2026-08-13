@@ -103,11 +103,26 @@ async function waitForMapIdle(page: Page): Promise<void> {
   });
 }
 
-/** Waits for the x-ray overlay to be painting: attached, at least one
- * badge, and (best effort) the ingest→pixel readout populated. */
+/** Waits for the x-ray overlay to be painting AND settled: attached,
+ * the map idle (every tile loaded, so every trace has been published),
+ * the badge count quiescent (>0 and unchanged for 1.2 s — badges ride
+ * the SSE stream, which trails the tile responses), and (best effort)
+ * the ingest→pixel readout populated. The quiescence matters: freezing
+ * the frame while badges were still streaming in made the badge COUNT
+ * a per-run race, which the second-capture pdiff rightly rejected. */
 async function waitForXRay(page: Page): Promise<void> {
   await expect(page.locator("swath-map .swath-xray")).toBeAttached();
-  await page.waitForFunction(() => document.querySelectorAll(".swath-xray-badge").length > 0);
+  await waitForMapIdle(page);
+  await page.waitForFunction(() => {
+    const w = window as unknown as { __badgeQuiet?: { n: number; at: number } };
+    const n = document.querySelectorAll(".swath-xray-badge").length;
+    const now = Date.now();
+    if (!w.__badgeQuiet || w.__badgeQuiet.n !== n) {
+      w.__badgeQuiet = { n, at: now };
+      return false;
+    }
+    return n > 0 && now - w.__badgeQuiet.at > 1200;
+  });
   await page
     .waitForFunction(
       () => {
@@ -120,19 +135,37 @@ async function waitForXRay(page: Page): Promise<void> {
     .catch(() => undefined); // cache-hit-only views may never learn i2p
 }
 
-function paletteButton(page: Page, processId: string) {
-  return page.locator(
-    `swath-authoring-panel .swath-authoring-palette button[data-process="${processId}"]`,
-  );
-}
-
 function fieldById(page: Page, id: string) {
   return page.locator(`#swath-authoring-${id}`);
 }
 
+/** The Model B canvas's stage-typed insert chip for `processId` at
+ * `gap` (0 = right after the permanent Load card) — the same driving
+ * convention as web/e2e/authoring.e2e.ts. */
+function chip(page: Page, gap: number, processId: string) {
+  return page.locator(
+    `swath-authoring-panel .swath-authoring-insert[data-gap="${gap}"] ` +
+      `button[data-process="${processId}"]`,
+  );
+}
+
+/** The panel is collapsed and lazy; the permanent Load card (s1)
+ * rendering means the canvas is ready (Model B, issue #168). */
 async function openAuthoringPanel(page: Page): Promise<void> {
   await page.locator("swath-authoring-panel .swath-authoring-toggle").click();
-  await expect(paletteButton(page, "load_collection")).toBeVisible();
+  await expect(page.locator('swath-authoring-panel [data-step="s1"]')).toBeVisible();
+}
+
+/** Waits until the canvas's live preview (POST /result, debounced) has
+ * arrived AND decoded — the preview image is deterministic pixel
+ * content, but its arrival is async, so freezing the frame before it
+ * lands made the shot a race between capture runs. */
+async function waitForAuthoringPreview(page: Page): Promise<void> {
+  const image = page.locator("#swath-authoring-preview-image");
+  await expect(image).toBeVisible({ timeout: 15_000 });
+  await expect
+    .poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0);
 }
 
 test("landing page: layer rail + default layer on a fitted view", async ({ page }) => {
@@ -233,22 +266,26 @@ test("x-ray bytes heatmap + trace feed", async ({ page }) => {
   );
 });
 
-test("authoring panel: schema-driven form with field help", async ({ page }) => {
+test("authoring panel: the always-valid canvas with field help", async ({ page }) => {
   await page.goto(`${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`);
   await waitForFittedView(page);
   await openAuthoringPanel(page);
 
-  // Compose the first two NDVI steps by hand so the generated forms (from
-  // the server's own GET /processes) are on screen with their help text.
-  await paletteButton(page, "load_collection").click();
-  await paletteButton(page, "ndvi").click();
+  // Compose the first NDVI steps on the Model B canvas (issue #168):
+  // collection from the /collections-fed select, bands ticked from the
+  // vocabulary checkboxes, NDVI inserted through its stage-typed chip —
+  // so the generated cards are on screen with their help text.
   await fieldById(page, "s1-id").selectOption("hls-s30");
-  await fieldById(page, "s1-bands").fill("b8a,b04");
+  await fieldById(page, "s1-bands-b8a").check();
+  await fieldById(page, "s1-bands-b04").check();
+  await chip(page, 0, "ndvi").click();
+  await expect(fieldById(page, "s2-nir")).toHaveValue("b8a");
   await expect(page.locator(".swath-authoring-field-help").first()).toBeVisible();
+  await waitForAuthoringPreview(page);
   await capture(
     page,
     "08-authoring-form.png",
-    "openEO authoring panel: forms generated from the server's own GET /processes, with plain-language field help.",
+    "openEO authoring canvas (Model B): cards generated from the server's own GET /processes, bands from the vocabulary, plain-language field help.",
   );
 });
 
@@ -261,6 +298,7 @@ test("authoring panel: template narrative + advanced fields open", async ({ page
   await expect(page.locator("#swath-authoring-narrative")).toContainText("compute NDVI");
   await page.locator('[data-step="s1"] .swath-authoring-advanced-toggle').click();
   await expect(fieldById(page, "s1-spatial_extent")).toBeVisible();
+  await waitForAuthoringPreview(page);
   await capture(
     page,
     "09-authoring-narrative-advanced.png",
@@ -376,6 +414,77 @@ test("trace analytics panel under load", async ({ page }) => {
     "12-analytics-under-load.png",
     "Trace analytics under load: rolling p50/p95 render latency, plan mix, and cache hit rate over the session's tiles.",
     { maxBadFrac: 0.03 }, // latency quantiles differ between runs
+  );
+});
+
+test("time slider: first pass live, second pass cached (issue #182)", async ({ page }) => {
+  // Four scrubs of ~24 live z13 NDVI renders each: comfortably done in
+  // seconds warm, but the shared-machine cold path has been observed to
+  // need more than the config's 120 s — give the sequence real headroom.
+  test.setTimeout(300_000);
+  // The Park Fire series (six granules, dropped by stack-up.sh): scrub
+  // the season with the x-ray open. This run's cache is cold, so the
+  // scripted request history reproduces exactly: the frames visited
+  // below render live the first time and replay as cache hits when
+  // revisited — the pair of shots IS the glass-box animation story.
+  const listing = await page.request.get("/datasets/hls-s30-fire/granules");
+  expect(listing.ok()).toBe(true);
+  const body = (await listing.json()) as { granules?: { datetime?: string }[] };
+  const frames = (body.granules ?? [])
+    .map((granule) => granule.datetime)
+    .filter((value): value is string => typeof value === "string")
+    .sort((a, b) => Date.parse(a) - Date.parse(b));
+  expect(frames.length).toBeGreaterThanOrEqual(3);
+
+  await page.goto(`${DEMO_PATH}?xray&layer=park-fire-ndvi&center=-121.6932,40.0208&zoom=12`);
+  await waitForFittedView(page);
+  await waitForXRay(page);
+  const slider = page.locator("swath-map .swath-map-time");
+  await expect(slider).toHaveAttribute("data-frames", String(frames.length));
+
+  /** Scrubs via the control's own range input and waits until every
+   * badge shows `kind` and the analytics card narrates the frame. */
+  const scrubAndSettle = async (index: number, kind: string): Promise<void> => {
+    // Scrub only against a settled map (the e2e suite's discipline):
+    // a scrub inside a still-loading style would race the re-point.
+    await waitForMapIdle(page);
+    await page
+      .locator('swath-map .swath-map-time input[type="range"]')
+      .evaluate((el: HTMLInputElement, value) => {
+        el.value = String(value);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }, index);
+    await page.waitForFunction(
+      ({ frame, kind }) => {
+        const analytics = document.querySelector<HTMLElement>(".swath-xray-analytics");
+        if (analytics?.dataset.frame !== frame) {
+          return false;
+        }
+        const badges = [...document.querySelectorAll<HTMLElement>(".swath-xray-badge")];
+        return badges.length > 0 && badges.every((badge) => badge.dataset.decision === kind);
+      },
+      { frame: frames[index] ?? "", kind },
+    );
+  };
+
+  // First pass: the fresh-burn-scar frame (2024-08-16) renders live.
+  await scrubAndSettle(2, "live");
+  await capture(
+    page,
+    "13-time-slider-live.png",
+    "Time slider over the Park Fire season, first pass: the scrubbed frame is rendered live — every badge says so, and the analytics card narrates the frame's own plan mix.",
+    { maxBadFrac: 0.03 }, // per-tile ms text differs between runs
+  );
+
+  // Step forward, then revisit the same frame: the season's second pass
+  // replays from the tile cache — the badges flip to cache_hit.
+  await scrubAndSettle(3, "live");
+  await scrubAndSettle(2, "cache_hit");
+  await capture(
+    page,
+    "14-time-slider-cached.png",
+    "The same frame revisited: every tile is a cache hit (same granule, same cache entry — ADR 0015 frame identity), which is why the loop replays smoothly.",
+    { maxBadFrac: 0.03 },
   );
 });
 

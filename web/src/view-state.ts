@@ -17,7 +17,7 @@
  * ([`viewStatesEqual`]) — pasted links survive byte-for-byte.
  */
 
-/** What a view is: which layer, where, and whether x-ray is on. */
+/** What a view is: which layer, where, when, and whether x-ray is on. */
 export interface ViewState {
   /** Layer id; absent means "the server's first layer" (zero-config). */
   layer?: string;
@@ -25,6 +25,9 @@ export interface ViewState {
   center?: [number, number];
   /** View zoom; absent means "fit the layer's bounds". */
   zoom?: number;
+  /** The viewed frame's `datetime=` instant (RFC 3339 UTC, issue #182);
+   * absent means "latest" — a layer without a time dimension. */
+  time?: string;
   /** Whether the x-ray overlay is enabled. */
   xray: boolean;
 }
@@ -33,7 +36,7 @@ export interface ViewState {
 export type ViewStateSource = "url" | "storage" | "default";
 
 /** The query params this module owns (everything else passes through). */
-const OWNED_PARAMS = ["layer", "center", "zoom", "xray"] as const;
+const OWNED_PARAMS = ["layer", "center", "zoom", "t", "xray"] as const;
 
 /** localStorage key; versioned so a future shape change can't misparse. */
 export const STORAGE_KEY = "swath.view-state.v1";
@@ -59,6 +62,22 @@ export function parseCenter(value: string | null): [number, number] | undefined 
     return undefined;
   }
   return Number.isFinite(lon) && Number.isFinite(lat) ? [lon, lat] : undefined;
+}
+
+/** The `t` param's grammar: an RFC 3339 UTC (`Z`) instant — exactly what
+ * the tile route's `datetime=` accepts as an instant (ADR 0015), and an
+ * alphabet of URL-safe characters, so a validated value can be written
+ * into the query string verbatim (hand-written deep-link style: no
+ * percent-encoded colons) without ever smuggling a `&` or `#`. */
+const TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+
+/** Parses the `t` param; undefined when absent or not an RFC 3339 UTC
+ * instant (malformed values degrade to "latest", never break the page). */
+export function parseTime(value: string | null): string | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  return TIME_PATTERN.test(value) ? value : undefined;
 }
 
 /** Parses a numeric param; undefined when absent or malformed. */
@@ -112,6 +131,10 @@ export function parseViewState(search: string): ViewState {
   if (zoom !== undefined) {
     state.zoom = zoom;
   }
+  const time = parseTime(params.get("t"));
+  if (time !== undefined) {
+    state.time = time;
+  }
   return state;
 }
 
@@ -137,6 +160,12 @@ export function withViewState(search: string, state: ViewState): string {
   if (state.zoom !== undefined) {
     parts.push(`zoom=${formatZoom(state.zoom)}`);
   }
+  if (state.time !== undefined) {
+    // Written verbatim: the value has already passed TIME_PATTERN (only
+    // validated times enter a ViewState), whose alphabet is URL-safe —
+    // so the deep link keeps the human-readable `t=2024-08-16T19:03:00Z`.
+    parts.push(`t=${state.time}`);
+  }
   if (state.xray) {
     parts.push("xray");
   }
@@ -150,7 +179,7 @@ export function withViewState(search: string, state: ViewState): string {
 /** Semantic equality within the write precision — the "don't rewrite a
  * URL that already says this" guard behind byte-stable deep links. */
 export function viewStatesEqual(a: ViewState, b: ViewState): boolean {
-  if (a.layer !== b.layer || a.xray !== b.xray) {
+  if (a.layer !== b.layer || a.xray !== b.xray || a.time !== b.time) {
     return false;
   }
   if ((a.center === undefined) !== (b.center === undefined)) {
@@ -242,6 +271,12 @@ export function loadViewState(storage: Storage): ViewState | undefined {
   }
   if (typeof record["zoom"] === "number" && Number.isFinite(record["zoom"])) {
     state.zoom = record["zoom"];
+  }
+  if (typeof record["time"] === "string") {
+    const time = parseTime(record["time"]);
+    if (time !== undefined) {
+      state.time = time;
+    }
   }
   return state;
 }
