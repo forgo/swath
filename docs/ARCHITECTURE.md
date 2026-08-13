@@ -300,7 +300,7 @@ a possible later seam and would get its own port when it lands.
 | OGC API - EDR                           | point/time-series from cubes        | 3            | not started                                     |
 | OGC API - Features                      | vector/GeoParquet                   | 3            | not started                                     |
 
-_Last verified against `b17d65d`._
+_Last verified against `86262cf`._
 
 ## 8. Data flows
 
