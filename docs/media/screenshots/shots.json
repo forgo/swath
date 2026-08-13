@@ -1,7 +1,7 @@
 {
   "schema": "swath-screenshots/1",
-  "git_sha": "76a9f35cdd052e68be69a51fe5528760de8b9c49",
-  "captured": "2026-08-13T09:44:54.833Z",
+  "git_sha": "81ed077fb4dbc932f2c501d7d4981358becdff00",
+  "captured": "2026-08-13T11:07:02.486Z",
   "viewport": {
     "width": 1528,
     "height": 860,
@@ -14,98 +14,98 @@
       "caption": "Zero-config landing page: the layer rail beside the map, default NDVI layer fitted to the fixture granule's footprint.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "ff18005c48d482819e3d7fd1ed3890b49453c51f0b45dae51a9326bca82d69ea"
+      "sha256": "cdb9927e45827bce2d6c91e4a2bfc2c604963ccb4539a8c30f3a2f89bf569cb5"
     },
     {
       "file": "02-ndvi-colormapped.png",
       "caption": "Colormapped NDVI (rdylgn) rendered live at z12 from the fixture granule — nothing pre-baked.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "75578d1197b3ac89159b4b7da29cc6450bd172a11752450363d15c3098ff7abb"
+      "sha256": "bd9ae91b38ca28307640c4a8f3b1967c0fabb66d956d791b125546c6be93fae5"
     },
     {
       "file": "03-truecolor-live.png",
       "caption": "HLS true color at the same viewpoint: selecting a layer in the rail re-points the raster source.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "007e1e47698acde212826d169eba68af97a3147430ca6a2f563b8032d7555e2f"
+      "sha256": "60c929479e5aaf62119e31c22139a9ccf26deba1ee8df9874c03084e40891efb"
     },
     {
       "file": "04-xray-decisions.png",
       "caption": "X-ray decision overlay: every tile badged with its render decision and timing; ingest→pixel readout top-left.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "099c673f9135a916fb3302dccdbc264dcb2961c40dda9daefc6848f97d08616d"
+      "sha256": "0e0181f58235177ae1f86ef99b0ad6ccafbd977748759dc724531518a09b914c"
     },
     {
       "file": "05-xray-why-view.png",
       "caption": "Why-view for one tile: the planner's candidate table — chosen plan, rejected candidates, and the reason for each.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "d30ba6b4e063f41bfe04526b6613c54e27de4d0ecf22f37bae07e2a3292248d6"
+      "sha256": "61bac6f06932f22a3a9339c83aea544d416033e94c4866f986695a79bbfe1501"
     },
     {
       "file": "06-xray-heatmap.png",
       "caption": "Bytes-read heatmap mode: badges bucketed on a log scale, with the legend the overlay itself publishes.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "cc361ea5384b24e4285956c4b7e56e687fb756edd5819fdf995a078ea216fe4e"
+      "sha256": "25b822860ddfdfef6c3ed57528f30a3294ab8a7c456eba5c99ab2c81f0e22dc3"
     },
     {
       "file": "07-xray-trace-feed.png",
       "caption": "Trace feed: the /traces SSE stream as scrollback — every line a render decision, clickable back to its tile.",
       "tolerance": 2,
       "maxBadFrac": 0.06,
-      "sha256": "8256325171aa9d9124bc2c2325a586997025c5ced908638f9c201a1f95a3c04b"
+      "sha256": "72a309b00dc64a1d6a7ec98133da7b7fffb161e18ba77260a2f29f814514e3f1"
     },
     {
       "file": "08-authoring-form.png",
       "caption": "openEO authoring canvas (Model B): cards generated from the server's own GET /processes, bands from the vocabulary, plain-language field help.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "3ff8cf9b344fe9d0ed545eae46a15c255c803d5d008488b03dabcebeeda41c62"
+      "sha256": "8490457d34e70fbf1fd65995aca8f4ce379ebdffa16a6071b11ad1aad4a7d3fc"
     },
     {
       "file": "09-authoring-narrative-advanced.png",
       "caption": "NDVI template loaded: the plain-words narrative of the graph, with a step's advanced (defaulted) fields opened.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "790730bb46de0104aeb3dc57dbd4428f2aa8368a48d088de718a998130fda01d"
+      "sha256": "ee8117c0af059cf9a11047ba385befff7f2571e928340b2c00ba00bf89d640ed"
     },
     {
       "file": "10-authoring-published.png",
       "caption": "Publish flow result: the authored NDVI service appears in the layer rail and serves on the map immediately — no reload.",
       "tolerance": 2,
       "maxBadFrac": 0.02,
-      "sha256": "0703b55a1ecf89d0a032823d1b43d7b3b8806353e0c2a4f0f55edecbdeb80ecd"
+      "sha256": "fb27be0c0654f891bb9521911a61bdbf94c5d1cf5c80fe4635934432e950448f"
     },
     {
       "file": "11-dataset-footprints.png",
       "caption": "Dataset browser expanded: the catalog's granules listed in the rail, footprints outlined live on the map.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "707816109859f3863b08492c5acddbe09303d172fee06d3581d795e976ed6cc7"
+      "sha256": "64850e76c60011aeb5efb24054ef09a38e42959dc802288c65949cd88be35042"
     },
     {
       "file": "12-analytics-under-load.png",
       "caption": "Trace analytics under load: rolling p50/p95 render latency, plan mix, and cache hit rate over the session's tiles.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "3c21030a88ff3c74ff1eeb28b6a77f5e080ec6f28eaa7b330f62ae7e64266872"
+      "sha256": "2d231d8c28085bf881ee909d532bdd7b01a0c3014c6928b8f0060d77be461608"
     },
     {
       "file": "13-time-slider-live.png",
       "caption": "Time slider over the Park Fire season, first pass: the scrubbed frame is rendered live — every badge says so, and the analytics card narrates the frame's own plan mix.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "0e233a7e31a1bbfca9a7599b58b5ed9319ec1a12af2fd8196efac2a94edc896d"
+      "sha256": "2deec25196a6e9971f3fb611efe3fc9af2fe56c97afb9c9152a4d72af31f09ba"
     },
     {
       "file": "14-time-slider-cached.png",
       "caption": "The same frame revisited: every tile is a cache hit (same granule, same cache entry — ADR 0015 frame identity), which is why the loop replays smoothly.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "ded56579d3ed14e001a1a3d7e3c80d2b97d1acc08a951f1715c0d115874c8d51"
+      "sha256": "9696b32296bc82fe7588eeccb85b9bc91bf26c88d7f690fe31e2bbee942d286a"
     }
   ]
 }
