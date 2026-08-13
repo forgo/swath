@@ -1,6 +1,6 @@
 # ADR 0015 — The time dimension: frame selection, not aggregation
 
-**Status:** Proposed · **Date:** 2026-08-12 · **Consumes:** `docs/ROADMAP.md` deferral row 7
+**Status:** Accepted · **Date:** 2026-08-12 · **Consumes:** `docs/ROADMAP.md` deferral row 7
 (touches row 15) · **Source:** issue #178, v1 semantics selected by the maintainer in planning
 
 ## Context
