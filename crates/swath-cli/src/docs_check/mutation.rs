@@ -120,13 +120,13 @@ fn reintroducing_the_stale_sha_stamps_fails() {
     if !stamps::history_available().unwrap() {
         return;
     }
-    for (doc_label, pre_sweep_sha) in [
-        ("docs/ARCHITECTURE.md", "c944a41"),
-        ("docs/EXTENDING.md", "32fad75"),
+    for (doc_label, current_sha, pre_sweep_sha) in [
+        ("docs/ARCHITECTURE.md", "576324d", "c944a41"),
+        ("docs/EXTENDING.md", "9ab35b8", "32fad75"),
     ] {
         let doc = read_repo(doc_label);
         stamps::check_doc(doc_label, &doc).expect("the unmutated stamps must pass");
-        let mutated = reintroduce(&doc, "9ab35b8", pre_sweep_sha);
+        let mutated = reintroduce(&doc, current_sha, pre_sweep_sha);
         let err =
             stamps::check_doc(doc_label, &mutated).expect_err("the pre-sweep stamps must be stale");
         assert!(
