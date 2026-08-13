@@ -94,6 +94,7 @@ flowchart TB
   subgraph ADS["Adapter crates — crates/adapters/* + swath-referencer"]
     A_COG["swath-source-cog"]
     A_VIRT["swath-source-virtual"]
+    A_PYR["swath-pyramid-objectstore"]
     A_PROJ["swath-reproject-proj4rs"]
     A_PG["swath-catalog-pgstac"]
     A_OS["swath-cache-objectstore"]
@@ -120,7 +121,7 @@ All nodes are implemented (no planned/phantom nodes remain, so no implemented-vs
 needed). The Python `VirtualiZarr` sidecar (`python/sidecars/referencer`) is deliberately absent: it
 is the conformance *reference* for `swath-referencer` (ADR 0006), not a runtime component.
 
-_Last verified against `9ab35b8`._
+_Last verified against `576324d`._
 
 ## 5. The Core (pure logic)
 
@@ -271,7 +272,7 @@ where
     C: TileCache;
 ```
 
-_Last verified against `9ab35b8`._
+_Last verified against `576324d`._
 
 ## 7. Adapters and inbound APIs
 
@@ -306,7 +307,7 @@ a possible later seam and would get its own port when it lands.
 | OGC API - EDR                           | point/time-series from cubes        | 3            | not started                                     |
 | OGC API - Features                      | vector/GeoParquet                   | 3            | not started                                     |
 
-_Last verified against `9ab35b8`._
+_Last verified against `576324d`._
 
 ## 8. Data flows
 
@@ -409,6 +410,7 @@ swath/                          # Cargo workspace
     adapters/
       swath-source-cog/         # `RasterSource`: COG over object_store
       swath-source-virtual/     # `RasterSource`: virtual-reference manifests
+      swath-pyramid-objectstore/ # `RasterSource` overlay: materialized GeoZarr pyramids + batch writer
       swath-reproject-proj4rs/  # `Reproject`: pure-Rust proj4rs
       swath-catalog-pgstac/     # `Catalog`: Postgres + pgstac
       swath-cache-objectstore/  # `TileCache`: object_store (local/S3)
@@ -423,7 +425,7 @@ swath/                          # Cargo workspace
 Phase-1 adapters are direct dependencies of the binary (Cargo features gate the embedded UI bundle
 and HDF5 support, not adapter selection). See §14 for third-party extension beyond compile time.
 
-_Last verified against `9ab35b8`._
+_Last verified against `576324d`._
 
 ## 13. Frontend architecture
 
