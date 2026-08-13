@@ -1,6 +1,6 @@
 # ADR 0016 — Extraction boundary: four crates ship, the product stays
 
-**Status:** Proposed · **Date:** 2026-08-13 · **Source:** issue #185, maintainer decisions from
+**Status:** Accepted · **Date:** 2026-08-13 · **Source:** issue #185, maintainer decisions from
 the planning round 3 portability exploration · **Design note:**
 `docs/design/extraction-boundary.md` · **Graduates:** `docs/ROADMAP.md` §2's Icechunk record
 

@@ -26,4 +26,4 @@ that produced the evidence).
 | 0013 | 2026-08-10 | Extension = compile-time features + openEO process graphs (closes §16.6/§14) | Accepted |
 | 0014 | 2026-08-11 | Preview: openEO `POST /result` as a preview-bounded sync subset (extends 0010) | Accepted |
 | 0015 | 2026-08-12 | Time dimension: frame selection via `datetime=`, latest-at-or-before (consumes roadmap row 7) | Accepted |
-| 0016 | 2026-08-13 | Extraction boundary: swath-warp/-manifest/-referencer/-planner ship as 0.x alphas; the product stays | Proposed |
+| 0016 | 2026-08-13 | Extraction boundary: swath-warp/-manifest/-referencer/-planner ship as 0.x alphas; the product stays | Accepted |
