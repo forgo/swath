@@ -61,7 +61,7 @@ A dated snapshot, not a rewrite: the requirement texts above are unchanged; scop
 
 | Req | Status | Evidence |
 |---|---|---|
-| R1 | **Met** | Filedrop → catalog → serve with no per-granule steps; measured 646 ms ingest-to-pixel, budget-asserted every commit (`PERFORMANCE.md` §4, `crates/swath-e2e`) |
+| R1 | **Met** | Filedrop → catalog → serve with no per-granule steps; measured <!-- number:i2p-ms -->646 ms<!-- /number:i2p-ms --> ingest-to-pixel, budget-asserted every commit (`PERFORMANCE.md` §4, `crates/swath-e2e`) |
 | R2 | **Met, as amended (A1)** | Datasets/layers control plane + UI, STAC hidden (`docs/design/catalog-domain.md`); the openEO boundary speaks STAC because the standard does (A1, ADR 0010) |
 | R3 | **Met** | openEO graph → live tiled XYZ layer in one motion (ADR 0010; authoring panel e2e `web/e2e/authoring.e2e.ts`) |
 | R4 | **Met** | Per-tile trace: decision, bytes read, chunk/byte-range provenance, timings, planner candidates; the e2e asserts on the same trace the x-ray renders (`ARCHITECTURE.md` §9, `crates/swath-e2e`) |
@@ -143,7 +143,7 @@ either learning fast or drifting — and either way it should be a conscious, vi
   suite pixel-diffs and truth-tables against (`tests/oracle/`); VirtualiZarr is the ingest-time
   conformance reference (ADR 0006).
   *Why:* R6/R7 pushed the other way once measured: owning the hot path made the core resilient,
-  testable, and fast (646 ms ingest-to-pixel; ~40× referencer, `PERFORMANCE.md`), and validating
+  testable, and fast (<!-- number:i2p-ms -->646 ms<!-- /number:i2p-ms --> ingest-to-pixel; <!-- number:ref-ratio-approx -->~40×<!-- /number:ref-ratio-approx --> referencer, `PERFORMANCE.md`), and validating
   against the ecosystem is a stronger correctness claim than inheriting from it.
   *Where decided:* ADR 0002 (2026-08-08), the oracle harness (#19), ADRs 0006/0008; charter §8
   reconciled in this change.

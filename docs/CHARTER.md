@@ -166,7 +166,7 @@ conformance reference for the Rust referencer (ADR 0006), not a runtime componen
 **Prior art we align with rather than duplicate:** openEO (processing), pangeo-forge (ingest/ETL recipes),
 eoAPI (catalog + serve). Each solves a slice; none fuses ingest + a low-latency publish loop + cost-aware
 serving + a single pane. That fusion is ours — and it is measured, not promised: ingest-to-pixel is
-646 ms end to end, budget-enforced on every commit (`PERFORMANCE.md` §4).
+<!-- number:i2p-ms -->646 ms<!-- /number:i2p-ms --> end to end, budget-enforced on every commit (`PERFORMANCE.md` §4).
 
 **Stack:** the shipped component-by-component inventory (pure-Rust single-binary core,
 Web-Components + MapLibre frontend, pgstac/object-store state; ADRs 0002, 0005, 0006 — the
