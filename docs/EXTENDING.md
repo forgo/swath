@@ -268,7 +268,7 @@ the spatial window stays tile serving's decision (`spatial_extent` is accepted a
 Products needing more than the IR's producing/transforming pipeline are the reopen territory
 recorded in ADR 0013.
 
-_Last verified against `9ab35b8`._
+_Last verified against `6b83794`._
 
 ## 4. A new colormap
 
