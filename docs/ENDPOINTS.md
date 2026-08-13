@@ -209,10 +209,18 @@ curl -s http://localhost:8080/tilesets/ndvi
   "links": [
     { "href": "http://localhost:8080/tilesets/ndvi", "rel": "self", "type": "application/json", "title": "HLS NDVI tileset metadata" },
     { "href": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad", "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme", "type": "application/json", "title": "WebMercatorQuad tile matrix set definition" },
-    { "href": "http://localhost:8080/tilesets/ndvi/tiles/{tileMatrix}/{tileRow}/{tileCol}", "rel": "item", "type": "image/png", "title": "HLS NDVI tiles (PNG)", "templated": true }
+    { "href": "http://localhost:8080/tilesets/ndvi/tiles/{tileMatrix}/{tileRow}/{tileCol}", "rel": "item", "type": "image/png", "title": "HLS NDVI tiles (PNG)", "templated": true },
+    { "href": "http://localhost:8080/datasets/hls-s30/granules", "rel": "granules", "type": "application/json", "title": "Granules of dataset hls-s30" }
   ]
 }
 ```
+
+Catalog-backed layers additionally carry the `granules` link above: the
+backing dataset's granule listing, whose acquisition datetimes are
+exactly the frames `datetime=` can select (ADR 0015) — this is how a
+client (the web viewer's time slider, issue #182) discovers a layer's
+temporal domain. Static (fixtures-mode) layers are a single timeless
+frame and carry no such link.
 
 ### `GET /tilesets/{layerId}/tiles/{tileMatrix}/{tileRow}/{tileCol}`
 

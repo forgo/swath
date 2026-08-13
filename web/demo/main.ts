@@ -27,6 +27,7 @@ import { defineSwathMap, type SwathLayer, SwathMap } from "../src/swath-map.js";
 import {
   formatCenter,
   formatZoom,
+  parseTime,
   parseViewState,
   resolveInitialState,
   safeLocalStorage,
@@ -52,6 +53,9 @@ if (initial.center) {
 }
 if (initial.zoom !== undefined) {
   mapElement?.setAttribute("zoom", formatZoom(initial.zoom));
+}
+if (initial.time !== undefined) {
+  mapElement?.setAttribute("datetime", initial.time);
 }
 if (initial.xray) {
   mapElement?.setAttribute("xray", "");
@@ -112,6 +116,13 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
     const state: ViewState = { xray: map.hasAttribute("xray") };
     if (appliedLayer !== undefined) {
       state.layer = appliedLayer;
+    }
+    // The viewed frame (issue #182): the map's `datetime` attribute is
+    // the source of truth; re-validated through the same parser the URL
+    // uses so only well-formed instants ever enter a ViewState.
+    const time = parseTime(map.getAttribute("datetime"));
+    if (time !== undefined) {
+      state.time = time;
     }
     const inner = map.map;
     if (inner) {
@@ -174,6 +185,28 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
     persist();
     syncUrl();
   }).observe(map, { attributes: true, attributeFilter: ["xray"] });
+
+  // Time scrub/play (issue #182): the map announces every frame change
+  // (slider scrub, play tick, or a programmatic attribute set) — mirror
+  // it into URL and storage so deep links carry time. A deep-linked `t`
+  // is applied as the attribute BEFORE define(), and upgrade-time
+  // attribute callbacks run before the map exists (the component
+  // ignores them) — no event fires on load, so pasted links stay
+  // byte-stable; `syncUrl` additionally skips the write whenever the
+  // URL already encodes the same state.
+  map.addEventListener("swath-timechange", () => {
+    persist();
+    syncUrl();
+  });
+
+  // Data framing (issue #182 follow-up): both the auto-frame after a
+  // user-initiated layer switch and the `zoom to data` control announce
+  // their move — user-driven view changes, so the share link follows
+  // (programmatic moves otherwise deliberately never rewrite the URL).
+  map.addEventListener("swath-framedata", () => {
+    persist();
+    syncUrl();
+  });
 }
 
 // The authoring panel (issue #109) is a pure openEO client; the shell

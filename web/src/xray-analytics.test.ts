@@ -84,6 +84,49 @@ test("decision mix and hit rate: keyed and bare decisions both count", () => {
   expect(analytics.hitRate).toBe(2 / 5);
 });
 
+test("per-frame mix: traces bucket under their temporal granule_datetime (issue #182)", () => {
+  const analytics = new TraceAnalytics();
+  expect(analytics.latestFrame).toBeUndefined();
+  // A static-layer trace (no frame) touches only the all-time mix.
+  analytics.record("live", 10);
+  expect(analytics.latestFrame).toBeUndefined();
+
+  const pre = "2024-07-22T19:03:00Z";
+  const post = "2024-08-16T19:03:00Z";
+  analytics.record("live", 20, pre);
+  analytics.record("live", 30, pre);
+  analytics.record({ cache_hit: { key: "abcd1234" } }, 2, pre);
+  analytics.record("live", 40, post);
+  expect(analytics.latestFrame).toBe(post);
+  expect(analytics.frameMix(pre)).toEqual({ live: 2, overview: 0, cache_hit: 1 });
+  expect(analytics.frameMix(post)).toEqual({ live: 1, overview: 0, cache_hit: 0 });
+  expect(analytics.frameMix("2030-01-01T00:00:00Z")).toBeUndefined();
+  // The all-time mix still counts every trace, framed or not.
+  expect(analytics.mix).toEqual({ live: 4, overview: 0, cache_hit: 1 });
+});
+
+test("panel shows the latest frame's own plan mix; hidden without temporal traces", () => {
+  const panel = new AnalyticsPanel(document);
+  document.body.append(panel.element);
+  const { element } = panel;
+  const frameLine = element.querySelector<HTMLElement>(".swath-xray-analytics-frame");
+  expect(frameLine?.hidden).toBe(true);
+  panel.record("live", 10); // static layer: line stays hidden
+  expect(frameLine?.hidden).toBe(true);
+  expect(element.dataset.frame).toBeUndefined();
+
+  const frame = "2024-08-16T19:03:00Z";
+  panel.record("live", 20, frame);
+  panel.record({ cache_hit: { key: "feedbeef" } }, 2, frame);
+  expect(frameLine?.hidden).toBe(false);
+  expect(element.dataset.frame).toBe(frame);
+  expect(element.dataset.frameLive).toBe("1");
+  expect(element.dataset.frameOverview).toBe("0");
+  expect(element.dataset.frameCacheHit).toBe("1");
+  expect(frameLine?.textContent).toBe(`frame ${frame} · live 1 · ovr 0 · cache 1`);
+  element.remove();
+});
+
 test("panel renders exact values in data attributes, formatted text on top", () => {
   const panel = new AnalyticsPanel(document);
   document.body.append(panel.element);

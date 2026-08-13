@@ -55,6 +55,13 @@ pub struct LayerIdentity {
     pub title: String,
     /// Short narrative description.
     pub description: String,
+    /// The dataset whose granules back this layer's frames (`None` for
+    /// static layers — a single timeless frame, no time dimension). How
+    /// the tileset metadata advertises the layer's granule listing
+    /// (`/datasets/{id}/granules`), which is where a client learns the
+    /// `datetime=` frames it can ask for (ADR 0015; the web time slider
+    /// reads exactly this).
+    pub dataset: Option<String>,
 }
 
 /// A layer resolved to renderable form: the static template plus, for
@@ -123,6 +130,7 @@ impl LayerProvider for LayerRegistry {
                 id: layer.id.clone(),
                 title: layer.title.clone(),
                 description: layer.description.clone(),
+                dataset: None,
             })
             .collect()
     }
@@ -132,6 +140,7 @@ impl LayerProvider for LayerRegistry {
             id: layer.id.clone(),
             title: layer.title.clone(),
             description: layer.description.clone(),
+            dataset: None,
         })
     }
 
@@ -289,6 +298,7 @@ impl<C: Catalog> LayerProvider for CatalogLayers<C> {
                 id: layer.id.clone(),
                 title: layer.title.clone(),
                 description: layer.description.clone(),
+                dataset: Some(layer.dataset.to_string()),
             })
             .collect()
     }
@@ -298,6 +308,7 @@ impl<C: Catalog> LayerProvider for CatalogLayers<C> {
             id: layer.id.clone(),
             title: layer.title.clone(),
             description: layer.description.clone(),
+            dataset: Some(layer.dataset.to_string()),
         })
     }
 

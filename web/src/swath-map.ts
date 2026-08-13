@@ -22,10 +22,24 @@
  *   decisions/timings from the `/traces` SSE stream, painted by the
  *   built-in [`XRayOverlay`] module (see swath-xray.ts for the design
  *   rationale). A toggle button control mirrors the attribute.
+ * - `datetime` — the viewed frame (issue #182, ADR 0015): an RFC 3339
+ *   UTC instant appended to tile requests as `datetime=`; changing it
+ *   re-points the raster source in place (no style rebuild, no bounds
+ *   refit). The built-in [`TimeSlider`] control mirrors it: its domain
+ *   comes from the granules listing the layer's tileset metadata links
+ *   (`rel: granules`, catalog-backed layers only), and it stays hidden
+ *   for layers with fewer than two acquisition dates.
  *
  * When neither `center` nor `zoom` is given, the view fits the layer's
  * geographic bounds from `/tilesets/{id}` metadata — a bare
  * `<swath-map>` against a live server is a working demo.
+ *
+ * Finding the data (issue #182 follow-up): a `zoom to data` control
+ * frames the active layer's data footprint (union of its granule
+ * footprints, else the metadata bounds; hidden when unknown), and a
+ * USER-initiated layer switch ([`setLayer`]) whose target's data is
+ * nowhere in the current viewport auto-frames it. Deep-linked views are
+ * never stomped: attribute-driven applies skip the auto-frame.
  *
  * Tile addressing (the #27 mirror): the Swath API serves OGC order
  * `/tiles/{tileMatrix}/{tileRow}/{tileCol}` = z/y/x, while MapLibre
@@ -33,9 +47,11 @@
  * be `{y}` (row): `/tiles/{z}/{y}/{x}`.
  */
 
-import { type IControl, Map as MapLibreMap } from "maplibre-gl";
+import { type IControl, Map as MapLibreMap, type RasterTileSource } from "maplibre-gl";
 import maplibreCss from "maplibre-gl/dist/maplibre-gl.css?inline";
+import { type GranuleBbox, parseBbox, unionBbox } from "./granule-footprints.js";
 import { type EventSourceFactory, XRayOverlay } from "./swath-xray.js";
+import { parseGranuleDatetimes, TimeSlider } from "./time-slider.js";
 import { centerTile } from "./tms.js";
 import { parseCenter, parseNumber } from "./view-state.js";
 
@@ -59,6 +75,19 @@ interface LonLatBounds {
 interface OgcLink {
   href?: string;
   rel?: string;
+}
+
+/** What the component reads off `/tilesets/{id}` metadata: the data
+ * bounds (zero-config fit) and, for catalog-backed layers, the backing
+ * dataset id from the granules link (issue #182). The id, not the raw
+ * href, deliberately: metadata links are absolute against the server's
+ * `base-url`, while the component must fetch through its own `server`
+ * origin (the vite dev proxy in dev — CORS stays opt-in and off), the
+ * same reason `layerIdFromSelfLink` parses ids instead of following
+ * hrefs. */
+interface LayerMetadata {
+  bounds?: LonLatBounds;
+  dataset?: string;
 }
 
 /** Subset of a tilesets-list item the component reads. */
@@ -131,6 +160,50 @@ swath-map .swath-map-xray-toggle button[aria-pressed="true"] {
   font-weight: 700;
   background: rgb(22 163 74 / 15%);
 }
+swath-map .swath-map-zoomdata button {
+  width: auto;
+  padding: 0 8px;
+  font: 12px/29px system-ui, sans-serif;
+}
+swath-map .swath-map-zoomdata[hidden] { display: none; }
+/* The time slider (issue #182): bottom-center, between the x-ray
+ * readouts (bottom-left) and the trace feed (bottom-right), styled like
+ * the overlay's dark-telemetry cards. */
+swath-map .swath-map-time {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 75%);
+  color: #e2e8f0;
+  font: 11px/1.5 ui-monospace, monospace;
+}
+swath-map .swath-map-time[hidden] { display: none; }
+swath-map .swath-map-time-play {
+  border: 0;
+  margin: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgb(255 255 255 / 12%);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+swath-map .swath-map-time-play[aria-pressed="true"] {
+  color: #4ade80;
+  font-weight: 700;
+}
+swath-map .swath-map-time input[type="range"] {
+  width: 180px;
+  accent-color: #4ade80;
+}
+swath-map .swath-map-time-label { white-space: nowrap; }
 `;
 
 /** Injects MapLibre's CSS + the component chrome once per document. */
@@ -241,11 +314,55 @@ class XRayToggleControl implements IControl {
   }
 }
 
+/** The "zoom to data" control (issue #182 follow-up): one button that
+ * frames the current layer's data footprint — the recovery affordance
+ * for "I picked a layer and see nothing; where on Earth is it?". Hidden
+ * whenever the layer's footprint is unknown (a dead button would
+ * promise what it cannot do). */
+class ZoomToDataControl implements IControl {
+  readonly #host: SwathMap;
+  #container: HTMLElement | undefined;
+  #known = false;
+
+  constructor(host: SwathMap) {
+    this.#host = host;
+  }
+
+  onAdd(): HTMLElement {
+    const container = document.createElement("div");
+    container.className = "maplibregl-ctrl maplibregl-ctrl-group swath-map-zoomdata";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "zoom to data";
+    button.setAttribute("aria-label", "Zoom to the layer's data");
+    button.addEventListener("click", () => {
+      this.#host.zoomToData();
+    });
+    container.append(button);
+    container.hidden = !this.#known;
+    this.#container = container;
+    return container;
+  }
+
+  onRemove(): void {
+    this.#container?.remove();
+    this.#container = undefined;
+  }
+
+  /** Shows the button exactly while a footprint is known. */
+  update(known: boolean): void {
+    this.#known = known;
+    if (this.#container) {
+      this.#container.hidden = !known;
+    }
+  }
+}
+
 export class SwathMap extends HTMLElement {
   static readonly tagName = "swath-map";
 
   static get observedAttributes(): readonly string[] {
-    return ["server", "layer", "center", "zoom", "xray", "basemap"];
+    return ["server", "layer", "center", "zoom", "datetime", "xray", "basemap"];
   }
 
   #map: MapLibreMap | undefined;
@@ -260,6 +377,18 @@ export class SwathMap extends HTMLElement {
   #switcher: LayerSwitcherControl | undefined;
   #xrayToggle: XRayToggleControl | undefined;
   #xray: XRayOverlay | undefined;
+  #time: TimeSlider | undefined;
+  #zoomData: ZoomToDataControl | undefined;
+  /** Where the active layer's data IS (issue #182 follow-up): the union
+   * of its granule footprints (catalog-backed), else the tileset
+   * metadata bounds (static layers), else unknown. What `zoomToData`
+   * frames and the auto-frame-on-switch checks against. */
+  #dataBounds: LonLatBounds | undefined;
+  /** Set by [`setLayer`] — a USER-initiated switch: the one path that
+   * may auto-frame the new layer's data. Attribute-driven applies (deep
+   * links, programmatic sets) never auto-frame — a shared URL's view is
+   * honored exactly (the issue #108 precedence contract). */
+  #pendingAutoFrame = false;
   /** The layer id the last successful apply painted — what the x-ray
    * overlay filters its badges on. */
   #activeLayer = "";
@@ -316,6 +445,17 @@ export class SwathMap extends HTMLElement {
     }
     this.#xrayToggle = new XRayToggleControl(this);
     this.#map.addControl(this.#xrayToggle, "top-right");
+    this.#zoomData = new ZoomToDataControl(this);
+    this.#map.addControl(this.#zoomData, "top-right");
+    this.#time = new TimeSlider(this.ownerDocument, {
+      scrubTo: (datetime) => {
+        this.setAttribute("datetime", datetime);
+      },
+      prefetch: (datetime) => {
+        this.#prefetchFrame(datetime);
+      },
+    });
+    this.append(this.#time.element);
     if (this.hasAttribute("xray")) {
       this.#enableXRay();
     }
@@ -334,10 +474,13 @@ export class SwathMap extends HTMLElement {
       this.#retryTimer = undefined;
     }
     this.#disableXRay();
+    this.#time?.dispose();
+    this.#time = undefined;
     this.#map?.remove();
     this.#map = undefined;
     this.#switcher = undefined;
     this.#xrayToggle = undefined;
+    this.#zoomData = undefined;
     this.replaceChildren();
   }
 
@@ -365,6 +508,9 @@ export class SwathMap extends HTMLElement {
         }
         break;
       }
+      case "datetime":
+        this.#repointTime(newValue);
+        break;
       case "xray":
         if (newValue === null) {
           this.#disableXRay();
@@ -398,10 +544,65 @@ export class SwathMap extends HTMLElement {
   }
 
   /** Switches the displayed layer (reflects the `layer` attribute) and
-   * settles once the map style has been updated. */
+   * settles once the map style has been updated. This is the
+   * USER-INITIATED path (the built-in switcher, the entry page's layer
+   * rail, an authored service landing): if the new layer's data
+   * footprint is nowhere in the current viewport, the apply frames it —
+   * a ~10 km fire window must never be an invisible needle on a world
+   * map. Deep links and programmatic attribute writes go through the
+   * attribute directly and never auto-frame (a shared URL's view wins,
+   * the issue #108 precedence contract). */
   async setLayer(id: string): Promise<void> {
+    this.#pendingAutoFrame = true;
     this.setAttribute("layer", id);
     await this.#ready;
+  }
+
+  /** Frames the active layer's data footprint (the `zoom to data`
+   * control's action — the always-available recovery affordance). No-op
+   * while the footprint is unknown; the control is hidden then. */
+  zoomToData(): void {
+    this.#frameData();
+  }
+
+  /** Jumps the view to the active layer's data bounds and announces the
+   * user-initiated move (`swath-framedata`, the page shell's URL-sync
+   * seam — a framed view must be shareable). `duration: 0` follows the
+   * footprint zoom's precedent: a jump reads clearer than an animation
+   * across the world, and it is deterministic for tests. */
+  #frameData(): void {
+    const map = this.#map;
+    const bounds = this.#dataBounds;
+    if (!map || !bounds) {
+      return;
+    }
+    map.once("moveend", () => {
+      this.dispatchEvent(new CustomEvent("swath-framedata", { detail: { bounds }, bubbles: true }));
+    });
+    map.fitBounds(
+      [
+        [bounds.west, bounds.south],
+        [bounds.east, bounds.north],
+      ],
+      { duration: 0, padding: 48 },
+    );
+  }
+
+  /** Whether any part of `bounds` is inside the current viewport — the
+   * "is the data already visible?" test that keeps auto-frame from
+   * yanking a view that can see the data. */
+  #viewIntersects(bounds: LonLatBounds): boolean {
+    const map = this.#map;
+    if (!map) {
+      return true; // no view to disturb
+    }
+    const view = map.getBounds();
+    return (
+      bounds.west <= view.getEast() &&
+      bounds.east >= view.getWest() &&
+      bounds.south <= view.getNorth() &&
+      bounds.north >= view.getSouth()
+    );
   }
 
   /** Brings the x-ray overlay up (idempotent). The overlay's DOM lives
@@ -428,7 +629,89 @@ export class SwathMap extends HTMLElement {
   /** OGC `{tileMatrix}/{tileRow}/{tileCol}` is z/y/x, so MapLibre's
    * XYZ-named template must carry `{y}` (row) in the middle segment. */
   #tileTemplate(layerId: string): string {
-    return `${this.server}/tilesets/${layerId}/tiles/{z}/{y}/{x}`;
+    return `${this.server}/tilesets/${layerId}/tiles/{z}/{y}/{x}${this.#tileQuery()}`;
+  }
+
+  /** The tile template's query string: the viewed frame (`datetime=`,
+   * ADR 0015) and the liveness-probe recovery version (`v=`, which must
+   * make the source template genuinely different — see `#retrySeq`). */
+  #tileQuery(): string {
+    const parts: string[] = [];
+    const datetime = this.getAttribute("datetime");
+    if (datetime !== null && datetime !== "") {
+      parts.push(`datetime=${encodeURIComponent(datetime)}`);
+    }
+    if (this.#retrySeq > 0) {
+      parts.push(`v=${this.#retrySeq}`);
+    }
+    return parts.length === 0 ? "" : `?${parts.join("&")}`;
+  }
+
+  /**
+   * The `datetime` fast path (issue #182): scrubbing re-points the
+   * raster source in place — `setTiles` refetches at the new frame with
+   * no style rebuild, no bounds refit, no `/tilesets` round trip. Before
+   * the first apply lands there is no source yet and the pending apply
+   * reads the attribute itself. The slider mirrors the attribute; the
+   * bubbling `swath-timechange` is the page shell's URL-sync seam.
+   */
+  #repointTime(datetime: string | null): void {
+    const map = this.#map;
+    if (this.#activeLayer !== "" && map) {
+      const repoint = (): void => {
+        const source = map.getSource(SOURCE_ID) as RasterTileSource | undefined;
+        // The template re-reads the datetime attribute, so a deferred
+        // re-point always applies the LATEST frame, never a stale one.
+        source?.setTiles([this.#tileTemplate(this.#activeLayer)]);
+      };
+      if (map.getSource(SOURCE_ID)) {
+        repoint();
+      } else {
+        // Style mid-apply (a scrub can land inside setStyle's diff
+        // window, where the source is momentarily unreachable): apply
+        // the frame as soon as the style lands instead of silently
+        // dropping it — the stuck-forever failure mode the screenshot
+        // suite exposed.
+        map.once("styledata", repoint);
+      }
+    }
+    this.#time?.setActive(datetime);
+    this.dispatchEvent(
+      new CustomEvent("swath-timechange", { detail: { datetime }, bubbles: true }),
+    );
+  }
+
+  /** Bound on play-mode prefetch: at most this many tiles per frame (a
+   * 1528px viewport shows ~24 tiles; more means the view is mid-zoom
+   * and warming it all buys nothing). */
+  static readonly #PREFETCH_MAX = 32;
+
+  /** Warms one frame (play mode): fetches the viewport's visible tile
+   * URLs at the displayed tile zoom with the frame's `datetime=`, so
+   * the server's write-through cache holds them before the frame
+   * displays. Fire-and-forget; failures are the next request's problem. */
+  #prefetchFrame(datetime: string): void {
+    const map = this.#map;
+    const layer = this.#activeLayer;
+    if (!map || layer === "") {
+      return;
+    }
+    // A 256px raster source displays z = style-zoom + 1 tiles (the same
+    // arithmetic the x-ray overlay badges by).
+    const z = Math.round(map.getZoom()) + 1;
+    const bounds = map.getBounds();
+    const nw = centerTile(bounds.getWest(), bounds.getNorth(), z);
+    const se = centerTile(bounds.getEast(), bounds.getSouth(), z);
+    const path = `${this.server}/tilesets/${layer}/tiles`;
+    const query = `datetime=${encodeURIComponent(datetime)}`;
+    let budget = SwathMap.#PREFETCH_MAX;
+    for (let y = nw.y; y <= se.y && budget > 0; y += 1) {
+      for (let x = nw.x; x <= se.x && budget > 0; x += 1) {
+        budget -= 1;
+        // OGC path order z/row/col = z/y/x.
+        fetch(`${path}/${z}/${y}/${x}?${query}`).catch(() => undefined);
+      }
+    }
   }
 
   /** Kicks off an async (re)apply of server+layer; `ready` tracks it. */
@@ -466,10 +749,12 @@ export class SwathMap extends HTMLElement {
       return;
     }
 
-    // Zero-config view: no explicit center/zoom means "fit the layer's
-    // data" — read its geographic bounds off the tileset metadata.
+    // The tileset metadata carries both the geographic bounds (the
+    // zero-config fit below) and, for catalog-backed layers, the
+    // granules link the time slider's domain comes from (issue #182).
     const fit = this.getAttribute("center") === null && this.getAttribute("zoom") === null;
-    const bounds = fit ? await this.#layerBounds(layerId) : undefined;
+    const metadata = await this.#layerMetadata(layerId);
+    const bounds = fit ? metadata?.bounds : undefined;
 
     // Optional basemap under the imagery: fetch (cached) and merge our raster
     // source/layer ON TOP of its sources/layers. Failure → bare style.
@@ -485,10 +770,9 @@ export class SwathMap extends HTMLElement {
       return;
     }
 
-    const retrySuffix = this.#retrySeq > 0 ? `?v=${this.#retrySeq}` : "";
     const swathSource = {
       type: "raster",
-      tiles: [`${this.#tileTemplate(layerId)}${retrySuffix}`],
+      tiles: [this.#tileTemplate(layerId)],
       tileSize: 256,
     };
     const swathLayer = { id: RASTER_LAYER_ID, type: "raster", source: SOURCE_ID };
@@ -540,6 +824,26 @@ export class SwathMap extends HTMLElement {
       }),
     );
     this.#startLivenessProbe(layerId, epoch);
+    // The data domain loads LAST, after the probe kicked off: the
+    // probe's timing relative to MapLibre's first tile fetches is part
+    // of the painted result (its no-store fetch renders through the
+    // cache, so reordering it flips a badge between live and cache_hit),
+    // while the domain only feeds the slider and the data-framing.
+    // `ready` still covers it — tests may await and then inspect.
+    await this.#applyDataDomain(metadata, epoch);
+    if (epoch !== this.#epoch) {
+      return;
+    }
+    // Auto-frame (issue #182 follow-up): a USER-initiated switch to a
+    // layer whose data is nowhere in view jumps to the data — consumed
+    // exactly once per `setLayer`, and skipped entirely when the data
+    // already intersects the viewport (never yank a view that can see
+    // it) or when the footprint is unknown.
+    const autoFrame = this.#pendingAutoFrame;
+    this.#pendingAutoFrame = false;
+    if (autoFrame && this.#dataBounds && !this.#viewIntersects(this.#dataBounds)) {
+      this.#frameData();
+    }
   }
 
   /** Self-healing tiles for the "viewer open before the data exists" flow
@@ -595,9 +899,10 @@ export class SwathMap extends HTMLElement {
     void probe();
   }
 
-  /** Geographic bounds from `/tilesets/{id}` metadata; undefined when the
-   * layer is not resolvable yet (e.g. empty catalog: an honest 404). */
-  async #layerBounds(layerId: string): Promise<LonLatBounds | undefined> {
+  /** Geographic bounds + granules link from `/tilesets/{id}` metadata;
+   * undefined when the layer is not resolvable yet (e.g. empty catalog:
+   * an honest 404) — the apply then proceeds without a fit or a slider. */
+  async #layerMetadata(layerId: string): Promise<LayerMetadata | undefined> {
     const response = await fetch(`${this.server}/tilesets/${layerId}`, {
       headers: { accept: "application/json" },
     });
@@ -606,15 +911,61 @@ export class SwathMap extends HTMLElement {
     }
     const body = (await response.json()) as {
       boundingBox?: { lowerLeft?: number[]; upperRight?: number[] };
+      links?: OgcLink[];
     };
+    const metadata: LayerMetadata = {};
     const lower = body.boundingBox?.lowerLeft;
     const upper = body.boundingBox?.upperRight;
     const [west, south] = lower ?? [];
     const [east, north] = upper ?? [];
-    if (west === undefined || south === undefined || east === undefined || north === undefined) {
-      return undefined;
+    if (west !== undefined && south !== undefined && east !== undefined && north !== undefined) {
+      metadata.bounds = { west, south, east, north };
     }
-    return { west, south, east, north };
+    // `/datasets/{id}/granules` — the dataset id is the second-to-last
+    // path segment of the granules link.
+    const granules = body.links?.find((link) => link.rel === "granules")?.href;
+    const dataset = granules?.split("/").filter(Boolean).at(-2);
+    if (dataset !== undefined) {
+      metadata.dataset = dataset;
+    }
+    return metadata;
+  }
+
+  /** Feeds the time slider AND the data-framing (issue #182): fetches
+   * the layer's granule listing (when its metadata linked one), hands
+   * the acquisition datetimes to the slider, and records where the data
+   * IS — the union of granule footprints, falling back to the tileset
+   * metadata bounds for static layers, unknown when neither exists (the
+   * zoom-to-data control hides then). Failures are tolerated: both are
+   * bonus affordances, never a reason the imagery fails to paint. */
+  async #applyDataDomain(metadata: LayerMetadata | undefined, epoch: number): Promise<void> {
+    let frames: string[] = [];
+    let footprints: GranuleBbox[] = [];
+    if (metadata?.dataset !== undefined) {
+      try {
+        const url = `${this.server}/datasets/${encodeURIComponent(metadata.dataset)}/granules`;
+        const response = await fetch(url, { headers: { accept: "application/json" } });
+        if (response.ok) {
+          const body: unknown = await response.json();
+          frames = parseGranuleDatetimes(body);
+          footprints = ((body as { granules?: { bbox?: unknown }[] }).granules ?? [])
+            .map((granule) => parseBbox(granule.bbox))
+            .filter((bbox): bbox is GranuleBbox => bbox !== undefined);
+        }
+      } catch {
+        frames = [];
+        footprints = [];
+      }
+    }
+    if (epoch !== this.#epoch) {
+      return;
+    }
+    const union = unionBbox(footprints);
+    this.#dataBounds = union
+      ? { west: union[0], south: union[1], east: union[2], north: union[3] }
+      : metadata?.bounds;
+    this.#zoomData?.update(this.#dataBounds !== undefined);
+    this.#time?.setDomain(frames, this.getAttribute("datetime"));
   }
 }
 

@@ -731,3 +731,56 @@ test("malformed payloads never reach the analytics", () => {
   expect(panel?.dataset.total).toBe("0");
   expect(panel?.textContent).toContain("p50 — · p95 — ms");
 });
+
+test("temporal traces reach the per-frame analytics line and the inspector (issue #182)", () => {
+  const { host, overlay, source } = mountOverlay();
+  const temporal = {
+    granule_id: "hlss30-t10tfk-2024229",
+    granule_datetime: "2024-08-16T19:03:00Z",
+    requested: "2024-08-20T00:00:00Z",
+    rule: "latest_at_or_before",
+  };
+  source.emit("trace", envelope("truecolor", "2/1/1", { temporal }));
+  source.emit(
+    "trace",
+    envelope("truecolor", "2/2/1", {
+      decision: { cache_hit: { key: "abcd1234" } },
+      temporal,
+    }),
+  );
+
+  // The analytics card grew the per-frame plan-mix line, keyed on the
+  // temporal decision's granule_datetime.
+  const panel = host.querySelector<HTMLElement>(".swath-xray-analytics");
+  expect(panel?.dataset.frame).toBe(temporal.granule_datetime);
+  expect(panel?.dataset.frameLive).toBe("1");
+  expect(panel?.dataset.frameCacheHit).toBe("1");
+  expect(panel?.textContent).toContain(
+    `frame ${temporal.granule_datetime} · live 1 · ovr 0 · cache 1`,
+  );
+
+  // The inspector names the frame: granule datetime, id, and rule.
+  overlay.refresh();
+  badges(host)[0]?.click();
+  const inspector = host.querySelector<HTMLElement>(".swath-xray-inspector");
+  expect(inspector?.textContent).toContain(
+    "2024-08-16T19:03:00Z (hlss30-t10tfk-2024229, latest_at_or_before)",
+  );
+
+  // A static-layer trace (no temporal) leaves the frame line untouched.
+  source.emit("trace", envelope("truecolor", "2/3/1"));
+  expect(panel?.dataset.frame).toBe(temporal.granule_datetime);
+  expect(panel?.dataset.frameLive).toBe("1");
+
+  // And so does another LAYER's temporal trace: the frame line narrates
+  // the painted layer's animation, not the whole stream (which counts
+  // in the layer-agnostic totals above, like the feed).
+  source.emit(
+    "trace",
+    envelope("other-layer", "2/3/1", {
+      temporal: { ...temporal, granule_datetime: "2030-01-01T00:00:00Z" },
+    }),
+  );
+  expect(panel?.dataset.frame).toBe(temporal.granule_datetime);
+  expect(panel?.dataset.total).toBe("4");
+});

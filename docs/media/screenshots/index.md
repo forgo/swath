@@ -6,8 +6,8 @@ HLS granule, no third-party basemap) at a pinned viewport (1528x860, DPR 1), and
 capture run must reproduce each shot within its perceptual-diff policy
 (tests/screenshots/verify_stable.py + swath-testkit pdiff) before the recipe passes.
 
-- capture sha: `c944a411d813b0f5d0dc40ab4e55e1b6ffbd1071`
-- captured: 2026-08-11T06:23:38.600Z
+- capture sha: `81ed077fb4dbc932f2c501d7d4981358becdff00`
+- captured: 2026-08-13T11:07:02.486Z
 - machine-readable manifest (per-shot sha256 + pdiff policy): [`shots.json`](shots.json)
 
 | shot | evidences |
@@ -19,8 +19,10 @@ capture run must reproduce each shot within its perceptual-diff policy
 | [`05-xray-why-view.png`](05-xray-why-view.png) | Why-view for one tile: the planner's candidate table — chosen plan, rejected candidates, and the reason for each. |
 | [`06-xray-heatmap.png`](06-xray-heatmap.png) | Bytes-read heatmap mode: badges bucketed on a log scale, with the legend the overlay itself publishes. |
 | [`07-xray-trace-feed.png`](07-xray-trace-feed.png) | Trace feed: the /traces SSE stream as scrollback — every line a render decision, clickable back to its tile. |
-| [`08-authoring-form.png`](08-authoring-form.png) | openEO authoring panel: forms generated from the server's own GET /processes, with plain-language field help. |
+| [`08-authoring-form.png`](08-authoring-form.png) | openEO authoring canvas (Model B): cards generated from the server's own GET /processes, bands from the vocabulary, plain-language field help. |
 | [`09-authoring-narrative-advanced.png`](09-authoring-narrative-advanced.png) | NDVI template loaded: the plain-words narrative of the graph, with a step's advanced (defaulted) fields opened. |
 | [`10-authoring-published.png`](10-authoring-published.png) | Publish flow result: the authored NDVI service appears in the layer rail and serves on the map immediately — no reload. |
 | [`11-dataset-footprints.png`](11-dataset-footprints.png) | Dataset browser expanded: the catalog's granules listed in the rail, footprints outlined live on the map. |
 | [`12-analytics-under-load.png`](12-analytics-under-load.png) | Trace analytics under load: rolling p50/p95 render latency, plan mix, and cache hit rate over the session's tiles. |
+| [`13-time-slider-live.png`](13-time-slider-live.png) | Time slider over the Park Fire season, first pass: the scrubbed frame is rendered live — every badge says so, and the analytics card narrates the frame's own plan mix. |
+| [`14-time-slider-cached.png`](14-time-slider-cached.png) | The same frame revisited: every tile is a cache hit (same granule, same cache entry — ADR 0015 frame identity), which is why the loop replays smoothly. |

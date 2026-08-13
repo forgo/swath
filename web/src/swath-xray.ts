@@ -95,6 +95,22 @@ export interface TraceProvenance {
   length: number;
 }
 
+/** The temporal decision (`TemporalTrace`, pinned in swath-core; riding
+ * the envelope since #223, ADR 0015): which granule backs this frame,
+ * what was asked, and under which resolution rule. */
+export interface TraceTemporal {
+  /** The granule the frame resolved to. */
+  granule_id: string;
+  /** That granule's acquisition datetime — the frame's identity, and
+   * what the per-frame analytics key on (issue #182). */
+  granule_datetime: string;
+  /** The raw `datetime=` request; null when absent (plain latest). */
+  requested: string | null;
+  /** The resolution rule that ran (`latest`, `latest_at_or_before`,
+   * `latest_in_interval`). */
+  rule: string;
+}
+
 /** The core `Trace` JSON (pinned in swath-core `trace` module). */
 export interface TraceJson {
   decision: TraceDecision;
@@ -110,6 +126,10 @@ export interface TraceJson {
    * the planner. Optional because pre-#37 emitters (and synthetic test
    * envelopes) omit the field entirely — both read as "no plan". */
   plan?: PlanTrace | null;
+  /** The temporal decision (#223); `null` on static layers (a single
+   * timeless frame). Optional for pre-#223 emitters and synthetic test
+   * envelopes — both read as "no time dimension". */
+  temporal?: TraceTemporal | null;
 }
 
 /** The `data:` payload of one `event: trace` (envelope pinned in
@@ -467,6 +487,8 @@ const OVERLAY_CSS = `
   color: #e2e8f0;
   font: 11px/1.5 ui-monospace, monospace;
 }
+.swath-xray-analytics-frame { color: #94a3b8; }
+.swath-xray-analytics-frame[hidden] { display: none; }
 .swath-xray-analytics-live { color: #4ade80; }
 .swath-xray-analytics-overview { color: #fbbf24; }
 .swath-xray-analytics-cache { color: #60a5fa; }
@@ -784,7 +806,18 @@ export class XRayOverlay {
       );
       this.#ingest.textContent = `ingest→pixel: ${this.#ingestMs} ms`;
     }
-    this.#analytics.record(envelope.trace.decision, envelope.trace.timings.total_ms);
+    // The frame key feeds the analytics card's per-frame line (issue
+    // #182) — scoped to the PAINTED layer, deliberately: the line
+    // narrates the animation on screen ("this frame: N live, M cached"),
+    // and since #223 every catalog-backed render on the shared stream
+    // carries a temporal decision, so an unscoped key would follow
+    // whatever background layer traced last. The stream-wide counters
+    // above stay layer-agnostic, like the feed.
+    this.#analytics.record(
+      envelope.trace.decision,
+      envelope.trace.timings.total_ms,
+      envelope.layer === this.#layer ? envelope.trace.temporal?.granule_datetime : undefined,
+    );
     this.#feedTrace(key, envelope);
     this.#schedule();
   }
@@ -1058,6 +1091,14 @@ export class XRayOverlay {
         `encode ${timings.encode_ms} · total ${timings.total_ms} ms`,
     );
     fact("crs", `${trace.crs_from} → ${trace.crs_to}`);
+    if (trace.temporal) {
+      // The frame's provenance in time (#182): which granule backs it,
+      // under which resolution rule — absent entirely on static layers.
+      fact(
+        "frame",
+        `${trace.temporal.granule_datetime} (${trace.temporal.granule_id}, ${trace.temporal.rule})`,
+      );
+    }
     fact("sources", trace.sources.join(", "));
     if (trace.ingest_to_pixel_ms !== null) {
       fact("ingest→pixel", `${trace.ingest_to_pixel_ms} ms`);

@@ -39,9 +39,34 @@ function json(body: object): Response {
   });
 }
 
+/** The fire fixture footprint the opt-in `temporal` stub's granules
+ * carry — far from the default `BBOX`, so auto-frame is observable. */
+const FIRE_BBOX = { west: -121.7388, south: 39.9856, east: -121.6475, north: 40.0559 };
+
+/** The Park Fire fixture series' acquisition datetimes (ascending) —
+ * the temporal domain the opt-in `temporal` stub serves. */
+const FIRE_FRAMES = [
+  "2024-06-07T19:03:00Z",
+  "2024-07-22T19:03:00Z",
+  "2024-08-16T19:03:00Z",
+  "2024-09-05T19:03:00Z",
+];
+
 /** A stub Swath API over `globalThis.fetch`: the tilesets list, per-layer
- * metadata (with the fixture bbox), and PNG bytes for tile requests. */
-function stubSwathApi(opts: { tilesLiveAfterMs?: number; serverLiveAfterMs?: number } = {}): {
+ * metadata (with the fixture bbox), and PNG bytes for tile requests.
+ * `temporal` opts one layer into the time dimension (issue #182): its
+ * metadata carries the `granules` link and the dataset's granule listing
+ * answers with `FIRE_FRAMES` (newest first, like the real API). */
+function stubSwathApi(
+  opts: {
+    tilesLiveAfterMs?: number;
+    serverLiveAfterMs?: number;
+    temporal?: { layer: string; dataset: string };
+    /** Serve tileset metadata with no bounds and no links — a layer
+     * whose data footprint is unknowable (zoom-to-data must hide). */
+    bare?: boolean;
+  } = {},
+): {
   requests: string[];
 } {
   const requests: string[] = [];
@@ -69,6 +94,20 @@ function stubSwathApi(opts: { tilesLiveAfterMs?: number; serverLiveAfterMs?: num
       );
     }
     if (/\/tilesets\/[a-z0-9-]+$/.test(url)) {
+      if (opts.bare) {
+        return Promise.resolve(json({ title: "stub", dataType: "map" }));
+      }
+      const { temporal } = opts;
+      const links =
+        temporal !== undefined && url.endsWith(`/tilesets/${temporal.layer}`)
+          ? [
+              {
+                href: `${new URL(url).origin}/datasets/${temporal.dataset}/granules`,
+                rel: "granules",
+                type: "application/json",
+              },
+            ]
+          : [];
       return Promise.resolve(
         json({
           title: "stub",
@@ -77,7 +116,20 @@ function stubSwathApi(opts: { tilesLiveAfterMs?: number; serverLiveAfterMs?: num
             lowerLeft: [BBOX.west, BBOX.south],
             upperRight: [BBOX.east, BBOX.north],
           },
-          links: [],
+          links,
+        }),
+      );
+    }
+    if (url.includes("/granules")) {
+      // Newest first, like the real listing; the component sorts.
+      return Promise.resolve(
+        json({
+          granules: [...FIRE_FRAMES].reverse().map((datetime, i) => ({
+            id: `g${i}`,
+            datetime,
+            bbox: [FIRE_BBOX.west, FIRE_BBOX.south, FIRE_BBOX.east, FIRE_BBOX.north],
+            assets: {},
+          })),
         }),
       );
     }
@@ -319,4 +371,151 @@ test("a failing server rejects ready and fires a swath-error event", async () =>
   const el = mount({ server: SERVER, layer: "truecolor" });
   await expect(el.ready).rejects.toThrow(/503/);
   expect(await errored).toBe(true);
+});
+
+// --- the time slider + datetime attribute (issue #182) ---
+
+test("time slider: visible with the granules domain on a temporal layer, hidden otherwise", async () => {
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const el = mount({ server: SERVER, layer: "ndvi" });
+  await el.ready;
+  const slider = el.querySelector<HTMLElement>(".swath-map-time");
+  expect(slider?.hidden).toBe(false);
+  expect(slider?.dataset["frames"]).toBe("4");
+  // No datetime attribute = latest: the thumb rests on the last frame.
+  expect(slider?.dataset["index"]).toBe("3");
+  expect(slider?.dataset["datetime"]).toBe(FIRE_FRAMES[3]);
+
+  // Switching to a layer without a granules link hides the control —
+  // the zero-config landing (single-date fixture layers) is untouched.
+  await el.setLayer("truecolor");
+  expect(el.querySelector<HTMLElement>(".swath-map-time")?.hidden).toBe(true);
+});
+
+test("datetime attribute re-points the raster source with datetime= and fires swath-timechange", async () => {
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const el = mount({ server: SERVER, layer: "ndvi" });
+  await el.ready;
+  expect(tileTemplates(el)).toEqual([`${SERVER}/tilesets/ndvi/tiles/{z}/{y}/{x}`]);
+
+  const frame = FIRE_FRAMES[1] ?? "";
+  const timechange = new Promise<string | null>((resolve) => {
+    el.addEventListener(
+      "swath-timechange",
+      (event) => resolve((event as CustomEvent<{ datetime: string | null }>).detail.datetime),
+      { once: true },
+    );
+  });
+  el.setAttribute("datetime", frame);
+  expect(await timechange).toBe(frame);
+  // The source was re-pointed in place — same style, new frame.
+  expect(tileTemplates(el)).toEqual([
+    `${SERVER}/tilesets/ndvi/tiles/{z}/{y}/{x}?datetime=${encodeURIComponent(frame)}`,
+  ]);
+  // The slider thumb mirrors the attribute.
+  expect(el.querySelector<HTMLElement>(".swath-map-time")?.dataset["index"]).toBe("1");
+});
+
+test("a deep-linked datetime is baked into the first applied template", async () => {
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const frame = FIRE_FRAMES[2] ?? "";
+  const el = mount({ server: SERVER, layer: "ndvi", datetime: frame });
+  await el.ready;
+  expect(tileTemplates(el)).toEqual([
+    `${SERVER}/tilesets/ndvi/tiles/{z}/{y}/{x}?datetime=${encodeURIComponent(frame)}`,
+  ]);
+  expect(el.querySelector<HTMLElement>(".swath-map-time")?.dataset["index"]).toBe("2");
+});
+
+test("scrubbing the built-in slider reflects the datetime attribute", async () => {
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const el = mount({ server: SERVER, layer: "ndvi" });
+  await el.ready;
+  const range = el.querySelector<HTMLInputElement>('.swath-map-time input[type="range"]');
+  if (!range) {
+    throw new Error("no slider range input");
+  }
+  range.value = "0";
+  range.dispatchEvent(new Event("input"));
+  expect(el.getAttribute("datetime")).toBe(FIRE_FRAMES[0]);
+  expect(tileTemplates(el)[0]).toContain(`datetime=${encodeURIComponent(FIRE_FRAMES[0] ?? "")}`);
+});
+
+// --- finding the data: auto-frame + zoom-to-data (issue #182 follow-up) ---
+
+/** Resolves on the next user-initiated data framing (the shell's
+ * URL-sync seam doubles as the tests' completion signal). */
+function framed(el: SwathMap): Promise<void> {
+  return new Promise((resolve) => {
+    el.addEventListener("swath-framedata", () => resolve(), { once: true });
+  });
+}
+
+test("a user-initiated switch auto-frames data that is nowhere in view", async () => {
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  // Viewing the other side of the world...
+  const el = mount({ server: SERVER, layer: "truecolor", center: "10,20", zoom: "4" });
+  await el.ready;
+  // ...the user switches to the fire layer (setLayer = the user path:
+  // the built-in switcher and the entry page's rail both go through it).
+  const frame = framed(el);
+  await el.setLayer("ndvi");
+  await frame;
+  const center = el.map?.getCenter();
+  expect(center?.lng).toBeGreaterThan(FIRE_BBOX.west);
+  expect(center?.lng).toBeLessThan(FIRE_BBOX.east);
+  expect(center?.lat).toBeGreaterThan(FIRE_BBOX.south);
+  expect(center?.lat).toBeLessThan(FIRE_BBOX.north);
+});
+
+test("deep-linked views are honored: attribute-driven applies never auto-frame", async () => {
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  // The shell applies a deep link's layer/center/zoom as attributes —
+  // the URL's view must win even though the fire data is off-screen.
+  const el = mount({ server: SERVER, layer: "ndvi", center: "10,20", zoom: "4" });
+  await el.ready;
+  expect(el.map?.getCenter().lng).toBeCloseTo(10, 5);
+  expect(el.map?.getCenter().lat).toBeCloseTo(20, 5);
+  // A programmatic attribute write is not a user switch either.
+  el.setAttribute("layer", "truecolor");
+  await el.ready;
+  el.setAttribute("layer", "ndvi");
+  await el.ready;
+  expect(el.map?.getCenter().lng).toBeCloseTo(10, 5);
+  expect(el.map?.getCenter().lat).toBeCloseTo(20, 5);
+});
+
+test("no auto-frame when the data already intersects the view", async () => {
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const el = mount({ server: SERVER, layer: "truecolor", center: "-121.7,40.02", zoom: "9" });
+  await el.ready;
+  await el.setLayer("ndvi");
+  // The fire footprint is on screen: the view is not yanked.
+  expect(el.map?.getCenter().lng).toBeCloseTo(-121.7, 5);
+  expect(el.map?.getCenter().lat).toBeCloseTo(40.02, 5);
+  expect(el.map?.getZoom()).toBeCloseTo(9, 5);
+});
+
+test("zoom to data: frames known bounds; hidden when nothing is known", async () => {
+  // A static layer (no granules link): the metadata bounds are the
+  // fallback footprint, so the control shows and frames them.
+  const el = mount({ server: SERVER, layer: "truecolor", center: "10,20", zoom: "3" });
+  await el.ready;
+  const control = el.querySelector<HTMLElement>(".swath-map-zoomdata");
+  expect(control?.hidden).toBe(false);
+  const frame = framed(el);
+  control?.querySelector("button")?.click();
+  await frame;
+  const center = el.map?.getCenter();
+  expect(center?.lng).toBeGreaterThan(BBOX.west);
+  expect(center?.lng).toBeLessThan(BBOX.east);
+  expect(center?.lat).toBeGreaterThan(BBOX.south);
+  expect(center?.lat).toBeLessThan(BBOX.north);
+  el.remove();
+
+  // No bounds, no granules — no dead button.
+  stubSwathApi({ bare: true });
+  const unknowable = mount({ server: SERVER, layer: "truecolor", center: "10,20", zoom: "3" });
+  await unknowable.ready;
+  expect(unknowable.querySelector<HTMLElement>(".swath-map-zoomdata")?.hidden).toBe(true);
 });
