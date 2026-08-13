@@ -194,7 +194,10 @@ impl From<CompileError> for OpenEoError {
             CompileError::MissingArgument { .. } => {
                 (StatusCode::BAD_REQUEST, "ProcessParameterRequired")
             }
-            CompileError::InvalidArgument { .. } | CompileError::UnknownBand { .. } => {
+            CompileError::InvalidArgument { .. }
+            | CompileError::UnknownBand { .. }
+            | CompileError::EmptyTemporalWindow { .. }
+            | CompileError::DimensionNotAvailable { .. } => {
                 (StatusCode::BAD_REQUEST, "ProcessParameterInvalid")
             }
             _ => (StatusCode::BAD_REQUEST, "ProcessGraphInvalid"),
@@ -455,6 +458,14 @@ const PROCESS_DEFINITIONS: &[(&str, &str)] = &[
         "supported inside a `reduce_dimension` reducer; division by zero makes the pixel no-data.",
     ),
     (
+        include_str!("../data/openeo-processes/filter_temporal.json"),
+        "narrows the frame-selection resolution window (ADR 0015): the interval constrains \
+         *which granule backs a frame* — the latest acquisition inside the window — never how \
+         pixels combine; bounds must be UTC (`Z`) date-times, dates, or years, compared at \
+         millisecond precision; `dimension` must be omitted, null, or `t`; an interval that \
+         provably selects nothing is rejected at validation time.",
+    ),
+    (
         include_str!("../data/openeo-processes/linear_scale_range.json"),
         "`outputMin`/`outputMax` must be exactly 0/255, spelled out explicitly (the render \
          path quantizes to 8-bit RGBA; the spec's defaults, 0/1, are rejected); at most one \
@@ -463,8 +474,11 @@ const PROCESS_DEFINITIONS: &[(&str, &str)] = &[
     (
         include_str!("../data/openeo-processes/load_collection.json"),
         "`id` must name the collection the graph is authored against; `bands` is required and \
-         entries must be dataset band names; `spatial_extent`, `temporal_extent`, and \
-         `properties` are accepted and ignored (tile serving decides the window and the granule).",
+         entries must be dataset band names; `temporal_extent` constrains the frame-selection \
+         resolution window (ADR 0015): which granule backs a frame — the latest acquisition \
+         inside the window — never how pixels combine (bounds must be UTC (`Z`) date-times, \
+         dates, or years, compared at millisecond precision); `spatial_extent` and \
+         `properties` are accepted and ignored (tile serving decides the spatial window).",
     ),
     (
         include_str!("../data/openeo-processes/multiply.json"),
@@ -695,6 +709,7 @@ pub fn compile_service_layer(
         },
         tile_size: layer.tile_size,
         budget: Budget::default(),
+        window: product.window,
     })
 }
 

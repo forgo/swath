@@ -579,18 +579,61 @@ test("schema honesty: chips and cards exist only for served definitions", async 
 test("every field carries a visible plain-language explainer, and the Load card speaks area/time plainly", async () => {
   const panel = await mount(fetchStub({}));
   expect(helpText(panel, "s1-id")).toBe("Which dataset to compute from.");
-  // The extents are advanced expert fields; the card carries the
-  // plain-worded summary of what leaving them alone means.
+  // The area extent stays an advanced expert field; the card carries
+  // the plain-worded summary of what the current choices mean.
   expect(field(panel, "s1-extent-summary").textContent).toBe(
     "Area: everywhere the collection covers · Time: everything available",
+  );
+  // Time is the card's own plain-words control (ADR 0015), visible
+  // without the advanced toggle, with its explainer beside it.
+  const whenHelp = field(panel, "s1-temporal_extent")
+    .closest("label")
+    ?.querySelector(".swath-authoring-field-help")?.textContent;
+  expect(whenHelp).toBe(
+    "When: the dates to show — leave both empty to use everything available. " +
+      "The map shows the newest image inside the range (the end date itself is not included).",
   );
   openAdvanced(panel, "s1");
   expect(helpText(panel, "s1-spatial_extent")).toBe(
     "The map area to compute over — leave as is to use the whole collection.",
   );
-  expect(helpText(panel, "s1-temporal_extent")).toBe(
-    "The time range to include — leave as is to use everything available.",
+});
+
+test("the Load card's when control is two date pickers that window the graph", async () => {
+  const panel = await mount(fetchStub({}));
+  choose(panel, "s1-id", "hls-s30");
+  tickBand(panel, "b8a");
+  tickBand(panel, "b04");
+  // The control is on the card itself — no advanced toggle needed.
+  const setDate = (slot: "from" | "until", value: string): void => {
+    const input = field<HTMLInputElement>(panel, `s1-temporal_extent-${slot}`);
+    input.value = value;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  setDate("from", "2024-06-01");
+  setDate("until", "2024-09-01");
+  // The when line and the narrative speak the choice plainly...
+  expect(field(panel, "s1-extent-summary").textContent).toBe(
+    "Area: everywhere the collection covers · Time: 2024-06-01 until 2024-09-01",
   );
+  // ...and the graph carries the interval (dates are valid openEO
+  // temporal-interval bounds; the compiler treats the end as excluded).
+  const graph = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
+  expect(graph["s1"]?.arguments["temporal_extent"]).toEqual(["2024-06-01", "2024-09-01"]);
+
+  // One side open: null on that side, per the spec.
+  setDate("until", "");
+  expect(field(panel, "s1-extent-summary").textContent).toBe(
+    "Area: everywhere the collection covers · Time: from 2024-06-01",
+  );
+  const open = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
+  expect(open["s1"]?.arguments["temporal_extent"]).toEqual(["2024-06-01", null]);
+
+  // Both cleared: back to "everything available" — explicit null, the
+  // exact pre-#181 graph (see NDVI_GRAPH).
+  setDate("from", "");
+  const cleared = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
+  expect(cleared["s1"]?.arguments["temporal_extent"]).toBeNull();
 });
 
 test("submit stays disabled with spelled-out reasons until the pipeline is complete", async () => {

@@ -156,7 +156,8 @@ const FIELD_HELP: Record<string, string> = {
   "load_collection.spatial_extent":
     "The map area to compute over — leave as is to use the whole collection.",
   "load_collection.temporal_extent":
-    "The time range to include — leave as is to use everything available.",
+    "When: the dates to show — leave both empty to use everything available. " +
+    "The map shows the newest image inside the range (the end date itself is not included).",
   "load_collection.bands":
     "The channels to load — tick them in the order you want them (for a 3-band picture, " +
     "that order is red, green, blue).",
@@ -197,6 +198,9 @@ function isAdvancedParam(processId: string, param: ProcessParameter): boolean {
   if (
     hasSubtype(param.schema, "collection-id") ||
     hasSubtype(param.schema, "output-format-options") ||
+    // The load card's plain-words "when" control (ADR 0015): time is a
+    // newcomer's choice now that windows select which granule serves.
+    (processId === "load_collection" && hasSubtype(param.schema, "temporal-interval")) ||
     isBandName(param.schema)
   ) {
     return false;
@@ -221,7 +225,10 @@ function narrativePhrase(
     case "load_collection": {
       const id = value("id");
       const bands = value("bands");
-      return `load ${id === "" ? "a collection" : id}${bands === "" ? "" : ` (bands ${bands})`}`;
+      const when = temporalPhrase(value("temporal_extent"));
+      return `load ${id === "" ? "a collection" : id}${bands === "" ? "" : ` (bands ${bands})`}${
+        when === "everything available" ? "" : `, ${when}`
+      }`;
     }
     case "ndvi": {
       const nir = value("nir") === "" ? "nir" : value("nir");
@@ -374,6 +381,24 @@ swath-authoring-panel .swath-authoring-bands {
   flex-wrap: wrap;
   gap: 2px 10px;
   margin: 2px 0 0;
+}
+swath-authoring-panel .swath-authoring-when {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin: 2px 0 0;
+}
+swath-authoring-panel .swath-authoring-when label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+swath-authoring-panel .swath-authoring-when input {
+  display: inline-block;
+  width: auto;
+  margin: 0;
 }
 swath-authoring-panel .swath-authoring-bands label {
   display: flex;
@@ -735,6 +760,48 @@ function parseLiteral(raw: string, schema: unknown): unknown {
   } catch {
     return raw;
   }
+}
+
+/** The `[from, until]` date strings of a stored temporal-interval value
+ * (`""` = open on that side; both `""` = no interval stored). */
+function temporalBounds(raw: string): [string, string] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed) && parsed.length === 2) {
+      return [
+        typeof parsed[0] === "string" ? parsed[0] : "",
+        typeof parsed[1] === "string" ? parsed[1] : "",
+      ];
+    }
+  } catch {
+    // Not an interval — treated as unset.
+  }
+  return ["", ""];
+}
+
+/** The stored temporal-interval value for two date-picker bounds:
+ * `""` (field omitted → null, no filter) when both are empty, the
+ * `[start, end]` JSON with `null` for an open side otherwise. */
+function temporalValue(from: string, until: string): string {
+  if (from === "" && until === "") {
+    return "";
+  }
+  return JSON.stringify([from === "" ? null : from, until === "" ? null : until]);
+}
+
+/** The when line's plain words for a stored temporal-interval value. */
+function temporalPhrase(raw: string): string {
+  const [from, until] = temporalBounds(raw);
+  if (from === "" && until === "") {
+    return "everything available";
+  }
+  if (from === "") {
+    return `until ${until}`;
+  }
+  if (until === "") {
+    return `from ${from}`;
+  }
+  return `${from} until ${until}`;
 }
 
 /** The prefill for a literal input, from the definition's `default`. */
@@ -1669,16 +1736,17 @@ export class SwathAuthoringPanel extends HTMLElement {
       item.append(...this.#renderField(card, key, param));
     }
     if (card === this.#loadCard) {
-      // The plain-worded where/when line (design note §4): the extents
-      // stay expert fields under advanced; the card says what leaving
-      // them alone means, in the user's vocabulary.
+      // The plain-worded where/when line (design note §4): area stays an
+      // expert field under advanced; time is the card's own "when"
+      // control (ADR 0015) — the line says what the current choice
+      // means, in the user's vocabulary.
       const plain = document.createElement("small");
       plain.className = "swath-authoring-plain";
       plain.id = `swath-authoring-${key}-extent-summary`;
       const custom = (name: string): boolean => (card.values.get(name) ?? "").trim() !== "";
       plain.textContent = `Area: ${
         custom("spatial_extent") ? "custom (see advanced)" : "everywhere the collection covers"
-      } · Time: ${custom("temporal_extent") ? "custom (see advanced)" : "everything available"}`;
+      } · Time: ${temporalPhrase(card.values.get("temporal_extent") ?? "")}`;
       item.append(plain);
     }
     if (card === this.#saveCard && this.#resultStage().kind === "multi") {
@@ -1755,6 +1823,9 @@ export class SwathAuthoringPanel extends HTMLElement {
     if (card === this.#loadCard && isBandArray(param.schema)) {
       label.htmlFor = "";
       label.append(this.#renderBandChecks(fieldId, touch));
+    } else if (card === this.#loadCard && hasSubtype(param.schema, "temporal-interval")) {
+      label.htmlFor = "";
+      label.append(this.#renderWhenControl(fieldId, card, param.name, touch));
     } else {
       label.append(this.#renderValueInput(card, key, param, fieldId, touch));
     }
@@ -1805,6 +1876,45 @@ export class SwathAuthoringPanel extends HTMLElement {
       wrap.append(box, text);
       group.append(wrap);
     }
+    return group;
+  }
+
+  /** The Load card's plain-words "when" control (design note §4, the
+   * Model B extent treatment; ADR 0015): two calendar pickers over the
+   * `temporal-interval` subtype — schema-derived in mechanism, curated
+   * in wording, like the collection picker. Empty on both sides means
+   * "everything available"; the stored value is the interval JSON the
+   * graph emits verbatim, so an impossible date string is
+   * unconstructible from the UI. */
+  #renderWhenControl(fieldId: string, card: Card, name: string, touch: () => void): Element {
+    const group = document.createElement("span");
+    group.className = "swath-authoring-when";
+    group.id = fieldId;
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", "Dates to show");
+    const bounds = temporalBounds(card.values.get(name) ?? "");
+    const picker = (slot: "from" | "until", labelText: string): Element => {
+      const wrap = document.createElement("label");
+      const text = document.createElement("span");
+      text.textContent = labelText;
+      const input = document.createElement("input");
+      input.type = "date";
+      input.id = `${fieldId}-${slot}`;
+      input.value = slot === "from" ? bounds[0] : bounds[1];
+      input.addEventListener("change", () => {
+        if (slot === "from") {
+          bounds[0] = input.value;
+        } else {
+          bounds[1] = input.value;
+        }
+        card.values.set(name, temporalValue(bounds[0], bounds[1]));
+        touch();
+        this.#render(); // the when line and the narrative follow along
+      });
+      wrap.append(text, input);
+      return wrap;
+    };
+    group.append(picker("from", "from"), picker("until", "until (not included)"));
     return group;
   }
 

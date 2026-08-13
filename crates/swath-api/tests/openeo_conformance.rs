@@ -205,6 +205,7 @@ async fn processes_are_schema_valid_and_exactly_the_compiler_subset() {
             "add",
             "array_element",
             "divide",
+            "filter_temporal",
             "linear_scale_range",
             "load_collection",
             "multiply",
@@ -250,7 +251,7 @@ fn runtime_process_definitions_match_the_pinned_oracle_copies() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 10, "all ten supported definitions are served");
+    assert_eq!(checked, 11, "all eleven supported definitions are served");
 }
 
 // --- Service types ---

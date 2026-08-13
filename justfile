@@ -221,6 +221,16 @@ render-goldens:
             --input "$FIRE-$day-b8a.tif" --input "$FIRE-$day-b04.tif" \
             --expression "(b1 - b2) / (b1 + b2)" --rescale=-1,1 --resampling bilinear
     done
+    # Per-timestamp goldens (issue #181, ADR 0015 frame selection): NDVI over
+    # the Park Fire series (tests/fixtures/hlss30-t10tfk-*, issue #179) at
+    # the same z13 tile. One golden per acquisition pins that a graph's
+    # temporal window serves the granule of *that* date: pre-fire green
+    # (159), fresh burn scar (229), early post-fire (289).
+    for day in 2024159 2024229 2024289; do
+        compose 13 1326 3100 "$D/ndvi-$day-13-1326-3100.png" \
+            --input "$FIRE-$day-b8a.tif" --input "$FIRE-$day-b04.tif" \
+            --expression "(b1 - b2) / (b1 + b2)" --rescale=-1,1 --resampling bilinear
+    done
 
 # Regenerate the web TMS truth table (web/src/tms_truth.json) from the pinned
 # morecantile oracle (issue #106; the TS twin of the swath-core table). The

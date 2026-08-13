@@ -18,10 +18,21 @@
 //!
 //! * **`load_collection`** — the leaf. `id` must name the context's
 //!   collection; `bands` is required in v0 and every entry must resolve
-//!   against the context's band bindings. `spatial_extent`,
-//!   `temporal_extent`, and `properties` are accepted and ignored: tile
-//!   serving decides the window and the granule, not the product graph
-//!   (the time dimension is a tracked deferral, `docs/ROADMAP.md`).
+//!   against the context's band bindings. `temporal_extent` compiles
+//!   into the product's **resolution window** ([`CompiledProduct::window`],
+//!   ADR 0015 frame selection): it constrains which granule backs a
+//!   frame, never how pixels combine. Bounds are RFC 3339 UTC (`Z`)
+//!   date-times, dates, or years, compared at millisecond precision;
+//!   the interval is left-closed per the spec. `spatial_extent` and
+//!   `properties` remain accepted and ignored: tile serving decides the
+//!   spatial window (`docs/ROADMAP.md`).
+//! * **`filter_temporal`** — narrows the resolution window further (the
+//!   intersection with the cube's window so far — same frame-selection
+//!   semantics as `temporal_extent`, per ADR 0015). `dimension` must be
+//!   omitted, `null`, or the temporal dimension `t`; anything else is
+//!   the spec's `DimensionNotAvailable`. A window that provably selects
+//!   nothing (an empty interval, or one disjoint from the window already
+//!   applied) is rejected at compile time.
 //! * **`reduce_dimension`** — over `dimension: "bands"` only, with an
 //!   embedded reducer sub-graph (the standard NDVI idiom). Inside the
 //!   reducer, `from_parameter: "data"` is the band array.
@@ -73,6 +84,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::Value as Json;
+use swath_core::catalog::{Datetime, TimeRange};
 
 use crate::ir::{BinaryOp, Colormap, Expr, RenderPlan};
 use crate::plan::{PlanSpec, ndvi_expr, plan_for};
@@ -155,11 +167,18 @@ pub struct CompiledProduct {
     /// other construction site speaks, so callers can derive the persisted
     /// metadata ([`crate::plan::plan_for`]) without re-reading the ops.
     pub spec: PlanSpec,
+    /// The temporal resolution window the graph implies —
+    /// `load_collection`'s `temporal_extent` intersected with every
+    /// `filter_temporal` on the result path. Granule resolution is
+    /// constrained to it (ADR 0015 frame selection: the window selects
+    /// *which frames the layer can show*, never how pixels combine).
+    /// Open on both sides when the graph says nothing about time.
+    pub window: TimeRange,
 }
 
 /// The supported process ids, for diagnostics.
-const SUPPORTED: &str = "load_collection, reduce_dimension, array_element, add, subtract, \
-     multiply, divide, linear_scale_range, ndvi, save_result";
+const SUPPORTED: &str = "load_collection, filter_temporal, reduce_dimension, array_element, \
+     add, subtract, multiply, divide, linear_scale_range, ndvi, save_result";
 
 /// Why a process graph could not be compiled. Every variant names the
 /// offending node; the Display strings are user-facing diagnostics and are
@@ -264,6 +283,32 @@ pub enum CompileError {
         /// What actually arrived.
         got: String,
     },
+    /// A temporal window that can select nothing: an interval whose end
+    /// is not after its start, or one disjoint from the window already
+    /// applied upstream. Frame selection (ADR 0015) resolves exactly one
+    /// granule inside the window, so a provably empty window is rejected
+    /// at compile time instead of 404ing every tile forever.
+    #[error("node `{node}` ({process}): empty temporal window: {detail}")]
+    EmptyTemporalWindow {
+        /// The node carrying the interval.
+        node: String,
+        /// Its process id.
+        process: String,
+        /// Why the window is empty.
+        detail: String,
+    },
+    /// `filter_temporal`'s `dimension` names a dimension that is not the
+    /// temporal dimension (the spec's `DimensionNotAvailable` exception).
+    #[error(
+        "node `{node}` (filter_temporal): dimension `{dimension}` does not exist — \
+         the temporal dimension is `t` (DimensionNotAvailable)"
+    )]
+    DimensionNotAvailable {
+        /// The `filter_temporal` node.
+        node: String,
+        /// The unknown dimension name.
+        dimension: String,
+    },
     /// `from_parameter` names a parameter the surrounding scope does not
     /// define.
     #[error("node `{node}`: from_parameter `{name}` is not defined in this scope")]
@@ -303,6 +348,10 @@ struct Cube {
     /// The palette requested by `save_result`'s `colormap` option
     /// (gray results only; `None` = grayscale).
     colormap: Option<Colormap>,
+    /// The temporal resolution window so far: `temporal_extent`
+    /// intersected with every `filter_temporal` applied to this cube
+    /// (ADR 0015 frame selection). Open on both sides = unconstrained.
+    window: TimeRange,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -436,6 +485,7 @@ impl<'a> Compiler<'a> {
         let process = scope.graph.nodes[id].process_id;
         match process {
             "load_collection" => self.load_collection(scope, id),
+            "filter_temporal" => self.filter_temporal(scope, id),
             "reduce_dimension" => self.reduce_dimension(scope, id),
             "ndvi" => self.ndvi(scope, id),
             "linear_scale_range" => self.linear_scale_range(scope, id),
@@ -618,11 +668,186 @@ impl<'a> Compiler<'a> {
                 dataset: dataset.into(),
             });
         }
+        let window = match Self::arg(n, "temporal_extent") {
+            None | Some(Json::Null) => TimeRange::default(),
+            Some(extent) => {
+                Self::temporal_interval(extent, node, "load_collection", "temporal_extent")?
+            }
+        };
         Ok(Value::Cube(Cube {
             kind: CubeKind::Multi(loaded),
             rescale: None,
             colormap: None,
+            window,
         }))
+    }
+
+    /// `filter_temporal`: narrows the cube's resolution window to its
+    /// intersection with `extent` (frame-selection semantics, ADR 0015 —
+    /// pixels are untouched, so it composes anywhere a cube flows).
+    fn filter_temporal(&self, scope: &mut Scope<'a>, node: &'a str) -> Result<Value, CompileError> {
+        let mut cube = self.cube_arg(scope, node, "data")?;
+        let n = &scope.graph.nodes[node];
+        if let Some(dimension) = Self::arg(n, "dimension")
+            && !dimension.is_null()
+        {
+            let name = dimension
+                .as_str()
+                .ok_or_else(|| CompileError::InvalidArgument {
+                    node: node.into(),
+                    process: "filter_temporal".into(),
+                    argument: "dimension".into(),
+                    detail: format!("expected a dimension name string or null, got {dimension}"),
+                })?;
+            if name != "t" {
+                return Err(CompileError::DimensionNotAvailable {
+                    node: node.into(),
+                    dimension: name.into(),
+                });
+            }
+        }
+        let extent = Self::require(scope, node, "extent")?;
+        let filter = Self::temporal_interval(extent, node, "filter_temporal", "extent")?;
+        cube.window = Self::intersect_windows(&cube.window, &filter, node)?;
+        Ok(Value::Cube(cube))
+    }
+
+    // --- temporal windows --------------------------------------------------
+
+    /// Parses one bound of a temporal interval: an RFC 3339 UTC (`Z`)
+    /// date-time, a date (`YYYY-MM-DD`), or a year (`YYYY`) — the three
+    /// string forms of the spec's `temporal-interval` subtype, narrowed
+    /// to UTC. Dates and years denote their first instant.
+    fn temporal_instant(value: &str) -> Option<Datetime> {
+        let expanded = if value.len() == 4 {
+            format!("{value}-01-01T00:00:00Z")
+        } else if value.len() == 10 {
+            format!("{value}T00:00:00Z")
+        } else {
+            value.to_owned()
+        };
+        Datetime::new(expanded).ok()
+    }
+
+    /// Parses a `temporal-interval` argument into the inclusive
+    /// [`TimeRange`] the catalog speaks: the interval is left-closed per
+    /// the spec, so the (exclusive) end becomes inclusive by stepping
+    /// back one millisecond — the domain's comparison resolution.
+    fn temporal_interval(
+        json: &Json,
+        node: &'a str,
+        process: &str,
+        argument: &str,
+    ) -> Result<TimeRange, CompileError> {
+        let invalid = |detail: String| CompileError::InvalidArgument {
+            node: node.into(),
+            process: process.into(),
+            argument: argument.into(),
+            detail,
+        };
+        let pair = json
+            .as_array()
+            .filter(|items| items.len() == 2)
+            .ok_or_else(|| {
+                invalid(format!(
+                    "expected a temporal interval [start, end], got {json}"
+                ))
+            })?;
+        let bound = |value: &Json| -> Result<Option<Datetime>, CompileError> {
+            match value {
+                Json::Null => Ok(None),
+                Json::String(s) => Self::temporal_instant(s).map(Some).ok_or_else(|| {
+                    invalid(format!(
+                        "`{s}` is not an RFC 3339 UTC (Z) date-time, date, or year"
+                    ))
+                }),
+                other => Err(invalid(format!(
+                    "interval bounds must be temporal strings or null, got {other}"
+                ))),
+            }
+        };
+        let (start, end) = (bound(&pair[0])?, bound(&pair[1])?);
+        if start.is_none() && end.is_none() {
+            return Err(invalid(
+                "an interval open on both sides selects everything — \
+                 use null for the whole argument instead of [null, null]"
+                    .into(),
+            ));
+        }
+        let end = match end {
+            None => None,
+            Some(end) => {
+                let end_ms = end.to_unix_millis();
+                if start
+                    .as_ref()
+                    .is_some_and(|start| start.to_unix_millis() >= end_ms)
+                {
+                    return Err(CompileError::EmptyTemporalWindow {
+                        node: node.into(),
+                        process: process.into(),
+                        detail: format!(
+                            "the left-closed interval [{}, {}) contains no instant — \
+                             the end must be after the start",
+                            start.as_ref().map_or_else(String::new, ToString::to_string),
+                            end
+                        ),
+                    });
+                }
+                Some(Datetime::from_unix_millis(end_ms - 1).map_err(|_| {
+                    CompileError::EmptyTemporalWindow {
+                        node: node.into(),
+                        process: process.into(),
+                        detail: format!("no representable instant precedes the end {end}"),
+                    }
+                })?)
+            }
+        };
+        Ok(TimeRange { start, end })
+    }
+
+    /// The intersection of two resolution windows: the later start, the
+    /// earlier end. A provably empty result (disjoint windows) is a
+    /// compile-time diagnostic — no granule could ever resolve.
+    fn intersect_windows(
+        current: &TimeRange,
+        filter: &TimeRange,
+        node: &'a str,
+    ) -> Result<TimeRange, CompileError> {
+        let later = |a: Option<&Datetime>, b: Option<&Datetime>| match (a, b) {
+            (Some(a), Some(b)) => {
+                if a.to_unix_millis() >= b.to_unix_millis() {
+                    Some(a.clone())
+                } else {
+                    Some(b.clone())
+                }
+            }
+            (bound, None) | (None, bound) => bound.cloned(),
+        };
+        let earlier = |a: Option<&Datetime>, b: Option<&Datetime>| match (a, b) {
+            (Some(a), Some(b)) => {
+                if a.to_unix_millis() <= b.to_unix_millis() {
+                    Some(a.clone())
+                } else {
+                    Some(b.clone())
+                }
+            }
+            (bound, None) | (None, bound) => bound.cloned(),
+        };
+        let start = later(current.start.as_ref(), filter.start.as_ref());
+        let end = earlier(current.end.as_ref(), filter.end.as_ref());
+        if let (Some(s), Some(e)) = (&start, &end)
+            && s.to_unix_millis() > e.to_unix_millis()
+        {
+            return Err(CompileError::EmptyTemporalWindow {
+                node: node.into(),
+                process: "filter_temporal".into(),
+                detail: format!(
+                    "this interval does not overlap the window already applied — \
+                     the combined window ({s} .. {e}) selects nothing"
+                ),
+            });
+        }
+        Ok(TimeRange { start, end })
     }
 
     fn reduce_dimension(
@@ -631,6 +856,7 @@ impl<'a> Compiler<'a> {
         node: &'a str,
     ) -> Result<Value, CompileError> {
         let cube = self.cube_arg(scope, node, "data")?;
+        let window = cube.window.clone();
         let bands = Self::unscaled_multi(cube, node, "reduce_dimension")?;
 
         let dimension = Self::require(scope, node, "dimension")?;
@@ -669,6 +895,7 @@ impl<'a> Compiler<'a> {
                 kind: CubeKind::Gray(expr),
                 rescale: None,
                 colormap: None,
+                window,
             })),
             other => Err(CompileError::TypeMismatch {
                 node: node.into(),
@@ -681,6 +908,7 @@ impl<'a> Compiler<'a> {
 
     fn ndvi(&self, scope: &mut Scope<'a>, node: &'a str) -> Result<Value, CompileError> {
         let cube = self.cube_arg(scope, node, "data")?;
+        let window = cube.window.clone();
         let bands = Self::unscaled_multi(cube, node, "ndvi")?;
         let n = &scope.graph.nodes[node];
         if let Some(target) = Self::arg(n, "target_band")
@@ -717,6 +945,7 @@ impl<'a> Compiler<'a> {
             kind: CubeKind::Gray(expr),
             rescale: None,
             colormap: None,
+            window,
         }))
     }
 
@@ -1063,5 +1292,6 @@ pub fn compile(graph: &Json, ctx: &CompileContext) -> Result<CompiledProduct, Co
         collection: ctx.collection.clone(),
         bands,
         spec,
+        window: cube.window,
     })
 }

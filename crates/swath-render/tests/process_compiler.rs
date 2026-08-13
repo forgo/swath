@@ -257,6 +257,35 @@ fn pinned_definitions_still_say_what_the_compiler_assumes() {
     // load_collection: bands is optional in the spec (v0 requires it).
     let load = process_def("load_collection");
     assert_eq!(param(&load, "bands")["optional"], json!(true));
+    // load_collection.temporal_extent / filter_temporal.extent: the
+    // interval is LEFT-CLOSED (start included, end excluded) — why the
+    // compiler steps the end back one millisecond when lowering to the
+    // catalog's inclusive TimeRange — and either bound may be null,
+    // never both.
+    for (def, name) in [
+        (&load, "temporal_extent"),
+        (&process_def("filter_temporal"), "extent"),
+    ] {
+        let description = param(def, name)["description"]
+            .as_str()
+            .expect("description");
+        assert!(description.to_lowercase().contains("left-closed"), "{name}");
+        assert!(description.contains("**excluded**"), "{name}");
+        assert!(description.contains("never both"), "{name}");
+    }
+    // filter_temporal: data + extent + dimension, dimension defaulting
+    // to null (= the only temporal dimension), with the
+    // DimensionNotAvailable exception the compiler's diagnostic mirrors.
+    let filter = process_def("filter_temporal");
+    assert_eq!(param_names(&filter), ["data", "extent", "dimension"]);
+    assert_eq!(param(&filter, "dimension")["default"], Json::Null);
+    assert_eq!(param(&filter, "dimension")["optional"], json!(true));
+    assert!(
+        filter["exceptions"]
+            .as_object()
+            .expect("exceptions")
+            .contains_key("DimensionNotAvailable")
+    );
     // save_result: data + format.
     assert!(param_names(&process_def("save_result")).starts_with(&["data", "format"]));
 }
@@ -365,7 +394,7 @@ fn unsupported_and_unknown_error_displays_are_pinned() {
                 "result": true
             }
         }))),
-        @"node `blur`: unsupported process `apply_kernel` — the supported subset is: load_collection, reduce_dimension, array_element, add, subtract, multiply, divide, linear_scale_range, ndvi, save_result"
+        @"node `blur`: unsupported process `apply_kernel` — the supported subset is: load_collection, filter_temporal, reduce_dimension, array_element, add, subtract, multiply, divide, linear_scale_range, ndvi, save_result"
     );
     // UnknownCollection.
     let mut wrong_collection = load_node();
@@ -678,5 +707,205 @@ fn save_result_colormap_errors_are_pinned() {
     insta::assert_snapshot!(
         err(&g),
         @"node `save` (save_result): invalid argument `options`: a colormap maps one gray value per pixel; it cannot apply to a multi-band (composite) result — reduce to gray first"
+    );
+}
+
+// --- Temporal windows (ADR 0015 frame selection, issue #181) ------------
+
+use swath_core::catalog::{Datetime, TimeRange};
+
+fn dt(s: &str) -> Datetime {
+    Datetime::new(s).expect("valid test datetime")
+}
+
+/// The ndvi-convenience graph with `temporal_extent` set on its load node.
+fn windowed_graph(extent: Json) -> Json {
+    let mut g = graph("ndvi-convenience.json");
+    g["process_graph"]["load"]["arguments"]["temporal_extent"] = extent;
+    g
+}
+
+#[test]
+fn absent_or_null_temporal_extent_leaves_the_window_open() {
+    // The committed graphs carry `temporal_extent: null` (no filter).
+    for name in [
+        "ndvi-convenience.json",
+        "ndvi-reduce.json",
+        "truecolor.json",
+    ] {
+        let product = swath_render::compile(&graph(name), &hls_ctx()).expect("compiles");
+        assert_eq!(product.window, TimeRange::default(), "{name}");
+    }
+}
+
+#[test]
+fn temporal_extent_compiles_into_the_resolution_window() {
+    // Left-closed per the pinned definition: the start is included, the
+    // end excluded — lowered to the catalog's inclusive TimeRange by
+    // stepping the end back one millisecond (the domain's comparison
+    // resolution, provider.rs `latest`).
+    let product = swath_render::compile(
+        &windowed_graph(json!(["2024-06-01T00:00:00Z", "2024-07-01T00:00:00Z"])),
+        &hls_ctx(),
+    )
+    .expect("compiles");
+    assert_eq!(
+        product.window,
+        TimeRange {
+            start: Some(dt("2024-06-01T00:00:00Z")),
+            end: Some(dt("2024-06-30T23:59:59.999Z")),
+        }
+    );
+    // The window changes granule resolution only — the executable plan
+    // is byte-for-byte the windowless NDVI plan.
+    assert_eq!(product.plan, hand_ndvi_plan());
+}
+
+#[test]
+fn date_and_year_bounds_denote_their_first_instant() {
+    let product = swath_render::compile(&windowed_graph(json!(["2024", "2024-08-16"])), &hls_ctx())
+        .expect("compiles");
+    assert_eq!(
+        product.window,
+        TimeRange {
+            start: Some(dt("2024-01-01T00:00:00Z")),
+            end: Some(dt("2024-08-15T23:59:59.999Z")),
+        }
+    );
+}
+
+#[test]
+fn open_ended_bounds_stay_open() {
+    let product = swath_render::compile(
+        &windowed_graph(json!([null, "2024-08-16T00:00:00Z"])),
+        &hls_ctx(),
+    )
+    .expect("compiles");
+    assert_eq!(
+        product.window,
+        TimeRange {
+            start: None,
+            end: Some(dt("2024-08-15T23:59:59.999Z")),
+        }
+    );
+    let product = swath_render::compile(
+        &windowed_graph(json!(["2024-08-16T00:00:00Z", null])),
+        &hls_ctx(),
+    )
+    .expect("compiles");
+    assert_eq!(
+        product.window,
+        TimeRange {
+            start: Some(dt("2024-08-16T00:00:00Z")),
+            end: None,
+        }
+    );
+}
+
+/// Splices a `filter_temporal` between `load` and the ndvi node of the
+/// convenience graph.
+fn filtered_graph(load_extent: Json, filter_args: Json) -> Json {
+    let mut g = windowed_graph(load_extent);
+    let mut args = filter_args;
+    args["data"] = json!({"from_node": "load"});
+    g["process_graph"]["filter"] = json!({
+        "process_id": "filter_temporal",
+        "arguments": args,
+    });
+    g["process_graph"]["ndvi"]["arguments"]["data"] = json!({"from_node": "filter"});
+    g
+}
+
+#[test]
+fn filter_temporal_intersects_with_the_loaded_window() {
+    let product = swath_render::compile(
+        &filtered_graph(
+            json!(["2024-06-01T00:00:00Z", "2024-12-01T00:00:00Z"]),
+            json!({"extent": ["2024-08-01T00:00:00Z", "2025-01-01T00:00:00Z"], "dimension": "t"}),
+        ),
+        &hls_ctx(),
+    )
+    .expect("compiles");
+    assert_eq!(
+        product.window,
+        TimeRange {
+            start: Some(dt("2024-08-01T00:00:00Z")),
+            end: Some(dt("2024-11-30T23:59:59.999Z")),
+        }
+    );
+}
+
+#[test]
+fn filter_temporal_composes_after_reduction_too() {
+    // filter_temporal never touches pixels, so it applies to a gray
+    // (reduced) cube exactly as to a loaded one.
+    let mut g = graph("ndvi-convenience.json");
+    g["process_graph"]["filter"] = json!({
+        "process_id": "filter_temporal",
+        "arguments": {
+            "data": {"from_node": "scale"},
+            "extent": ["2024-08-16", null],
+        },
+    });
+    g["process_graph"]["save"]["arguments"]["data"] = json!({"from_node": "filter"});
+    let product = swath_render::compile(&g, &hls_ctx()).expect("compiles");
+    assert_eq!(
+        product.window,
+        TimeRange {
+            start: Some(dt("2024-08-16T00:00:00Z")),
+            end: None,
+        }
+    );
+    assert_eq!(product.plan, hand_ndvi_plan());
+}
+
+#[test]
+fn temporal_window_errors_are_pinned() {
+    // Empty interval: the left-closed [t, t) contains no instant.
+    insta::assert_snapshot!(
+        err(&windowed_graph(json!(["2024-06-01T00:00:00Z", "2024-06-01T00:00:00Z"]))),
+        @"node `load` (load_collection): empty temporal window: the left-closed interval [2024-06-01T00:00:00Z, 2024-06-01T00:00:00Z) contains no instant — the end must be after the start"
+    );
+    // Reversed interval.
+    insta::assert_snapshot!(
+        err(&windowed_graph(json!(["2024-07-01T00:00:00Z", "2024-06-01T00:00:00Z"]))),
+        @"node `load` (load_collection): empty temporal window: the left-closed interval [2024-07-01T00:00:00Z, 2024-06-01T00:00:00Z) contains no instant — the end must be after the start"
+    );
+    // Disjoint filter: the combined window provably selects nothing.
+    insta::assert_snapshot!(
+        err(&filtered_graph(
+            json!(["2024-06-01T00:00:00Z", "2024-07-01T00:00:00Z"]),
+            json!({"extent": ["2024-08-01T00:00:00Z", "2024-09-01T00:00:00Z"]}),
+        )),
+        @"node `filter` (filter_temporal): empty temporal window: this interval does not overlap the window already applied — the combined window (2024-08-01T00:00:00Z .. 2024-06-30T23:59:59.999Z) selects nothing"
+    );
+    // Both bounds null: the spec says never both.
+    insta::assert_snapshot!(
+        err(&windowed_graph(json!([null, null]))),
+        @"node `load` (load_collection): invalid argument `temporal_extent`: an interval open on both sides selects everything — use null for the whole argument instead of [null, null]"
+    );
+    // A non-UTC datetime: the Swath profile narrows to Z.
+    insta::assert_snapshot!(
+        err(&windowed_graph(json!(["2024-06-01T00:00:00+02:00", null]))),
+        @"node `load` (load_collection): invalid argument `temporal_extent`: `2024-06-01T00:00:00+02:00` is not an RFC 3339 UTC (Z) date-time, date, or year"
+    );
+    // Not an interval at all.
+    insta::assert_snapshot!(
+        err(&windowed_graph(json!("2024-06-01T00:00:00Z"))),
+        @r#"node `load` (load_collection): invalid argument `temporal_extent`: expected a temporal interval [start, end], got "2024-06-01T00:00:00Z""#
+    );
+    // filter_temporal on a non-temporal dimension: the spec's
+    // DimensionNotAvailable exception.
+    insta::assert_snapshot!(
+        err(&filtered_graph(
+            json!(null),
+            json!({"extent": ["2024-06-01T00:00:00Z", null], "dimension": "bands"}),
+        )),
+        @"node `filter` (filter_temporal): dimension `bands` does not exist — the temporal dimension is `t` (DimensionNotAvailable)"
+    );
+    // filter_temporal without its required extent.
+    insta::assert_snapshot!(
+        err(&filtered_graph(json!(null), json!({}))),
+        @"node `filter` (filter_temporal): missing required argument `extent`"
     );
 }

@@ -457,6 +457,34 @@ pub(crate) fn openeo_app() -> (Router, MemoryCatalog) {
     openeo_app_with_preview_ceiling(None)
 }
 
+/// The catalog-mode openEO app over an arbitrary seeded dataset and its
+/// granules, with no config-defined layer templates — the temporal
+/// conformance tests (issue #181, ADR 0015) seed the Park Fire series
+/// here and author every layer through the openEO surface itself.
+pub(crate) fn openeo_app_seeded(
+    dataset: Dataset,
+    granules: Vec<Granule>,
+) -> (Router, MemoryCatalog) {
+    use swath_api::{CatalogLayers, OpenEoState, openeo_router};
+
+    let catalog = MemoryCatalog::default();
+    catalog.seed(dataset, granules);
+    let provider = CatalogLayers::new(catalog.clone(), Vec::new());
+    let store: Arc<dyn object_store::ObjectStore> =
+        Arc::new(LocalFileSystem::new_with_prefix(fixtures_dir()).expect("fixture dir exists"));
+    let state = ApiState::new(
+        provider.clone(),
+        CogSource::new(Arc::clone(&store)),
+        Proj4rsReproject,
+        BASE_URL,
+    )
+    .with_openeo();
+    let openeo_state =
+        OpenEoState::new(provider, CogSource::new(store), Proj4rsReproject, BASE_URL);
+    let app = router(Arc::new(state)).merge(openeo_router(Arc::new(openeo_state)));
+    (app, catalog)
+}
+
 /// [`openeo_app`] with the preview budget's `max_estimated_live_bytes`
 /// ceiling overridden — the refusal-path tests force the planner over
 /// budget with a tiny ceiling (the default admits every fixture render).
@@ -482,6 +510,7 @@ pub(crate) fn openeo_app_with_preview_ceiling(ceiling: Option<u64>) -> (Router, 
             resampling: layer.resampling,
             tile_size: layer.tile_size,
             budget: layer.budget.clone(),
+            window: TimeRange::default(),
         })
         .collect();
     let provider = CatalogLayers::new(catalog.clone(), templates);
