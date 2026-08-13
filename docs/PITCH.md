@@ -25,9 +25,8 @@ pane + the materialization guarantees**, which is precisely the part that is har
 
 This charter is framed as an independent open-source project, but it is deliberately the productized
 platform layer that an EO-products government contractor most needs. Being the maintainer of the OSS core
-makes its author the technical center of gravity for exactly that problem — more valuable than a second
-pair of hands. And because Swath layers onto an existing pgstac/TiTiler deployment (e.g. a fire portal
-already using that stack), it's adoptable there with near-zero migration cost. It is a way to *exceed*
-the "just orchestrate what exists" framing by owning the two things that framing misses: making the loop
-**standards-native** (openEO/OGC) and **embedding-aware**, plus the cost-aware materialization brain that
-turns "assemble the tilers" into an actual product.
+makes its author the technical center of gravity for exactly that problem, and because Swath layers onto
+an existing pgstac/TiTiler deployment it's adoptable there with near-zero migration cost. It exceeds the
+"just orchestrate what exists" framing by owning what that framing misses: a **standards-native**
+(openEO/OGC), **embedding-aware** loop, plus the cost-aware materialization brain that turns "assemble
+the tilers" into an actual product.

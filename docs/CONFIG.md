@@ -1,14 +1,13 @@
 # Swath configuration reference
 
 Every knob the `swath` binary accepts: CLI flags, `SWATH_*` environment
-variables, and the `--config` TOML file. The in-binary help
-(`swath serve --help` and the `swath --help` after-help) remains the
+variables, and the `--config` TOML file. The in-binary help remains the
 source of truth; **this file is kept synchronized mechanically** — the
 tables between `config-check` markers are diffed against the actual clap
 command tree and serde config schema by `swath-cli`'s docs-drift tests
-(`crates/swath-cli/src/docs_check.rs`, run by `just test` and CI). A flag
-or TOML key added, renamed, or removed without updating this file fails
-the build; so does documenting a key the code does not accept.
+(`crates/swath-cli/src/docs_check.rs`, run by `just test` and CI). A key
+added, renamed, or removed without updating this file fails the build;
+so does documenting a key the code does not accept.
 
 Companion docs: [`OPERATIONS.md`](OPERATIONS.md) (what the knobs mean
 operationally), [`ENDPOINTS.md`](ENDPOINTS.md) (the HTTP surface they
@@ -17,25 +16,15 @@ configure).
 ## Precedence
 
 Configuration is layered, later layers overriding earlier ones scalar by
-scalar:
-
-1. **Built-in defaults** — bind `127.0.0.1:8080` (loopback: never all
-   interfaces unless asked), base URL `http://localhost:<port>`, no cache,
-   no catalog, CORS off.
-2. **TOML file** (`--config <PATH>`). Layers and datasets live *only*
-   here — a layer is a structure, and structures are not encoded in
-   environment variables.
-3. **Environment / flags** (one surface: each scalar flag has a `SWATH_*`
-   variable via clap's `env` attribute; either outranks the file).
-
-`--fixtures` conflicts with `--config` (clap rejects the pair) and serves
-the built-in HLS demo registry with the store root defaulted to
-`./tests/fixtures`.
-
-The materialization budget resolves knob by knob: built-in defaults →
-top-level `[budget]` → `--overview-oversample` /
-`--max-estimated-live-bytes` (or their env vars) → per-layer
-`[layers.budget]`, most specific wins.
+scalar: **built-in defaults** (loopback bind `127.0.0.1:8080`, base URL
+`http://localhost:<port>`, no cache, no catalog, CORS off) → the **TOML
+file** (`--config`; layers and datasets live *only* here) →
+**environment / flags** (each scalar flag has a `SWATH_*` variable;
+either outranks the file). `--fixtures` conflicts with `--config` and
+serves the built-in HLS demo registry from `./tests/fixtures`. The
+materialization budget resolves knob by knob: defaults → `[budget]` →
+the global flags/env → per-layer `[layers.budget]`, most specific
+wins.
 
 ## `swath serve` — flags and environment
 
@@ -59,20 +48,18 @@ top-level `[budget]` → `--overview-oversample` /
 
 ### Environment beyond the flags
 
-- `SWATH_LOG` — max log level: `error` | `warn` | `info` | `debug` |
-  `trace` (default `info`). An unrecognized value falls back to `info` —
-  logging config never takes the server down.
-- With an `s3://` store or cache root, credentials and endpoint come from
-  the standard `object_store` AWS environment: `AWS_ACCESS_KEY_ID`,
-  `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` (or `AWS_REGION`),
-  `AWS_ENDPOINT`, and `AWS_ALLOW_HTTP=true` for plain-HTTP endpoints such
-  as local MinIO.
+`SWATH_LOG` — max log level, `error`..`trace` (default `info`; an
+unrecognized value falls back to `info` — logging config never takes the
+server down). With an `s3://` store or cache root, credentials and
+endpoint come from the standard `object_store` AWS environment
+(`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_*_REGION`,
+`AWS_ENDPOINT`, `AWS_ALLOW_HTTP=true` for plain-HTTP endpoints).
 
 ## `swath ingest reference` — flags
 
-Generates a legacy granule's virtual-reference manifest (ADR 0006)
-without registering anything — the same generation the filedrop legacy
-path performs automatically at ingest.
+Generates a legacy granule's virtual-reference manifest (ADR 0006) — the
+same generation the filedrop legacy path performs automatically at
+ingest.
 
 <!-- config-check:begin flags swath ingest reference -->
 
@@ -85,16 +72,12 @@ path performs automatically at ingest.
 
 ## `swath materialize` — flags
 
-Materializes overview pyramids for the configured layers' assets into
-`pyramids/` under the store root (issue #183; layout documented in
-`crates/adapters/swath-pyramid-objectstore`). Reads the same config file
-as `swath serve` and resolves layer assets identically — static layers
-directly, catalog layers from each dataset's latest ingested granule.
-Idempotent and resumable: existing chunks are probed and skipped, so
-rerunning after new granules arrive materializes only what is missing,
-and the serving process picks new levels up on its next describe with no
-restart. `nearest` layers get nearest-aggregated pyramids (categorical
-data); everything else averages, nodata-aware.
+Materializes overview pyramids into `pyramids/` under the store root
+(issue #183; layout in `crates/adapters/swath-pyramid-objectstore`),
+reading the same config file as `swath serve`. Idempotent and resumable;
+the serving process picks new levels up with no restart. `nearest`
+layers get nearest-aggregated pyramids; everything else averages,
+nodata-aware.
 
 <!-- config-check:begin flags swath materialize -->
 
@@ -131,10 +114,10 @@ a typo fails loudly at startup, never silently falls back to a default.
 
 <!-- config-check:end file -->
 
-Validation rules enforced at startup: catalog mode requires at least one
-`[[datasets]]`; `[[datasets]]` and `watch-dir` require `catalog`; static
-`[[layers]]` and catalog mode are mutually exclusive; layer ids must be
-unique across all datasets (they share URL space), dataset ids unique.
+Validation at startup: catalog mode requires `[[datasets]]` (and vice
+versa, as does `watch-dir`); static `[[layers]]` and catalog mode are
+mutually exclusive; layer ids are unique across all datasets (shared URL
+space), dataset ids unique.
 
 ### `[budget]` — and `[layers.budget]` / `[datasets.layers.budget]`
 
@@ -153,11 +136,10 @@ per-layer values outranking the global default (see Precedence above).
 
 ### `[[layers]]` — and `[[datasets.layers]]`
 
-One schema, two contexts (the drift test pins that they stay one schema).
-In static `[[layers]]`, `bands` values are **asset URIs relative to the
-store root**; in `[[datasets.layers]]` they are **dataset band names**
-(granule asset keys, e.g. `r = "b04"`), resolved per tile from the
-dataset's latest ingested granule.
+One schema, two contexts (the drift test pins that they stay one
+schema): in static `[[layers]]`, `bands` values are **asset URIs under
+the store root**; in `[[datasets.layers]]` they are **dataset band
+names**, resolved per tile from the latest ingested granule.
 
 <!-- config-check:begin layer -->
 
@@ -207,17 +189,14 @@ Enum vocabularies (an unknown spelling fails at parse):
 
 <!-- config-check:end enum resampling -->
 
-The `kind` enum is the walking-skeleton vocabulary for operator-authored
-layers; arbitrary pipelines are authored through the openEO services
-surface (`POST /services`, ADR 0010), which compiles a process graph into
-a served layer.
+(`kind` is the walking-skeleton vocabulary for operator-authored layers;
+arbitrary pipelines are authored through `POST /services`, ADR 0010.)
 
 ### `[[datasets]]` (catalog mode)
 
-The dataset is upserted into the catalog at startup — config is the
-source of truth for dataset identity and serving layers (operators write
-TOML, never STAC). Granules arrive later via ingest and require their
-dataset to pre-exist.
+Upserted into the catalog at startup — config is the source of truth for
+dataset identity (operators write TOML, never STAC); granules arrive via
+ingest and require their dataset to pre-exist.
 
 <!-- config-check:begin dataset -->
 
@@ -231,29 +210,12 @@ dataset to pre-exist.
 
 <!-- config-check:end dataset -->
 
-## Examples
-
-### Static layers over a local store
-
-```toml
-bind = "127.0.0.1:8080"
-store-root = "/data"
-
-[[layers]]
-id = "truecolor"
-title = "True color"
-kind = "truecolor"
-rescale = [0.0, 3000.0]
-[layers.bands]                 # asset URIs under store-root
-r = "granule-b04.tif"
-g = "granule-b03.tif"
-b = "granule-b02.tif"
-```
-
-### Catalog mode with filedrop ingest, cache, and budgets
+## Example — catalog mode with filedrop ingest, cache, and budgets
 
 The compose stack's config ([`tests/e2e/swath-catalog.toml`](../tests/e2e/swath-catalog.toml))
-is the living example; in miniature:
+is the living example; in miniature (a static-layers file is the same minus
+`catalog`/`watch-dir`/`[[datasets]]`, with `[[layers]]` whose `bands` values
+are asset URIs under the store root):
 
 ```toml
 bind = "0.0.0.0:8080"
@@ -273,18 +235,9 @@ title = "HLS Sentinel-2 (S30)"
 license = "CC0-1.0"
 
 [[datasets.layers]]
-id = "truecolor"
-kind = "truecolor"
-rescale = [0.0, 3000.0]
-[datasets.layers.bands]         # dataset band names, resolved per tile
-r = "b04"
-g = "b03"
-b = "b02"
-
-[[datasets.layers]]
 id = "ndvi"
 kind = "ndvi"                   # colormap defaults to rdylgn
-[datasets.layers.bands]
+[datasets.layers.bands]         # dataset band names, resolved per tile
 nir = "b8a"
 red = "b04"
 [datasets.layers.budget]
