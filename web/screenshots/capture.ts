@@ -163,9 +163,24 @@ async function openAuthoringPanel(page: Page): Promise<void> {
 async function waitForAuthoringPreview(page: Page): Promise<void> {
   const image = page.locator("#swath-authoring-preview-image");
   await expect(image).toBeVisible({ timeout: 15_000 });
-  await expect
-    .poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth))
-    .toBeGreaterThan(0);
+  // Quiesce on the blob URL, not just presence: each edit re-previews
+  // after a debounce, so a mid-composition preview can land first and a
+  // later one replace it — freezing between the two made the shot a
+  // per-run coin flip. Stable-for-1.2s (4x the debounce) plus decoded
+  // pixels means the FINAL graph's preview is what the shot carries.
+  await page.waitForFunction(() => {
+    const img = document.querySelector<HTMLImageElement>("#swath-authoring-preview-image");
+    if (!img || img.naturalWidth === 0) {
+      return false;
+    }
+    const w = window as unknown as { __previewQuiet?: { src: string; at: number } };
+    const now = Date.now();
+    if (!w.__previewQuiet || w.__previewQuiet.src !== img.src) {
+      w.__previewQuiet = { src: img.src, at: now };
+      return false;
+    }
+    return now - w.__previewQuiet.at > 1200;
+  });
 }
 
 test("landing page: layer rail + default layer on a fitted view", async ({ page }) => {
