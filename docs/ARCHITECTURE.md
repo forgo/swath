@@ -143,18 +143,11 @@ _Last verified against `576324d`._
 ## 6. Ports — trait signatures (verbatim from source)
 
 The signatures below are copied verbatim from the named files (doc comments and method bodies
-elided); the rustdoc on each trait and its module is the normative contract. Design points that
-supersede the v0.1 sketches:
-
-- **Native async-in-trait** (`impl Future … + Send`), not `#[async_trait]`. The async ports are
-  deliberately **not dyn-compatible**; consumers are generic over them. `Reproject`,
-  `CoordTransform`, and `IngestReferencer` are sync and dyn-compatible on purpose.
-- **`Catalog` is domain-shaped** (`Dataset`/`Granule`), not STAC-shaped — STAC types appear only
-  inside adapters ([`docs/design/catalog-domain.md`](design/catalog-domain.md), §16.5).
-- **`EventSource` is pull-shaped** (`&mut self`, one event per call), not a subscribed stream.
-- **There is no `ProcessRegistry` port.** The openEO compiler resolves its bounded process subset
-  against a `CompileContext` (ADR 0010); process definitions are data, not an adapter seam.
-- **`IngestReferencer` is a port the sketches lacked** — virtual-reference generation (ADR 0006).
+elided); the rustdoc on each trait and its module is the normative contract — including the
+design points that superseded the v0.1 sketches (async-in-trait shape and dyn-compatibility per
+each port's module docs; the domain-shaped `Catalog` per
+[`docs/design/catalog-domain.md`](design/catalog-domain.md), §16.5; the pull-shaped
+`EventSource`; no `ProcessRegistry` port, ADR 0010; the `IngestReferencer` port, ADR 0006).
 
 ```rust
 // crates/swath-core/src/source.rs
@@ -272,7 +265,7 @@ where
     C: TileCache;
 ```
 
-_Last verified against `576324d`._
+_Last verified against `49e962b`._
 
 ## 7. Adapters and inbound APIs
 
@@ -388,9 +381,8 @@ encoded tile to a GDAL-rendered reference.
 ## 11. Runtime & concurrency
 
 `tokio` + `axum`. Async I/O via `object_store`; CPU-bound warp/resample runs **inline on the async
-runtime** — the earlier `rayon`/`spawn_blocking` sketch is superseded by
-[ADR 0012](decisions/0012-render-stays-inline-async.md) (load-evidence resolution of §16.7, reopen
-trigger recorded there). Cancellation propagates from dropped requests down to in-flight
+runtime** (the v0.1 `rayon`/`spawn_blocking` sketch is superseded —
+[ADR 0012](decisions/0012-render-stays-inline-async.md)). Cancellation propagates from dropped requests down to in-flight
 reads. Single process; horizontal scale by running N stateless instances behind a load balancer (state lives
 in Postgres + object store + optional Redis).
 
@@ -438,20 +430,11 @@ _Last verified against `576324d`._
 
 ## 14. Extension model (decided — ADR 0013)
 
-Three candidate mechanisms for third-party adapters/processes were weighed, trading "single-binary
-simplicity" vs. "extend without recompiling":
-
-1. **Compile-time Cargo features** — simplest, single static binary, but extending means a rebuild.
-2. **WASM plug-ins** — third-party sources/processes as sandboxed WASM modules loaded at runtime; portable
-   and safe, but a defined host ABI and perf overhead.
-3. **Sidecar processes over a stable RPC** — language-agnostic (a Python source adapter, say), but adds
-   process-management and a serialization seam.
-
-Decided ([ADR 0013](decisions/0013-extension-features-plus-openeo-graphs.md)): **compile-time
-features/crates for adapters, plus openEO process graphs at runtime** as the primary user-facing
-extension surface — a custom product is just a graph via the openEO API (ADR 0010), no plugin
-needed. WASM and RPC sidecars are deferred, not rejected; the reopen condition (concrete demand for
-dynamic plugin loading) is recorded in the ADR.
+**Compile-time Cargo features/crates for adapters, plus openEO process graphs at runtime** as the
+primary user-facing extension surface —
+[ADR 0013](decisions/0013-extension-features-plus-openeo-graphs.md) records the three candidate
+mechanisms weighed (features, WASM plug-ins, RPC sidecars), the WASM/RPC deferral, and the reopen
+condition.
 
 ## 15. Deployment topology
 
@@ -461,68 +444,19 @@ replicas) + managed Postgres + bucket. The pure-Rust core keeps the image tiny a
 
 ## 16. Open questions — status ledger
 
-Each item below carries exactly one status: **Resolved** (links the resolving artifact — ADR,
-design doc, or data), **Open** (states exactly what evidence would resolve it), or
-**Closed-by-ADR** (a plan decision confirm-closed by ADR, with its reopen condition recorded
-there). ADRs are immutable; a Resolved/Closed item reopens only via a superseding ADR.
+Each row carries exactly one status — **Resolved**, **Open**, or **Closed-by-ADR** — and links
+the artifact that owns the full rationale (ADR, design doc, module docs, or data). This section
+is a ledger, not the argument: an Open row's link states exactly what evidence would resolve it,
+and a Closed row's ADR records its reopen condition. ADRs are immutable; a Resolved/Closed item
+reopens only via a superseding ADR.
 
-1. **Port granularity.** Is `RasterSource` one port, or split (metadata/`describe` vs `read_window`, and
-   raster vs. cube)? Cube reads (Zarr, N-dim) may want a distinct `CubeSource` with dimension selection.
-   *Status: **Resolved** — by the as-built port set (§6, verbatim from source; reconciliation #152,
-   verified at `c944a41`): `RasterSource` is one port carrying both `describe` and `read_window`
-   (with `ReadLevel` for overview selection), and both shipped sources (`swath-source-cog`,
-   `swath-source-virtual`) fit it without strain. No split, no `CubeSource`. The cube half returns
-   as a new question only when the native Zarr (`zarrs`) adapter lands with a genuinely N-dim
-   read shape (§7 planned adapters).*
-2. **Where warp lives.** Kernels in `swath-render` calling a minimal `Reproject` port (current proposal) —
-   or a richer `Warp` port so an adapter could offload to GPU/GDAL later? Trade purity vs. future options.
-   *Status: **Resolved** — as built (§6, #152): warp/resample kernels live in `swath-render`
-   (`warp`, `window`, `grid`) over the minimal `Reproject`/`CoordTransform` port; there is no
-   `Warp` port. ADR 0012's load evidence shows the pure-kernel shape holds under full warp
-   saturation, so no offload seam earned its keep. GPU/GDAL offload, if ever demanded, is a new
-   port via a superseding ADR — GDAL stays test-oracle-only (§3).*
-3. **Cache key & invalidation.** Is `layer_version` monotonic per layer, content-hash, or a vector clock?
-   How do partial-data updates (a new granule in a mosaic) invalidate only affected tiles?
-   *Status: **Open** (narrowed by #36). The key question is decided for v1: `layer_version` is
-   **content-derived** — a string built from the serving inputs (latest granule id + plan hash for
-   catalog layers; plan hash alone for static layers), no persisted counters, no vector clock. A
-   new granule or edited layer is a new version and therefore a clean whole-layer miss; superseded
-   entries are orphaned, not stale — GC is future operational work (tracked, with
-   partial-mosaic invalidation, in [`ROADMAP.md`](ROADMAP.md)'s deferral inventory). Full semantics: the
-   `swath-core` `cache` module docs. What would resolve the remainder: multi-granule mosaic layers
-   landing, plus measured re-render cost of whole-layer misses under a realistic granule cadence —
-   that data decides whether per-footprint invalidation is worth its complexity.*
-4. **Planner budget semantics.** Per-layer policy knobs vs. a global cost model that learns from Trace
-   history. How much of Phase 1 does the planner actually need (MVP could be "always Live" + Trace)?
-   *Status: **Resolved** — for v1 by [`docs/design/materialization-planner.md`](design/materialization-planner.md)
-   (issue #37): **explicit per-layer knobs + transparent cost estimates** — `cache_enabled`,
-   `overview_oversample`, `max_estimated_live_bytes` — with a documented, calibratable byte model and
-   every candidate's estimate recorded in the Trace (`plan.considered`). A learned cost model fitted
-   from Trace history is recorded there as future work (tracked in
-   [`ROADMAP.md`](ROADMAP.md)'s deferral inventory); the Trace already carries its training pairs.*
-5. **Control-plane domain model.** Exact `Dataset`/`Layer` schema that cleanly hides STAC yet round-trips
-   to it losslessly. This is the "make STAC disappear" contract and deserves its own mini-spec.
-   *Status: **Resolved** — by [`docs/design/catalog-domain.md`](design/catalog-domain.md):
-   `Dataset`/`Granule`/`Layer` map to STAC Collection/Item with swath-owned fields under a `swath:`
-   prefix — `Layer`s stored as `swath:layers` on the Collection — and a proptest-enforced
-   domain→STAC→domain identity. The `Catalog` port is domain-shaped, refining the §6 sketch: STAC
-   types appear only inside adapters.*
-6. **Extension mechanism (§14).** Commit to compile-time features for v1 and defer WASM? Confirm.
-   *Status: **Closed-by-ADR** —
-   [ADR 0013](decisions/0013-extension-features-plus-openeo-graphs.md): extension = compile-time
-   Cargo features/crates for adapters + openEO process graphs at runtime as the primary user-facing
-   surface; WASM and RPC sidecars deferred, not rejected. Reopen condition (concrete demand for
-   dynamic plugin loading) recorded in the ADR. §14 records the decision.*
-7. **Async vs blocking render boundary.** `spawn_blocking` + `rayon` vs a dedicated render threadpool with a
-   work-stealing queue and admission control (matters under load and for the latency budget).
-   *Status: **Resolved** — by [ADR 0012](decisions/0012-render-stays-inline-async.md) (the M4 load
-   evidence, issues #101/#102): render stays inline on the async runtime — measured on 12-core and
-   2-CPU shapes, the control plane stays ≤1.44 ms p99 under full warp saturation. Data:
-   `docs/perf/load-baseline.json` and `docs/perf/load-2cpu-16.7-evidence.md`; reopen trigger
-   recorded in the ADR.*
-8. **The Python ingest seam.** Is VirtualiZarr-as-sidecar acceptable long-term for legacy reference
-   generation, or do we want a Rust reader for kerchunk/virtual manifests to keep even ingest pure-Rust?
-   *Status: **Resolved** — by
-   [ADR 0006](decisions/0006-legacy-referencer-staged.md): staged Python→Rust behind one manifest
-   port; evidence from prototype 0001. The Rust stage has since shipped (`swath-referencer`, §7),
-   with the Python sidecar retained as the conformance reference.*
+| # | Item | Status | Rationale lives at |
+| --- | --- | --- | --- |
+| 1 | Port granularity: one `RasterSource`, or split (metadata vs. read, raster vs. cube `CubeSource`)? | Resolved | As-built port set, §6 (reconciliation #152): one port, no split; the cube half returns only when a native `zarrs` N-dim adapter lands (§7) — reopen trigger recorded in [`ROADMAP.md`](ROADMAP.md) |
+| 2 | Where warp lives: pure kernels over a minimal `Reproject`, or a richer `Warp` offload port? | Resolved | As built, §6 (#152): kernels in `swath-render`, no `Warp` port; load evidence in [ADR 0012](decisions/0012-render-stays-inline-async.md); GPU/GDAL offload is an ADR-governed deferral in [`ROADMAP.md`](ROADMAP.md) (GDAL stays test-oracle-only, §3) |
+| 3 | Cache key & invalidation | Open (narrowed by #36) | `swath-core` `cache` module docs: content-derived `layer_version` decided for v1, plus what evidence resolves the remainder; GC and partial-mosaic invalidation tracked in [`ROADMAP.md`](ROADMAP.md)'s inventory |
+| 4 | Planner budget semantics | Resolved | [`docs/design/materialization-planner.md`](design/materialization-planner.md) (issue #37): explicit per-layer knobs + transparent cost estimates; its recorded future work is tracked in [`ROADMAP.md`](ROADMAP.md) |
+| 5 | Control-plane domain model ("make STAC disappear") | Resolved | [`docs/design/catalog-domain.md`](design/catalog-domain.md): lossless domain↔STAC mapping; the `Catalog` port is domain-shaped |
+| 6 | Extension mechanism (§14) | Closed-by-ADR | [ADR 0013](decisions/0013-extension-features-plus-openeo-graphs.md): compile-time features + openEO graphs; reopen condition recorded there |
+| 7 | Async vs blocking render boundary | Resolved | [ADR 0012](decisions/0012-render-stays-inline-async.md) (M4 load evidence, #101/#102; data under `docs/perf/`; reopen trigger recorded there) |
+| 8 | The Python ingest seam | Resolved | [ADR 0006](decisions/0006-legacy-referencer-staged.md): staged Python→Rust behind one manifest port; Rust stage shipped (`swath-referencer`, §7) |
