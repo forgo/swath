@@ -261,10 +261,12 @@ a process is a match arm in the compiler plus pinned data.
 ### 3.3 Boundedness (what a process may not do)
 
 A process is a *pure per-pixel/per-band lowering* into the Render IR. It cannot perform I/O,
-introduce new data sources (that is §2), decide windows or granules (`spatial_extent`/
-`temporal_extent` are accepted and ignored — tile serving decides), or require state between
-requests. Products needing more than the IR's producing/transforming pipeline are the reopen
-territory recorded in ADR 0013.
+introduce new data sources (that is §2), read pixels across granules, or require state between
+requests. Temporal arguments (`temporal_extent`, `filter_temporal`) compile into the product's
+granule-resolution *window* — frame selection per ADR 0015, never how pixels combine — while
+the spatial window stays tile serving's decision (`spatial_extent` is accepted and ignored).
+Products needing more than the IR's producing/transforming pipeline are the reopen territory
+recorded in ADR 0013.
 
 _Last verified against `9ab35b8`._
 

@@ -476,9 +476,17 @@ The supported subset of openeo-processes 1.2.0 — the pinned official
 definitions with a **Swath profile** note appended to each description
 where v0 narrows the spec. Currently:
 
-`add`, `array_element`, `divide`, `linear_scale_range`,
-`load_collection`, `multiply`, `ndvi`, `reduce_dimension`,
-`save_result`, `subtract`.
+`add`, `array_element`, `divide`, `filter_temporal`,
+`linear_scale_range`, `load_collection`, `multiply`, `ndvi`,
+`reduce_dimension`, `save_result`, `subtract`.
+
+Temporal arguments are real since ADR 0015: `load_collection`'s
+`temporal_extent` and `filter_temporal` compile into the published
+layer's granule-resolution window (frame selection — which acquisition
+backs a frame, never how pixels combine); a window excluding every
+ingested granule makes `POST /result` answer 404 `NotFound`, and a
+window that can never select anything is rejected with 400
+`ProcessParameterInvalid`.
 
 One entry, abridged (the full response is ~29 KB of the official
 definitions):

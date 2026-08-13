@@ -693,6 +693,9 @@ impl LayerConfig {
                 || default_budget.clone(),
                 |budget| budget.overlay(default_budget),
             ),
+            // Config-defined layers are temporally unconstrained: latest
+            // wins, exactly as before ADR 0015.
+            window: swath_core::catalog::TimeRange::default(),
         };
         let domain_layer = domain::Layer {
             id: self.id.clone(),

@@ -1,6 +1,6 @@
 ---
 source: crates/swath-api/tests/openeo_services.rs
-assertion_line: 306
+assertion_line: 348
 expression: shapes
 ---
 {
@@ -35,7 +35,7 @@ expression: shapes
   "unknown process id": {
     "error": {
       "code": "ProcessUnsupported",
-      "message": "node `smooth`: unsupported process `apply_kernel` — the supported subset is: load_collection, reduce_dimension, array_element, add, subtract, multiply, divide, linear_scale_range, ndvi, save_result"
+      "message": "node `smooth`: unsupported process `apply_kernel` — the supported subset is: load_collection, filter_temporal, reduce_dimension, array_element, add, subtract, multiply, divide, linear_scale_range, ndvi, save_result"
     },
     "status": 400
   },

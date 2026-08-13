@@ -180,6 +180,13 @@ pub struct CatalogLayer {
     /// The layer's materialization budget (#37) — the planner's knobs;
     /// defaults reproduce pre-planner behavior.
     pub budget: swath_core::planner::Budget,
+    /// The temporal resolution window (ADR 0015 frame selection): granule
+    /// resolution considers only acquisitions inside it. Open on both
+    /// sides (the default) resolves against every granule — today's
+    /// "latest wins", unchanged. Compiled from an openEO graph's
+    /// `temporal_extent` / `filter_temporal`; config-defined layers are
+    /// unconstrained.
+    pub window: TimeRange,
 }
 
 /// The catalog-backed [`LayerProvider`]: identities compiled from config
@@ -254,6 +261,24 @@ fn latest(granules: Vec<Granule>) -> Option<Granule> {
         .max_by_key(|g| (g.datetime.to_unix_millis(), g.id.clone()))
 }
 
+/// The intersection of two inclusive, optionally open-ended windows —
+/// the later start, the earlier end (ADR 0015: the request's `datetime`
+/// composed with a layer's compiled resolution window). May come out
+/// empty (start after end); the caller treats that as selecting nothing.
+fn intersect(a: &TimeRange, b: &TimeRange) -> TimeRange {
+    let pick = |x: Option<&Datetime>, y: Option<&Datetime>, later: bool| match (x, y) {
+        (Some(x), Some(y)) => {
+            let x_wins = (x.to_unix_millis() >= y.to_unix_millis()) == later;
+            Some(if x_wins { x.clone() } else { y.clone() })
+        }
+        (bound, None) | (None, bound) => bound.cloned(),
+    };
+    TimeRange {
+        start: pick(a.start.as_ref(), b.start.as_ref(), true),
+        end: pick(a.end.as_ref(), b.end.as_ref(), false),
+    }
+}
+
 impl<C: Catalog> LayerProvider for CatalogLayers<C> {
     fn identities(&self) -> Vec<LayerIdentity> {
         self.layers
@@ -290,9 +315,11 @@ impl<C: Catalog> LayerProvider for CatalogLayers<C> {
 
 impl<C: Catalog> CatalogLayers<C> {
     /// Resolves a layer template — registered or not — against the
-    /// **latest granule within `window`** of its dataset (ADR 0015:
-    /// `window` is the request's parsed `datetime`; `None` = fully open
-    /// = latest, the pre-#180 behavior byte-for-byte): the shared
+    /// **latest granule within the effective window** of its dataset
+    /// (ADR 0015: the request's parsed `datetime` in `window`,
+    /// intersected with the layer's compiled resolution window
+    /// [`CatalogLayer::window`]; both open = latest, the pre-#180
+    /// behavior byte-for-byte): the shared
     /// resolution of [`resolve`] (which looks the template up by id
     /// first) and the openEO preview (ADR 0014), which must resolve a
     /// *draft* template without ever inserting it into the served layer
@@ -313,18 +340,43 @@ impl<C: Catalog> CatalogLayers<C> {
         window: Option<&TimeRange>,
     ) -> Result<ResolvedLayer, ApiError> {
         let id = &entry.id;
-        let query = GranuleQuery {
-            bbox: None,
-            datetime: window.cloned(),
+        // ADR 0015 composition: the request's `datetime` window (the
+        // tiles route, #180) is intersected with the layer's *compiled*
+        // resolution window (`temporal_extent`/`filter_temporal`, #181)
+        // before the latest-at-or-before rule runs — later start,
+        // earlier end. A layer without a graph window passes the request
+        // window through untouched; no window at all keeps the exact
+        // open query the provider always sent.
+        let compiled = (entry.window != TimeRange::default()).then_some(&entry.window);
+        let effective = match (compiled, window) {
+            (None, None) => None,
+            (Some(one), None) | (None, Some(one)) => Some(one.clone()),
+            (Some(a), Some(b)) => Some(intersect(a, b)),
         };
-        let granules = self
-            .catalog
-            .find_granules(&entry.dataset, &query)
-            .await
-            .map_err(|err| catalog_error(&entry.dataset, &err))?;
+        // A provably empty intersection (a request datetime outside the
+        // layer's window) selects no granule by definition — 404 without
+        // asking the catalog to evaluate an inverted interval.
+        let empty = effective
+            .as_ref()
+            .is_some_and(|w| match (&w.start, &w.end) {
+                (Some(start), Some(end)) => start.to_unix_millis() > end.to_unix_millis(),
+                _ => false,
+            });
+        let granules = if empty {
+            Vec::new()
+        } else {
+            let query = GranuleQuery {
+                bbox: None,
+                datetime: effective.clone(),
+            };
+            self.catalog
+                .find_granules(&entry.dataset, &query)
+                .await
+                .map_err(|err| catalog_error(&entry.dataset, &err))?
+        };
         let granule = latest(granules).ok_or_else(|| {
             let dataset = &entry.dataset;
-            match window {
+            match &effective {
                 None => ApiError::not_found(format!(
                     "layer `{id}`: no granule of dataset `{dataset}` has been ingested yet",
                 )),
@@ -393,7 +445,7 @@ mod tests {
 
     use swath_core::catalog::{
         Bbox, Catalog, CatalogError, Dataset, DatasetId, Datetime, Granule, GranuleAsset,
-        GranuleId, GranuleQuery,
+        GranuleId, GranuleQuery, TimeRange,
     };
     use swath_core::tile::TileCoord;
     use swath_render::ir::{BandInput, OutputSpec, PixelOp, RenderPlan, TileFormat};
@@ -509,6 +561,7 @@ mod tests {
                 resampling: Resampling::Bilinear(NodataPolicy::ExcludeRenormalize),
                 tile_size: 256,
                 budget: swath_core::planner::Budget::default(),
+                window: TimeRange::default(),
             }],
         )
     }

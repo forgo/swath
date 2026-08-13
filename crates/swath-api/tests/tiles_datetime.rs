@@ -115,6 +115,9 @@ fn fire_app() -> Router {
             resampling: Resampling::Bilinear(NodataPolicy::ExcludeRenormalize),
             tile_size: 256,
             budget: swath_core::planner::Budget::default(),
+            // Config-defined shape: no compiled graph window — only the
+            // request's datetime= constrains resolution here.
+            window: swath_core::catalog::TimeRange::default(),
         }],
     );
     let store = LocalFileSystem::new_with_prefix(common::fixtures_dir()).expect("fixture dir");
