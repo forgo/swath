@@ -27,6 +27,7 @@ use swath_catalog_pgstac::PgstacCatalog;
 use swath_core::catalog::{Catalog, CatalogError};
 use swath_core::events::EventSource;
 use swath_events_filedrop::FiledropEvents;
+use swath_pyramid_objectstore::PyramidSource;
 use swath_reproject_proj4rs::Proj4rsReproject;
 
 use crate::config::{self, CatalogMode, LayerSource, ResolvedConfig};
@@ -303,10 +304,16 @@ where
     // clones share the layer set, so a POSTed service serves on the next
     // tile request. The preview endpoint (ADR 0014's POST /result)
     // renders inline through the same composite source and reprojection
-    // adapters the tile handlers use — same store root, same pixels.
+    // adapters the tile handlers use — same store root, same pixels
+    // (pyramid overlay included, so previews benefit from materialized
+    // overviews exactly as tiles do).
+    let openeo_store = build_store(&cfg.store_root)?;
     let openeo = swath_api::openeo_router(Arc::new(swath_api::OpenEoState::new(
         provider.clone(),
-        CompositeSource::new(build_store(&cfg.store_root)?),
+        PyramidSource::new(
+            CompositeSource::new(Arc::clone(&openeo_store)),
+            openeo_store,
+        ),
         Proj4rsReproject,
         &cfg.base_url,
     )));
@@ -340,10 +347,14 @@ where
     // The composite source (crate::source): COG assets and virtual-cube
     // manifests (#39) served from the same store root, dispatched per
     // asset — legacy granules render from byte ranges into their
-    // original files.
+    // original files. Wrapped in the pyramid overlay (#183): levels
+    // materialized by `swath materialize` under `pyramids/` in the same
+    // root are advertised to the planner and served from stored chunks;
+    // with no pyramid present the overlay is a per-describe existence
+    // probe and nothing more.
     let mut state = ApiState::new(
         layers,
-        CompositeSource::new(store),
+        PyramidSource::new(CompositeSource::new(Arc::clone(&store)), store),
         Proj4rsReproject,
         &cfg.base_url,
     );
@@ -483,7 +494,7 @@ fn embedded_ui() -> swath_api::UiAssets {
 /// builds an S3 store from the standard AWS_* environment (endpoint,
 /// region, credentials, `AWS_ALLOW_HTTP` for `MinIO`); anything else is a
 /// local directory.
-fn build_store(root: &str) -> Result<Arc<dyn ObjectStore>, ServeError> {
+pub(crate) fn build_store(root: &str) -> Result<Arc<dyn ObjectStore>, ServeError> {
     let store_error = |source| ServeError::Store {
         root: root.to_owned(),
         source,

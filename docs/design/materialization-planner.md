@@ -186,6 +186,9 @@ inventory):
   once storage pressure is real.
 - **Partial-mosaic invalidation**: unchanged from #36 — per-footprint
   invalidation lands with mosaics themselves (`swath-core::cache` docs).
-- **Overview *generation*** (the batch-materialization path): the planner
-  chooses among what exists; deciding what to pre-compute is the
-  materialization pipeline's issue.
+- **Overview *generation*** (the batch-materialization path): shipped by
+  issue #183 — `swath materialize` builds per-asset GeoZarr-shaped
+  pyramids (`crates/adapters/swath-pyramid-objectstore`) and the
+  `PyramidSource` overlay feeds them into `Availability` through
+  `describe`, unchanged planner (`docs/ROADMAP.md` deferral row 6,
+  closed).

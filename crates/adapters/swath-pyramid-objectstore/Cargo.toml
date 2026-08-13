@@ -1,0 +1,26 @@
+[package]
+name = "swath-pyramid-objectstore"
+description = "Materialized overview pyramids over object_store: a GeoZarr-shaped (Zarr v2) per-asset pyramid writer plus the RasterSource overlay that serves the generated levels."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+object_store = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+swath-core = { path = "../../swath-core", version = "0.1.0-alpha.1" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+swath-source-cog = { path = "../swath-source-cog", version = "0.1.0-alpha.1" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
