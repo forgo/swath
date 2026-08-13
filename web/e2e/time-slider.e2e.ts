@@ -30,6 +30,17 @@ const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
 const CENTER = "-121.6932,40.0208";
 const ZOOM = process.env.SWATH_E2E_MODE === "binary" ? "13" : "12";
 
+/** The signature-loop test's OWN zoom, one deeper than everything else
+ * in this file (and than the other mode's signature pass — one stack
+ * serves both): its "first pass renders live" premise needs tiles no
+ * other test has touched. The scrub test above provably leaks frame
+ * renders into the server cache on slow runners — its page closes with
+ * `datetime=` requests still in flight, and a render that has already
+ * left the proxy completes (and caches) server-side regardless — which
+ * turned the signature's first pass into cache hits on CI while local
+ * runs (whose queued requests die with the page) stayed live. */
+const SIGNATURE_ZOOM = process.env.SWATH_E2E_MODE === "binary" ? "14" : "13";
+
 const LAYER = "park-fire-ndvi";
 const DATASET = "hls-s30-fire";
 
@@ -121,43 +132,87 @@ async function scrubTo(page: Page, index: number): Promise<void> {
  * Returns the number of badges that settled.
  */
 async function expectFrameBadges(page: Page, frame: string, kind: string): Promise<number> {
-  const handle = await page.waitForFunction(
-    ({ frame, kind, layer }) => {
-      const received = window.__timeReceived ?? [];
-      const latest = new Map<string, Envelope>();
-      for (const envelope of received) {
-        latest.set(`${envelope.layer}/${envelope.tile}`, envelope);
-      }
-      const badges = [...document.querySelectorAll<HTMLElement>(".swath-xray-badge")].filter(
-        (badge) => (badge.dataset.key ?? "").startsWith(`${layer}/`),
-      );
-      if (badges.length === 0) {
-        return null;
-      }
-      for (const badge of badges) {
-        const envelope = latest.get(badge.dataset.key ?? "");
-        if (!envelope || envelope.trace.temporal?.granule_datetime !== frame) {
-          return null; // this tile's latest trace is not the frame yet
+  const dump = async (): Promise<string> =>
+    await page.evaluate(
+      ({ frame, kind, layer }) => {
+        const received = window.__timeReceived ?? [];
+        const latest = new Map<string, Envelope>();
+        for (const envelope of received) {
+          latest.set(`${envelope.layer}/${envelope.tile}`, envelope);
         }
-        const { decision } = envelope.trace;
-        const flat =
-          typeof decision === "string"
-            ? decision
-            : "cache_hit" in decision
-              ? "cache_hit"
-              : "overview";
-        if (flat !== kind || badge.dataset.decision !== kind) {
+        const badges = [...document.querySelectorAll<HTMLElement>(".swath-xray-badge")]
+          .filter((badge) => (badge.dataset.key ?? "").startsWith(`${layer}/`))
+          .map((badge) => {
+            const key = badge.dataset.key ?? "";
+            const envelope = latest.get(key);
+            return `${key}=${badge.dataset.decision}|rx:${
+              envelope
+                ? `${typeof envelope.trace.decision === "string" ? envelope.trace.decision : JSON.stringify(envelope.trace.decision)}@${envelope.trace.temporal?.granule_datetime ?? "-"}`
+                : "MISSING"
+            }`;
+          });
+        const analytics = document.querySelector<HTMLElement>(".swath-xray-analytics");
+        return JSON.stringify(
+          {
+            want: { frame, kind },
+            received: received.length,
+            receivedForFrame: received.filter(
+              (e) => e.layer === layer && e.trace.temporal?.granule_datetime === frame,
+            ).length,
+            analyticsFrame: analytics?.dataset.frame,
+            slider: document.querySelector<HTMLElement>(".swath-map-time")?.dataset,
+            badges,
+          },
+          null,
+          1,
+        );
+      },
+      { frame, kind, layer: LAYER },
+    );
+  const handle = await page
+    .waitForFunction(
+      ({ frame, kind, layer }) => {
+        const received = window.__timeReceived ?? [];
+        const latest = new Map<string, Envelope>();
+        for (const envelope of received) {
+          latest.set(`${envelope.layer}/${envelope.tile}`, envelope);
+        }
+        const badges = [...document.querySelectorAll<HTMLElement>(".swath-xray-badge")].filter(
+          (badge) => (badge.dataset.key ?? "").startsWith(`${layer}/`),
+        );
+        if (badges.length === 0) {
           return null;
         }
-      }
-      return badges.length;
-    },
-    { frame, kind, layer: LAYER },
-    // Generous per-frame budget: a frame is a viewport of live NDVI
-    // renders, and CI's 2-core runner shares them with the browser and
-    // the dev server (observed >30 s there; seconds locally).
-    { timeout: 120_000 },
-  );
+        for (const badge of badges) {
+          const envelope = latest.get(badge.dataset.key ?? "");
+          if (!envelope || envelope.trace.temporal?.granule_datetime !== frame) {
+            return null; // this tile's latest trace is not the frame yet
+          }
+          const { decision } = envelope.trace;
+          const flat =
+            typeof decision === "string"
+              ? decision
+              : "cache_hit" in decision
+                ? "cache_hit"
+                : "overview";
+          if (flat !== kind || badge.dataset.decision !== kind) {
+            return null;
+          }
+        }
+        return badges.length;
+      },
+      { frame, kind, layer: LAYER },
+      // Generous per-frame budget: a frame is a viewport of live NDVI
+      // renders, and CI's 2-core runner shares them with the browser and
+      // the dev server (observed >30 s there; seconds locally).
+      { timeout: 120_000 },
+    )
+    .catch(async (error: unknown) => {
+      // The stall's anatomy, in the test output: which badge disagrees,
+      // what the stream last said about it, and what the overlay shows.
+      console.log(`expectFrameBadges stalled: ${await dump()}`);
+      throw error;
+    });
   return (await handle.jsonValue()) as number;
 }
 
@@ -242,7 +297,7 @@ test("the signature loop: first pass renders live, second pass replays from cach
   test.setTimeout(600_000);
   const frames = await granuleFrames(page);
 
-  await page.goto(`${DEMO_PATH}?xray&layer=${LAYER}&center=${CENTER}&zoom=${ZOOM}`);
+  await page.goto(`${DEMO_PATH}?xray&layer=${LAYER}&center=${CENTER}&zoom=${SIGNATURE_ZOOM}`);
   await expect(page.locator("swath-map canvas.maplibregl-canvas")).toBeVisible();
   await subscribeToTraces(page);
   await waitForFittedView(page);
