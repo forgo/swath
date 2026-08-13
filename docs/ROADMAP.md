@@ -58,17 +58,20 @@ jobs/batch/user-defined-processes/files and auth (ADR 0010 — also why no openE
 class is claimed); OGC API - Maps (`ARCHITECTURE.md` §7); GPU/GDAL warp offload
 (`ARCHITECTURE.md` §16.2 — GDAL stays test-oracle-only); deck.gl (ADR 0005).
 
-### Icechunk (first written record)
+### Icechunk (graduated: executed interop in M8)
 
-An **Icechunk adapter** would be a `RasterSource` (or future cube-source) adapter over
-`zarrs` + `zarrs_icechunk`, reading versioned, transactional Zarr stores — including virtual
-references *committed to an Icechunk repo* rather than loose manifest JSON — buying versioned
-layers with time-travel, transactional multi-granule updates (also changing row 3's story), and
-alignment with the Earthmover stack. Deferred because manifest v1 + `object_store` covers every
-current dataset and no versioned-store demand exists; it is the natural companion to the
-planned native-Zarr adapter (`ARCHITECTURE.md` §7, which also reopens
-`RasterSource`-vs-`CubeSource`, §16.1). **Revisit when:** the native Zarr adapter lands, or a
-user needs versioned/transactional layers.
+First recorded here as a deferral; **graduated by
+[ADR 0016](decisions/0016-extraction-boundary-published-crates.md)** into an executed-interop
+plan. M8 ships the interop rather than an adapter wish: the referencer commits virtual chunk
+references to an Icechunk repo instead of owning a private-only format (M8.7, #191, with an
+icechunk-python/xarray conformance gate), and Swath serves tiles back from an Icechunk commit,
+byte-identical to the manifest path and trace-visible (M8.9, #193), with the zarrs codec-chain
+adoption (M8.6, #190) as the enabling step. What remains demand-triggered (item 15 below): the
+versioned-layer product UX — time-travel surfacing, transactional multi-granule updates (which
+would also change row 3's story) — and the native-Zarr `RasterSource` adapter
+(`ARCHITECTURE.md` §7, which also reopens `RasterSource`-vs-`CubeSource`, §16.1).
+**Revisit when:** a user needs versioned/transactional layers surfaced, or the native Zarr
+adapter lands.
 
 ## 3. M7+ candidates (proposed order — maintainer decision pending)
 
@@ -91,7 +94,8 @@ it** (the PR that introduced this file carries the approval checkbox).
 12. **OGC API - Records** — wants real dataset extents (row 15).
 13. **OGC API - Features** — vector/GeoParquet.
 14. **OGC API - Maps** — lowest-demand surface.
-15. **Icechunk adapter** (above).
+15. **Icechunk adapter** (above). *Interop half executed in M8 per ADR 0016 (#190/#191/#193);
+    the versioned-layer UX remainder stays demand-triggered.*
 16. **Engine breadth bundle** (rows 8, 9, 10) — demand-triggered.
 17. **WebP** (row 1) — deliberately cheap late.
 18. **Learned planner cost model** (row 4) — needs a real-operation Trace corpus.
