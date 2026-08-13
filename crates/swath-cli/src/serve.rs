@@ -233,7 +233,9 @@ where
     // over before the upsert and recompile them into serving templates,
     // so published products survive a restart.
     for dataset in &mut mode.datasets {
+        let mut preexisting = false;
         if let Some(existing) = catalog.get_dataset(&dataset.id).await? {
+            preexisting = true;
             for layer in existing.layers {
                 let is_service = layer.process.is_some();
                 let conflicts = dataset.layers.iter().any(|own| own.id == layer.id);
@@ -268,11 +270,15 @@ where
         // min/max acquisition datetime of what has actually been
         // ingested. Re-deriving from all granules at registration also
         // heals any drift the incremental per-ingest widening (the
-        // core's `ingest_granule`) could leave behind.
-        let granules = catalog
-            .find_granules(&dataset.id, &swath_core::catalog::GranuleQuery::default())
-            .await?;
-        dataset.extent.interval = swath_core::catalog::temporal_interval(&granules);
+        // core's `ingest_granule`) could leave behind. Only a dataset
+        // the catalog already holds can have granules — `find_granules`
+        // on an unregistered collection is a hard DatasetNotFound.
+        if preexisting {
+            let granules = catalog
+                .find_granules(&dataset.id, &swath_core::catalog::GranuleQuery::default())
+                .await?;
+            dataset.extent.interval = swath_core::catalog::temporal_interval(&granules);
+        }
         catalog.upsert_dataset(dataset).await?;
         tracing::info!(
             "registered dataset {id} ({layers} layer(s))",
@@ -620,6 +626,14 @@ mod tests {
             dataset: &DatasetId,
             _query: &GranuleQuery,
         ) -> Result<Vec<Granule>, CatalogError> {
+            // Like pgstac: querying a collection that was never
+            // registered is a hard error, not an empty set — the
+            // startup registration order depends on this contract.
+            if !self.datasets.lock().unwrap().contains_key(dataset.as_str()) {
+                return Err(CatalogError::DatasetNotFound {
+                    id: dataset.clone(),
+                });
+            }
             Ok(self
                 .granules
                 .lock()
