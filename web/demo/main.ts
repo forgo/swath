@@ -198,6 +198,15 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
     persist();
     syncUrl();
   });
+
+  // Data framing (issue #182 follow-up): both the auto-frame after a
+  // user-initiated layer switch and the `zoom to data` control announce
+  // their move — user-driven view changes, so the share link follows
+  // (programmatic moves otherwise deliberately never rewrite the URL).
+  map.addEventListener("swath-framedata", () => {
+    persist();
+    syncUrl();
+  });
 }
 
 // The authoring panel (issue #109) is a pure openEO client; the shell

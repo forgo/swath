@@ -13,6 +13,8 @@ import {
   type FootprintCollection,
   footprintCollection,
   GranuleFootprints,
+  parseBbox,
+  unionBbox,
 } from "./granule-footprints.js";
 
 /** A fake map: records sources/layers/fitBounds, replays styledata, and
@@ -182,4 +184,23 @@ test("dispose detaches: styledata after dispose paints nothing", () => {
   map.emit("styledata");
   expect(map.sources.size).toBe(0);
   expect(map.layers.size).toBe(0);
+});
+
+test("parseBbox: the checked tuple, or undefined for junk shapes", () => {
+  expect(parseBbox([-121.74, 39.99, -121.65, 40.06])).toEqual([-121.74, 39.99, -121.65, 40.06]);
+  for (const junk of [undefined, null, "box", [1, 2, 3], [1, 2, 3, "four"], {}]) {
+    expect(parseBbox(junk)).toBeUndefined();
+  }
+});
+
+test("unionBbox: the envelope of footprints; empty stays unknown, not [0,0,0,0]", () => {
+  expect(unionBbox([])).toBeUndefined();
+  expect(unionBbox([[-2, -1, 3, 4]])).toEqual([-2, -1, 3, 4]);
+  expect(
+    unionBbox([
+      [-121.74, 39.99, -121.65, 40.06],
+      [-121.8, 40.0, -121.7, 40.1],
+      [-121.72, 39.9, -121.6, 40.02],
+    ]),
+  ).toEqual([-121.8, 39.9, -121.6, 40.1]);
 });

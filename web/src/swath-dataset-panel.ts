@@ -29,7 +29,7 @@
  * mirroring `<swath-map>`.
  */
 
-import type { FootprintGranule, GranuleBbox } from "./granule-footprints.js";
+import { type FootprintGranule, parseBbox } from "./granule-footprints.js";
 
 /** One dataset of the listing. */
 export interface DatasetItem {
@@ -153,25 +153,6 @@ function injectStyles(doc: Document): void {
   style.id = STYLE_ELEMENT_ID;
   style.textContent = PANEL_CSS;
   doc.head.append(style);
-}
-
-/** `bbox` as the wire carries it → the checked tuple, or undefined when
- * malformed (a granule without a usable footprint is skipped, honestly,
- * rather than painted somewhere wrong). */
-function parseBbox(raw: unknown): GranuleBbox | undefined {
-  if (!Array.isArray(raw) || raw.length !== 4) {
-    return undefined;
-  }
-  const [west, south, east, north] = raw as unknown[];
-  if (
-    typeof west !== "number" ||
-    typeof south !== "number" ||
-    typeof east !== "number" ||
-    typeof north !== "number"
-  ) {
-    return undefined;
-  }
-  return [west, south, east, north];
 }
 
 export class SwathDatasetPanel extends HTMLElement {

@@ -34,6 +34,13 @@
  * geographic bounds from `/tilesets/{id}` metadata — a bare
  * `<swath-map>` against a live server is a working demo.
  *
+ * Finding the data (issue #182 follow-up): a `zoom to data` control
+ * frames the active layer's data footprint (union of its granule
+ * footprints, else the metadata bounds; hidden when unknown), and a
+ * USER-initiated layer switch ([`setLayer`]) whose target's data is
+ * nowhere in the current viewport auto-frames it. Deep-linked views are
+ * never stomped: attribute-driven applies skip the auto-frame.
+ *
  * Tile addressing (the #27 mirror): the Swath API serves OGC order
  * `/tiles/{tileMatrix}/{tileRow}/{tileCol}` = z/y/x, while MapLibre
  * raster templates are XYZ-named — so the template's middle segment must
@@ -42,6 +49,7 @@
 
 import { type IControl, Map as MapLibreMap, type RasterTileSource } from "maplibre-gl";
 import maplibreCss from "maplibre-gl/dist/maplibre-gl.css?inline";
+import { type GranuleBbox, parseBbox, unionBbox } from "./granule-footprints.js";
 import { type EventSourceFactory, XRayOverlay } from "./swath-xray.js";
 import { parseGranuleDatetimes, TimeSlider } from "./time-slider.js";
 import { centerTile } from "./tms.js";
@@ -152,6 +160,12 @@ swath-map .swath-map-xray-toggle button[aria-pressed="true"] {
   font-weight: 700;
   background: rgb(22 163 74 / 15%);
 }
+swath-map .swath-map-zoomdata button {
+  width: auto;
+  padding: 0 8px;
+  font: 12px/29px system-ui, sans-serif;
+}
+swath-map .swath-map-zoomdata[hidden] { display: none; }
 /* The time slider (issue #182): bottom-center, between the x-ray
  * readouts (bottom-left) and the trace feed (bottom-right), styled like
  * the overlay's dark-telemetry cards. */
@@ -300,6 +314,50 @@ class XRayToggleControl implements IControl {
   }
 }
 
+/** The "zoom to data" control (issue #182 follow-up): one button that
+ * frames the current layer's data footprint — the recovery affordance
+ * for "I picked a layer and see nothing; where on Earth is it?". Hidden
+ * whenever the layer's footprint is unknown (a dead button would
+ * promise what it cannot do). */
+class ZoomToDataControl implements IControl {
+  readonly #host: SwathMap;
+  #container: HTMLElement | undefined;
+  #known = false;
+
+  constructor(host: SwathMap) {
+    this.#host = host;
+  }
+
+  onAdd(): HTMLElement {
+    const container = document.createElement("div");
+    container.className = "maplibregl-ctrl maplibregl-ctrl-group swath-map-zoomdata";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "zoom to data";
+    button.setAttribute("aria-label", "Zoom to the layer's data");
+    button.addEventListener("click", () => {
+      this.#host.zoomToData();
+    });
+    container.append(button);
+    container.hidden = !this.#known;
+    this.#container = container;
+    return container;
+  }
+
+  onRemove(): void {
+    this.#container?.remove();
+    this.#container = undefined;
+  }
+
+  /** Shows the button exactly while a footprint is known. */
+  update(known: boolean): void {
+    this.#known = known;
+    if (this.#container) {
+      this.#container.hidden = !known;
+    }
+  }
+}
+
 export class SwathMap extends HTMLElement {
   static readonly tagName = "swath-map";
 
@@ -320,6 +378,17 @@ export class SwathMap extends HTMLElement {
   #xrayToggle: XRayToggleControl | undefined;
   #xray: XRayOverlay | undefined;
   #time: TimeSlider | undefined;
+  #zoomData: ZoomToDataControl | undefined;
+  /** Where the active layer's data IS (issue #182 follow-up): the union
+   * of its granule footprints (catalog-backed), else the tileset
+   * metadata bounds (static layers), else unknown. What `zoomToData`
+   * frames and the auto-frame-on-switch checks against. */
+  #dataBounds: LonLatBounds | undefined;
+  /** Set by [`setLayer`] — a USER-initiated switch: the one path that
+   * may auto-frame the new layer's data. Attribute-driven applies (deep
+   * links, programmatic sets) never auto-frame — a shared URL's view is
+   * honored exactly (the issue #108 precedence contract). */
+  #pendingAutoFrame = false;
   /** The layer id the last successful apply painted — what the x-ray
    * overlay filters its badges on. */
   #activeLayer = "";
@@ -376,6 +445,8 @@ export class SwathMap extends HTMLElement {
     }
     this.#xrayToggle = new XRayToggleControl(this);
     this.#map.addControl(this.#xrayToggle, "top-right");
+    this.#zoomData = new ZoomToDataControl(this);
+    this.#map.addControl(this.#zoomData, "top-right");
     this.#time = new TimeSlider(this.ownerDocument, {
       scrubTo: (datetime) => {
         this.setAttribute("datetime", datetime);
@@ -409,6 +480,7 @@ export class SwathMap extends HTMLElement {
     this.#map = undefined;
     this.#switcher = undefined;
     this.#xrayToggle = undefined;
+    this.#zoomData = undefined;
     this.replaceChildren();
   }
 
@@ -472,10 +544,65 @@ export class SwathMap extends HTMLElement {
   }
 
   /** Switches the displayed layer (reflects the `layer` attribute) and
-   * settles once the map style has been updated. */
+   * settles once the map style has been updated. This is the
+   * USER-INITIATED path (the built-in switcher, the entry page's layer
+   * rail, an authored service landing): if the new layer's data
+   * footprint is nowhere in the current viewport, the apply frames it —
+   * a ~10 km fire window must never be an invisible needle on a world
+   * map. Deep links and programmatic attribute writes go through the
+   * attribute directly and never auto-frame (a shared URL's view wins,
+   * the issue #108 precedence contract). */
   async setLayer(id: string): Promise<void> {
+    this.#pendingAutoFrame = true;
     this.setAttribute("layer", id);
     await this.#ready;
+  }
+
+  /** Frames the active layer's data footprint (the `zoom to data`
+   * control's action — the always-available recovery affordance). No-op
+   * while the footprint is unknown; the control is hidden then. */
+  zoomToData(): void {
+    this.#frameData();
+  }
+
+  /** Jumps the view to the active layer's data bounds and announces the
+   * user-initiated move (`swath-framedata`, the page shell's URL-sync
+   * seam — a framed view must be shareable). `duration: 0` follows the
+   * footprint zoom's precedent: a jump reads clearer than an animation
+   * across the world, and it is deterministic for tests. */
+  #frameData(): void {
+    const map = this.#map;
+    const bounds = this.#dataBounds;
+    if (!map || !bounds) {
+      return;
+    }
+    map.once("moveend", () => {
+      this.dispatchEvent(new CustomEvent("swath-framedata", { detail: { bounds }, bubbles: true }));
+    });
+    map.fitBounds(
+      [
+        [bounds.west, bounds.south],
+        [bounds.east, bounds.north],
+      ],
+      { duration: 0, padding: 48 },
+    );
+  }
+
+  /** Whether any part of `bounds` is inside the current viewport — the
+   * "is the data already visible?" test that keeps auto-frame from
+   * yanking a view that can see the data. */
+  #viewIntersects(bounds: LonLatBounds): boolean {
+    const map = this.#map;
+    if (!map) {
+      return true; // no view to disturb
+    }
+    const view = map.getBounds();
+    return (
+      bounds.west <= view.getEast() &&
+      bounds.east >= view.getWest() &&
+      bounds.south <= view.getNorth() &&
+      bounds.north >= view.getSouth()
+    );
   }
 
   /** Brings the x-ray overlay up (idempotent). The overlay's DOM lives
@@ -697,13 +824,26 @@ export class SwathMap extends HTMLElement {
       }),
     );
     this.#startLivenessProbe(layerId, epoch);
-    // The slider's domain loads LAST, after the probe kicked off: the
+    // The data domain loads LAST, after the probe kicked off: the
     // probe's timing relative to MapLibre's first tile fetches is part
     // of the painted result (its no-store fetch renders through the
     // cache, so reordering it flips a badge between live and cache_hit),
-    // while the temporal domain only feeds the slider. `ready` still
-    // covers it — tests may await and then inspect the control.
-    await this.#applyTemporalDomain(metadata?.dataset, epoch);
+    // while the domain only feeds the slider and the data-framing.
+    // `ready` still covers it — tests may await and then inspect.
+    await this.#applyDataDomain(metadata, epoch);
+    if (epoch !== this.#epoch) {
+      return;
+    }
+    // Auto-frame (issue #182 follow-up): a USER-initiated switch to a
+    // layer whose data is nowhere in view jumps to the data — consumed
+    // exactly once per `setLayer`, and skipped entirely when the data
+    // already intersects the viewport (never yank a view that can see
+    // it) or when the footprint is unknown.
+    const autoFrame = this.#pendingAutoFrame;
+    this.#pendingAutoFrame = false;
+    if (autoFrame && this.#dataBounds && !this.#viewIntersects(this.#dataBounds)) {
+      this.#frameData();
+    }
   }
 
   /** Self-healing tiles for the "viewer open before the data exists" flow
@@ -791,28 +931,40 @@ export class SwathMap extends HTMLElement {
     return metadata;
   }
 
-  /** Feeds the time slider (issue #182): fetches the layer's granule
-   * listing (when its metadata linked one) and hands the acquisition
-   * datetimes to the control. No link, a fetch failure, or fewer than
-   * two dates all mean the same thing — nothing to scrub, slider
-   * hidden. Failures are tolerated: time is a bonus dimension, never a
-   * reason the imagery fails to paint. */
-  async #applyTemporalDomain(dataset: string | undefined, epoch: number): Promise<void> {
+  /** Feeds the time slider AND the data-framing (issue #182): fetches
+   * the layer's granule listing (when its metadata linked one), hands
+   * the acquisition datetimes to the slider, and records where the data
+   * IS — the union of granule footprints, falling back to the tileset
+   * metadata bounds for static layers, unknown when neither exists (the
+   * zoom-to-data control hides then). Failures are tolerated: both are
+   * bonus affordances, never a reason the imagery fails to paint. */
+  async #applyDataDomain(metadata: LayerMetadata | undefined, epoch: number): Promise<void> {
     let frames: string[] = [];
-    if (dataset !== undefined) {
+    let footprints: GranuleBbox[] = [];
+    if (metadata?.dataset !== undefined) {
       try {
-        const url = `${this.server}/datasets/${encodeURIComponent(dataset)}/granules`;
+        const url = `${this.server}/datasets/${encodeURIComponent(metadata.dataset)}/granules`;
         const response = await fetch(url, { headers: { accept: "application/json" } });
         if (response.ok) {
-          frames = parseGranuleDatetimes(await response.json());
+          const body: unknown = await response.json();
+          frames = parseGranuleDatetimes(body);
+          footprints = ((body as { granules?: { bbox?: unknown }[] }).granules ?? [])
+            .map((granule) => parseBbox(granule.bbox))
+            .filter((bbox): bbox is GranuleBbox => bbox !== undefined);
         }
       } catch {
         frames = [];
+        footprints = [];
       }
     }
     if (epoch !== this.#epoch) {
       return;
     }
+    const union = unionBbox(footprints);
+    this.#dataBounds = union
+      ? { west: union[0], south: union[1], east: union[2], north: union[3] }
+      : metadata?.bounds;
+    this.#zoomData?.update(this.#dataBounds !== undefined);
     this.#time?.setDomain(frames, this.getAttribute("datetime"));
   }
 }

@@ -24,6 +24,48 @@
  * `bbox` field of the granules API (`GET /datasets/{id}/granules`). */
 export type GranuleBbox = readonly [number, number, number, number];
 
+/** `bbox` as the wire carries it → the checked tuple, or undefined when
+ * malformed (a granule without a usable footprint is skipped, honestly,
+ * rather than painted somewhere wrong). Shared by every consumer of the
+ * granules API's `bbox` — the dataset browser's list and the map's
+ * data-framing (issue #182 follow-up) parse through this one function. */
+export function parseBbox(raw: unknown): GranuleBbox | undefined {
+  if (!Array.isArray(raw) || raw.length !== 4) {
+    return undefined;
+  }
+  const [west, south, east, north] = raw as unknown[];
+  if (
+    typeof west !== "number" ||
+    typeof south !== "number" ||
+    typeof east !== "number" ||
+    typeof north !== "number"
+  ) {
+    return undefined;
+  }
+  return [west, south, east, north];
+}
+
+/** The bounding union of footprints — where a layer's data IS: the
+ * envelope the map frames when a selected layer is nowhere in view.
+ * `undefined` on an empty list ("no data" must stay distinguishable
+ * from "data at [0,0,0,0]"). Plain min/max envelope: the committed
+ * datasets are single-scene stacks; an antimeridian-aware union can
+ * arrive with a dataset that needs one. */
+export function unionBbox(bboxes: readonly GranuleBbox[]): GranuleBbox | undefined {
+  let union: [number, number, number, number] | undefined;
+  for (const [west, south, east, north] of bboxes) {
+    union = union
+      ? [
+          Math.min(union[0], west),
+          Math.min(union[1], south),
+          Math.max(union[2], east),
+          Math.max(union[3], north),
+        ]
+      : [west, south, east, north];
+  }
+  return union;
+}
+
 /** The one granule slice the footprint paint needs. */
 export interface FootprintGranule {
   id: string;

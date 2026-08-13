@@ -403,3 +403,62 @@ test("play advances frames and prefetches the next frame before showing it", asy
   await page.waitForTimeout(2_500); // two would-be ticks
   await expect(slider(page)).toHaveAttribute("data-datetime", at ?? "");
 });
+
+// --- finding the data (issue #182 follow-up): the ~10 km fire window
+// must be reachable without knowing where on Earth to look.
+
+/** The map's current view, read off the live MapLibre instance. */
+async function mapView(page: Page): Promise<{ lng: number; lat: number; zoom: number }> {
+  return await page.evaluate(() => {
+    const el = document.querySelector("swath-map") as {
+      map?: { getCenter(): { lng: number; lat: number }; getZoom(): number };
+    } | null;
+    const map = el?.map;
+    if (!map) {
+      throw new Error("swath-map has no map instance");
+    }
+    const center = map.getCenter();
+    return { lng: center.lng, lat: center.lat, zoom: map.getZoom() };
+  });
+}
+
+const zoomToData = (page: Page) => page.getByRole("button", { name: "Zoom to the layer's data" });
+
+test("switching to the off-screen fire layer auto-frames it; deep links are honored", async ({
+  page,
+}) => {
+  // Start on the Colorado fixture view (an explicit, URL-carried view).
+  await page.goto(`${DEMO_PATH}?layer=ndvi&center=-105.4475,39.2650&zoom=11`);
+  await waitForFittedView(page);
+
+  // The user picks the fire layer in the rail: its footprint is nowhere
+  // near Colorado, so the view auto-frames the data.
+  await page.locator(`swath-layer-panel button[data-layer="${LAYER}"]`).click();
+  await expect.poll(async () => (await mapView(page)).lng, { timeout: 30_000 }).toBeLessThan(-121);
+  const framedView = await mapView(page);
+  expect(framedView.lng).toBeGreaterThan(-122.5);
+  expect(framedView.lat).toBeGreaterThan(39.5);
+  expect(framedView.lat).toBeLessThan(40.5);
+  // The framed view is user-driven, so the share link follows it.
+  await expect(page).toHaveURL(/layer=park-fire-ndvi/);
+  await expect.poll(() => new URL(page.url()).searchParams.get("center") ?? "").toMatch(/^-121\./);
+  // The recovery affordance is on screen for the current layer.
+  await expect(zoomToData(page)).toBeVisible();
+
+  // A deep link with an explicit view is HONORED — no auto-frame stomp,
+  // and the pasted URL survives byte-for-byte (the issue #108 contract).
+  const deepLink = `${DEMO_PATH}?layer=${LAYER}&center=-105.4475,39.265&zoom=11`;
+  await page.goto(deepLink);
+  // The apply has fully settled once the slider carries its domain.
+  await expect(slider(page)).toHaveAttribute("data-frames", /\d+/);
+  const held = await mapView(page);
+  expect(held.lng).toBeCloseTo(-105.4475, 3);
+  expect(held.lat).toBeCloseTo(39.265, 3);
+  expect(page.url()).toBe(new URL(deepLink, page.url()).toString());
+
+  // From that data-less view, "zoom to data" recovers — and the share
+  // link follows the user-driven move.
+  await zoomToData(page).click();
+  await expect.poll(async () => (await mapView(page)).lng).toBeLessThan(-121);
+  await expect.poll(() => new URL(page.url()).searchParams.get("center") ?? "").toMatch(/^-121\./);
+});

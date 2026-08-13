@@ -64,10 +64,13 @@ The time dimension, live (ADR 0015, issue #182). The demo stack also ingests the
 2024 Park Fire series** (HLS T10TFK subsets over Chico, CA — `tests/fixtures/README.md`), so the
 same `just demo` session can scrub a real fire season:
 
-1. In the layer rail, switch to **Park Fire NDVI**. A **time slider** appears bottom-center —
-   its stops are the dataset's six acquisition dates, read straight from
-   `GET /datasets/hls-s30-fire/granules` (a layer with a single date shows no slider at all,
-   which is why the landing page looks exactly as before).
+1. In the layer rail, switch to **Park Fire NDVI**. The fire window is a tiny ~10 km patch near
+   Chico, so the map **auto-frames the layer's data** — picking a layer whose footprint is
+   nowhere in view jumps straight to it (a **zoom to data** button, top-right, does the same at
+   any time; deep links with an explicit `center`/`zoom` are always honored instead). A **time
+   slider** appears bottom-center — its stops are the dataset's six acquisition dates, read
+   straight from `GET /datasets/hls-s30-fire/granules` (a layer with a single date shows no
+   slider at all, which is why the landing page looks exactly as before).
 2. Scrub oldest → newest with the x-ray on. Every frame is one `datetime=` request re-pointing
    the raster source at the granule that was current then (latest-at-or-before — the server's
    rule, not the client's guess). Watch the vegetation index collapse between July 22 and
