@@ -51,3 +51,26 @@ kind = "ndvi"
 [datasets.layers.bands]
 nir = "b8a"
 red = "b04"
+
+# The six-date Park Fire series (tests/fixtures/README.md, issue #179):
+# the time-dimension e2e (ADR 0015, issue #180) drops all six granules
+# via tests/e2e/drop-fire-granules.sh and steps `datetime=` across them.
+# Grayscale so served frames compare against the committed rio-tiler
+# oracle goldens (crates/swath-render/tests/data/fire-ndvi-*). The layer
+# id deliberately sorts after "ndvi": the zero-config web demo picks the
+# FIRST tileset in id order, and that must stay `ndvi`.
+[[datasets]]
+id = "hls-s30-fire"
+title = "HLS Sentinel-2 (S30), 2024 Park Fire"
+description = "Six-date T10TFK time series across the 2024 Park Fire."
+license = "CC0-1.0"
+
+[[datasets.layers]]
+id = "park-fire-ndvi"
+title = "Park Fire NDVI"
+description = "(B8A - B04) / (B8A + B04), rescaled -1..1, grayscale."
+kind = "ndvi"
+colormap = "grayscale"
+[datasets.layers.bands]
+nir = "b8a"
+red = "b04"

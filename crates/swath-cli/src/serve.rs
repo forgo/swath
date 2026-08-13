@@ -263,6 +263,16 @@ where
                 }
             }
         }
+        // Derived temporal extent (ADR 0015): the config compiles an
+        // open "no granule yet" interval; the served truth is the
+        // min/max acquisition datetime of what has actually been
+        // ingested. Re-deriving from all granules at registration also
+        // heals any drift the incremental per-ingest widening (the
+        // core's `ingest_granule`) could leave behind.
+        let granules = catalog
+            .find_granules(&dataset.id, &swath_core::catalog::GranuleQuery::default())
+            .await?;
+        dataset.extent.interval = swath_core::catalog::temporal_interval(&granules);
         catalog.upsert_dataset(dataset).await?;
         tracing::info!(
             "registered dataset {id} ({layers} layer(s))",
@@ -982,6 +992,22 @@ mod tests {
             .upsert_dataset(&existing)
             .await
             .expect("seed dataset");
+        // Granules from earlier runs: registration must derive the
+        // dataset's temporal extent from them (ADR 0015) rather than
+        // re-registering the config's open placeholder interval.
+        for (id, datetime) in [
+            ("g-jun", "2024-06-07T19:03:00Z"),
+            ("g-oct", "2024-10-15T19:03:00Z"),
+            ("g-aug", "2024-08-16T19:03:00Z"),
+        ] {
+            let mut granule = granule_event("hls-s30").granule;
+            granule.id = GranuleId::new(id);
+            granule.datetime = Datetime::new(datetime).expect("valid datetime");
+            catalog
+                .upsert_granules(std::slice::from_ref(&granule))
+                .await
+                .expect("seed granule");
+        }
 
         let shared = Shared {
             bind: cfg.bind,
@@ -1004,6 +1030,14 @@ mod tests {
             ids,
             ["truecolor", "ndvi", "xyz-restored"],
             "config layers plus the restored service; broken/colliding/stale dropped"
+        );
+        assert_eq!(
+            stored.extent.interval,
+            TimeRange {
+                start: Some(Datetime::new("2024-06-07T19:03:00Z").expect("valid datetime")),
+                end: Some(Datetime::new("2024-10-15T19:03:00Z").expect("valid datetime")),
+            },
+            "registration derives the temporal extent from ingested granules (ADR 0015)"
         );
     }
 

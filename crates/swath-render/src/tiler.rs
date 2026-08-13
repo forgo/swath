@@ -650,6 +650,10 @@ async fn render_planned<S: RasterSource, R: Reproject + ?Sized>(
         },
         ingest_to_pixel_ms: request.ingested_at.as_ref().map(ingest_to_pixel_ms),
         plan: planned.trace(),
+        // The temporal decision is resolution-time knowledge: the API
+        // layer (which resolved the granule) fills it in after the render
+        // (ADR 0015); the tiler itself only knows assets.
+        temporal: None,
     };
 
     Ok((
@@ -807,6 +811,7 @@ fn cache_hit(
         },
         ingest_to_pixel_ms: None,
         plan: planned.trace(),
+        temporal: None,
     };
     (
         EncodedTile {

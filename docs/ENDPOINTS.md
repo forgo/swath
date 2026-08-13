@@ -43,7 +43,7 @@ and no phantom rows survive.
 | GET | `/tiles` | always | Tilesets list (OGC dataset-tilesets path) |
 | GET | `/tilesets` | always | Tilesets list (canonical resource collection; same document) |
 | GET | `/tilesets/{layerId}` | always | Tileset metadata incl. derived bounding box |
-| GET | `/tilesets/{layerId}/tiles/{tileMatrix}/{tileRow}/{tileCol}` | always | The tile: PNG bytes + `x-swath-trace` |
+| GET | `/tilesets/{layerId}/tiles/{tileMatrix}/{tileRow}/{tileCol}` | always | The tile: PNG bytes + `x-swath-trace`; optional `datetime=` frame selection (ADR 0015) |
 | GET | `/traces` | always | X-ray SSE stream of every render |
 | GET | `/healthz` | always | Liveness probe (process only) |
 | GET/HEAD | *fallback* | always | Embedded UI assets; unknown paths are plain 404 |
@@ -160,6 +160,16 @@ curl -s http://localhost:8080/tilesets
       ]
     },
     {
+      "title": "Park Fire NDVI",
+      "dataType": "map",
+      "crs": "http://www.opengis.net/def/crs/EPSG/0/3857",
+      "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
+      "links": [
+        { "href": "http://localhost:8080/tilesets/park-fire-ndvi", "rel": "self", "type": "application/json", "title": "Park Fire NDVI tileset metadata" },
+        { "href": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad", "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme", "type": "application/json", "title": "WebMercatorQuad tile matrix set definition" }
+      ]
+    },
+    {
       "title": "HLS true color",
       "dataType": "map",
       "crs": "http://www.opengis.net/def/crs/EPSG/0/3857",
@@ -231,6 +241,54 @@ The same request again (with a cache configured) is a hit:
 x-swath-trace: {"decision":"cache_hit","bytes_read":0,"total_ms":3}
 ```
 
+**`datetime=` — the time dimension (ADR 0015).** One optional query
+parameter selects **which granule backs the frame**, with exactly the
+OGC API grammar (Features/Common Part 2, the grammar EDR reuses): an
+RFC 3339 UTC instant (`2024-08-01T00:00:00Z`) or an interval
+(`start/end`, either side openable as `..`, never both). An instant
+resolves **latest-at-or-before** (the granule that was current then); an
+interval resolves to the latest granule within it (inclusive bounds);
+absent means the fully open interval — plain latest, byte-identical to a
+request without the parameter. Frames cache under the granule they
+*resolved to*: two spellings selecting the same granule share one cache
+entry, different granules never collide. The trace on the SSE stream
+carries the decision (`temporal`: resolved granule id + datetime, the
+raw request, and the rule). Static (fixtures-mode) layers are a single
+timeless frame: the grammar is validated, then every valid value serves
+that frame. Askable times are served on the collection document (the
+derived temporal extent, below).
+
+```sh
+# The 2024 Park Fire demo series: the same tile, before and after the burn.
+curl -s -o pre.png  "http://localhost:8080/tilesets/park-fire-ndvi/tiles/13/3100/1326?datetime=2024-08-01T00:00:00Z"
+curl -s -o post.png "http://localhost:8080/tilesets/park-fire-ndvi/tiles/13/3100/1326?datetime=2024-08-20T00:00:00Z"
+```
+
+A malformed value is a 400 naming the grammar; a window selecting no
+granule (before the first acquisition, or a narrowed interval) is the
+same honest 404 shape as "no granule ingested yet":
+
+```sh
+curl -s "http://localhost:8080/tilesets/park-fire-ndvi/tiles/13/3100/1326?datetime=yesterday"
+```
+
+```json
+{"detail":"datetime `yesterday`: `yesterday` is not an RFC 3339 UTC (`Z`) timestamp","status":400,"title":"Bad Request","type":"about:blank"}
+```
+
+```sh
+curl -s "http://localhost:8080/tilesets/park-fire-ndvi/tiles/13/3100/1326?datetime=2020-01-01T00:00:00Z"
+```
+
+```json
+{
+  "detail": "layer `park-fire-ndvi`: no granule of dataset `hls-s30-fire` has an acquisition datetime within [.., 2020-01-01T00:00:00Z]",
+  "status": 404,
+  "title": "Not Found",
+  "type": "about:blank"
+}
+```
+
 Error taxonomy (OGC 20-057 allows 404 or 400 for out-of-range; Swath's
 split — addresses that *cannot exist* are 404, malformed ones 400):
 
@@ -262,9 +320,12 @@ unknown layer or an out-of-matrix row/col is 404.
 
 The x-ray SSE stream (`text/event-stream`): one `trace` event per render
 from connection time on, with the full trace the header only summarizes —
-sources, byte-range provenance, stage timings, and the planner's
-considered strategies with reasons. Slow subscribers lose events
-(`lagged`), never delay a tile.
+sources, byte-range provenance, stage timings, the planner's considered
+strategies with reasons, and (catalog-backed renders, ADR 0015) the
+`temporal` decision: which granule the frame resolved to, the raw
+`datetime` requested, and the rule (`latest`, `latest_at_or_before`, or
+`latest_in_interval`). Slow subscribers lose events (`lagged`), never
+delay a tile.
 
 ```sh
 curl -N http://localhost:8080/traces
@@ -273,7 +334,7 @@ curl -N http://localhost:8080/traces
 ```
 event: trace
 id: 3
-data: {"tile":"12/848/1562","layer":"truecolor","trace":{"decision":"live","source":"hlss30-t13sdd-2024158-b04.tif","sources":["hlss30-t13sdd-2024158-b04.tif","hlss30-t13sdd-2024158-b03.tif","hlss30-t13sdd-2024158-b02.tif"],"crs_from":32613,"crs_to":3857,"bytes_read":430088,"provenance":[{"path":"hlss30-t13sdd-2024158-b04.tif","offset":195269,"length":50384},{"path":"hlss30-t13sdd-2024158-b04.tif","offset":245661,"length":97869},{"path":"hlss30-t13sdd-2024158-b03.tif","offset":189844,"length":48780},{"path":"hlss30-t13sdd-2024158-b03.tif","offset":238632,"length":93462},{"path":"hlss30-t13sdd-2024158-b02.tif","offset":187079,"length":48101},{"path":"hlss30-t13sdd-2024158-b02.tif","offset":235188,"length":91492}],"timings":{"read_ms":206,"warp_ms":28,"pixel_ops_ms":0,"encode_ms":7,"total_ms":242},"ingest_to_pixel_ms":121492,"plan":{"chosen":"live","considered":[{"strategy":"cache_hit","estimated_cost_bytes":0,"admissible":false,"reason":"cache miss"},{"strategy":{"overview":{"factor":0}},"estimated_cost_bytes":0,"admissible":false,"reason":"no overview factor eligible at this zoom"},{"strategy":"live","estimated_cost_bytes":388620,"admissible":true,"reason":"full-resolution read"}]}}}
+data: {"tile":"12/848/1562","layer":"truecolor","trace":{"decision":"live","source":"hlss30-t13sdd-2024158-b04.tif","sources":["hlss30-t13sdd-2024158-b04.tif","hlss30-t13sdd-2024158-b03.tif","hlss30-t13sdd-2024158-b02.tif"],"crs_from":32613,"crs_to":3857,"bytes_read":430088,"provenance":[{"path":"hlss30-t13sdd-2024158-b04.tif","offset":195269,"length":50384},{"path":"hlss30-t13sdd-2024158-b04.tif","offset":245661,"length":97869},{"path":"hlss30-t13sdd-2024158-b03.tif","offset":189844,"length":48780},{"path":"hlss30-t13sdd-2024158-b03.tif","offset":238632,"length":93462},{"path":"hlss30-t13sdd-2024158-b02.tif","offset":187079,"length":48101},{"path":"hlss30-t13sdd-2024158-b02.tif","offset":235188,"length":91492}],"timings":{"read_ms":206,"warp_ms":28,"pixel_ops_ms":0,"encode_ms":7,"total_ms":242},"ingest_to_pixel_ms":121492,"plan":{"chosen":"live","considered":[{"strategy":"cache_hit","estimated_cost_bytes":0,"admissible":false,"reason":"cache miss"},{"strategy":{"overview":{"factor":0}},"estimated_cost_bytes":0,"admissible":false,"reason":"no overview factor eligible at this zoom"},{"strategy":"live","estimated_cost_bytes":388620,"admissible":true,"reason":"full-resolution read"}]},"temporal":{"granule_id":"hlss30-t13sdd-2024158","granule_datetime":"2024-06-06T17:54:00Z","requested":null,"rule":"latest"}}}
 ```
 
 ### `GET /healthz`
@@ -370,7 +431,12 @@ curl -s http://localhost:8080/.well-known/openeo
 One STAC collection per dataset (datacube extension: spatial/temporal
 dimensions plus the band vocabulary a graph may load). The list wraps the
 same documents with a `links` array; unknown ids are the standardized
-`CollectionNotFound` (404).
+`CollectionNotFound` (404). The **temporal extent is derived from
+ingested granules** (min/max acquisition datetime, ADR 0015 — how a
+client learns what `datetime=` values are askable; here the stack's one
+ingested granule): `[null, null]` means no granule yet. The spatial
+extent remains a whole-world placeholder (its derivation is deferred —
+`docs/ROADMAP.md` row 15, Records trigger).
 
 ```sh
 curl -s http://localhost:8080/collections/hls-s30
@@ -380,14 +446,14 @@ curl -s http://localhost:8080/collections/hls-s30
 {
   "cube:dimensions": {
     "bands": { "type": "bands", "values": ["b02", "b03", "b04", "b8a"] },
-    "t": { "extent": [null, null], "type": "temporal" },
+    "t": { "extent": ["2024-06-06T17:54:00Z", "2024-06-06T17:54:00Z"], "type": "temporal" },
     "x": { "axis": "x", "extent": [-180.0, 180.0], "reference_system": 4326, "type": "spatial" },
     "y": { "axis": "y", "extent": [-90.0, 90.0], "reference_system": 4326, "type": "spatial" }
   },
   "description": "Harmonized Landsat Sentinel-2, S30 product.",
   "extent": {
     "spatial": { "bbox": [[-180.0, -90.0, 180.0, 90.0]] },
-    "temporal": { "interval": [[null, null]] }
+    "temporal": { "interval": [["2024-06-06T17:54:00Z", "2024-06-06T17:54:00Z"]] }
   },
   "id": "hls-s30",
   "license": "CC0-1.0",

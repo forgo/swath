@@ -105,6 +105,41 @@ pub struct PlanTrace {
     pub considered: Vec<CandidateTrace>,
 }
 
+/// The rule that selected the granule backing a time-parameterized frame
+/// (ADR 0015): how the request's `datetime` (or its absence) was applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TemporalRule {
+    /// No `datetime` was requested: the fully open interval, resolving to
+    /// the latest granule — the pre-ADR-0015 behavior, unchanged.
+    Latest,
+    /// An instant `t`: the latest granule with acquisition datetime ≤ `t`
+    /// (the granule that was current at `t`).
+    LatestAtOrBefore,
+    /// An interval: the latest granule whose datetime falls within the
+    /// inclusive (optionally open-ended) interval.
+    LatestInInterval,
+}
+
+/// The temporal decision behind one rendered frame (ADR 0015): which
+/// granule the tile's `datetime` parameter resolved to, and by what rule
+/// — the x-ray answer to "which acquisition am I looking at?". Present on
+/// catalog-backed renders only; static/fixture layers have no time
+/// dimension and no granule, so their traces carry nothing here.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TemporalTrace {
+    /// The granule the frame resolved to.
+    pub granule_id: String,
+    /// That granule's acquisition datetime (RFC 3339 UTC).
+    pub granule_datetime: String,
+    /// The request's raw `datetime` parameter, verbatim; `None` when the
+    /// request carried none (absent = latest).
+    pub requested: Option<String>,
+    /// The resolution rule that applied.
+    pub rule: TemporalRule,
+}
+
 /// The structured explanation of one rendered tile — what happened, from
 /// where, and how long it took.
 ///
@@ -161,6 +196,12 @@ pub struct Trace {
     /// with estimates. Present on every planned render; `None` only for
     /// traces predating the planner (or synthetic ones).
     pub plan: Option<PlanTrace>,
+    /// The temporal decision (ADR 0015): the granule this frame resolved
+    /// to and the rule that chose it. Present on catalog-backed renders;
+    /// `None` (and omitted from the JSON — the deliberate, additive
+    /// contract change of #180) for static layers and older traces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temporal: Option<TemporalTrace>,
 }
 
 #[cfg(test)]
@@ -223,6 +264,7 @@ mod tests {
             },
             ingest_to_pixel_ms: Some(950),
             plan: Some(sample_plan()),
+            temporal: None,
         }
     }
 
@@ -290,6 +332,45 @@ mod tests {
             .unwrap(),
             serde_json::json!({"cache_hit": {"key": "0123abcd"}}),
         );
+    }
+
+    /// The temporal decision's wire shape (ADR 0015, #180): pinned like
+    /// the rest of the contract. `temporal` is omitted entirely when
+    /// `None` — pre-#180 traces (and static-layer renders) keep their
+    /// exact bytes, which is what makes the field additive.
+    #[test]
+    fn temporal_wire_shape_is_pinned_and_absent_when_none() {
+        let json = serde_json::to_value(sample()).unwrap();
+        assert!(
+            json.as_object().unwrap().get("temporal").is_none(),
+            "a None temporal must be omitted, not null"
+        );
+
+        let mut trace = sample();
+        trace.temporal = Some(super::TemporalTrace {
+            granule_id: "hlss30-t10tfk-2024204".to_owned(),
+            granule_datetime: "2024-07-22T19:03:00Z".to_owned(),
+            requested: Some("2024-08-01T00:00:00Z".to_owned()),
+            rule: super::TemporalRule::LatestAtOrBefore,
+        });
+        let json = serde_json::to_value(&trace).unwrap();
+        assert_eq!(
+            json["temporal"],
+            serde_json::json!({
+                "granule_id": "hlss30-t10tfk-2024204",
+                "granule_datetime": "2024-07-22T19:03:00Z",
+                "requested": "2024-08-01T00:00:00Z",
+                "rule": "latest_at_or_before",
+            }),
+        );
+        let back: Trace = serde_json::from_value(json).unwrap();
+        assert_eq!(back, trace);
+
+        // Older serialized traces (no `temporal` key) still deserialize.
+        let mut old = serde_json::to_value(sample()).unwrap();
+        old.as_object_mut().unwrap().remove("temporal");
+        let back: Trace = serde_json::from_value(old).unwrap();
+        assert_eq!(back.temporal, None);
     }
 
     #[test]

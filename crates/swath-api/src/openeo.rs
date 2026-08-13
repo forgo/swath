@@ -989,7 +989,10 @@ where
     let coord = preview_tile(&bbox);
     let resolved = app
         .provider
-        .resolve_template(&template)
+        // Previews render the latest granule (fully open window): the
+        // graph's `temporal_extent` stays accepted-and-ignored until the
+        // compiler grows resolution windows (ADR 0015's graph half, #181).
+        .resolve_template(&template, None)
         .await
         .map_err(preview_resolution_error)?;
     let request = resolved.tile_request(coord);

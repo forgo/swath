@@ -374,6 +374,37 @@ mod tests {
         assert_ne!(v1, layer_version(Some("g-2024158"), r#"{"inputs":[{}]}"#));
     }
 
+    /// The ADR 0015 cache-identity pin: a time-parameterized frame keys
+    /// under the version of the granule it *resolved to*. Two requests
+    /// whose `datetime`s resolve to different granules get distinct
+    /// versions and therefore distinct keys; two requests resolving to
+    /// the same granule share one key — no `datetime` string is (or may
+    /// ever be) an input to the key, so how the granule was asked for
+    /// cannot fragment the cache.
+    #[test]
+    fn temporal_frames_key_by_resolved_granule_only() {
+        let plan = r#"{"inputs":[{"name":"b04"}]}"#;
+        let key_for = |granule: &str| {
+            let version = layer_version(Some(granule), plan);
+            TileKey::compute(&TileKeyInputs {
+                layer_version: &version,
+                ..inputs()
+            })
+        };
+        // Distinct resolved granules (e.g. datetime=pre-fire vs
+        // datetime=post-fire) → distinct keys.
+        assert_ne!(
+            key_for("hlss30-t10tfk-2024204"),
+            key_for("hlss30-t10tfk-2024229")
+        );
+        // Same resolved granule — whether via an instant, an interval,
+        // or an absent datetime — → the same key, computed twice.
+        assert_eq!(
+            key_for("hlss30-t10tfk-2024229"),
+            key_for("hlss30-t10tfk-2024229")
+        );
+    }
+
     #[test]
     fn key_serializes_as_its_hex_string() {
         let key = TileKey::compute(&inputs());

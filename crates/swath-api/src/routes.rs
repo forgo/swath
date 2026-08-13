@@ -9,10 +9,11 @@
 //! the honesty rules on `/conformance`, and the documented behavioral
 //! choices (transparent 200 for off-data tiles, 404-vs-400 taxonomy).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -22,7 +23,7 @@ use swath_core::crs::Crs;
 use swath_core::reproject::Reproject;
 use swath_core::source::RasterSource;
 use swath_core::tile::{LonLatBounds, TileCoord};
-use swath_core::trace::{Strategy, Trace};
+use swath_core::trace::{Strategy, TemporalRule, TemporalTrace, Trace};
 use swath_render::{render_tile, render_tile_cached};
 
 use crate::error::ApiError;
@@ -397,7 +398,7 @@ where
         .layers
         .identity(&layer_id)
         .ok_or_else(|| ApiError::not_found(format!("no layer `{layer_id}`")))?;
-    let resolved = app.layers.resolve(&layer_id).await?;
+    let resolved = app.layers.resolve(&layer_id, None).await?;
     let bounds = layer_bounds(&app.source, &app.reproject, &resolved.layer).await?;
     let item = tileset_item(&app.base_url, &identity);
 
@@ -434,9 +435,19 @@ where
 
 // --- The tile handler ---
 
+/// The tile: PNG bytes for one frame. One optional query parameter,
+/// `datetime` (ADR 0015) — the OGC API grammar (an RFC 3339 UTC instant,
+/// or `start/end` with either side openable as `..`, never both;
+/// [`crate::temporal`]) — selects **which granule backs the frame**:
+/// latest-at-or-before for an instant, latest-within for an interval,
+/// plain latest when absent (byte-for-byte the pre-#180 behavior).
+/// Malformed → 400 naming the grammar; a window selecting no granule →
+/// 404, the same shape as "no granule ingested yet". Other query
+/// parameters are ignored, as on the granules route.
 async fn tile<S, R, L, C>(
     State(app): State<Arc<ApiState<S, R, L, C>>>,
     Path((layer_id, tile_matrix, tile_row, tile_col)): Path<(String, String, String, String)>,
+    Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError>
 where
@@ -447,7 +458,14 @@ where
 {
     let coord = parse_tile_path(&tile_matrix, &tile_row, &tile_col)?;
     check_accepts_png(&headers)?;
-    let layer = app.layers.resolve(&layer_id).await?;
+    let datetime = query
+        .get("datetime")
+        .map(|raw| crate::temporal::parse_datetime_param(raw))
+        .transpose()?;
+    let window = datetime
+        .as_ref()
+        .map(crate::temporal::DatetimeParam::window);
+    let layer = app.layers.resolve(&layer_id, window.as_ref()).await?;
 
     let request = layer.tile_request(coord);
     let render = match &app.cache {
@@ -473,8 +491,26 @@ where
         }
         None => render_tile(&app.source, &app.reproject, &request).await,
     };
-    let (encoded, trace) =
+    let (encoded, mut trace) =
         render.map_err(|err| ApiError::internal(format!("tile render failed: {err}")))?;
+
+    // The temporal decision (ADR 0015) is resolution-time knowledge, so
+    // the handler — not the tiler — records it: which granule this frame
+    // resolved to, under which rule. Catalog-backed layers only; static
+    // layers have no time dimension and their traces stay byte-identical.
+    if let (Some(granule_id), Some(granule_datetime)) = (&layer.granule_id, &layer.granule_datetime)
+    {
+        trace.temporal = Some(TemporalTrace {
+            granule_id: granule_id.clone(),
+            granule_datetime: granule_datetime.to_string(),
+            requested: query.get("datetime").cloned(),
+            rule: match &datetime {
+                None => TemporalRule::Latest,
+                Some(crate::temporal::DatetimeParam::Instant(_)) => TemporalRule::LatestAtOrBefore,
+                Some(crate::temporal::DatetimeParam::Interval(_)) => TemporalRule::LatestInInterval,
+            },
+        });
+    }
 
     // 200 + PNG bytes, with the Trace both summarized in a debug header
     // and attached whole as a response extension (the #28 SSE seam — the

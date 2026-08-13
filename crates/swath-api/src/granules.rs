@@ -38,7 +38,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::routing::get;
 use swath_core::catalog::{
-    AssetKind, Bbox, Catalog, CatalogError, DatasetId, Datetime, Granule, GranuleQuery, TimeRange,
+    AssetKind, Bbox, Catalog, CatalogError, DatasetId, Granule, GranuleQuery, TimeRange,
 };
 
 use crate::error::ApiError;
@@ -347,42 +347,18 @@ fn parse_bbox(raw: &str) -> Result<Bbox, ApiError> {
     Ok(bbox)
 }
 
-/// Parses `datetime`: a single RFC 3339 UTC instant (an inclusive
-/// point-range), or `start/end` with either side `..` (open).
+/// Parses `datetime` through the shared OGC grammar ([`crate::temporal`],
+/// also the tiles route's `datetime`): here an instant is an inclusive
+/// point-range `[t, t]` — "granules acquired at `t`" — a *filter*, unlike
+/// the tiles route's latest-at-or-before *resolution* of the same form.
 fn parse_datetime(raw: &str) -> Result<TimeRange, ApiError> {
-    let instant = |part: &str| -> Result<Option<Datetime>, ApiError> {
-        if part == ".." {
-            return Ok(None);
-        }
-        Datetime::new(part).map(Some).map_err(|_| {
-            ApiError::bad_request(format!(
-                "datetime `{raw}`: `{part}` is not an RFC 3339 UTC (`Z`) timestamp"
-            ))
-        })
-    };
-    match raw.split_once('/') {
-        None => {
-            let point = instant(raw)?.ok_or_else(|| {
-                ApiError::bad_request(format!("datetime `{raw}` is open on both sides"))
-            })?;
-            Ok(TimeRange {
-                start: Some(point.clone()),
-                end: Some(point),
-            })
-        }
-        Some((start, end)) => {
-            let range = TimeRange {
-                start: instant(start)?,
-                end: instant(end)?,
-            };
-            if range.start.is_none() && range.end.is_none() {
-                return Err(ApiError::bad_request(format!(
-                    "datetime `{raw}` is open on both sides"
-                )));
-            }
-            Ok(range)
-        }
-    }
+    Ok(match crate::temporal::parse_datetime_param(raw)? {
+        crate::temporal::DatetimeParam::Instant(point) => TimeRange {
+            start: Some(point.clone()),
+            end: Some(point),
+        },
+        crate::temporal::DatetimeParam::Interval(range) => range,
+    })
 }
 
 #[cfg(test)]

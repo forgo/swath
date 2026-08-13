@@ -114,7 +114,8 @@
 //! Handlers resolve `{layerId}` through the [`LayerProvider`] seam: the
 //! in-memory [`LayerRegistry`] (fixtures/config mode, unchanged) or the
 //! catalog-backed [`CatalogLayers`], whose tiles render from the **latest
-//! granule** of each layer's dataset and whose Traces carry
+//! granule within the request's `datetime` window** (ADR 0015; absent =
+//! plain latest) of each layer's dataset and whose Traces carry
 //! `ingest_to_pixel_ms` (also surfaced in the `X-Swath-Trace` header) — the
 //! north-star metric's serve half. See [`provider`](CatalogLayers) docs.
 
@@ -126,6 +127,7 @@ pub mod openeo;
 mod provider;
 mod registry;
 mod routes;
+mod temporal;
 pub mod traces;
 pub mod ui;
 

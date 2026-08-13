@@ -13,11 +13,16 @@
 //!
 //! A [`CatalogLayers`] layer is a compiled render template over a *dataset*;
 //! each tile request resolves the plan's band names against the assets of
-//! the dataset's **latest granule** — "latest" = maximum acquisition
-//! `datetime` at millisecond precision, ties broken by granule id (a total,
-//! documented order). The granule's `ingested_at` rides into the
-//! [`TileRequest`], where the tiler computes `Trace::ingest_to_pixel_ms` at
-//! render completion.
+//! the dataset's **latest granule within the request's resolution
+//! window** (ADR 0015): the tiles route's `datetime` parameter parses to
+//! an inclusive, optionally open-ended window, and an absent parameter is
+//! the fully open window — plain **latest**, the original behavior,
+//! unchanged. "Latest" = maximum acquisition `datetime` at millisecond
+//! precision, ties broken by granule id (a total, documented order). The
+//! granule's `ingested_at` rides into the [`TileRequest`], where the
+//! tiler computes `Trace::ingest_to_pixel_ms` at render completion; its
+//! id and acquisition datetime ride out on the [`ResolvedLayer`] for the
+//! cache's `layer_version` and the Trace's temporal decision.
 //!
 //! Resolution is one `Catalog::find_granules` per tile request — honest
 //! walking-skeleton cost, noted for the planner/cache issues to optimize;
@@ -30,7 +35,9 @@
 
 use core::future::Future;
 
-use swath_core::catalog::{Catalog, CatalogError, DatasetId, Datetime, Granule, GranuleQuery};
+use swath_core::catalog::{
+    Catalog, CatalogError, DatasetId, Datetime, Granule, GranuleQuery, TimeRange,
+};
 use swath_core::tile::TileCoord;
 use swath_render::TileRequest;
 use swath_render::ir::RenderPlan;
@@ -62,8 +69,13 @@ pub struct ResolvedLayer {
     /// The id of the granule the assets resolved from (`None` for static
     /// layers) — the granule half of the cache's `layer_version` (#36,
     /// `swath_core::cache::layer_version`): a new granule is a new
-    /// version, which is the whole invalidation story.
+    /// version, which is the whole invalidation story. Under ADR 0015 a
+    /// time-parameterized frame keys under the granule it *resolved to*,
+    /// so this same field is also the whole temporal cache identity.
     pub granule_id: Option<String>,
+    /// The resolved granule's acquisition datetime (`None` for static
+    /// layers) — what the Trace's temporal decision reports (ADR 0015).
+    pub granule_datetime: Option<Datetime>,
 }
 
 impl ResolvedLayer {
@@ -89,10 +101,17 @@ pub trait LayerProvider: Send + Sync {
     /// The identity of one layer, or `None` if the id is not served.
     fn identity(&self, id: &str) -> Option<LayerIdentity>;
 
-    /// Resolves a layer to renderable form. Errors are API-shaped: unknown
-    /// id → 404, a catalog-backed layer with no granules yet → 404,
-    /// catalog failure → 500.
-    fn resolve(&self, id: &str) -> impl Future<Output = Result<ResolvedLayer, ApiError>> + Send;
+    /// Resolves a layer to renderable form, optionally constrained to a
+    /// temporal resolution `window` (ADR 0015: the tiles route's parsed
+    /// `datetime`; `None` = the fully open interval = latest — today's
+    /// behavior, unchanged). Errors are API-shaped: unknown id → 404, a
+    /// catalog-backed layer with no granule in the window (none ingested
+    /// yet, or the window selects none) → 404, catalog failure → 500.
+    fn resolve(
+        &self,
+        id: &str,
+        window: Option<&TimeRange>,
+    ) -> impl Future<Output = Result<ResolvedLayer, ApiError>> + Send;
 }
 
 /// The static registry is the trivial provider: resolution is a clone, and
@@ -116,7 +135,16 @@ impl LayerProvider for LayerRegistry {
         })
     }
 
-    async fn resolve(&self, id: &str) -> Result<ResolvedLayer, ApiError> {
+    /// A static layer is a single, timeless frame — it has no acquisition
+    /// datetime to select on, so every valid `window` resolves to that
+    /// one frame (the degenerate latest-at-or-before over a dateless
+    /// singleton). The grammar is still validated upstream; only catalog
+    /// mode has frames time can distinguish.
+    async fn resolve(
+        &self,
+        id: &str,
+        _window: Option<&TimeRange>,
+    ) -> Result<ResolvedLayer, ApiError> {
         let layer = self
             .get(id)
             .ok_or_else(|| ApiError::not_found(format!("no layer `{id}`")))?;
@@ -124,6 +152,7 @@ impl LayerProvider for LayerRegistry {
             layer: layer.clone(),
             ingested_at: None,
             granule_id: None,
+            granule_datetime: None,
         })
     }
 }
@@ -247,39 +276,65 @@ impl<C: Catalog> LayerProvider for CatalogLayers<C> {
         })
     }
 
-    async fn resolve(&self, id: &str) -> Result<ResolvedLayer, ApiError> {
+    async fn resolve(
+        &self,
+        id: &str,
+        window: Option<&TimeRange>,
+    ) -> Result<ResolvedLayer, ApiError> {
         let entry = self
             .entry(id)
             .ok_or_else(|| ApiError::not_found(format!("no layer `{id}`")))?;
-        self.resolve_template(&entry).await
+        self.resolve_template(&entry, window).await
     }
 }
 
 impl<C: Catalog> CatalogLayers<C> {
-    /// Resolves a layer template — registered or not — against the latest
-    /// granule of its dataset: the shared resolution of [`resolve`]
-    /// (which looks the template up by id first) and the openEO preview
-    /// (ADR 0014), which must resolve a *draft* template without ever
-    /// inserting it into the served layer set.
+    /// Resolves a layer template — registered or not — against the
+    /// **latest granule within `window`** of its dataset (ADR 0015:
+    /// `window` is the request's parsed `datetime`; `None` = fully open
+    /// = latest, the pre-#180 behavior byte-for-byte): the shared
+    /// resolution of [`resolve`] (which looks the template up by id
+    /// first) and the openEO preview (ADR 0014), which must resolve a
+    /// *draft* template without ever inserting it into the served layer
+    /// set. Mechanically still one `find_granules` per request — the
+    /// query now carries its already-existing `datetime` filter.
     ///
     /// [`resolve`]: LayerProvider::resolve
     ///
     /// # Errors
     ///
-    /// API-shaped like [`resolve`]: no granules yet → 404, catalog
-    /// failure → 500, a granule missing a required band → 500.
-    pub async fn resolve_template(&self, entry: &CatalogLayer) -> Result<ResolvedLayer, ApiError> {
+    /// API-shaped like [`resolve`]: no granule in the window (none
+    /// ingested yet, or a `datetime` that selects none — before the
+    /// first acquisition, or a narrowed interval) → 404 of one shape,
+    /// catalog failure → 500, a granule missing a required band → 500.
+    pub async fn resolve_template(
+        &self,
+        entry: &CatalogLayer,
+        window: Option<&TimeRange>,
+    ) -> Result<ResolvedLayer, ApiError> {
         let id = &entry.id;
+        let query = GranuleQuery {
+            bbox: None,
+            datetime: window.cloned(),
+        };
         let granules = self
             .catalog
-            .find_granules(&entry.dataset, &GranuleQuery::default())
+            .find_granules(&entry.dataset, &query)
             .await
             .map_err(|err| catalog_error(&entry.dataset, &err))?;
         let granule = latest(granules).ok_or_else(|| {
-            ApiError::not_found(format!(
-                "layer `{id}`: no granule of dataset `{dataset}` has been ingested yet",
-                dataset = entry.dataset,
-            ))
+            let dataset = &entry.dataset;
+            match window {
+                None => ApiError::not_found(format!(
+                    "layer `{id}`: no granule of dataset `{dataset}` has been ingested yet",
+                )),
+                Some(window) => ApiError::not_found(format!(
+                    "layer `{id}`: no granule of dataset `{dataset}` has an acquisition \
+                     datetime within [{start}, {end}]",
+                    start = window.start.as_ref().map_or("..", Datetime::as_str),
+                    end = window.end.as_ref().map_or("..", Datetime::as_str),
+                )),
+            }
         })?;
 
         // Plan inputs name dataset bands; the granule must provide each.
@@ -314,6 +369,7 @@ impl<C: Catalog> CatalogLayers<C> {
             },
             ingested_at: granule.ingested_at.clone(),
             granule_id: Some(granule.id.to_string()),
+            granule_datetime: Some(granule.datetime.clone()),
         })
     }
 }
@@ -345,7 +401,11 @@ mod tests {
 
     use super::{CatalogLayer, CatalogLayers, LayerProvider};
 
-    /// Granule-serving stub: `find_granules` returns the canned set.
+    /// Granule-serving stub: `find_granules` returns the canned set,
+    /// honoring the query's `datetime` filter exactly as the port
+    /// documents it (inclusive, optionally open-ended) — the resolution
+    /// rule under test is "catalog filters the window, provider takes
+    /// the latest of what remains".
     struct StubCatalog {
         granules: Mutex<Vec<Granule>>,
     }
@@ -370,9 +430,26 @@ mod tests {
         async fn find_granules(
             &self,
             _: &DatasetId,
-            _: &GranuleQuery,
+            query: &GranuleQuery,
         ) -> Result<Vec<Granule>, CatalogError> {
-            Ok(self.granules.lock().unwrap().clone())
+            let granules = self.granules.lock().unwrap().clone();
+            let Some(window) = &query.datetime else {
+                return Ok(granules);
+            };
+            Ok(granules
+                .into_iter()
+                .filter(|g| {
+                    let ms = g.datetime.to_unix_millis();
+                    window
+                        .start
+                        .as_ref()
+                        .is_none_or(|start| start.to_unix_millis() <= ms)
+                        && window
+                            .end
+                            .as_ref()
+                            .is_none_or(|end| ms <= end.to_unix_millis())
+                })
+                .collect())
         }
     }
 
@@ -451,7 +528,7 @@ mod tests {
             ),
             granule("g-mid", "2024-06-10T17:54:00Z", None),
         ]);
-        let resolved = provider.resolve("truecolor").await.unwrap();
+        let resolved = provider.resolve("truecolor", None).await.unwrap();
         assert_eq!(resolved.layer.bands["b04"].as_str(), "g-new-b04.tif");
         assert_eq!(
             resolved.ingested_at.as_ref().map(Datetime::as_str),
@@ -466,22 +543,127 @@ mod tests {
         );
     }
 
+    /// The ADR 0015 resolution-rule table over the catalog port: instants
+    /// (latest-at-or-before, inclusive), intervals (latest-within, both
+    /// ends inclusive), open ends, and the empty window → 404. Windows
+    /// here are the parsed forms `crate::temporal` produces (an instant
+    /// `t` arrives as `(.., t]`).
+    #[tokio::test]
+    async fn temporal_windows_resolve_latest_at_or_before() {
+        use swath_core::catalog::TimeRange;
+        let dt = |s: &str| Some(swath_core::catalog::Datetime::new(s).unwrap());
+        let provider = provider(vec![
+            granule("g-old", "2024-06-06T17:54:00Z", None),
+            granule("g-mid", "2024-06-10T17:54:00Z", None),
+            granule("g-new", "2024-06-13T17:54:00Z", None),
+        ]);
+
+        let resolve = |window: TimeRange| {
+            let provider = &provider;
+            async move {
+                provider
+                    .resolve("truecolor", Some(&window))
+                    .await
+                    .map(|resolved| resolved.granule_id.unwrap())
+            }
+        };
+        let cases = [
+            // Instant windows `(.., t]`: the granule current at `t`.
+            (None, dt("2024-06-11T00:00:00Z"), Ok("g-mid")),
+            // At-or-before is inclusive: an instant exactly at an
+            // acquisition selects it.
+            (None, dt("2024-06-10T17:54:00Z"), Ok("g-mid")),
+            (None, dt("2024-06-05T00:00:00Z"), Err("before the first")),
+            // Intervals: latest within, both bounds inclusive.
+            (
+                dt("2024-06-07T00:00:00Z"),
+                dt("2024-06-13T17:54:00Z"),
+                Ok("g-new"),
+            ),
+            (
+                dt("2024-06-07T00:00:00Z"),
+                dt("2024-06-11T00:00:00Z"),
+                Ok("g-mid"),
+            ),
+            // A granule before the interval's start never leaks in.
+            (
+                dt("2024-06-14T00:00:00Z"),
+                None,
+                Err("nothing after the last"),
+            ),
+            // Open-ended interval forms.
+            (dt("2024-06-07T00:00:00Z"), None, Ok("g-new")),
+            (None, None, Ok("g-new")),
+        ];
+        for (start, end, expected) in cases {
+            let window = TimeRange {
+                start: start.clone(),
+                end: end.clone(),
+            };
+            let outcome = resolve(window).await;
+            match expected {
+                Ok(granule_id) => {
+                    assert_eq!(outcome.as_deref(), Ok(granule_id), "[{start:?}, {end:?}]");
+                }
+                Err(why) => {
+                    let err = outcome.expect_err(why);
+                    assert_eq!(
+                        err.status,
+                        axum::http::StatusCode::NOT_FOUND,
+                        "[{start:?}, {end:?}]: {why}"
+                    );
+                    assert!(
+                        err.detail.contains("acquisition datetime within"),
+                        "the empty-window 404 names the window: {}",
+                        err.detail
+                    );
+                }
+            }
+        }
+
+        // Absent window (`None`) is plain latest — and carries the
+        // no-granules-yet wording only when the dataset is empty.
+        let resolved = provider.resolve("truecolor", None).await.unwrap();
+        assert_eq!(resolved.granule_id.as_deref(), Some("g-new"));
+        assert_eq!(
+            resolved.granule_datetime.as_ref().map(Datetime::as_str),
+            Some("2024-06-13T17:54:00Z"),
+        );
+    }
+
+    /// Ties inside a window break by granule id — the same total order as
+    /// plain latest, so a time-parameterized frame is deterministic too.
+    #[tokio::test]
+    async fn temporal_window_ties_break_by_granule_id() {
+        use swath_core::catalog::TimeRange;
+        let provider = provider(vec![
+            granule("g-aaa", "2024-06-06T17:54:00Z", None),
+            granule("g-zzz", "2024-06-06T17:54:00Z", None),
+        ]);
+        let window = TimeRange {
+            start: None,
+            end: Some(swath_core::catalog::Datetime::new("2024-06-07T00:00:00Z").unwrap()),
+        };
+        let resolved = provider.resolve("truecolor", Some(&window)).await.unwrap();
+        assert_eq!(resolved.granule_id.as_deref(), Some("g-zzz"));
+    }
+
     #[tokio::test]
     async fn same_datetime_ties_break_by_granule_id() {
         let provider = provider(vec![
             granule("g-aaa", "2024-06-06T17:54:00Z", None),
             granule("g-zzz", "2024-06-06T17:54:00Z", None),
         ]);
-        let resolved = provider.resolve("truecolor").await.unwrap();
+        let resolved = provider.resolve("truecolor", None).await.unwrap();
         assert_eq!(resolved.layer.bands["b04"].as_str(), "g-zzz-b04.tif");
     }
 
     #[tokio::test]
     async fn no_granules_is_404_and_unknown_layer_is_404() {
         let provider = provider(Vec::new());
-        let err = provider.resolve("truecolor").await.unwrap_err();
+        let err = provider.resolve("truecolor", None).await.unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::NOT_FOUND);
-        let err = provider.resolve("nope").await.unwrap_err();
+        let err = provider.resolve("nope", None).await.unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::NOT_FOUND);
     }
 
@@ -490,7 +672,7 @@ mod tests {
         let mut incomplete = granule("g-partial", "2024-06-06T17:54:00Z", None);
         incomplete.assets.remove("b03");
         let provider = provider(vec![incomplete]);
-        let err = provider.resolve("truecolor").await.unwrap_err();
+        let err = provider.resolve("truecolor", None).await.unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
     }
 

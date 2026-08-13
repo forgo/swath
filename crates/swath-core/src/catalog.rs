@@ -337,6 +337,37 @@ pub struct TimeRange {
     pub end: Option<Datetime>,
 }
 
+impl TimeRange {
+    /// This range widened (at millisecond precision — the catalog's
+    /// documented comparison order) to include `instant`: the derived
+    /// temporal-extent maintenance rule of ADR 0015. On a **derived**
+    /// interval an open side means "no granule recorded yet", so
+    /// including the first instant closes both sides.
+    #[must_use]
+    pub fn including(&self, instant: &Datetime) -> Self {
+        let ms = instant.to_unix_millis();
+        let keep = |bound: &Option<Datetime>, wins: fn(i64, i64) -> bool| match bound {
+            Some(existing) if wins(existing.to_unix_millis(), ms) => Some(existing.clone()),
+            _ => Some(instant.clone()),
+        };
+        Self {
+            start: keep(&self.start, |existing, new| existing <= new),
+            end: keep(&self.end, |existing, new| existing >= new),
+        }
+    }
+}
+
+/// The derived temporal extent of a granule set (ADR 0015): the min/max
+/// acquisition datetime, both sides `None` when no granule exists —
+/// what a dataset's `Extent.interval` is maintained to, replacing the
+/// open-ended placeholder config-defined datasets used to carry.
+#[must_use]
+pub fn temporal_interval(granules: &[Granule]) -> TimeRange {
+    granules.iter().fold(TimeRange::default(), |interval, g| {
+        interval.including(&g.datetime)
+    })
+}
+
 /// A dataset's overall spatial + temporal extent (STAC Collection `extent`).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Extent {
@@ -712,6 +743,27 @@ mod tests {
         assert_eq!(dt(1_717_696_440_000).as_str(), "2024-06-06T17:54:00Z");
         assert_eq!(dt(500).as_str(), "1970-01-01T00:00:00.500Z");
         assert_eq!(dt(7).as_str(), "1970-01-01T00:00:00.007Z");
+    }
+
+    #[test]
+    fn temporal_interval_is_min_max_acquisition_datetime() {
+        use super::{TimeRange, temporal_interval};
+        let dt = |s: &str| Datetime::new(s).unwrap();
+
+        // Empty set: both sides open ("no granule recorded yet").
+        assert_eq!(temporal_interval(&[]), TimeRange::default());
+
+        // Widening one instant at a time closes both sides, then only
+        // moves a bound when the instant falls outside it.
+        let one = TimeRange::default().including(&dt("2024-07-22T19:03:00Z"));
+        assert_eq!(one.start, Some(dt("2024-07-22T19:03:00Z")));
+        assert_eq!(one.end, Some(dt("2024-07-22T19:03:00Z")));
+        let widened = one
+            .including(&dt("2024-06-07T19:03:00Z"))
+            .including(&dt("2024-10-15T19:03:00Z"))
+            .including(&dt("2024-08-16T19:03:00Z")); // interior: no move
+        assert_eq!(widened.start, Some(dt("2024-06-07T19:03:00Z")));
+        assert_eq!(widened.end, Some(dt("2024-10-15T19:03:00Z")));
     }
 
     #[test]
