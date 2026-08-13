@@ -1,256 +1,146 @@
 # Swath — Project Charter
 
-*Working document. v0.4 — August 2026. Vision, principles, and phases. Delivery status lives
-in `ROADMAP.md`; the build/adopt/bind/never inventory in `ARCHITECTURE.md` §3; positioning and
-founder framing in `PITCH.md` (outside the contributor reading path). Where this charter and an
-ADR disagree, the ADR wins; the north-star requirements live in `REQUIREMENTS.md` (scope changes
-are recorded as dated amendments in its §10).*
+*Working document. v0.4 — August 2026. Vision, principles, phases; delivery status lives in
+`ROADMAP.md`, positioning in `PITCH.md`, the requirements in `REQUIREMENTS.md`. Where this
+charter and an ADR disagree, the ADR wins.*
 
 ---
 
 ## 1. What Swath is, in one sentence
 
-Swath is an open-source, cloud-native geospatial platform where **satellite data comes in and is
-immediately available on a map**, and where data scientists can **tap the live data flow, derive new
-products, and publish them the same way** — all from a single, intuitive pane of glass that hides the
-plumbing (STAC, tilers, cube formats) behind a clean, standards-based experience.
+An open-source, cloud-native geospatial platform where **satellite data comes in and is
+immediately available on a map**, and where data scientists **tap the live data flow, derive
+new products, and publish them the same way** — from a single pane of glass that hides the
+plumbing.
 
 ## 2. Why this, why now
 
-The cloud-native geospatial stack has crossed a threshold. The primitives are done and battle-tested:
-
-- **Serving:** TiTiler / rio-tiler (COG), `xpublish-tiles` and titiler-multidim/xarray (Zarr/NetCDF cubes).
-- **Cataloging:** stac-fastapi + pgstac; bundled by **eoAPI**.
-- **Storage:** Icechunk 1.0 (versioned, transactional Zarr), emerging **GeoZarr** + multiscale overviews.
-- **Legacy bridging:** VirtualiZarr + kerchunk (turn existing NetCDF/HDF/GRIB into virtual cubes, no rewrite).
-- **Processing standard:** **openEO** — as of May 2026 an official OGC Community Standard — plus OGC API - Processes.
-
-What does **not** exist is a *product* that fuses these into one managed, low-latency, observable loop.
-Today, standing up "data in → live on a map, with a place for scientists to build new products" means
-hand-wiring eoAPI + a tiler + custom ingest + a bespoke UI, per deployment. NASA's VEDA and Development
-Seed's eoAPI prove the pieces; they are building blocks and a NASA-specific dashboard, not a turnkey,
-self-hostable platform with a control plane, a materialization brain, and a data-scientist publish loop.
-
-That gap is the opportunity, and it was independently identified from two directions — the technical
-survey below, and a practitioner (a founder building EO products for government) who put it plainly:
-*"a way for data scientists to tap into that flow of data to generate new products with low latency,
-and then host those products the same way — that's a place where we could build something. It hasn't
-been addressed by anyone as far as I can see."*
+The cloud-native geospatial primitives — serving, cataloging, storage, legacy bridging, and a
+processing standard (openEO, an OGC Community Standard since May 2026) — are done and
+battle-tested. What does **not** exist is a *product* fusing them into one managed,
+low-latency, observable loop; today that means hand-wiring eoAPI + a tiler + custom ingest + a
+bespoke UI per deployment. The gap was identified independently twice — by the technical
+survey, and by a practitioner building EO products for government: *"a way for data scientists
+to tap into that flow of data to generate new products with low latency, and then host those
+products the same way … It hasn't been addressed by anyone as far as I can see."*
 
 ## 3. The core thesis (the wedge)
 
-There is exactly one hard, defensible, unbuilt kernel at the center of this, and it's worth stating precisely:
+There is exactly one hard, defensible, unbuilt kernel:
 
-> **openEO / OGC API - Processes** can *define* a derived product (NDVI, a false-color composite, a
-> reprojection) — but serves it as a **batch** job.
-> **TiTiler / `xpublish-tiles`** can *serve* a raster or cube as **low-latency dynamic tiles** — but
-> can't let a scientist define an **arbitrary** product.
-> **Nobody compiles a data-scientist's process graph into a low-latency dynamic tile service backed by
-> a cost-aware materialization cache.**
+> **openEO / OGC API - Processes** can *define* a derived product — but serves it as a **batch**
+> job. **TiTiler / `xpublish-tiles`** can *serve* low-latency dynamic tiles — but can't let a
+> scientist define an **arbitrary** product. **Nobody compiles a data-scientist's process graph
+> into a low-latency dynamic tile service backed by a cost-aware materialization cache.**
 
-Building that bridge — and wrapping it in a single pane of glass and a glass-box observability layer —
-is Swath. Everything else we compose, bind, or — where building proved cheaper and stronger than
-composing — keep as a validation oracle (§8).
+Building that bridge — wrapped in a single pane of glass and glass-box observability — is
+Swath; everything else we compose, bind, or keep as a validation oracle (§8).
 
 ## 4. North-star metric
 
-**Ingest-to-pixel latency:** seconds from *"a new granule arrives"* to *"a correct tile is visible on the map."*
-
-It is measurable, demoable with a stopwatch, and it unifies every subsystem — ingest, catalog,
-materialization, serving — under one number. The glass-box observability layer reports it continuously,
-and our tests assert against it.
+**Ingest-to-pixel latency:** seconds from *"a new granule arrives"* to *"a correct tile is
+visible on the map"* — measurable, stopwatch-demoable, unifying every subsystem under one
+number the glass box reports and the tests assert against.
 
 ## 5. Who it's for
 
-- **Agencies and their contractors** running EO data services (NOAA / NESDIS, NASA, and the startups who
-  build derived products on their data). The first named use case is the weather-service / NESDIS pattern.
-- **EO / geospatial startups** who currently glue eoAPI + TiTiler + custom code per project.
-- **The existing eoAPI / pgstac / TiTiler community** — Swath is designed to layer *on top of* the exact
-  stack they already run, so adoption is incremental, not a migration.
-- **Data scientists** who want to turn "an idea for a product" into "a hosted, tiled, shareable layer"
-  without a DevOps project each time.
+Agencies and their contractors running EO data services (the NESDIS pattern first); startups
+who glue eoAPI + TiTiler + custom code per project; the eoAPI/pgstac/TiTiler community (Swath
+layers *on top of* their stack); and data scientists who want "an idea for a product" to become
+"a hosted, tiled, shareable layer" without a DevOps project.
 
 ## 6. UX principles — two audiences, one system
 
-The design tension is that the platform serves both a non-expert who just wants a beautiful, responsive
-map, and a developer who needs to *see the machine working*. Swath resolves this with a **glass-box**
-architecture:
-
-- **Default (everyone):** smooth, obvious interaction — pan, zoom, animate a time series, toggle a derived
-  product — with no exposure to STAC, Zarr, projections, or tiling. It is always obvious *what* is
-  happening on screen; it is never necessary to know *how*.
-- **Advanced / "x-ray" mode (developers & power users):** a DevTools-style overlay that makes the
-  optimizations visible and verifiable, per tile:
-  - the materialization decision — served **live** from the cube, from a **pre-computed overview**, or a **cache hit**;
-  - a cache hit/miss heatmap painted on the map as you pan;
-  - latency, bytes fetched, which Zarr **chunks** or COG **byte-ranges** were read;
-  - a "why did it decide that?" trace from the planner, and the live **ingest-to-pixel** timer.
-
-This overlay does triple duty and is treated as a **keystone feature**, not a nicety: it's the advanced
-mode, it's the single best demo of the whole project, and — critically — **it is the test oracle.**
-Integration tests assert against the same trace the overlay renders ("this tile at z3 must come from an
-overview, not live"), so correctness and observability are one surface.
-
-Engineering values: modern, typed, well-documented, well-tested, well-organized; bleeding-edge but
-*measured* (no premature optimization, profile before reaching for Rust); standards-native wherever a
-standard exists, so we interoperate instead of reinventing.
+The platform serves both a non-expert who wants a responsive map and a developer who needs to
+*see the machine working* — the **glass-box** architecture: smooth default interaction with no
+exposure to STAC/Zarr/projections/tiling, plus the **x-ray** overlay making the optimizations
+visible per tile (the materialization decision, a cache heatmap, latency/bytes/chunks, the
+planner's "why", the live ingest-to-pixel timer). The overlay is a **keystone feature**: the
+advanced mode, the single best demo, and — critically — **the test oracle**; integration tests
+assert against the same trace it renders.
 
 ## 7. The three pillars + a frontier
 
-### Pillar 1 — Ground-segment ingest spine
+**Pillar 1 — Ground-segment ingest spine.** Event-driven: a granule lands and is automatically
+processed, cataloged, tileable — no human in the loop; cloud-optimized data registers directly,
+and decades of NetCDF/HDF/GRIB archives are absorbed **without a rewrite** via virtual
+references. Measured by ingest-to-pixel latency.
 
-Event-driven ingest that behaves like a modern ground segment: a granule lands (an object-store event,
-a new CMR record, a downlink drop), and the platform automatically processes, catalogs, and makes it
-tileable — no human in the loop. Two ingest paths, deliberately:
+**Pillar 2 — Data-scientist product loop (the wedge, productized).** Author a product as an
+openEO graph; the **materialization engine** lowers it to Render IR and serves it live via
+OGC API - Tiles, the **cost-aware planner** (the novel heart) choosing live / overview / cache
+per layer × zoom under an explicit storage-vs-latency budget — showing its work in the x-ray
+overlay.
 
-- **Clean / modern path:** already-cloud-optimized data (COG, GeoZarr) is registered directly.
-- **Legacy path:** decades of NetCDF / HDF / GRIB archives are absorbed **without a rewrite**, via
-  **VirtualiZarr + Icechunk virtual references** — the old files stay in place, byte-range-referenced, and
-  the engine sees a clean cloud-native cube. This is the "seamlessly ingest legacy file-based approaches
-  into a modern architecture" requirement, done with real, current tooling.
+**Pillar 3 — Single-pane control plane.** The "make STAC disappear" layer: manage **datasets**
+and **layers**; Swath writes the pgstac catalog underneath. The public contract is the OGC API
+family — a coherent single pane, instantly interoperable; format-plural by design (COG + Zarr +
+GeoParquet, raster *and* vector) — a platform, not a raster viewer.
 
-Measured by ingest-to-pixel latency.
-
-### Pillar 2 — Data-scientist product loop (the wedge, productized)
-
-The surface where a scientist taps the live flow and publishes a new product:
-
-- **Author** a product as an **openEO / OGC API - Processes** graph (NDVI, false-color, reprojection,
-  band math) using tooling they may already know — not a bespoke DSL.
-- **Compile & serve** it through the **materialization engine**, which lowers that graph to Swath's
-  Render IR and serves it live through the owned Rust tiler, exposed via **OGC API - Tiles**.
-- **Cost-aware materialization planner** (the novel heart): for each layer × zoom, estimate the on-the-fly
-  cost and choose a strategy — serve **live**, pre-compute a **GeoZarr overview**, or **cache** tiles —
-  under an explicit storage-vs-latency budget. This is the direct, systematized answer to the practitioner's
-  own tension: *"some products you can do on the fly, some you must cache, but caching defeats the storage
-  savings."* Swath makes that decision, per layer, and shows its work in the x-ray overlay.
-
-### Pillar 3 — Single-pane control plane
-
-The "make STAC disappear" layer. You manage **datasets** and **layers**; Swath writes the pgstac catalog
-underneath. Its public contract is the **OGC API family**, which is what makes it both a coherent single
-pane *and* instantly interoperable (QGIS, existing clients):
-
-- **Records** — catalog/discovery
-- **Tiles / Maps** — raster & derived-product serving
-- **EDR** — point / time-series extraction straight out of the cube (key for weather/temporal data)
-- **Features** — vector data (GeoParquet: fire perimeters, detections, footprints)
-- **Processes** — the derivation/product authoring above
-
-Format-plural by design: **COG + Zarr + GeoParquet**, raster *and* vector — a platform, not a raster viewer.
-
-### Frontier — Geo-embeddings as a first-class product
-
-The pillar that puts Swath a generation ahead of classic viz platforms. An embedding is *just another
-product the DS loop can generate*: run a geospatial foundation model (Clay, Prithvi, AlphaEarth-style)
-over incoming granules, store the embeddings (GeoParquet/Zarr), and the platform gains **semantic /
-similarity search** ("find scenes that look like this") and ML-ready features over the same catalog.
-The recent literature already frames "Earth embeddings as products," which is exactly the treatment here.
-Architect for it now (embeddings = a product type + a vector index); ship it in a later phase.
+**Frontier — Geo-embeddings as a first-class product.** An embedding is *just another product
+the DS loop can generate*: run a foundation model over incoming granules and the platform gains
+semantic/similarity search over the same catalog. Architect for it now (a product type + a
+vector index); ship it later.
 
 ## 8. Architecture — build vs. compose
 
-The single most important discipline for finishing this: build only the defensible core; stand on the
-shoulders of everything else. The v0.1 draft planned "~5 things to build"; all five were built. The
-full build/adopt/bind/never table — what was built, what was composed, what is bound, what is
-never reimplemented — verified against the tree, is `ARCHITECTURE.md` §3.
+The single most important discipline: build only the defensible core; stand on the shoulders
+of everything else. The v0.1 draft planned "~5 things to build"; all five were built — the
+build/adopt/bind/never table and shipped stack inventory are `ARCHITECTURE.md` §§3-4 and
+§12.
 
 **Demoted to test oracles:** the v0.1 draft composed TiTiler + rio-tiler, `xpublish-tiles`,
-stac-fastapi, morecantile, and openEO reference tooling into the serving path; the pure-Rust core
-(ADR 0002) outbuilt that list, and REQUIREMENTS §10 (amendment A2) records the demotion.
-TiTiler/rio-tiler — like GDAL and morecantile — relate to Swath today as validation oracles: the test
-suite renders the same tiles and tile-matrix math through them and pixel-diffs the results
-(`tests/oracle/`, `just oracle-verify`, the committed goldens). VirtualiZarr remains the ingest-time
-conformance reference for the Rust referencer (ADR 0006), not a runtime component.
+stac-fastapi, morecantile, and openEO reference tooling into the serving path; the pure-Rust
+core (ADR 0002) outbuilt that list, and REQUIREMENTS §10 (A2) records the demotion. They relate
+to Swath today as validation oracles: the test suite renders the same tiles and tile-matrix
+math through them and pixel-diffs the results (`tests/oracle/`, `just oracle-verify`, the
+committed goldens); VirtualiZarr remains the ingest-time conformance reference (ADR 0006).
 
-**Prior art we align with rather than duplicate:** openEO (processing), pangeo-forge (ingest/ETL recipes),
-eoAPI (catalog + serve). Each solves a slice; none fuses ingest + a low-latency publish loop + cost-aware
-serving + a single pane. That fusion is ours — and it is measured, not promised: ingest-to-pixel is
-<!-- number:i2p-ms -->646 ms<!-- /number:i2p-ms --> end to end, budget-enforced on every commit (`PERFORMANCE.md` §4).
-
-**Stack:** the shipped component-by-component inventory (pure-Rust single-binary core,
-Web-Components + MapLibre frontend, pgstac/object-store state; ADRs 0002, 0005, 0006 — the
-original draft's Python core and React/deck.gl frontend are superseded) is `ARCHITECTURE.md`
-§§3-4 and §12.
+**Prior art we align with rather than duplicate:** openEO (processing), pangeo-forge (ingest
+recipes), eoAPI (catalog + serve) — each solves a slice; none fuses them. That fusion is ours,
+measured: ingest-to-pixel is <!-- number:i2p-ms -->646 ms<!-- /number:i2p-ms --> end to end,
+budget-enforced on every commit (`PERFORMANCE.md` §4).
 
 ## 9. Reference datasets
 
-- **Clean path — HLS (Harmonized Landsat Sentinel-2):** already COG, already in NASA CMR, `titiler-cmr`
-  has a published HLS tiling + rendering-performance guide, and it ships real derived products (RGB
-  composites *and* official NDVI/vegetation indices). Ideal day-one benchmark for the DS loop and the
-  materialization engine.
-- **Legacy path — MODIS or VIIRS (HDF/NetCDF):** virtualized via VirtualiZarr to prove seamless legacy
-  ingest. (Pairing HLS + a legacy collection demonstrates the full ingest spectrum.)
+**Clean path — HLS** (already COG, real derived products like NDVI): the day-one benchmark.
+**Legacy path — MODIS or VIIRS (HDF/NetCDF)**, virtualized to prove seamless legacy ingest.
+Pairing the two demonstrates the full spectrum.
 
 ## 10. Milestones
 
-_These are the phases as scope — what each one is. Delivery status against them — shipped
-milestones with exit evidence, the canonical deferral inventory, and the parked M7+ candidates —
-lives in [`ROADMAP.md`](ROADMAP.md) §1._
+_Phases as scope; delivery status lives in [`ROADMAP.md`](ROADMAP.md) §1._
 
-**Phase 0 — Foundations.**
-Charter, requirements, ADRs 0001-0007, build-vs-compose boundary, dev environment, the `just check`
-gate mirrored by CI (`ENGINEERING.md`), testing harness.
-
-**Phase 1 — MVP: "granule → live tile".**
-HLS ingest → true-color + NDVI derived on the fly → served via OGC API - Tiles → MapLibre viewer with
-datasets/layers panels (STAC hidden). X-ray v0 with the ingest-to-pixel timer and live/cache
-indicator; the stopwatch demo, asserted under budget on every commit.
-
-**Phase 2 — The materialization brain + legacy ingest + DS authoring.**
-Cost-aware planner (live vs. overview vs. cache under explicit budgets) —
-`docs/design/materialization-planner.md`. Legacy path on VIIRS (VNP09GA, ADR 0008), virtualized
-by the pure-Rust referencer with VirtualiZarr as its conformance reference (ADR 0006). openEO
-product authoring compiled through the engine (ADR 0010). The x-ray overlay carries the
-chunk/byte-range provenance and planner decision-trace views (`ARCHITECTURE.md` §9).
-
-**Phase 3 — Platform breadth + turnkey deploy.**
-Versioned images with a no-checkout one-liner, one-command local stack, and the release pipeline
-(`docs/RELEASING.md`); OGC API breadth (EDR time-series, Features/GeoParquet vector); auth
-(OIDC/RBAC); multi-tenant; cloud IaC deploy; the documented "adopt on top of your existing
-eoAPI" path.
-
-**Phase 4 — Frontier: geo-embeddings.**
-Embeddings as a first-class product type; a vector index; semantic/similarity search over the catalog.
+**Phase 0 — Foundations**: charter, requirements, ADRs 0001-0007, the CI-mirrored
+`just check` gate. **Phase 1 — MVP "granule → live tile"**: HLS ingest → NDVI on the fly →
+OGC API - Tiles → viewer with STAC hidden; x-ray v0; the stopwatch demo asserted under budget.
+**Phase 2 — the materialization brain + legacy ingest + DS authoring**: the cost-aware planner
+(`docs/design/materialization-planner.md`), the legacy path on VIIRS (ADRs 0006/0008), openEO
+authoring (ADR 0010), the x-ray provenance views. **Phase 3 — platform breadth + turnkey
+deploy**: versioned images and the release pipeline (`docs/RELEASING.md`), OGC API breadth,
+auth, multi-tenant, cloud deploy, the "adopt on top of your existing eoAPI" path. **Phase 4 —
+frontier**: geo-embeddings with a vector index.
 
 ## 11. Open decisions
 
-Decided since v0.1 (see `docs/decisions/`):
-
-- ~~**License**~~ → **Apache-2.0 with DCO** (ADR 0003).
-- ~~**Rust in the hot path**~~ → superseded by the **pure-Rust core** decision (ADR 0002); the question
-  is no longer "when to add Rust" but "what to adopt vs build vs bind."
-- ~~**Legacy dataset for the Phase-2 proof**~~ → **VIIRS primary, MODIS stretch** (ADR 0004).
-- ~~**openEO surface**~~ → **native openEO API at a bounded profile** (ADR 0010): capabilities,
-  collections, processes, and XYZ secondary services over the process compiler — real openEO
-  clients author against Swath; jobs/batch/auth deferred until demanded.
-- ~~**Extension mechanism**~~ → **compile-time features/crates for adapters + openEO process graphs
-  at runtime for products** (ADR 0013); WASM plug-ins and RPC sidecars deferred, not rejected — the
-  reopen condition is recorded in the ADR. See `ARCHITECTURE.md` §14.
-
-Still open:
-
-- **Embedding model for the frontier:** Clay vs. Prithvi vs. AlphaEarth-style — decide when Phase 4 nears.
+Decided since v0.1 (`docs/decisions/`): license (ADR 0003), the pure-Rust core (ADR 0002), the
+legacy dataset (ADR 0004), the bounded openEO surface (ADR 0010), the extension mechanism
+(ADR 0013 — WASM/RPC deferred, reopen condition in the ADR). Still open: the frontier's
+embedding model — decide when Phase 4 nears.
 
 ## 12. Glossary
 
-- **STAC** — SpatioTemporal Asset Catalog; the standard for describing geospatial assets. Swath hides it.
-- **COG** — Cloud-Optimized GeoTIFF; a 2D raster whose header lets a tiler byte-range-fetch just the tile it needs.
-- **Zarr / cube** — chunked, cloud-native n-dimensional array storage (the "cubic data" source products derive from).
-- **GeoParquet** — cloud-native columnar format for vector data.
-- **OGC APIs** — modern web-API standards: Records, Tiles, Maps, EDR, Features, Processes.
-- **Dynamic tiler** — serves map tiles on demand from source data rather than from a pre-rendered pyramid.
-- **Materialization** — the live-vs-overview-vs-cache decision for how a given tile gets produced.
-- **Ingest-to-pixel** — Swath's north-star metric: arrival of a granule → visible correct tile.
-- **Geo-embeddings** — learned vectors from a foundation model over imagery; enable semantic/similarity search.
+**Materialization** — the live-vs-overview-vs-cache decision for how a tile gets produced.
+**Ingest-to-pixel** — the north-star metric: arrival of a granule → visible correct tile.
+**Geo-embeddings** — learned vectors from a foundation model over imagery, enabling
+semantic/similarity search. (STAC, COG, Zarr, GeoParquet, and the OGC APIs are the ecosystem's
+standard vocabulary; their specs are the reference.)
 
 ## 13. References
 
-- eoAPI — https://eoapi.dev/ · https://developmentseed.org/projects/eoapi/
-- TiTiler — https://developmentseed.org/titiler/ · titiler-cmr HLS guide — https://developmentseed.org/titiler-cmr/dev/datasets/hls_tiling/
-- Earthmover `xpublish-tiles` — https://github.com/earth-mover/xpublish-tiles · blog — https://www.earthmover.io/blog/dynamic-map-tile-rendering-icechunk-zarr-data-xpublish-tiles
-- Icechunk — https://icechunk.io/ · GeoZarr — https://geozarr.org/
-- VirtualiZarr — https://virtualizarr.readthedocs.io/
-- openEO as OGC Community Standard — https://www.ogc.org/announcement/openeo-api-ogc-community-standard/
-- NASA VEDA — https://developmentseed.org/projects/nasa-impact-veda/
-- "Earth Embeddings as Products" — https://arxiv.org/html/2601.13134v1
+eoAPI — https://eoapi.dev/ · TiTiler — https://developmentseed.org/titiler/ · `xpublish-tiles`
+— https://github.com/earth-mover/xpublish-tiles · Icechunk — https://icechunk.io/ · GeoZarr —
+https://geozarr.org/ · VirtualiZarr — https://virtualizarr.readthedocs.io/ · openEO as OGC
+Community Standard — https://www.ogc.org/announcement/openeo-api-ogc-community-standard/ ·
+NASA VEDA — https://developmentseed.org/projects/nasa-impact-veda/ · "Earth Embeddings as
+Products" — https://arxiv.org/html/2601.13134v1

@@ -86,29 +86,31 @@ model, and more), and the M7+ candidate list all live in [`docs/ROADMAP.md`](doc
 
 ## Documentation
 
-Read in this order:
+Newcomer-first reading order — start where you'll actually start (running it), then go deeper:
 
-1. [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) — the north star: mission, non-negotiable
-   requirements (R1-R10), success criteria. Changes rarely and deliberately.
-2. [`docs/CHARTER.md`](docs/CHARTER.md) — the full vision: why now, the wedge, pillars,
-   milestone phases.
-3. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — ports & adapters, the build/adopt/bind
-   boundary, component model, data flows.
-4. [`docs/ENGINEERING.md`](docs/ENGINEERING.md) — repo standards: toolchains, linting,
-   testing, CI/CD, release, security posture.
-5. [`docs/QUICKSTART.md`](docs/QUICKSTART.md) — three verified tracks from nothing to tiles;
+1. [`docs/QUICKSTART.md`](docs/QUICKSTART.md) — three verified tracks from nothing to tiles;
    [`docs/DEMO.md`](docs/DEMO.md) — the stopwatch demo and what the x-ray overlay shows.
-6. [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — the operator guide: store backends, the tile
+2. [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — the operator guide: store backends, the tile
    cache, ingest sources, observability — with [`docs/CONFIG.md`](docs/CONFIG.md) (every
    flag/env/TOML key, kept in sync by a CI-enforced drift test) and
    [`docs/ENDPOINTS.md`](docs/ENDPOINTS.md) (every mounted route, with captured examples).
-7. [`docs/EXTENDING.md`](docs/EXTENDING.md) — the ports: adding a source adapter or an
+3. [`docs/EXTENDING.md`](docs/EXTENDING.md) — the ports: adding a source adapter or an
    openEO process, and the oracle and test obligations that come with each.
-8. [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) and [`docs/COMPARISON.md`](docs/COMPARISON.md)
+4. [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) and [`docs/COMPARISON.md`](docs/COMPARISON.md)
    — the evidence behind every number and positioning claim in this README.
-9. [`docs/decisions/`](docs/decisions/) — dated, immutable ADRs recording *why* Swath is
-   shaped this way; [`prototypes/`](prototypes/) holds the dated experiments that produced
-   the evidence.
+
+The maintainer canon — why Swath is shaped this way:
+
+5. [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) — the north star: mission, non-negotiable
+   requirements (R1-R10), success criteria. Changes rarely and deliberately.
+6. [`docs/CHARTER.md`](docs/CHARTER.md) — the full vision: why now, the wedge, pillars,
+   milestone phases.
+7. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — ports & adapters, the build/adopt/bind
+   boundary, component model, data flows.
+8. [`docs/ENGINEERING.md`](docs/ENGINEERING.md) — repo standards: toolchains, linting,
+   testing, CI/CD, release, security posture.
+9. [`docs/decisions/`](docs/decisions/) — dated, immutable ADRs; [`prototypes/`](prototypes/)
+   holds the dated experiments that produced the evidence.
 
 ## License
 

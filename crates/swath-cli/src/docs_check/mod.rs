@@ -26,6 +26,9 @@
 //! - [`mutation`] — the acceptance bar: each of the six documentation
 //!   drifts fixed by the #172 sweep (PR #214) is re-introduced in memory
 //!   and the gate must fail on every one.
+//! - [`budgets`] — per-doc word budgets (issue #177): the word-reduction
+//!   sweep's committed ceilings over `README.md` + `docs/*.md`, measured
+//!   exactly as `just docs-words` measures (`wc -w`).
 //!
 //! Escape hatch policy: a legitimate exception goes on an explicit,
 //! reason-carrying allowlist next to the check it exempts (and a stale
@@ -46,6 +49,7 @@
 //! walks `Cli::command()` recursively, so a new subcommand with any
 //! argument needs its own documented block too.
 
+mod budgets;
 mod claims;
 mod deferrals;
 mod mutation;

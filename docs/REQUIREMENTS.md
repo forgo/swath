@@ -1,9 +1,8 @@
 # Swath — Requirements & Vision (North Star)
 
-*The enduring reference. This document changes rarely and deliberately. Everything else — the charter,
-the architecture, ADRs, prototypes, code — may evolve freely, but it should always be checkable against
-what is written here. If we ever drift from this, either we consciously amend this document (with a dated
-entry in §10) or we correct course. Read this first, forever.*
+*The enduring reference; it changes rarely and deliberately. Everything else may evolve freely
+but should always be checkable against what is written here — drift means a conscious, dated
+amendment in §10 or a course correction. Read this first, forever.*
 
 **Status:** v1.0 — 2026-08-08; amended through 2026-08-11 (§10).
 
@@ -11,24 +10,24 @@ entry in §10) or we correct course. Read this first, forever.*
 
 ## 1. Mission (one sentence)
 
-**Satellite data comes in, and is immediately available on a map — from a single pane of glass — and
-anyone can derive a new product from the live data flow and publish it the same way.**
+**Satellite data comes in and is immediately available on a map — from a single pane of glass —
+and anyone can derive a new product from the live flow and publish it the same way.**
 
 ## 2. The problem we exist to solve
 
-The cloud-native geospatial primitives (dynamic tilers, STAC, cube formats, virtualization) are mature,
-but no product fuses them into one managed, low-latency, observable loop. Standing up "data in → live on
-a map, with a place to build and publish new products" today means hand-wiring several projects per
+The cloud-native geospatial primitives are mature, but no product fuses them into one managed,
+low-latency, observable loop — standing that up means hand-wiring several projects per
 deployment. Swath is that missing product layer.
 
 ## 3. North-star metric
 
-**Ingest-to-pixel latency** — the time from *"a new granule arrives"* to *"a correct tile is visible on
-the map."* Every subsystem is measured against it; the platform reports it continuously and honestly.
+**Ingest-to-pixel latency** — from *"a new granule arrives"* to *"a correct tile is visible on
+the map."* Every subsystem is measured against it; the platform reports it continuously and
+honestly.
 
 ## 4. Non-negotiable requirements
 
-These are the durable commitments. Numbered so we can reference them in reviews and ADRs.
+The durable commitments, numbered for reference in reviews and ADRs.
 
 - **R1 — Immediacy.** New data becomes visible on a map with no manual per-granule work. The happy path is
   automatic: arrive → catalog → serve.
@@ -56,121 +55,85 @@ These are the durable commitments. Numbered so we can reference them in reviews 
 
 ### R1–R10 status (annotated 2026-08-11, issue #123)
 
-A dated snapshot, not a rewrite: the requirement texts above are unchanged; scope evolutions are the
-§10 amendments (A1–A4). "Met" means evidence exists in the tree and is linked.
+A dated snapshot, not a rewrite — the requirement texts above are unchanged; scope evolutions
+are the §10 amendments. "Met" means linked evidence exists in the tree.
 
 | Req | Status | Evidence |
 |---|---|---|
-| R1 | **Met** | Filedrop → catalog → serve with no per-granule steps; measured <!-- number:i2p-ms -->646 ms<!-- /number:i2p-ms --> ingest-to-pixel, budget-asserted every commit (`PERFORMANCE.md` §4, `crates/swath-e2e`) |
-| R2 | **Met, as amended (A1)** | Datasets/layers control plane + UI, STAC hidden (`docs/design/catalog-domain.md`); the openEO boundary speaks STAC because the standard does (A1, ADR 0010) |
-| R3 | **Met** | openEO graph → live tiled XYZ layer in one motion (ADR 0010; authoring panel e2e `web/e2e/authoring.e2e.ts`) |
-| R4 | **Met** | Per-tile trace: decision, bytes read, chunk/byte-range provenance, timings, planner candidates; the e2e asserts on the same trace the x-ray renders (`ARCHITECTURE.md` §9, `crates/swath-e2e`) |
-| R5 | **Met, as amended (A3)** | OGC API - Tiles + native openEO at a documented bounded profile, conformance-tested (`crates/swath-api/tests/conformance.rs`, `openeo_conformance.rs`); breadth (EDR, Features) is Phase-3 scope, not a silent gap (`CHARTER.md` §10) |
-| R6 | **Met** | Six ports, seven adapter crates, core free of tool types (`ARCHITECTURE.md` §6; reconciliation #152) |
-| R7 | **Met, as amended (A2)** | Tiler, planner, compiler, trace, orchestration are owned Rust; projections bound (`proj4rs`), GDAL/TiTiler/morecantile kept as test oracles (`ARCHITECTURE.md` §3) |
-| R8 | **Met, as amended (A4)** | One command from a checkout (`docker compose up` / `just demo`) and a no-checkout GHCR demo one-liner, both CI-exercised (A4) |
-| R9 | **Met** | ADR 0013; `EXTENDING.md` is verified by construction (every path exercised by a shipped adapter or test) |
-| R10 | **Partially met** — docs breadth in flight | Correctness: oracle pixel-diffs, proptest/Hypothesis, conformance gates, goldens (`justfile`, CI). Safety: no `unsafe` in the workspace. Performance: measured and enforced (`PERFORMANCE.md`). Remaining: operator guide / quickstart / endpoint reference are tracked (#118, #119) — until they land, "every interface well-documented" is not fully true |
+| R1 | **Met** | Filedrop → catalog → serve, no per-granule steps; measured <!-- number:i2p-ms -->646 ms<!-- /number:i2p-ms -->, budget-asserted every commit (`PERFORMANCE.md` §4) |
+| R2 | **Met, as amended (A1)** | Datasets/layers control plane + UI, STAC hidden (`docs/design/catalog-domain.md`) |
+| R3 | **Met** | openEO graph → live tiled XYZ layer in one motion (ADR 0010) |
+| R4 | **Met** | Per-tile trace; the e2e asserts on the same trace the x-ray renders (`ARCHITECTURE.md` §9) |
+| R5 | **Met, as amended (A3)** | Tiles + native openEO at a documented bounded profile, conformance-tested; breadth is Phase-3 scope, not a silent gap |
+| R6 | **Met** | Six ports, seven adapter crates, core free of tool types (`ARCHITECTURE.md` §6) |
+| R7 | **Met, as amended (A2)** | The differentiating path is owned Rust; projections bound, GDAL/TiTiler/morecantile kept as test oracles (`ARCHITECTURE.md` §3) |
+| R8 | **Met, as amended (A4)** | One command from a checkout and a no-checkout GHCR one-liner, both CI-exercised |
+| R9 | **Met** | ADR 0013; `EXTENDING.md` is verified by construction |
+| R10 | **Partially met** — docs breadth in flight | Oracle pixel-diffs, proptest/Hypothesis, conformance gates, goldens; no `unsafe`; performance measured and enforced. Remaining docs tracked (#118, #119) |
 
 ## 5. What we are building (pillars)
 
-1. **Ground-segment ingest spine** — event-driven ingest that also absorbs legacy file archives without
-   rewriting them.
-2. **Data-scientist product loop** — author a product as a standard process graph; the materialization
-   engine compiles it into low-latency dynamic tiles and decides live-vs-overview-vs-cache.
-3. **Single-pane control plane** — datasets/layers over the OGC API family; STAC hidden.
-4. **Frontier: geo-embeddings** — embeddings as a first-class product type enabling semantic/similarity
-   search over the same catalog.
+**Ground-segment ingest spine** (event-driven, absorbing legacy archives without rewrites);
+the **data-scientist product loop** (a standard process graph compiled into low-latency
+dynamic tiles); the **single-pane control plane** (datasets/layers over the OGC API family,
+STAC hidden); the **geo-embeddings frontier** (embeddings as a first-class product type).
 
 ## 6. How we build (principles)
 
-Hexagonal core (ports & adapters). Standards-as-interfaces. Pure-Rust, single-binary core. Glass-box by
-construction (the trace is the test oracle). Go deep on a vertical before going wide. Intuitive by default,
-extensible at the edges. Priorities, in order: **correctness → performance/memory → UX → safety → docs →
-standards breadth.**
+Hexagonal core. Standards-as-interfaces. Pure-Rust, single-binary core. Glass-box by
+construction (the trace is the test oracle). Deep before wide. Priorities, in order:
+**correctness → performance/memory → UX → safety → docs → standards breadth.**
 
 ## 7. Success criteria (the "are we still on vision?" checklist)
 
-At any point in the future, we are on-vision if we can answer *yes* to these:
-
-- Can a new granule appear on the map with zero manual per-granule steps, and can we state its
-  ingest-to-pixel latency? (R1, R3)
-- Can a non-expert operate the platform without ever seeing the word "STAC"? (R2)
-- Can a data scientist publish a new derived product as a hosted, tiled layer in one motion? (R3)
-- Can any developer open the x-ray view and see *why* a given tile was served the way it was — and does a
-  test assert that same fact? (R4)
-- Do all external interfaces validate against their OGC/STAC/openEO standard? (R5)
-- If a key upstream tool changed or vanished tomorrow, would the fix be one adapter, not a core rewrite? (R6)
-- Is the differentiating logic ours, tested against oracles, and are we free of "rewrote the world"
-  reimplementations? (R7)
-- Does `one command` still stand up a working system? (R8)
-- Can someone add a source/product/backend without touching our core? (R9)
+On-vision means answering *yes* to each: zero-manual-step granules with a stated
+ingest-to-pixel latency (R1, R3); a non-expert never sees "STAC" (R2); one-motion publishing
+(R3); the x-ray explains every tile and a test asserts the same fact (R4); standards-validated
+interfaces (R5); a vanished upstream tool costs one adapter (R6); the differentiating logic is
+ours, oracle-tested (R7); one command stands up the system (R8); extension without touching the
+core (R9).
 
 ## 8. Non-goals
 
-Not a general GIS/desktop tool. Not a data archive or storage vendor. Not a reimplementation of PROJ, GDAL
-format drivers, or existing dynamic tilers for their own sake. Not tied to any single agency, cloud, or
-dataset. Not a framework-heavy web app.
+Not a general GIS/desktop tool. Not a data archive or storage vendor. Not a reimplementation of
+PROJ, GDAL format drivers, or existing dynamic tilers for their own sake. Not tied to any single
+agency, cloud, or dataset. Not a framework-heavy web app.
 
 ## 9. Business shape (for context, not a requirement)
 
-Open-core: a permissive (Apache-2.0), genuinely useful, self-hostable core; a commercial layer (managed
-hosting, enterprise/government features, support) on top. The core must stand on its own merits.
+Open-core: a permissive (Apache-2.0), genuinely useful, self-hostable core; a commercial layer
+(managed hosting, enterprise/government features, support) on top. The core must stand on its
+own merits.
 
 ## 10. Amendments log
 
-Changes to this north star are recorded here, dated, with rationale. If this log grows quickly, we are
-either learning fast or drifting — and either way it should be a conscious, visible act.
+Changes to this north star are recorded here, dated, with rationale — a conscious, visible
+act.
 
 - 2026-08-08 — v1.0 established.
 
-- **2026-08-11 — A1: R2 scope as built (openEO clients see STAC; Swath's own pane never does).**
-  *What changed:* R2's "never STAC/Zarr/tiler internals" is scoped to Swath's own control plane and
-  UI. The openEO authoring surface serves STAC-based collection metadata to openEO clients, because
-  openEO collections *are* STAC — that is what the standard specifies.
-  *Why:* at a standards boundary, R5 governs: hiding STAC from a client whose standard is built on
-  STAC would break interop, the very thing R5 exists to protect. Operators and the single pane still
-  never see STAC (R2 intact where it was aimed).
-  *Where decided:* ADR 0010 (2026-08-09), `docs/design/catalog-domain.md`.
-  *Maintainer sign-off:* recorded in PR #157.
+- **2026-08-11 — A1: R2 scope as built.** "Never STAC" is scoped to Swath's own control plane
+  and UI; the openEO surface serves STAC-based collection metadata because openEO collections
+  *are* STAC — at a standards boundary, R5 governs. *Decided:* ADR 0010,
+  `docs/design/catalog-domain.md`. *Sign-off:* PR #157.
 
-- **2026-08-11 — A2: compose-to-oracle demotion (the serving path is owned, the ecosystem became
-  our test oracle).**
-  *What changed:* §2's premise implied Swath would compose the existing serving primitives (TiTiler /
-  rio-tiler, `xpublish-tiles`, stac-fastapi, morecantile) into the loop. As built, Swath owns the
-  tiler, planner, compiler, trace, and orchestration in pure Rust; it composes **pgstac** and
-  **object storage**, binds **proj4rs**, and demotes the rest to correctness oracles that the test
-  suite pixel-diffs and truth-tables against (`tests/oracle/`); VirtualiZarr is the ingest-time
-  conformance reference (ADR 0006).
-  *Why:* R6/R7 pushed the other way once measured: owning the hot path made the core resilient,
-  testable, and fast (<!-- number:i2p-ms -->646 ms<!-- /number:i2p-ms --> ingest-to-pixel; <!-- number:ref-ratio-approx -->~40×<!-- /number:ref-ratio-approx --> referencer, `PERFORMANCE.md`), and validating
-  against the ecosystem is a stronger correctness claim than inheriting from it.
-  *Where decided:* ADR 0002 (2026-08-08), the oracle harness (#19), ADRs 0006/0008; charter §8
-  reconciled in this change.
-  *Maintainer sign-off:* recorded in PR #157.
+- **2026-08-11 — A2: compose-to-oracle demotion.** §2's premise implied composing the existing
+  serving primitives; as built, Swath owns the tiler, planner, compiler, trace, and
+  orchestration in pure Rust, composes pgstac and object storage, binds proj4rs, and demotes
+  the rest to correctness oracles (`tests/oracle/`; VirtualiZarr is the ingest-time conformance
+  reference, ADR 0006). Owning the hot path proved out once measured
+  (<!-- number:i2p-ms -->646 ms<!-- /number:i2p-ms -->;
+  <!-- number:ref-ratio-approx -->~40×<!-- /number:ref-ratio-approx --> referencer), and
+  validating against the ecosystem is a stronger claim than inheriting from it. *Decided:*
+  ADR 0002, the oracle harness (#19), ADRs 0006/0008. *Sign-off:* PR #157.
 
-- **2026-08-11 — A3: R5 bounded-profile honesty (standards implemented to a truthful, advertised
-  subset).**
-  *What changed:* R5 is satisfied at *documented bounded profiles*: each external surface implements
-  its standard to an honest subset whose capabilities document advertises **only what exists** —
-  openEO API 1.2.0 with capabilities/collections/processes and `xyz` secondary services (jobs,
-  batch, billing, auth deferred until demanded), OGC API - Tiles for serving. Full-breadth
-  conformance is roadmap, not implied.
-  *Why:* claiming full conformance while shipping a subset is the kind of silent aspiration this
-  project forbids; a truthful capabilities document is itself the standards-native way to bound
-  scope. Real openEO clients discover and use exactly what is there.
-  *Where decided:* ADR 0010 (2026-08-09); conformance tests `crates/swath-api/tests/`.
-  *Maintainer sign-off:* recorded in PR #157.
+- **2026-08-11 — A3: R5 bounded-profile honesty.** R5 is satisfied at *documented bounded
+  profiles*: each surface implements an honest subset whose capabilities document advertises
+  **only what exists**; full-breadth conformance is roadmap, not implied. *Decided:* ADR 0010;
+  conformance tests `crates/swath-api/tests/`. *Sign-off:* PR #157.
 
-- **2026-08-11 — A4: R8 one command, from checkout (and a no-checkout demo one-liner).**
-  *What changed:* R8's "a newcomer runs one command" is defined pre-1.0 as: from a fresh checkout,
-  one command stands up the working system (`docker compose up` for the stack; `just demo` for the
-  guided demo), and with no checkout at all, one CI-smoke-tested command runs the demo container
-  (`docker run -p 8080:8080 ghcr.io/forgo/swath serve --fixtures`). Installers and
-  platform-package distribution are graduation-tier (`docs/RELEASING.md`).
-  *Why:* "one command" needed an honest operational definition while the project is pre-release;
-  the GHCR one-liner is verified by the same smoke test as every published image, so the promise is
-  enforced, not aspirational.
-  *Where decided:* issue #104 (GHCR image + CI-tested one-liner, 2026-08-10); ENGINEERING §7
-  amendment (release tier); `docs/RELEASING.md`.
-  *Maintainer sign-off:* recorded in PR #157.
+- **2026-08-11 — A4: R8 one command, from checkout.** Defined pre-1.0 as: from a fresh
+  checkout, one command stands up the system (`docker compose up` / `just demo`), and with no
+  checkout, one CI-smoke-tested command runs the demo container; installers are
+  graduation-tier (`docs/RELEASING.md`). *Decided:* issue #104; ENGINEERING §7. *Sign-off:*
+  PR #157.
