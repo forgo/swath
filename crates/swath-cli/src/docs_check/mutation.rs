@@ -121,8 +121,8 @@ fn reintroducing_the_stale_sha_stamps_fails() {
         return;
     }
     for (doc_label, current_sha, pre_sweep_sha) in [
-        ("docs/ARCHITECTURE.md", "576324d", "c944a41"),
-        ("docs/EXTENDING.md", "9ab35b8", "32fad75"),
+        ("docs/ARCHITECTURE.md", "a1e77e4", "c944a41"),
+        ("docs/EXTENDING.md", "a1e77e4", "32fad75"),
     ] {
         let doc = read_repo(doc_label);
         stamps::check_doc(doc_label, &doc).expect("the unmutated stamps must pass");
