@@ -265,7 +265,7 @@ where
     C: TileCache;
 ```
 
-_Last verified against `49e962b`._
+_Last verified against `2250c90`._
 
 ## 7. Adapters and inbound APIs
 
@@ -300,7 +300,7 @@ a possible later seam and would get its own port when it lands.
 | OGC API - EDR                           | point/time-series from cubes        | 3            | not started                                     |
 | OGC API - Features                      | vector/GeoParquet                   | 3            | not started                                     |
 
-_Last verified against `576324d`._
+_Last verified against `2250c90`._
 
 ## 8. Data flows
 
