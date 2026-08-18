@@ -29,7 +29,7 @@ name = "swath"
 path = "src/main.rs"
 
 [features]
-default = ["embedded-ui", "legacy-hdf5"]
+default = ["embedded-ui", "legacy-hdf5", "udf-wasm"]
 # Compile the production web bundle (web/dist, built by `pnpm build` /
 # `just build-full`) into the binary and serve it at `/` (issue #103,
 # ADR 0011). Default ON — the shipped binary carries its UI, like the
@@ -37,6 +37,13 @@ default = ["embedded-ui", "legacy-hdf5"]
 # (the build script embeds an empty set and serving is UI-less); opt out
 # entirely with `--no-default-features`.
 embedded-ui = ["dep:include_dir"]
+# The run_udf WASM runtime (ADR 0018, #200 supply-chain gate). Default ON:
+# the shipped binary carries the deterministic engine like it carries its
+# UI and libhdf5; the fast dev-loop profile (`just check-fast`, no default
+# features) drops the whole wasmtime tree. Execution wiring arrives with
+# #201–#205 — until then the feature only links the engine and states so
+# at serve start.
+udf-wasm = ["dep:swath-udf-wasmtime"]
 # HDF5/NetCDF4 referencing (swath-referencer's statically bundled libhdf5 —
 # issue #99). Default ON: the shipped binary and Docker image reference
 # legacy granules out of the box (R8). The fast dev-loop profile turns it
@@ -68,6 +75,7 @@ swath-pyramid-objectstore = { path = "../adapters/swath-pyramid-objectstore", ve
 # The manifest→Icechunk committer (`swath ingest reference --icechunk`, #191).
 swath-icechunk = { path = "../adapters/swath-icechunk", version = "0.1.0-alpha.1" }
 swath-referencer = { path = "../swath-referencer", version = "0.1.0-alpha.1", default-features = false }
+swath-udf-wasmtime = { path = "../adapters/swath-udf-wasmtime", version = "0.1.0-alpha.1", optional = true }
 swath-render = { path = "../swath-render", version = "0.1.0-alpha.1" }
 swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.1.0-alpha.1" }
 swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.1.0-alpha.1" }
