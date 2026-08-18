@@ -359,6 +359,10 @@ test-virtual:
         --resampling bilinear --no-overviews --exact-grid
     # Perceptual diff, default policy — the same bar the render goldens meet.
     cargo run -q -p swath-testkit --bin pdiff -- "$dir/swath-ndvi.png" "$dir/oracle-ndvi.png"
+    # Icechunk read-back demo (#193, ADR 0017): the SAME tile served from
+    # an Icechunk commit, byte-identical to the manifest path, provenance
+    # into the original .h5 asserted inside the test.
+    SWATH_VNP09GA="$granule"     SWATH_VNP09GA_MANIFEST="$dir/real.vmanifest.json"         cargo test -q -p swath-icechunk --test vnp09ga_serve -- --ignored
     echo "test-virtual PASS"
 
 # --- python/ (uv workspace; ingest sidecars only, ADR 0006) ---

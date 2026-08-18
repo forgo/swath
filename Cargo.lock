@@ -4100,9 +4100,14 @@ name = "swath-icechunk"
 version = "0.1.0-alpha.1"
 dependencies = [
  "icechunk",
+ "object_store",
  "serde_json",
+ "swath-core",
  "swath-manifest",
  "swath-referencer",
+ "swath-render",
+ "swath-reproject-proj4rs",
+ "swath-source-virtual",
  "swath-testsupport",
  "thiserror 2.0.20",
  "tokio",

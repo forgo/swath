@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Ingest adapter: commits a [`VirtualManifest`]'s byte-range references to
+//! Icechunk interop adapter: the write half commits a [`VirtualManifest`]'s
+//! byte-range references to
 //! an **Icechunk repository** (ADR 0016's interop half, #191; spec target
 //! recorded in ADR 0017) — the granule joins the VirtualiZarr→Icechunk
 //! ecosystem instead of living only in Swath's private manifest format.
@@ -30,6 +31,9 @@
 //! Local-filesystem repositories only for now (the `object-store-fs`
 //! feature is the only Icechunk backend compiled in); an object-store
 //! deployment target arrives with a real deployment, feature-flagged then.
+//!
+//! The read half — [`IcechunkSource`], serving tiles **from a commit**,
+//! byte-identical to the manifest path (#193) — lives in [`source`].
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -42,6 +46,9 @@ use icechunk::store::Store;
 use icechunk::virtual_chunks::VirtualChunkContainer;
 use icechunk::{ObjectStoreConfig, Repository, RepositoryConfig, new_local_filesystem_storage};
 use swath_manifest::{VirtualArray, VirtualManifest};
+
+mod source;
+pub use source::IcechunkSource;
 
 /// What can go wrong committing a manifest to an Icechunk repository.
 ///
@@ -341,6 +348,18 @@ async fn write_array(
 ) -> Result<(), CommitError> {
     let dimension_names = dims.names(&array.shape);
     let fill_value = fill_value(mapping.dtype, array);
+    // Georeferencing travels in a namespaced attribute (the manifest's own
+    // `Georef` shape, serde-identical): any consumer can read it, and the
+    // read-back adapter (`IcechunkSource`, #193) reconstructs the exact
+    // `RasterInfo` the manifest path serves from — the byte-identical
+    // serving equivalence rests on this being lossless.
+    let mut attributes = serde_json::Map::new();
+    if let Some(georef) = &array.georef {
+        attributes.insert(
+            "swath:georef".to_owned(),
+            serde_json::to_value(georef).expect("georef is a plain serde tree"),
+        );
+    }
     let metadata = serde_json::json!({
         "zarr_format": 3,
         "node_type": "array",
@@ -354,7 +373,7 @@ async fn write_array(
         "fill_value": fill_value,
         "codecs": mapping.codecs,
         "dimension_names": dimension_names,
-        "attributes": {}
+        "attributes": attributes
     });
     let key = format!("{}/zarr.json", array.name);
     store

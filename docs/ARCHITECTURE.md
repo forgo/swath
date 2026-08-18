@@ -151,7 +151,7 @@ _Last verified against sources `46d03b482a92`._
 
 | Port | Implemented adapter (crate) | Planned |
 | --- | --- | --- |
-| `RasterSource` | `swath-source-cog`; `swath-source-virtual`; `swath-pyramid-objectstore` (pyramid overlay over either) | `zarrs` (native Zarr) |
+| `RasterSource` | `swath-source-cog`; `swath-source-virtual`; `swath-icechunk` (read-back from a commit, #193); `swath-pyramid-objectstore` (pyramid overlay) | `zarrs` (native Zarr) |
 | `Reproject` | `swath-reproject-proj4rs` | `proj` C-bindings |
 | `Catalog` | `swath-catalog-pgstac` | — |
 | `TileCache` | `swath-cache-objectstore` (local/S3) | Redis hot-tile cache |

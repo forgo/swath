@@ -1,7 +1,7 @@
 # SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
 [package]
 name = "swath-icechunk"
-description = "Ingest adapter: commits a virtual-reference manifest's byte-range refs to an Icechunk repository (spec v2.1) — the VirtualiZarr→Icechunk ecosystem path for Swath-referenced granules."
+description = "Icechunk interop adapter: commits a virtual-reference manifest's byte-range refs to an Icechunk repository (spec v2.1) and serves tiles back from a commit, byte-identical to the manifest path."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,6 +14,12 @@ publish = false
 
 [dependencies]
 icechunk = { workspace = true }
+# The read-back half (#193): the RasterSource port + the shared serving
+# core (chunk math, codec decode, provenance) live with the manifest
+# adapter; this crate reconstructs identical inputs from the commit.
+object_store = { workspace = true }
+swath-core = { path = "../../swath-core", version = "0.1.0-alpha.1" }
+swath-source-virtual = { path = "../swath-source-virtual", version = "0.1.0-alpha.1" }
 # The lock type Store's session handle requires; sync only — the runtime
 # lives with the caller (CLI/harness), never here.
 tokio = { workspace = true, features = ["sync"] }
@@ -24,6 +30,8 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 swath-referencer = { path = "../../swath-referencer", version = "0.1.0-alpha.1" }
+swath-render = { path = "../../swath-render", version = "0.1.0-alpha.1" }
+swath-reproject-proj4rs = { path = "../swath-reproject-proj4rs", version = "0.1.0-alpha.1" }
 swath-testsupport = { path = "../../swath-testsupport", version = "0.1.0-alpha.1" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
