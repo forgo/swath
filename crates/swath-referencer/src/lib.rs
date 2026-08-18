@@ -2,12 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The production pure-Rust virtual-reference generator (ADR 0006, issue
-//! #40): [`SwathReferencer`] implements the core
-//! [`IngestReferencer`](swath_core::ingest::IngestReferencer) port, turning a
-//! legacy granule (HDF5/NetCDF4 via `hdf5-metno`, GRIB2 via `gribberish`)
-//! into a [`VirtualManifest`](swath_manifest::VirtualManifest) —
-//! byte-range references into the original file, generated in milliseconds
-//! from a metadata walk, no pixel data touched.
+//! #40): [`SwathReferencer`] turns a legacy granule (HDF5/NetCDF4 via
+//! `hdf5-metno`, GRIB2 via `gribberish`) into a
+//! [`VirtualManifest`](manifest::VirtualManifest) — byte-range references
+//! into the original file, generated in milliseconds from a metadata walk,
+//! no pixel data touched.
+//!
+//! Standalone by design (ADR 0016): this crate exposes its own
+//! [`ReferencerError`] taxonomy and depends only on the manifest
+//! vocabulary — Swath's `IngestReferencer` port stays in `swath-core`,
+//! adapted by a thin in-tree shim. An optional `cli` feature adds the
+//! `swath-referencer` binary (granule in, manifest JSON out).
 //!
 //! Productionized from prototype 0001 (referencer-bakeoff), whose generator
 //! logic was proven byte-identical to the Python `VirtualiZarr`/kerchunk
@@ -18,9 +23,10 @@
 //! sinusoidal grids), the core error taxonomy, and no printing.
 //!
 //! The Python sidecar remains the *conformance reference*: the gated
-//! equivalence harness (`just test-referencer`) runs both generators on a
-//! real VNP09GA granule and asserts byte-range equivalence via
-//! [`swath_manifest::compare`].
+//! equivalence harness (`just test-referencer`, documented for external
+//! consumers in this crate's README) runs both generators on a real
+//! VNP09GA granule and asserts byte-range equivalence via
+//! [`manifest::compare`].
 //!
 //! HDF5/NetCDF4 support (and with it the statically bundled libhdf5 C
 //! build) sits behind the default-ON `legacy-hdf5` feature (issue #99):
@@ -38,11 +44,53 @@ mod hdf;
 
 use std::path::Path;
 
-use swath_core::ingest::{IngestReferencer, ReferencerError};
-use swath_manifest::VirtualManifest;
+// The manifest vocabulary this generator emits (the `swath-manifest`
+// crate, ADR 0016 §standalone rule), re-exported so one dependency gives
+// consumers the generator and its output contract together.
+pub use swath_manifest as manifest;
+
+use manifest::VirtualManifest;
 
 /// The generator name stamped into manifests.
 pub const GENERATOR: &str = "swath-referencer";
+
+/// What can go wrong generating virtual references for a legacy granule.
+///
+/// The taxonomy separates "this generator does not do that" from "this
+/// granule is broken" from "the machine failed" — consumers route the
+/// first to a fallback/conformance story (ADR 0006), log the second per
+/// granule, and retry the third.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum ReferencerError {
+    /// The granule is readable but uses something the generator deliberately
+    /// does not map (an unrecognized extension, an exotic/big-endian dtype,
+    /// an unknown projection). A hard, honest error — never a guessed
+    /// manifest (prototype 0001 §7).
+    #[error("unsupported by this referencer: {detail}")]
+    Unsupported {
+        /// What was encountered, naming the offending array/feature.
+        detail: String,
+    },
+
+    /// The granule could not be understood at all (not a valid container,
+    /// corrupt structure, missing required metadata).
+    #[error("malformed granule: {detail}")]
+    Malformed {
+        /// What was wrong, naming the offending granule/structure.
+        detail: String,
+    },
+
+    /// The underlying filesystem/library machinery failed.
+    #[error("referencer backend failure: {detail}")]
+    Backend {
+        /// What was being attempted.
+        detail: String,
+        /// The underlying error.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
 
 /// The production pure-Rust reference generator. Stateless; dispatches on
 /// file extension (the drop conventions guarantee meaningful extensions —
@@ -70,14 +118,16 @@ impl SwathReferencer {
         let grib = matches!(ext.as_str(), "grib2" | "grb2" | "grib");
         (cfg!(feature = "legacy-hdf5") && hdf) || grib
     }
-}
 
-impl IngestReferencer for SwathReferencer {
-    fn handles(&self, granule: &Path) -> bool {
-        Self::handles(granule)
-    }
-
-    fn generate(&self, granule: &Path) -> Result<VirtualManifest, ReferencerError> {
+    /// Generates the virtual manifest for one granule file. The manifest's
+    /// chunk `path`s reference `granule` as given (the caller controls
+    /// whether that is relative or absolute).
+    ///
+    /// # Errors
+    ///
+    /// A [`ReferencerError`] per the taxonomy above; a partial manifest is
+    /// never returned.
+    pub fn generate(&self, granule: &Path) -> Result<VirtualManifest, ReferencerError> {
         match extension(granule).as_str() {
             #[cfg(feature = "legacy-hdf5")]
             "h5" | "hdf5" | "nc" | "nc4" => hdf::generate(granule),
@@ -111,7 +161,7 @@ fn extension(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{IngestReferencer, ReferencerError, SwathReferencer};
+    use super::{ReferencerError, SwathReferencer};
     use std::path::Path;
 
     #[test]

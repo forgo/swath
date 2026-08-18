@@ -302,7 +302,7 @@ where
             );
         } else {
             events = events.with_referencer(
-                std::sync::Arc::new(swath_referencer::SwathReferencer::new()),
+                std::sync::Arc::new(ReferencerShim::default()),
                 PathBuf::from(&cfg.store_root),
             );
         }
@@ -556,6 +556,39 @@ async fn shutdown_signal() {
         () = terminate => {}
     }
     tracing::info!("shutdown signal received; draining in-flight requests");
+}
+
+/// The in-tree port shim (ADR 0016): the standalone `swath-referencer`
+/// crate knows nothing of the workspace's
+/// [`IngestReferencer`](swath_core::ingest::IngestReferencer) port; this
+/// newtype adapts it, mapping the crate's error taxonomy onto the port's,
+/// variant for variant.
+#[derive(Debug, Clone, Copy, Default)]
+struct ReferencerShim(swath_referencer::SwathReferencer);
+
+impl swath_core::ingest::IngestReferencer for ReferencerShim {
+    fn handles(&self, granule: &std::path::Path) -> bool {
+        swath_referencer::SwathReferencer::handles(granule)
+    }
+
+    fn generate(
+        &self,
+        granule: &std::path::Path,
+    ) -> Result<swath_core::manifest::VirtualManifest, swath_core::ingest::ReferencerError> {
+        use swath_core::ingest::ReferencerError as Port;
+        use swath_referencer::ReferencerError as Lib;
+        self.0.generate(granule).map_err(|err| match err {
+            Lib::Unsupported { detail } => Port::Unsupported { detail },
+            Lib::Malformed { detail } => Port::Malformed { detail },
+            Lib::Backend { detail, source } => Port::Backend { detail, source },
+            // The crate's taxonomy is non_exhaustive; an unknown future
+            // variant surfaces as a backend failure, never a silent drop.
+            other => Port::Backend {
+                detail: "unmapped referencer error".to_owned(),
+                source: Box::new(other),
+            },
+        })
+    }
 }
 
 #[cfg(test)]

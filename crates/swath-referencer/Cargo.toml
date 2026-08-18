@@ -1,19 +1,36 @@
 # SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
 [package]
 name = "swath-referencer"
-description = "Production pure-Rust virtual-reference generator (ADR 0006): HDF5/NetCDF4 via hdf5-metno, GRIB2 via gribberish, behind the core IngestReferencer port."
+description = "Pure-Rust virtual-reference generator (kerchunk-style byte-range manifests): HDF5/NetCDF4 via hdf5-metno, GRIB2 via gribberish — byte-identical to the VirtualiZarr reference, library + optional CLI."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+readme = "README.md"
+keywords = ["hdf5", "grib2", "kerchunk", "virtualizarr", "zarr"]
+categories = ["science::geo", "parser-implementations"]
+# Flips to `true` in the publish pipeline PR (#192), per ADR 0016 — the name
+# is claimed only by a release carrying real content, never a placeholder.
 publish = false
 
-# The conformance harness's equivalence gate (`just test-referencer`).
+[package.metadata.docs.rs]
+# Document the full surface: the HDF5 half (`legacy-hdf5`) and the CLI.
+all-features = true
+
+# The conformance harness's equivalence gate (`just test-referencer`,
+# README §conformance). No extra deps — always built.
 [[bin]]
 name = "vmanifest-compare"
 path = "src/bin/vmanifest_compare.rs"
+
+# The standalone CLI (issue #188): granule in, manifest JSON out. Behind
+# the `cli` feature so library consumers never pull clap.
+[[bin]]
+name = "swath-referencer"
+path = "src/bin/swath_referencer.rs"
+required-features = ["cli"]
 
 [features]
 default = ["legacy-hdf5"]
@@ -25,8 +42,13 @@ default = ["legacy-hdf5"]
 # a loud "built without the legacy-hdf5 feature" error. GRIB2 stays
 # unconditional — gribberish is pure Rust and costs nothing.
 legacy-hdf5 = ["dep:hdf5-metno"]
+# The standalone `swath-referencer` binary (issue #188). Opt-in so the
+# library surface stays clap-free.
+cli = ["dep:clap"]
 
 [dependencies]
+# The standalone CLI's argument parsing; only with the `cli` feature.
+clap = { workspace = true, optional = true }
 # GRIB2 metadata walk (prototype 0001: message offsets/lengths/grids/packing
 # come straight from the section structs — no field decode, no default
 # features).
@@ -40,11 +62,14 @@ gribberish = { workspace = true }
 # touch HDF5 can opt out (`just check-fast` / `just test-fast`) while every
 # default build — `just test`, release, Docker — keeps it exactly as before.
 hdf5-metno = { workspace = true, optional = true }
-swath-core = { path = "../swath-core", version = "0.1.0-alpha.1" }
 # The manifest schema, consumed directly per the extraction boundary
 # (ADR 0016, docs/design/extraction-boundary.md §1): the referencer's
-# output contract, published alongside it.
+# output contract, published alongside it and re-exported as
+# `swath_referencer::manifest`.
 swath-manifest = { path = "../swath-manifest", version = "0.1.0-alpha.1" }
+# The crate-own error taxonomy (ADR 0016 standalone rule: the port trait
+# and its error stay home in swath-core; this crate speaks for itself).
+thiserror = { workspace = true }
 
 [dev-dependencies]
 swath-testsupport = { path = "../swath-testsupport", version = "0.1.0-alpha.1" }

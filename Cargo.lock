@@ -3307,11 +3307,12 @@ dependencies = [
 name = "swath-referencer"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "clap",
  "gribberish",
  "hdf5-metno",
- "swath-core",
  "swath-manifest",
  "swath-testsupport",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

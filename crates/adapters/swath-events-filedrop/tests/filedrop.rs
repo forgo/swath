@@ -308,12 +308,39 @@ fn tiny_fixture() -> PathBuf {
         .expect("tiny.h5 fixture exists")
 }
 
+/// The test's copy of the in-tree port shim (ADR 0016): the standalone
+/// referencer crate does not implement the workspace's `IngestReferencer`
+/// port, so the adapter test adapts it exactly as `swath serve` does.
+#[derive(Debug, Clone, Copy, Default)]
+struct ReferencerShim(swath_referencer::SwathReferencer);
+
+impl swath_core::ingest::IngestReferencer for ReferencerShim {
+    fn handles(&self, granule: &Path) -> bool {
+        swath_referencer::SwathReferencer::handles(granule)
+    }
+
+    fn generate(
+        &self,
+        granule: &Path,
+    ) -> Result<swath_core::manifest::VirtualManifest, swath_core::ingest::ReferencerError> {
+        use swath_core::ingest::ReferencerError as Port;
+        use swath_referencer::ReferencerError as Lib;
+        self.0.generate(granule).map_err(|err| match err {
+            Lib::Unsupported { detail } => Port::Unsupported { detail },
+            Lib::Malformed { detail } => Port::Malformed { detail },
+            Lib::Backend { detail, source } => Port::Backend { detail, source },
+            other => Port::Backend {
+                detail: "unmapped referencer error".to_owned(),
+                source: Box::new(other),
+            },
+        })
+    }
+}
+
 /// A watcher with the legacy path enabled, data root = the watch dir.
 fn legacy_watcher(dir: &Path) -> FiledropEvents {
-    FiledropEvents::new(dir, Duration::from_millis(10)).with_referencer(
-        std::sync::Arc::new(swath_referencer::SwathReferencer::new()),
-        dir,
-    )
+    FiledropEvents::new(dir, Duration::from_millis(10))
+        .with_referencer(std::sync::Arc::new(ReferencerShim::default()), dir)
 }
 
 fn drop_legacy_granule(dir: &Path, dataset: &str, granule: &str, asset_uri: &str) {

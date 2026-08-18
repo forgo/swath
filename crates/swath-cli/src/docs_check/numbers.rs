@@ -32,7 +32,7 @@ use super::read_repo;
 /// The measured documents and the marker keys each must carry. PITCH and
 /// ROADMAP quote no figure today but stay under the naked-literal scan —
 /// a headline number can only enter them through a marker.
-const DOCS: [(&str, &[&str]); 10] = [
+const DOCS: [(&str, &[&str]); 11] = [
     ("docs/PITCH.md", &[]),
     ("docs/ROADMAP.md", &[]),
     (
@@ -44,6 +44,12 @@ const DOCS: [(&str, &[&str]); 10] = [
             "ref-warm-ms",
             "ref-ratio",
         ],
+    ),
+    // The published crate's README (issue #188): its measured claims flow
+    // through the same markers as the workspace docs'.
+    (
+        "crates/swath-referencer/README.md",
+        &["ref-warm-ms", "ref-sidecar-warm-ms", "ref-ratio"],
     ),
     ("docs/DEMO.md", &["i2p-ms", "i2p-sha"]),
     ("docs/CHARTER.md", &["i2p-ms"]),

@@ -3,7 +3,7 @@
 
 //! `vmanifest-compare a.json b.json`: the conformance harness's equivalence
 //! gate (`just test-referencer`). Loads two v1 manifests, runs
-//! [`swath_manifest::compare`], prints the report, and exits non-zero
+//! [`swath_referencer::manifest::compare`], prints the report, and exits non-zero
 //! on any mismatch — the promoted form of prototype 0001's `compare`
 //! subcommand.
 
@@ -14,7 +14,7 @@
 
 use std::process::ExitCode;
 
-use swath_manifest::{VirtualManifest, compare};
+use swath_referencer::manifest::{VirtualManifest, compare};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
