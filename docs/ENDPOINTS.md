@@ -36,7 +36,8 @@ survive.
 | GET | `/traces` | always | X-ray SSE stream of every render |
 | GET | `/healthz` | always | Liveness probe (process only) |
 | GET/HEAD | *fallback* | always | Embedded UI assets; unknown paths are plain 404 |
-| GET | `/datasets/{datasetId}/granules` | catalog mode | Granule browsing (paged, filterable) |
+| GET, POST | `/datasets/{datasetId}/granules` | catalog mode | Granule browsing (paged, filterable); POST registers one (asset map or inline STAC Item — headers validated, extents derived, #196) |
+| POST | `/datasets` | catalog mode | Register a dataset (id, title, bands) — #196; 409 on existing id |
 | GET | `/.well-known/openeo` | catalog mode | openEO version discovery |
 | GET | `/collections` | catalog mode | openEO/STAC collections (one per dataset) |
 | GET | `/collections/{collection_id}` | catalog mode | One collection document |

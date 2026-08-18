@@ -22,10 +22,11 @@ pub(super) const DOC: &str = "docs/ENDPOINTS.md";
 /// The router files and the "Mounted" value their routes carry in the
 /// doc's table — exactly the files `docs/ENDPOINTS.md` names as where
 /// "the route tables live in code".
-const ROUTERS: [(&str, &str); 3] = [
+const ROUTERS: [(&str, &str); 4] = [
     ("crates/swath-api/src/routes.rs", "always"),
     ("crates/swath-api/src/granules.rs", "catalog mode"),
     ("crates/swath-api/src/openeo.rs", "catalog mode"),
+    ("crates/swath-api/src/datasets.rs", "catalog mode"),
 ];
 
 /// axum's routing method helpers — the identifiers that name HTTP
@@ -112,22 +113,41 @@ fn scrape_router(src: &str) -> (Vec<(String, BTreeSet<String>)>, bool) {
 }
 
 /// The code truth: path → route for every mounted route, plus whether a
-/// fallback exists (asserting no path is registered twice across files).
+/// fallback exists. A path registered by two router files with the same
+/// mount context merges its methods (the granule surface: browsing GETs
+/// in `granules.rs`, registration POSTs in the separately-unmountable
+/// `datasets.rs`, #196); the same path+method twice, or one path across
+/// different mount contexts, is still a hard clash.
 fn actual_routes() -> (BTreeMap<String, Route>, bool) {
-    let mut map = BTreeMap::new();
+    let mut map: BTreeMap<String, Route> = BTreeMap::new();
     let mut fallback = false;
     for (file, mounted) in ROUTERS {
         let (routes, has_fallback) = scrape_router(&read_repo(file));
         fallback |= has_fallback;
         for (path, methods) in routes {
-            let clash = map.insert(
-                path.clone(),
-                Route {
-                    methods,
-                    mounted: mounted.to_owned(),
-                },
-            );
-            assert!(clash.is_none(), "route `{path}` registered twice ({file})");
+            match map.get_mut(&path) {
+                None => {
+                    map.insert(
+                        path,
+                        Route {
+                            methods,
+                            mounted: mounted.to_owned(),
+                        },
+                    );
+                }
+                Some(existing) => {
+                    assert_eq!(
+                        existing.mounted, mounted,
+                        "route `{path}` registered under two mount contexts ({file})"
+                    );
+                    for method in methods {
+                        assert!(
+                            existing.methods.insert(method.clone()),
+                            "route `{path}` registers {method} twice ({file})"
+                        );
+                    }
+                }
+            }
         }
     }
     (map, fallback)

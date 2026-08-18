@@ -64,7 +64,7 @@ struct Section {
 ///   workspace manifest: the crate set is the claim.
 /// - ARCHITECTURE §6 (verbatim port traits + core entry points)
 ///   references the trait/entry-point source files it quotes.
-/// - ARCHITECTURE §7 (inbound APIs) references the three router files —
+/// - ARCHITECTURE §7 (inbound APIs) references the four router files —
 ///   the mounted surface is the claim (the adapter table's crate set is
 ///   covered by the §12 manifest watch).
 /// - EXTENDING §2/§3/§4 reference the files their signature blocks are
@@ -97,6 +97,7 @@ const SECTIONS: [(&str, &[Section]); 2] = [
                     "crates/swath-api/src/routes.rs",
                     "crates/swath-api/src/granules.rs",
                     "crates/swath-api/src/openeo.rs",
+                    "crates/swath-api/src/datasets.rs",
                 ],
             },
             Section {

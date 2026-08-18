@@ -24,7 +24,7 @@ use object_store::prefix::PrefixStore;
 use swath_api::{ApiState, CatalogLayers, LayerProvider};
 use swath_cache_objectstore::ObjectStoreTileCache;
 use swath_catalog_pgstac::PgstacCatalog;
-use swath_core::catalog::{Catalog, CatalogError};
+use swath_core::catalog::{Catalog, CatalogError, Dataset};
 use swath_core::events::EventSource;
 use swath_events_filedrop::FiledropEvents;
 use swath_pyramid_objectstore::PyramidSource;
@@ -190,6 +190,40 @@ where
     }
 }
 
+/// API-registered datasets (#196) are not in the config; they live only
+/// in the catalog. Rehydrates their authored service layers so a
+/// restarted server serves exactly what was registered + published
+/// (config datasets' services are carried over in the registration loop
+/// above; a graph that no longer compiles is dropped loudly, never
+/// served wrongly).
+fn restore_api_dataset_services(datasets: Vec<Dataset>, mode: &mut crate::config::CatalogMode) {
+    for dataset in datasets {
+        if mode.datasets.iter().any(|d| d.id == dataset.id) {
+            continue;
+        }
+        for layer in &dataset.layers {
+            if layer.process.is_none() {
+                continue; // API datasets author layers via services only
+            }
+            match swath_api::compile_service_layer(&dataset, layer) {
+                Ok(template) => {
+                    tracing::info!(
+                        "restored openEO service {id} on API-registered dataset {dataset}",
+                        id = layer.id,
+                        dataset = dataset.id,
+                    );
+                    mode.layers.push(template);
+                }
+                Err(err) => tracing::warn!(
+                    "dropping persisted openEO service {id}: its process graph no                      longer compiles against dataset {dataset}: {err}",
+                    id = layer.id,
+                    dataset = dataset.id,
+                ),
+            }
+        }
+    }
+}
+
 /// The mode-independent scalars of a resolved config.
 struct Shared {
     bind: std::net::SocketAddr,
@@ -286,6 +320,7 @@ where
             layers = dataset.layers.len(),
         );
     }
+    restore_api_dataset_services(catalog.list_datasets().await?, &mut mode);
     if let Some(dir) = &mode.watch_dir {
         tracing::info!("watching {} for granule manifests", dir.display());
         let mut events = FiledropEvents::new(dir.clone(), WATCH_POLL);
@@ -333,11 +368,23 @@ where
         Proj4rsReproject,
         &cfg.base_url,
     )));
+    // The dataset-creation surface (#196): register datasets/granules by
+    // API, validated through the same source stack tiles read. A separate
+    // router on purpose — the read-only slice (#198) will omit it.
+    let datasets_store = build_store(&cfg.store_root)?;
+    let datasets = swath_api::datasets_router(Arc::new(swath_api::DatasetsState::new(
+        provider.clone(),
+        PyramidSource::new(
+            CompositeSource::new(Arc::clone(&datasets_store)),
+            datasets_store,
+        ),
+        Proj4rsReproject,
+    )));
     run_server(
         cfg,
         provider,
         layer_count,
-        Some(openeo.merge(granules)),
+        Some(openeo.merge(granules).merge(datasets)),
         shutdown,
     )
     .await
