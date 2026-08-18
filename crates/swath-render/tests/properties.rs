@@ -164,10 +164,14 @@ proptest! {
                 .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
                     (lo.min(*v), hi.max(*v))
                 });
+            // Margin: under the skip-the-divide shortcut (weight sum within
+            // 1e-5 of 1.0, divide skipped) a convex combination scales by up
+            // to 1e-5, so the bound can be exceeded by |bound| * 1e-5 (#240).
+            let margin = 1e-9 + lo.abs().max(hi.abs()) * 1.1e-5;
             for (v, valid) in out.values.iter().zip(&out.valid) {
                 if *valid {
                     prop_assert!(
-                        *v >= lo - 1e-9 && *v <= hi + 1e-9,
+                        *v >= lo - margin && *v <= hi + margin,
                         "value {v} outside valid source range [{lo}, {hi}]"
                     );
                 }
@@ -187,8 +191,13 @@ proptest! {
         let out = warp(&src, &Identity, &grid, resampling).expect("warp");
         for (v, valid) in out.values.iter().zip(&out.valid) {
             if *valid {
+                // Tolerance: the kernel's GDAL-faithful skip-the-divide
+                // shortcut returns `acc` undivided when the support weight
+                // sum is within 1e-5 of 1.0, so a constant can come back as
+                // `c * weight_sum` — relative error up to 1e-5 (issue #240).
+                let tol = f64::from(value).abs() * 1.1e-5 + 1e-9;
                 prop_assert!(
-                    (*v - f64::from(value)).abs() < 1e-9,
+                    (*v - f64::from(value)).abs() <= tol,
                     "constant {value} warped to {v}"
                 );
             }
