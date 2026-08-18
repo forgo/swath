@@ -65,6 +65,8 @@ swath-pyramid-objectstore = { path = "../adapters/swath-pyramid-objectstore", ve
 # `swath ingest reference` and the serve-time filedrop legacy path.
 # default-features = false so this crate's own `legacy-hdf5` feature (above,
 # default ON) is the single switch for the bundled libhdf5 build.
+# The manifest→Icechunk committer (`swath ingest reference --icechunk`, #191).
+swath-icechunk = { path = "../adapters/swath-icechunk", version = "0.1.0-alpha.1" }
 swath-referencer = { path = "../swath-referencer", version = "0.1.0-alpha.1", default-features = false }
 swath-render = { path = "../swath-render", version = "0.1.0-alpha.1" }
 swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.1.0-alpha.1" }

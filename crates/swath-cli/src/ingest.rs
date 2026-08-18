@@ -34,6 +34,11 @@ enum IngestCommand {
         /// (default: `<granule>.vmanifest.json`).
         #[arg(long, value_name = "PATH")]
         output: Option<PathBuf>,
+        /// Also commit the virtual references to the Icechunk repository
+        /// at this directory (created if absent; committed to `main` —
+        /// ADR 0017). Chunk paths resolve against the granule's directory.
+        #[arg(long, value_name = "DIR")]
+        icechunk: Option<PathBuf>,
     },
 }
 
@@ -58,12 +63,25 @@ pub(crate) enum IngestError {
         #[source]
         source: std::io::Error,
     },
+    /// The Icechunk commit failed (#191).
+    #[error("icechunk commit to `{repo}`: {source}")]
+    Icechunk {
+        /// The repository directory.
+        repo: String,
+        /// The committer's error.
+        #[source]
+        source: swath_icechunk::CommitError,
+    },
 }
 
 /// Runs one ingest subcommand.
 pub(crate) fn run(args: &IngestArgs) -> Result<(), IngestError> {
     match &args.command {
-        IngestCommand::Reference { granule, output } => {
+        IngestCommand::Reference {
+            granule,
+            output,
+            icechunk,
+        } => {
             let manifest = SwathReferencer::new().generate(granule).map_err(|source| {
                 IngestError::Reference {
                     granule: granule.display().to_string(),
@@ -94,9 +112,56 @@ pub(crate) fn run(args: &IngestArgs) -> Result<(), IngestError> {
                 arrays = manifest.arrays.len(),
                 out = out.display(),
             );
+            if let Some(repo) = icechunk {
+                commit_icechunk(repo, &manifest, granule)?;
+            }
             Ok(())
         }
     }
+}
+
+/// Commits `manifest` to the Icechunk repository at `repo` (#191, ADR
+/// 0017), resolving chunk paths against the granule's directory. The
+/// ingest command is synchronous; the committer is async (Icechunk is
+/// tokio-based), so a current-thread runtime is built for the call.
+fn commit_icechunk(
+    repo: &std::path::Path,
+    manifest: &swath_referencer::manifest::VirtualManifest,
+    granule: &std::path::Path,
+) -> Result<(), IngestError> {
+    let source_root = granule
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let err = |source| IngestError::Icechunk {
+        repo: repo.display().to_string(),
+        source,
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("current-thread runtime builds");
+    let outcome = runtime
+        .block_on(swath_icechunk::commit_manifest(
+            repo,
+            manifest,
+            source_root,
+            &format!("swath ingest reference {}", granule.display()),
+        ))
+        .map_err(err)?;
+    for skipped in &outcome.skipped {
+        tracing::info!(
+            "icechunk: skipped `{name}`: {reason}",
+            name = skipped.name,
+            reason = skipped.reason,
+        );
+    }
+    tracing::info!(
+        "icechunk: committed {arrays} array(s) to {repo} (snapshot {snapshot})",
+        arrays = outcome.committed.len(),
+        repo = repo.display(),
+        snapshot = outcome.snapshot_id,
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -122,7 +187,11 @@ mod tests {
 
     fn reference(granule: PathBuf, output: Option<PathBuf>) -> IngestArgs {
         IngestArgs {
-            command: IngestCommand::Reference { granule, output },
+            command: IngestCommand::Reference {
+                granule,
+                output,
+                icechunk: None,
+            },
         }
     }
 

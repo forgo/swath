@@ -1,0 +1,31 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-icechunk"
+description = "Ingest adapter: commits a virtual-reference manifest's byte-range refs to an Icechunk repository (spec v2.1) — the VirtualiZarr→Icechunk ecosystem path for Swath-referenced granules."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Stays unpublished (ADR 0016: the four extraction crates only; this is
+# workspace-side interop glue over the published swath-manifest).
+publish = false
+
+[dependencies]
+icechunk = { workspace = true }
+# The lock type Store's session handle requires; sync only — the runtime
+# lives with the caller (CLI/harness), never here.
+tokio = { workspace = true, features = ["sync"] }
+url = { workspace = true }
+serde_json = { workspace = true }
+swath-manifest = { path = "../../swath-manifest", version = "0.1.0-alpha.1" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+swath-referencer = { path = "../../swath-referencer", version = "0.1.0-alpha.1" }
+swath-testsupport = { path = "../../swath-testsupport", version = "0.1.0-alpha.1" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

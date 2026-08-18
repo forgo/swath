@@ -11,6 +11,7 @@ members = [
     "crates/adapters/swath-pyramid-objectstore",
     "crates/adapters/swath-reproject-proj4rs",
     "crates/adapters/swath-source-cog",
+    "crates/adapters/swath-icechunk",
     "crates/adapters/swath-source-virtual",
     "crates/swath-api",
     "crates/swath-cli",
@@ -156,6 +157,21 @@ zarrs = { version = "0.23.13", default-features = false, features = ["zlib"] }
 # bundled libhdf5 from source, so no system HDF5 is required on any platform
 # (the single-binary story, prototype 0001 H4); versions pinned to the ones
 # the bake-off validated.
+# Icechunk interop (ADR 0016 + addendum, #191): the manifest→Icechunk
+# committer writes virtual chunk references natively (spec v2.1, the version
+# icechunk 2.1.x writes). Feature-trimmed hard: default features off drops
+# the AWS SDK (s3), the GCS/Azure/HTTP object_store backends, and reqwest;
+# exactly `object-store-fs` on — the local-filesystem repo the conformance
+# gate and `swath ingest` write today (S3 arrives with a real deployment,
+# feature-flagged then). The residual cost is icechunk's core: tokio,
+# flatbuffers/rmp-serde/zstd (the on-disk format), chrono — itemized in
+# PR #191 per the #190 supply-chain checkpoint pattern. Unpublished adapter
+# only: the published swath-referencer stays free of all of this.
+icechunk = { version = "2.1.2", default-features = false, features = ["object-store-fs"] }
+# Filesystem-path -> file:// URL construction for virtual chunk locations
+# (percent-encoding done right); already in the tree transitively under
+# icechunk — a direct use, not new supply-chain surface.
+url = { version = "2.5.7" }
 gribberish = { version = "1.6.0", default-features = false }
 hdf5-metno = { version = "0.14.0", features = ["static"] }
 
