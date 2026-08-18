@@ -176,7 +176,7 @@ impl VirtualSource {
 impl RasterSource for VirtualSource {
     async fn describe(&self, asset: &AssetRef) -> Result<RasterInfo, SourceError> {
         let (array, georef) = self.load_array(asset).await?;
-        raster_info(asset, &array, &georef)
+        array_raster_info(asset, &array, &georef)
     }
 
     async fn read_window(
@@ -187,7 +187,32 @@ impl RasterSource for VirtualSource {
         level: ReadLevel,
     ) -> Result<WindowData, SourceError> {
         let (array, georef) = self.load_array(asset).await?;
-        let info = raster_info(asset, &array, &georef)?;
+        read_array_window(&self.store, asset, &array, &georef, window, band, level).await
+    }
+}
+
+/// Serves one windowed read of `array` — the manifest-independent core of
+/// this adapter, shared with the Icechunk read-back sibling
+/// (`swath-icechunk`, #193): the caller supplies the array + georef from
+/// wherever they were recorded (a manifest document, an Icechunk commit's
+/// zarr metadata) and the `store` its chunk `path`s are keys into; chunk
+/// intersection, ranged fetches, codec decode, fill semantics, and
+/// [`Provenance`] are identical whichever route loaded the array.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the port signature plus the two loaded pieces; a builder would obscure a hot path"
+)]
+pub async fn read_array_window(
+    store: &Arc<dyn ObjectStore>,
+    asset: &AssetRef,
+    array: &VirtualArray,
+    georef: &Georef,
+    window: WindowRequest,
+    band: BandSelection,
+    level: ReadLevel,
+) -> Result<WindowData, SourceError> {
+    {
+        let info = array_raster_info(asset, array, georef)?;
         // Virtual cubes carry no overview pyramids (`describe` reports the
         // empty list); an overview request is a caller bug surfaced with
         // the port's own error, never silently served at full resolution.
@@ -238,7 +263,7 @@ impl RasterSource for VirtualSource {
         };
 
         let dtype = info.dtype;
-        let reader = ChunkReader::new(asset, &array, dtype)?;
+        let reader = ChunkReader::new(asset, array, dtype)?;
         let mut out = WindowBytes::new(&clip, dtype, info.nodata);
         let mut provenance = Vec::new();
         for (chunk_row, chunk_col) in reader.chunks_touching(&clip) {
@@ -246,8 +271,7 @@ impl RasterSource for VirtualSource {
                 // Unallocated in the original file: stays at fill value.
                 continue;
             };
-            let raw = self
-                .store
+            let raw = store
                 .get_range(
                     &source_path(asset, chunk_ref)?,
                     chunk_ref.offset..chunk_ref.offset + chunk_ref.length,
@@ -274,8 +298,9 @@ impl RasterSource for VirtualSource {
     }
 }
 
-/// Builds the port's `RasterInfo` from a manifest array + georef.
-fn raster_info(
+/// Builds the port's `RasterInfo` from a manifest array + georef —
+/// shared with the Icechunk read-back sibling (#193).
+pub fn array_raster_info(
     asset: &AssetRef,
     array: &VirtualArray,
     georef: &Georef,

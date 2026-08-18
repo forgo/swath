@@ -65,8 +65,8 @@ First recorded here as a deferral; **graduated by
 plan. M8 ships the interop rather than an adapter wish: the referencer commits virtual chunk
 references to an Icechunk repo instead of owning a private-only format (M8.7, #191, with an
 icechunk-python/xarray conformance gate), and Swath serves tiles back from an Icechunk commit,
-byte-identical to the manifest path and trace-visible (M8.9, #193), with the zarrs codec-chain
-adoption (M8.6, #190) as the enabling step. What remains demand-triggered (item 15 below): the
+byte-identical to the manifest path and trace-visible (M8.9, #193; all executed), with the
+zarrs codec-chain adoption (M8.6, #190) as the enabling step. What remains demand-triggered (item 15 below): the
 versioned-layer product UX — time-travel surfacing, transactional multi-granule updates (which
 would also change row 3's story) — and the native-Zarr `RasterSource` adapter
 (`ARCHITECTURE.md` §7, which also reopens `RasterSource`-vs-`CubeSource`, §16.1).
@@ -94,8 +94,9 @@ it** (the PR that introduced this file carries the approval checkbox).
 12. **OGC API - Records** — wants real dataset extents (row 15).
 13. **OGC API - Features** — vector/GeoParquet.
 14. **OGC API - Maps** — lowest-demand surface.
-15. **Icechunk adapter** (above). *Interop half executed in M8 per ADR 0016 (#190/#191/#193);
-    the versioned-layer UX remainder stays demand-triggered.*
+15. **Icechunk adapter** (above). *Interop executed in M8 per ADR 0016/0017: refs committed
+    (#191) and tiles served back from a commit, byte-identical and traced (#193); only the
+    versioned-layer product UX remainder stays demand-triggered.*
 16. **Engine breadth bundle** (rows 8, 9, 10) — demand-triggered.
 17. **WebP** (row 1) — deliberately cheap late.
 18. **Learned planner cost model** (row 4) — needs a real-operation Trace corpus.
