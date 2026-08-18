@@ -1,5 +1,5 @@
 ---
-source: crates/swath-core/tests/manifest_schema.rs
+source: crates/swath-manifest/tests/manifest_schema.rs
 expression: value
 ---
 {

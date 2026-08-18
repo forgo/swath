@@ -3245,6 +3245,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "swath-manifest",
  "thiserror 2.0.20",
 ]
 
@@ -3271,6 +3272,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "swath-manifest"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "insta",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "swath-pyramid-objectstore"
 version = "0.1.0-alpha.1"
 dependencies = [
@@ -3291,6 +3301,7 @@ dependencies = [
  "gribberish",
  "hdf5-metno",
  "swath-core",
+ "swath-manifest",
  "swath-testsupport",
 ]
 
@@ -3350,6 +3361,7 @@ dependencies = [
  "object_store",
  "serde",
  "swath-core",
+ "swath-manifest",
  "swath-referencer",
  "swath-render",
  "swath-reproject-proj4rs",

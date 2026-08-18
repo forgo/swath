@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! The virtual-reference manifest: schema v1 of the `IngestReferencer` port
-//! contract (ADR 0006, prototype 0001 §3).
+//! The virtual-reference manifest: schema v1 of the generator contract
+//! (Swath ADR 0006, prototype 0001 §3). The normative schema description
+//! ships with this crate as `SPEC.md`; this API is that document made
+//! executable.
 //!
 //! A [`VirtualManifest`] describes a legacy granule (NetCDF4/HDF5, GRIB2) as
 //! a set of arrays whose chunks are **byte ranges into the original file** —
@@ -10,8 +12,9 @@
 //! manifest is the contract: whoever generates it (the production Rust
 //! generator in `swath-referencer`, or the Python `VirtualiZarr` sidecar in the
 //! conformance harness), the serve path reads it identically, so generators
-//! are interchangeable behind the port. [`compare`] is that interchangeability
-//! made executable — the equivalence check promoted from prototype 0001.
+//! are interchangeable behind the contract. [`compare`] is that
+//! interchangeability made executable — the equivalence check promoted from
+//! prototype 0001.
 //!
 //! # Versioning
 //!
@@ -22,21 +25,18 @@
 //!
 //! # Georeferencing vocabulary (new over the prototype schema)
 //!
-//! Serving (#39) needs each array's spatial identity, so v1 adds an optional
+//! Serving needs each array's spatial identity, so v1 adds an optional
 //! per-array [`Georef`]: CRS + geotransform + nodata + band semantics. The
 //! CRS is the manifest's **own** vocabulary ([`GeorefCrs`]): VNP09GA's grid
 //! is MODIS-heritage sinusoidal with **no EPSG code**, so alongside
 //! `{"epsg": N}` the manifest can carry `{"proj4": "+proj=sinu …"}` (a proj
-//! string — matching the proj4rs adapter's input language). This deliberately
-//! does **not** redesign the core [`Crs`](crate::crs::Crs) newtype (EPSG-only
-//! today): how serving resolves a manifest CRS into the `Reproject` port is
-//! #39's decision, made where the serving wire-up lives — the manifest just
-//! records the identity losslessly.
+//! string). How a consumer resolves a manifest CRS into projection math is
+//! the consumer's decision, made where its reprojection wire-up lives — the
+//! manifest just records the identity losslessly.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-
-use crate::raster::GeoTransform;
+use std::fmt;
 
 /// The schema version this module reads and writes.
 pub const MANIFEST_VERSION: u32 = 1;
@@ -140,6 +140,58 @@ pub struct ChunkRef {
     pub length: u64,
 }
 
+/// Affine pixel↔CRS mapping, GDAL's six-parameter convention:
+///
+/// ```text
+/// x = origin_x + col * pixel_width  + row * row_rotation
+/// y = origin_y + col * col_rotation + row * pixel_height
+/// ```
+///
+/// `(origin_x, origin_y)` is the CRS position of the **top-left corner of the
+/// top-left pixel**; `(col, row)` are fractional pixel coordinates measured
+/// from that corner. Rows are stored north-up in the common case:
+/// `pixel_height` is **negative** (y decreases as `row` grows southward) and
+/// both rotation terms are zero.
+///
+/// This is the manifest's own record of the mapping — six named numbers,
+/// data only. Geometry (inversion, windowing) lives with the consumer.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GeoTransform {
+    /// CRS x of the top-left corner of pixel (0, 0).
+    pub origin_x: f64,
+    /// Column step in CRS x units (GDAL `GT(1)`); positive east-up.
+    pub pixel_width: f64,
+    /// Row step in CRS x units (GDAL `GT(2)`); zero for axis-aligned rasters.
+    pub row_rotation: f64,
+    /// CRS y of the top-left corner of pixel (0, 0).
+    pub origin_y: f64,
+    /// Column step in CRS y units (GDAL `GT(4)`); zero for axis-aligned rasters.
+    pub col_rotation: f64,
+    /// Row step in CRS y units (GDAL `GT(5)`); **negative** for north-up rasters.
+    pub pixel_height: f64,
+}
+
+impl GeoTransform {
+    /// An axis-aligned, north-up transform (both rotation terms zero).
+    /// `pixel_height` should be negative per the north-up convention.
+    #[must_use]
+    pub const fn north_up(
+        origin_x: f64,
+        origin_y: f64,
+        pixel_width: f64,
+        pixel_height: f64,
+    ) -> Self {
+        Self {
+            origin_x,
+            pixel_width,
+            row_rotation: 0.0,
+            origin_y,
+            col_rotation: 0.0,
+            pixel_height,
+        }
+    }
+}
+
 /// Per-array georeferencing: everything serving needs to place the array's
 /// pixel grid on the planet (module docs).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -172,18 +224,6 @@ pub enum GeorefCrs {
     Proj4(String),
 }
 
-impl From<&GeorefCrs> for crate::crs::Crs {
-    /// The manifest CRS vocabulary maps losslessly onto the core [`Crs`]
-    /// (which grew its proj-string variant in #39 for exactly this): an
-    /// EPSG code stays a code, a proj string stays a proj string.
-    fn from(crs: &GeorefCrs) -> Self {
-        match crs {
-            GeorefCrs::Epsg(code) => Self::Epsg(*code),
-            GeorefCrs::Proj4(definition) => Self::Proj4(definition.clone()),
-        }
-    }
-}
-
 impl VirtualManifest {
     /// Parses a manifest from its JSON text, validating the schema version.
     ///
@@ -210,17 +250,30 @@ impl VirtualManifest {
 }
 
 /// What can go wrong reading a manifest document.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+///
+/// Hand-implemented `Display`/`Error` (no derive dependency): the published
+/// crate's tree stays exactly serde + `serde_json` (ADR 0016's zero-new-deps
+/// rule, and the design note's recorded dep set).
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ManifestError {
     /// The text is not a valid v1 manifest document (malformed JSON, missing
     /// fields, unknown fields, or an unsupported `manifest_version`).
-    #[error("invalid manifest document: {detail}")]
     Json {
         /// The underlying parse/validation failure.
         detail: String,
     },
 }
+
+impl fmt::Display for ManifestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Json { detail } => write!(f, "invalid manifest document: {detail}"),
+        }
+    }
+}
+
+impl std::error::Error for ManifestError {}
 
 // ---------- equivalence (the conformance check, from prototype 0001) ----------
 

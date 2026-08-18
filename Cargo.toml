@@ -16,6 +16,7 @@ members = [
     "crates/swath-cli",
     "crates/swath-core",
     "crates/swath-e2e",
+    "crates/swath-manifest",
     "crates/swath-referencer",
     "crates/swath-render",
     "crates/swath-testkit",

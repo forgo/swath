@@ -41,6 +41,10 @@ gribberish = { workspace = true }
 # default build — `just test`, release, Docker — keeps it exactly as before.
 hdf5-metno = { workspace = true, optional = true }
 swath-core = { path = "../swath-core", version = "0.1.0-alpha.1" }
+# The manifest schema, consumed directly per the extraction boundary
+# (ADR 0016, docs/design/extraction-boundary.md §1): the referencer's
+# output contract, published alongside it.
+swath-manifest = { path = "../swath-manifest", version = "0.1.0-alpha.1" }
 
 [dev-dependencies]
 swath-testsupport = { path = "../swath-testsupport", version = "0.1.0-alpha.1" }

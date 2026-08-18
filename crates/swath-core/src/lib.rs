@@ -22,7 +22,8 @@
 //! - [`ingest`] — the ingest orchestrator's registration step (REQUIREMENTS.md R1)
 //!   and the `IngestReferencer` port (ADR 0006)
 //! - [`manifest`] — virtual-reference manifest schema v1, the port contract
-//!   (ADR 0006), plus the generator-equivalence check
+//!   (ADR 0006), plus the generator-equivalence check — re-exported from the
+//!   extracted `swath-manifest` crate (ADR 0016)
 //! - [`planner`] — the cost-aware materialization planner (issue #37):
 //!   `plan()` chooses `CacheHit | Overview | Live` under a per-layer `Budget`
 //!   and records every candidate's estimate for the Trace
@@ -40,7 +41,9 @@ pub mod crs;
 pub mod error;
 pub mod events;
 pub mod ingest;
-pub mod manifest;
+/// Manifest v1 — the schema crate re-exported under its pre-extraction
+/// path (ADR 0016): `swath_core::manifest::*` keeps resolving unchanged.
+pub use swath_manifest as manifest;
 pub mod planner;
 pub mod raster;
 pub mod reproject;

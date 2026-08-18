@@ -169,6 +169,37 @@ impl GeoTransform {
     }
 }
 
+/// The manifest records the same six numbers as pure data
+/// (`swath_manifest::GeoTransform`, ADR 0016); the core owns the geometry.
+/// The two convert field-for-field, both directions — the extraction shim.
+impl From<swath_manifest::GeoTransform> for GeoTransform {
+    fn from(t: swath_manifest::GeoTransform) -> Self {
+        Self {
+            origin_x: t.origin_x,
+            pixel_width: t.pixel_width,
+            row_rotation: t.row_rotation,
+            origin_y: t.origin_y,
+            col_rotation: t.col_rotation,
+            pixel_height: t.pixel_height,
+        }
+    }
+}
+
+/// The core→manifest half of the shim: generators compute with the core
+/// geometry and record the result in the schema's own vocabulary.
+impl From<GeoTransform> for swath_manifest::GeoTransform {
+    fn from(t: GeoTransform) -> Self {
+        Self {
+            origin_x: t.origin_x,
+            pixel_width: t.pixel_width,
+            row_rotation: t.row_rotation,
+            origin_y: t.origin_y,
+            col_rotation: t.col_rotation,
+            pixel_height: t.pixel_height,
+        }
+    }
+}
+
 /// A rectangular pixel window into a raster grid: `width × height` pixels
 /// starting at `(col_off, row_off)` from the top-left.
 ///

@@ -45,6 +45,7 @@ path = [
     "crates/swath-referencer/tests/data/tiny.h5",
     "crates/swath-referencer/tests/data/tiny.expected.json",
     "crates/swath-core/tests/snapshots/*.snap",
+    "crates/swath-manifest/tests/snapshots/*.snap",
     "crates/swath-api/tests/snapshots/*.snap",
     "crates/swath-core/tests/*.proptest-regressions",
     "crates/adapters/swath-reproject-proj4rs/tests/data/*.json",

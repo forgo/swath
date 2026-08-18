@@ -18,7 +18,7 @@
 use std::path::PathBuf;
 
 use swath_core::ingest::{IngestReferencer as _, ReferencerError};
-use swath_core::manifest::{VirtualManifest, compare};
+use swath_manifest::{VirtualManifest, compare};
 use swath_referencer::SwathReferencer;
 
 fn data(file: &str) -> PathBuf {
@@ -101,7 +101,7 @@ fn storage_layouts_map_as_documented() {
     let georef = nir.georef.as_ref().expect("nir is georeferenced");
     assert_eq!(
         georef.crs,
-        swath_core::manifest::GeorefCrs::Proj4(
+        swath_manifest::GeorefCrs::Proj4(
             "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +R=6371007.181 +units=m +no_defs".to_owned()
         )
     );

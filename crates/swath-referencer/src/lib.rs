@@ -5,7 +5,7 @@
 //! #40): [`SwathReferencer`] implements the core
 //! [`IngestReferencer`](swath_core::ingest::IngestReferencer) port, turning a
 //! legacy granule (HDF5/NetCDF4 via `hdf5-metno`, GRIB2 via `gribberish`)
-//! into a [`VirtualManifest`](swath_core::manifest::VirtualManifest) —
+//! into a [`VirtualManifest`](swath_manifest::VirtualManifest) —
 //! byte-range references into the original file, generated in milliseconds
 //! from a metadata walk, no pixel data touched.
 //!
@@ -20,7 +20,7 @@
 //! The Python sidecar remains the *conformance reference*: the gated
 //! equivalence harness (`just test-referencer`) runs both generators on a
 //! real VNP09GA granule and asserts byte-range equivalence via
-//! [`swath_core::manifest::compare`].
+//! [`swath_manifest::compare`].
 //!
 //! HDF5/NetCDF4 support (and with it the statically bundled libhdf5 C
 //! build) sits behind the default-ON `legacy-hdf5` feature (issue #99):
@@ -39,7 +39,7 @@ mod hdf;
 use std::path::Path;
 
 use swath_core::ingest::{IngestReferencer, ReferencerError};
-use swath_core::manifest::VirtualManifest;
+use swath_manifest::VirtualManifest;
 
 /// The generator name stamped into manifests.
 pub const GENERATOR: &str = "swath-referencer";

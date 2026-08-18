@@ -27,8 +27,8 @@
 //! `docs/ROADMAP.md`).
 
 use swath_core::ingest::ReferencerError;
-use swath_core::manifest::GeorefCrs;
 use swath_core::raster::GeoTransform;
+use swath_manifest::GeorefCrs;
 
 /// One grid definition parsed out of `StructMetadata.0`.
 #[derive(Debug, Clone, PartialEq)]
@@ -197,7 +197,7 @@ fn malformed(block: &str, detail: &str) -> ReferencerError {
 mod tests {
     use super::{EosGrid, parse_grids};
     use swath_core::ingest::ReferencerError;
-    use swath_core::manifest::GeorefCrs;
+    use swath_manifest::GeorefCrs;
 
     /// The real VNP09GA StructMetadata.0 text, committed verbatim from the
     /// bake-off granule (`VNP09GA.A2012019.h33v12.002.2023122182434.h5`).

@@ -6,10 +6,9 @@
 //! changes bump `manifest_version` instead), and text → domain → text is the
 //! identity for a representative manifest exercising every field.
 
-use swath_core::manifest::{
-    ChunkRef, Georef, GeorefCrs, ManifestVersion, VirtualArray, VirtualManifest,
+use swath_manifest::{
+    ChunkRef, GeoTransform, Georef, GeorefCrs, ManifestVersion, VirtualArray, VirtualManifest,
 };
-use swath_core::raster::GeoTransform;
 
 /// A VNP09GA-shaped representative: one sinusoidal (proj4) georeferenced
 /// chunked array, one EPSG-coded array, one bare metadata array.

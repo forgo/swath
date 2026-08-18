@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "swath-manifest"
+description = "Virtual-reference manifest v1: the versioned, deny-unknown JSON contract describing a legacy granule (HDF5/NetCDF4, GRIB2) as byte-range references into the original file, with the generator-equivalence check."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Flips to `true` in the publish pipeline PR (#192), per ADR 0016 — the name
+# is claimed only by a release carrying real content, never a placeholder.
+publish = false
+
+[dependencies]
+# The schema is serde all the way down; serde_json is the document format
+# (pretty text out, validated text in). Exactly the published-dep set the
+# extraction boundary records (docs/design/extraction-boundary.md §1) —
+# extraction added zero dependencies (ADR 0016).
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# The schema snapshot test (tests/manifest_schema.rs) travels with the crate.
+insta = { workspace = true }
+
+[lints]
+workspace = true

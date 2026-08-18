@@ -23,7 +23,7 @@ use std::path::Path;
 use gribberish::message::read_messages;
 use gribberish::templates::product::tables::FixedSurfaceType;
 use swath_core::ingest::ReferencerError;
-use swath_core::manifest::{ChunkRef, ManifestVersion, VirtualArray, VirtualManifest};
+use swath_manifest::{ChunkRef, ManifestVersion, VirtualArray, VirtualManifest};
 
 /// Generates the manifest for a GRIB2 granule.
 pub(crate) fn generate(granule: &Path) -> Result<VirtualManifest, ReferencerError> {
