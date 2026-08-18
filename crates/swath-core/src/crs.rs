@@ -95,6 +95,20 @@ impl Crs {
     }
 }
 
+impl From<&crate::manifest::GeorefCrs> for Crs {
+    /// The manifest CRS vocabulary maps losslessly onto the core [`Crs`]
+    /// (which grew its proj-string variant in #39 for exactly this): an
+    /// EPSG code stays a code, a proj string stays a proj string. (Moved
+    /// here from the manifest module when the schema was extracted to the
+    /// `swath-manifest` crate — ADR 0016; `Crs` is the local type.)
+    fn from(crs: &crate::manifest::GeorefCrs) -> Self {
+        match crs {
+            crate::manifest::GeorefCrs::Epsg(code) => Self::Epsg(*code),
+            crate::manifest::GeorefCrs::Proj4(definition) => Self::Proj4(definition.clone()),
+        }
+    }
+}
+
 impl fmt::Display for Crs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

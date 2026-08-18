@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 
 use swath_core::ingest::IngestReferencer as _;
-use swath_core::manifest::GeorefCrs;
+use swath_manifest::GeorefCrs;
 use swath_referencer::SwathReferencer;
 
 #[test]

@@ -15,8 +15,8 @@ use object_store::ObjectStoreExt as _;
 use object_store::memory::InMemory;
 use object_store::path::Path as StorePath;
 use swath_core::ingest::IngestReferencer as _;
-use swath_core::manifest::VirtualManifest;
 use swath_core::raster::AssetRef;
+use swath_manifest::VirtualManifest;
 use swath_referencer::SwathReferencer;
 use swath_source_virtual::VirtualSource;
 

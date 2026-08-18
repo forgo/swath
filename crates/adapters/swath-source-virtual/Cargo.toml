@@ -16,6 +16,10 @@ publish = false
 flate2 = { workspace = true }
 object_store = { workspace = true }
 swath-core = { path = "../../swath-core", version = "0.1.0-alpha.1" }
+# The manifest schema, consumed directly per the extraction boundary
+# (ADR 0016, docs/design/extraction-boundary.md §1): this adapter reads
+# what the referencer writes.
+swath-manifest = { path = "../../swath-manifest", version = "0.1.0-alpha.1" }
 
 [dev-dependencies]
 serde = { workspace = true }

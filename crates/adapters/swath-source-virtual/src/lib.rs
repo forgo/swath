@@ -38,7 +38,7 @@
 //! # What the adapter serves
 //!
 //! Exactly what the manifest can georeference: 2-D arrays carrying a
-//! [`Georef`](swath_core::manifest::Georef) (CRS — EPSG or proj-string —
+//! [`Georef`](swath_manifest::Georef) (CRS — EPSG or proj-string —
 //! geotransform, nodata, band). Arrays without a georef (coordinate
 //! vectors, metadata blobs) and non-2-D shapes are an honest
 //! [`SourceError::Unsupported`]. Virtual cubes have **no overview
@@ -68,12 +68,12 @@ use std::sync::Arc;
 
 use object_store::path::Path;
 use object_store::{ObjectStore, ObjectStoreExt as _};
-use swath_core::manifest::{ChunkRef, Georef, VirtualArray, VirtualManifest};
 use swath_core::raster::{AssetRef, DType, RasterInfo, WindowRequest};
 use swath_core::source::{
     BandSelection, PixelBuffer, RasterSource, ReadLevel, SourceError, WindowData,
 };
 use swath_core::trace::Provenance;
+use swath_manifest::{ChunkRef, Georef, VirtualArray, VirtualManifest};
 
 /// A [`RasterSource`] serving virtual-reference manifests from an
 /// [`ObjectStore`].
@@ -296,7 +296,7 @@ fn raster_info(
         crs: (&georef.crs).into(),
         width,
         height,
-        transform: georef.transform,
+        transform: georef.transform.into(),
         band_count: 1,
         dtype,
         nodata: georef.nodata,

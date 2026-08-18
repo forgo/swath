@@ -19,7 +19,7 @@ else is **dashed**, whatever the docs say.
 | Control plane (datasets, granules, Trace SSE, healthz) | `crates/swath-api/src/lib.rs` | `crates/swath-api/tests/{granules,trace_stream,conformance}.rs` |
 | STAC 1.1.0 hidden persistence + datacube ext v2.2.0 | `crates/swath-core/src/catalog/stac.rs` `STAC_VERSION = "1.1.0"`; `openeo.rs` datacube schema URI | `crates/swath-core/tests/catalog_roundtrip.rs` round-trip properties + snapshots; `openeo_conformance.rs` cube:dimensions assertions. Internal round-trip evidence, not external-schema validation — hidden by design (R2) |
 | COG reading | `crates/adapters/swath-source-cog/` | `tests/{describe,windows,overviews}.rs` (GDAL/rio-tiler oracle regime, ADR 0002) |
-| Virtual-reference manifest v1 | `crates/swath-core/src/manifest.rs`; `crates/swath-referencer/`; `crates/adapters/swath-source-virtual/` | `manifest_schema.rs`, `known_answer.rs`, `windows.rs` (SHA-256 pixel oracle); gated real-granule equivalence harness (`just test-referencer`, `.github/workflows/referencer-conformance.yml`) |
+| Virtual-reference manifest v1 | `crates/swath-manifest/src/lib.rs`; `crates/swath-referencer/`; `crates/adapters/swath-source-virtual/` | `manifest_schema.rs`, `known_answer.rs`, `windows.rs` (SHA-256 pixel oracle); gated real-granule equivalence harness (`just test-referencer`, `.github/workflows/referencer-conformance.yml`) |
 
 ## Dashed (deferred, not claimed, or docs-only)
 

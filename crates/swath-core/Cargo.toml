@@ -17,6 +17,10 @@ serde_json = { workspace = true }
 # The TileCache key (#36): SHA-256, stable across releases/architectures
 # (cache keys name store objects). Pure computation; the core stays I/O-free.
 sha2 = { workspace = true }
+# Manifest v1 lives in its own published-boundary crate (ADR 0016, #187);
+# the core re-exports it as `swath_core::manifest` and keeps the
+# `IngestReferencer` port speaking `VirtualManifest`.
+swath-manifest = { path = "../swath-manifest", version = "0.1.0-alpha.1" }
 thiserror = { workspace = true }
 
 [dev-dependencies]

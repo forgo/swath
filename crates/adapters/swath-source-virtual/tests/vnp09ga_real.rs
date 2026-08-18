@@ -20,9 +20,9 @@ use object_store::ObjectStoreExt as _;
 use object_store::memory::InMemory;
 use object_store::path::Path as StorePath;
 use swath_core::crs::Crs;
-use swath_core::manifest::VirtualManifest;
 use swath_core::raster::AssetRef;
 use swath_core::tile::TileCoord;
+use swath_manifest::VirtualManifest;
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
 use swath_render::{NodataPolicy, Resampling, TileRequest, render_tile};
 use swath_reproject_proj4rs::Proj4rsReproject;
@@ -90,7 +90,7 @@ async fn real_vnp09ga_ndvi_tile_renders_from_original_bytes() {
         let georef = array.georef.as_ref().expect("reflectance is georeferenced");
         assert_eq!(georef.band.as_deref(), Some(band));
         assert!(
-            matches!(&georef.crs, swath_core::manifest::GeorefCrs::Proj4(s)
+            matches!(&georef.crs, swath_manifest::GeorefCrs::Proj4(s)
                 if s.starts_with("+proj=sinu")),
             "sinusoidal grid"
         );

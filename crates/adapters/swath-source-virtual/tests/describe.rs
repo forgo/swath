@@ -18,11 +18,11 @@ use swath_source_virtual::VirtualSource;
 
 /// The georef truth of one expected-manifest array, straight from the
 /// committed JSON.
-fn expected_georef(array: &str) -> swath_core::manifest::Georef {
+fn expected_georef(array: &str) -> swath_manifest::Georef {
     let path = common::fixture_path().with_file_name("tiny.expected.json");
     let text = std::fs::read_to_string(path).expect("expected json readable");
     let manifest =
-        swath_core::manifest::VirtualManifest::from_json_str(&text).expect("expected json parses");
+        swath_manifest::VirtualManifest::from_json_str(&text).expect("expected json parses");
     manifest
         .arrays
         .iter()
@@ -45,7 +45,11 @@ async fn describe_matches_the_h5py_derived_georef_truth() {
             matches!(&info.crs, Crs::Proj4(s) if s.starts_with("+proj=sinu")),
             "{array}: sinusoidal proj-string CRS"
         );
-        assert_eq!(info.transform, truth.transform, "{array}: geotransform");
+        assert_eq!(
+            info.transform,
+            truth.transform.into(),
+            "{array}: geotransform"
+        );
         assert_eq!(info.nodata, truth.nodata, "{array}: nodata");
         assert_eq!((info.width, info.height), (7, 8), "{array}: dims");
         assert_eq!(info.dtype, DType::Int16, "{array}: dtype");
