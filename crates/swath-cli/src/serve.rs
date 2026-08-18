@@ -191,6 +191,21 @@ where
         cors_allowed_origins,
         read_only,
     };
+    // The udf runtime is built up front (ADR 0018, #200): fail-fast on a
+    // host the deterministic configuration cannot honor, state the runtime
+    // identity operators are trusting, and keep the size measurement
+    // honest (an unreferenced engine would be LTO-stripped). The engine is
+    // dropped again until #205 wires execution.
+    #[cfg(feature = "udf-wasm")]
+    match swath_udf_wasmtime::deterministic_engine() {
+        Ok(_engine) => tracing::info!(
+            "udf runtime ready: {version} (ADR 0018; execution arrives with #201-#205)",
+            version = swath_udf_wasmtime::runtime_version(),
+        ),
+        Err(err) => tracing::warn!(
+            "udf runtime unavailable on this host: {err} — run_udf will be              refused when execution lands (#203)",
+        ),
+    }
     match layers {
         LayerSource::Static(registry) => {
             let layer_count = registry.identities().len();

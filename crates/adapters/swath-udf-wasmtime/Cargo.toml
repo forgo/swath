@@ -1,0 +1,20 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-udf-wasmtime"
+description = "run_udf executor adapter: sandboxed, deterministic WASM per ADR 0018 — zero-import modules, NaN canonicalization, fuel + epoch bounds, pooled instantiation. #200 lands the engine configuration and the supply-chain gate; execution wiring arrives with #203."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+thiserror = { workspace = true }
+# The ONLY crate in the workspace allowed to name this dependency
+# (ADR 0018; the referencer's wasmtime-free guard pins the isolation).
+wasmtime = { workspace = true }
+
+[lints]
+workspace = true

@@ -22,6 +22,13 @@ ignore = [
 # per-license, when a dependency demands it — never with a blanket "OR later".
 allow = [
     "Apache-2.0",
+    # The wasmtime/cranelift family (ADR 0018, #200): the LLVM exception
+    # only RELAXES Apache-2.0 (no Section-3 patent-termination for
+    # compiled output; explicit permission to link the runtime into
+    # binaries under other licenses). Strictly more permissive for our
+    # use than plain Apache-2.0, and scoped: only the udf adapter's
+    # subtree carries it.
+    "Apache-2.0 WITH LLVM-exception",
     "MIT",
     "BSD-2-Clause",
     "BSD-3-Clause",

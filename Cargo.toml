@@ -13,6 +13,7 @@ members = [
     "crates/adapters/swath-source-cog",
     "crates/adapters/swath-icechunk",
     "crates/adapters/swath-source-virtual",
+    "crates/adapters/swath-udf-wasmtime",
     "crates/swath-api",
     "crates/swath-cli",
     "crates/swath-core",
@@ -151,6 +152,20 @@ tracing-subscriber = { version = "0.3.20", default-features = false, features = 
 # (rayon, moka, num, half, inventory, …) — measured and itemized in PR #190;
 # this dep is the supply-chain rehearsal for M9's wasmtime review.
 zarrs = { version = "0.23.13", default-features = false, features = ["zlib"] }
+# The WASM runtime for run_udf (ADR 0018, #200 — the supply-chain
+# checkpoint this comment IS, per the #190 zarrs pattern above). Trimmed to
+# the ADR's commitments and nothing else: `runtime` + `cranelift` (compile
+# + execute core modules), `pooling-allocator` (per-request instantiation
+# at tile rates), `std`. Explicitly ABSENT, forever by default: `wasi`
+# (zero-import modules — determinism is structural), `component-model`,
+# `async` (execution is bounded by fuel + epoch, inline per ADR 0012),
+# `cache`/`incremental-cache` (module compilation is content-addressed by
+# OUR store, #204), `parallel-compilation` (rayon stays out of the serve
+# path), gc/profiling/debug machinery. License: Apache-2.0 WITH
+# LLVM-exception (deny.toml allows the exact expression). Only the udf
+# adapter crate may name this dep; the referencer's wasmtime-free guard
+# test pins the isolation.
+wasmtime = { version = "47.0.3", default-features = false, features = ["runtime", "cranelift", "pooling-allocator", "std"] }
 # The production referencer (ADR 0006, issue #40). gribberish: GRIB2 section
 # metadata (offsets/lengths/grids/packing templates) — referencing needs no
 # field decode, so default features stay off. hdf5-metno `static`: builds the

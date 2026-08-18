@@ -48,7 +48,7 @@ flowchart TB
   RENDER["swath-render: tiler, warp/resample kernels (via swath-warp), process compiler, Render IR, encoder"]
   CORE["swath-core (no I/O): planner, catalog domain, ingest step, manifest v1 (re-exported from swath-manifest), tile/TMS math, Trace"]
   PORTS[["Ports (swath-core traits): RasterSource, Reproject, Catalog, TileCache, EventSource, IngestReferencer"]]
-  ADS["Adapters: swath-source-cog, swath-source-virtual, swath-pyramid-objectstore, swath-reproject-proj4rs, swath-catalog-pgstac, swath-cache-objectstore, swath-events-filedrop, swath-icechunk, swath-referencer"]
+  ADS["Adapters: swath-source-cog, swath-source-virtual, swath-pyramid-objectstore, swath-reproject-proj4rs, swath-catalog-pgstac, swath-cache-objectstore, swath-events-filedrop, swath-icechunk, swath-referencer, swath-udf-wasmtime"]
   EXT[("External: object storage, Postgres/pgstac, granule files")]
   CLI["swath-cli — wires adapters; serve + filedrop ingest loop"]
 
@@ -63,7 +63,7 @@ All nodes are implemented (per-module detail lives in each crate's rustdoc); the
 `VirtualiZarr` sidecar is deliberately absent — the conformance *reference* for
 `swath-referencer` (ADR 0006), not a runtime component.
 
-_Last verified against sources `34ef3dd3e779`._
+_Last verified against sources `c32224c7b927`._
 
 ## 5. The Core (pure logic)
 
@@ -228,7 +228,7 @@ crates, with the seven adapter crates under `crates/adapters/`; beside it,
 embedded UI and HDF5 weight, not adapter selection (§14 covers extension beyond compile
 time).
 
-_Last verified against sources `34ef3dd3e779`._
+_Last verified against sources `c32224c7b927`._
 
 ## 13. Frontend architecture
 
