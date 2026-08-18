@@ -2,7 +2,7 @@
 
 Hand-crafted SVG — [`planner-decision-loop.svg`](planner-decision-loop.svg) is both the
 editable source and the export (canonical). The loop is `plan()` in
-`crates/swath-core/src/planner.rs` — pure, deterministic, no I/O. The payload on the right of
+`crates/swath-planner/src/lib.rs` (the extracted planner crate, ADR 0016; re-exported at `swath_core::planner`) — pure, deterministic, no I/O. The payload on the right of
 the figure is a **real capture, not a mock**: copied verbatim (abridged to the `plan` field)
 from [`planner-trace.capture.json`](planner-trace.capture.json), the committed `GET /traces`
 SSE frames recorded from the fixture stack. Provenance in

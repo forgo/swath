@@ -63,7 +63,7 @@ All nodes are implemented (per-module detail lives in each crate's rustdoc); the
 `VirtualiZarr` sidecar is deliberately absent — the conformance *reference* for
 `swath-referencer` (ADR 0006), not a runtime component.
 
-_Last verified against sources `8f43009b1dc5`._
+_Last verified against sources `56221bb877aa`._
 
 ## 5. The Core (pure logic)
 
@@ -136,13 +136,14 @@ pub trait IngestReferencer: Send + Sync {
 ```
 
 The core entry points (not ports — the logic itself; the stamp fingerprints these files too):
-`plan(budget, availability) -> Plan` in `crates/swath-core/src/planner.rs` (`PlanChoice` is
+`plan(budget, availability) -> Plan` in `crates/swath-planner/src/lib.rs` (the extracted
+planner crate, ADR 0016 — re-exported at `swath_core::planner`; `PlanChoice` is
 `CacheHit | Overview { factor } | Live | Refuse { .. }`); `compile(graph, ctx)` in
 `crates/swath-render/src/process.rs`; `render_tile` / `render_tile_cached` in
 `crates/swath-render/src/tiler.rs` — free functions generic over the ports; the cached variant
 owns the probe + write-through.
 
-_Last verified against sources `cfc1fb9728b7`._
+_Last verified against sources `46d03b482a92`._
 
 ## 7. Adapters and inbound APIs
 
@@ -219,15 +220,15 @@ stateless instances behind a load balancer.
 
 The Cargo workspace is exactly the §4 component model on disk: `crates/` holds `swath-core`,
 `swath-manifest` (the extracted manifest v1 schema, ADR 0016), `swath-render`, `swath-warp`
-(the extracted GDAL-exact kernel, ADR 0016), `swath-api`, `swath-cli`, `swath-referencer`,
-`swath-e2e`, and the never-shipped test crates, with the seven adapter crates under
-`crates/adapters/`; beside it,
+(the extracted GDAL-exact kernel, ADR 0016), `swath-planner` (the extracted cost model, ADR
+0016), `swath-api`, `swath-cli`, `swath-referencer`, `swath-e2e`, and the never-shipped test
+crates, with the seven adapter crates under `crates/adapters/`; beside it,
 `web/`, `python/`, `tests/`, `prototypes/` (dated experiments, immutable once concluded), and
 `docs/`. Phase-1 adapters are direct dependencies of the binary — Cargo features gate the
 embedded UI and HDF5 weight, not adapter selection (§14 covers extension beyond compile
 time).
 
-_Last verified against sources `8f43009b1dc5`._
+_Last verified against sources `56221bb877aa`._
 
 ## 13. Frontend architecture
 

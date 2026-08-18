@@ -81,7 +81,7 @@ use swath_core::raster::{AssetRef, RasterInfo};
 use swath_core::reproject::{CoordTransform, Reproject, ReprojectError};
 use swath_core::source::{BandSelection, RasterSource, ReadLevel, SourceError};
 use swath_core::tile::TileCoord;
-use swath_core::trace::{Provenance, Strategy, Timings, Trace};
+use swath_core::trace::{PlanTraceExt as _, Provenance, Strategy, Timings, Trace};
 
 use crate::encode::{EncodeError, encode_png};
 use crate::error::RenderError;

@@ -17,7 +17,7 @@
 //!   changing it is a deliberate, reviewed act.
 
 use crate::crs::Crs;
-use crate::planner::{CandidateTrace, PlannedStrategy};
+use crate::planner::{CandidateTrace, Plan, PlanChoice, PlannedStrategy};
 use crate::raster::AssetRef;
 
 /// The materialization strategy the planner chose for a tile
@@ -103,6 +103,35 @@ pub struct PlanTrace {
     /// Every candidate, in the fixed evaluation order `cache_hit`,
     /// `overview`, `live`.
     pub considered: Vec<CandidateTrace>,
+}
+
+/// The planner's trace integration — the one piece of planner knowledge
+/// that stays home after the extraction (ADR 0016, #189: the published
+/// `swath-planner` is Trace-free by the standalone rule, so the mapping
+/// from its [`Plan`] to the x-ray payload lives here, beside the model
+/// it feeds).
+pub trait PlanTraceExt {
+    /// The Trace payload for a plan that chose a servable strategy
+    /// (`None` for a refusal — a refused render errors and emits no
+    /// Trace).
+    fn trace(&self) -> Option<PlanTrace>;
+}
+
+impl PlanTraceExt for Plan {
+    fn trace(&self) -> Option<PlanTrace> {
+        let chosen = match self.strategy {
+            PlanChoice::CacheHit => PlannedStrategy::CacheHit,
+            PlanChoice::Overview { factor } => PlannedStrategy::Overview { factor },
+            PlanChoice::Live => PlannedStrategy::Live,
+            // Refuse — and any future variant (`PlanChoice` is
+            // non-exhaustive upstream): nothing servable, no Trace.
+            _ => return None,
+        };
+        Some(PlanTrace {
+            chosen,
+            considered: self.considered.clone(),
+        })
+    }
 }
 
 /// The rule that selected the granule backing a time-parameterized frame
@@ -371,6 +400,37 @@ mod tests {
         old.as_object_mut().unwrap().remove("temporal");
         let back: Trace = serde_json::from_value(old).unwrap();
         assert_eq!(back.temporal, None);
+    }
+
+    /// The extraction-surviving half of #37's contract (re-homed from the
+    /// planner's own tests with the ADR 0016 split): a served plan maps
+    /// chosen + considered verbatim into the Trace payload; a refusal
+    /// emits none.
+    #[test]
+    fn plan_trace_maps_served_plans_and_skips_refusals() {
+        use super::PlanTraceExt as _;
+        use crate::planner::{Availability, BandWindow, Budget, CacheProbe, plan};
+
+        let p = plan(
+            &Budget::default(),
+            &Availability::new(CacheProbe::Miss, 256, vec![]),
+        );
+        let trace = p.trace().expect("a served plan has a Trace payload");
+        assert_eq!(trace.chosen, PlannedStrategy::Live);
+        assert_eq!(trace.considered, p.considered);
+
+        let refused = plan(
+            &Budget {
+                max_estimated_live_bytes: Some(1),
+                ..Budget::default()
+            },
+            &Availability::new(
+                CacheProbe::Miss,
+                256,
+                vec![BandWindow::new(505.0, 505.0, 2, vec![])],
+            ),
+        );
+        assert_eq!(refused.trace(), None, "a refusal has no Trace payload");
     }
 
     #[test]

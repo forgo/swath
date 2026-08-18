@@ -8,7 +8,7 @@
 //! priority, overview-beats-live, determinism, and ceiling admissibility.
 
 use proptest::prelude::{Just, Strategy, prop_assert, prop_assert_eq, prop_oneof, proptest};
-use swath_core::planner::{
+use swath_planner::{
     Availability, BandWindow, Budget, CacheProbe, PlanChoice, PlannedStrategy, plan,
 };
 
@@ -67,7 +67,7 @@ fn arb_budget() -> impl Strategy<Value = Budget> {
 }
 
 /// The candidate record matching a choice.
-fn chosen_candidate(p: &swath_core::planner::Plan) -> Option<&swath_core::planner::CandidateTrace> {
+fn chosen_candidate(p: &swath_planner::Plan) -> Option<&swath_planner::CandidateTrace> {
     let strategy = match p.strategy {
         PlanChoice::CacheHit => PlannedStrategy::CacheHit,
         PlanChoice::Overview { factor } => PlannedStrategy::Overview { factor },

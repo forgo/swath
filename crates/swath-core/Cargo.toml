@@ -21,16 +21,15 @@ sha2 = { workspace = true }
 # the core re-exports it as `swath_core::manifest` and keeps the
 # `IngestReferencer` port speaking `VirtualManifest`.
 swath-manifest = { path = "../swath-manifest", version = "0.1.0-alpha.1" }
+# The extracted planner (ADR 0016, #189), re-exported at `planner` so
+# workspace paths are unchanged; trace integration stays here (PlanTraceExt).
+# The published crate never depends back on this unpublished one.
+swath-planner = { path = "../swath-planner", version = "0.1.0-alpha.1" }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-criterion = { workspace = true }
 insta = { workspace = true }
 proptest = { workspace = true }
-
-[[bench]]
-name = "planner"
-harness = false
 
 [lints]
 workspace = true

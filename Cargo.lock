@@ -3239,13 +3239,13 @@ dependencies = [
 name = "swath-core"
 version = "0.1.0-alpha.1"
 dependencies = [
- "criterion",
  "insta",
  "proptest",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "swath-manifest",
+ "swath-planner",
  "thiserror 2.0.20",
 ]
 
@@ -3278,6 +3278,15 @@ dependencies = [
  "insta",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "swath-planner"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "criterion",
+ "proptest",
+ "serde",
 ]
 
 [[package]]

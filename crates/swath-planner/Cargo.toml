@@ -1,0 +1,28 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-planner"
+description = "Cost-aware materialization planner: pure, explainable cache/overview/live decisions under an explicit per-layer budget, every candidate weighed and traced."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Extracted for publication (ADR 0016, #189); flips `true` in the M8.8
+# publish pipeline (#192) — an alpha ships from a tagged commit through the
+# full gate, never before the pipeline exists.
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+proptest = { workspace = true }
+
+[[bench]]
+name = "planner"
+harness = false
+
+[lints]
+workspace = true

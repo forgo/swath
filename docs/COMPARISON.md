@@ -108,9 +108,9 @@ are that sentence's two axes; rows 3–4 are the committed evidence behind
   [`docs/perf/load-baseline.md`](perf/load-baseline.md); serving-path tests
   [`crates/swath-api/tests/tiles.rs`](../crates/swath-api/tests/tiles.rs).
 - **[S3]** Cost model in
-  [`crates/swath-core/src/planner.rs`](../crates/swath-core/src/planner.rs);
+  [`crates/swath-planner/src/lib.rs`](../crates/swath-planner/src/lib.rs);
   property test
-  [`chosen_is_cheapest_admissible`](../crates/swath-core/tests/planner_properties.rs);
+  [`chosen_is_cheapest_admissible`](../crates/swath-planner/tests/planner_properties.rs);
   cache tests [`tiles_cache.rs`](../crates/swath-api/tests/tiles_cache.rs);
   budget knobs in [`docs/CONFIG.md`](CONFIG.md).
 - **[S4]** Trace model in

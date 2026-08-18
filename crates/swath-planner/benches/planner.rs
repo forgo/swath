@@ -12,7 +12,7 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
-use swath_core::planner::{Availability, BandWindow, Budget, CacheProbe, plan};
+use swath_planner::{Availability, BandWindow, Budget, CacheProbe, plan};
 
 fn band() -> BandWindow {
     BandWindow::new(505.0, 505.0, 2, vec![2])

@@ -32,7 +32,7 @@ the compose stack (`tests/e2e/stack-up.sh`), which mounts a writable cache. The 
 
 | Diagram element | Committed artifact |
 |---|---|
-| Fixed candidate order and "exactly 3 candidates" invariant | `crates/swath-core/src/trace.rs` (`PlanTrace::considered` doc: "in the fixed evaluation order cache_hit, overview, live"); tests `all_three_candidates_are_always_recorded` in `crates/swath-core/src/planner.rs` and trace assertions in `crates/swath-render/tests/tiler.rs` |
-| Reason strings, admissibility rules, cost model, tie-break by `min_by_key` | `crates/swath-core/src/planner.rs` (`plan()`, `cache_hit_plan()`, `common_overview_factor()`) |
-| Refusal emits no trace, tiler raises BudgetExceeded | `crates/swath-core/src/planner.rs` (`Plan::trace()`), `crates/swath-render/src/tiler.rs` |
+| Fixed candidate order and "exactly 3 candidates" invariant | `crates/swath-core/src/trace.rs` (`PlanTrace::considered` doc: "in the fixed evaluation order cache_hit, overview, live"); tests `all_three_candidates_are_always_recorded` in `crates/swath-planner/src/lib.rs` and trace assertions in `crates/swath-render/tests/tiler.rs` |
+| Reason strings, admissibility rules, cost model, tie-break by `min_by_key` | `crates/swath-planner/src/lib.rs` (`plan()`, `cache_hit_plan()`, `common_overview_factor()`) |
+| Refusal emits no trace, tiler raises BudgetExceeded | `crates/swath-core/src/trace.rs` (`PlanTraceExt::trace()`), `crates/swath-render/src/tiler.rs` |
 | Design narrative | `docs/design/materialization-planner.md` |
