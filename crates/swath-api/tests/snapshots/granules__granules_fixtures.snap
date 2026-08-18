@@ -1,11 +1,19 @@
 ---
 source: crates/swath-api/tests/granules.rs
-assertion_line: 95
 expression: body
 ---
 {
   "granules": [
     {
+      "id": "hlss30-t13sdd-2024158",
+      "bbox": [
+        -105.537,
+        39.1954,
+        -105.3581,
+        39.3345
+      ],
+      "datetime": "2024-06-06T17:54:00Z",
+      "ingestedAt": "2024-06-06T18:00:00Z",
       "assets": {
         "b02": {
           "href": "hlss30-t13sdd-2024158-b02.tif",
@@ -23,26 +31,17 @@ expression: body
           "href": "hlss30-t13sdd-2024158-b8a.tif",
           "kind": "raster"
         }
-      },
-      "bbox": [
-        -105.537,
-        39.1954,
-        -105.3581,
-        39.3345
-      ],
-      "datetime": "2024-06-06T17:54:00Z",
-      "id": "hlss30-t13sdd-2024158",
-      "ingestedAt": "2024-06-06T18:00:00Z"
+      }
     }
   ],
+  "numberMatched": 1,
+  "numberReturned": 1,
   "links": [
     {
       "href": "http://localhost/datasets/hls-s30/granules?limit=100&offset=0",
       "rel": "self",
-      "title": "Granules of dataset hls-s30",
-      "type": "application/json"
+      "type": "application/json",
+      "title": "Granules of dataset hls-s30"
     }
-  ],
-  "numberMatched": 1,
-  "numberReturned": 1
+  ]
 }

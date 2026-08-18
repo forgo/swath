@@ -51,8 +51,11 @@
 //! manifest's chunk grid, fetches each intersecting chunk's byte range via
 //! [`ObjectStore::get_range`], and decodes the manifest codec chain **in
 //! reverse** (codecs are recorded in HDF5 filter-pipeline order — see the
-//! manifest docs): `zlib:<level>` inflates via flate2, `shuffle` undoes
-//! HDF5's byte-shuffle. Sample bytes are little-endian by construction —
+//! manifest docs). Each stage delegates to the matching [`zarrs`] codec:
+//! `zlib:<level>` inflates via [`ZlibCodec`] (HDF5's deflate filter is a
+//! zlib stream), `shuffle` undoes HDF5's byte-shuffle via [`ShuffleCodec`]
+//! (byte-identical to `H5Z_filter_shuffle`'s decode, which numcodecs
+//! `shuffle` reimplements). Sample bytes are little-endian by construction —
 //! the generator refuses big-endian datasets at referencing time
 //! (`swath-referencer` docs), so every dtype that can reach a manifest is
 //! native/LE. HDF5 stores edge chunks at full chunk shape, so a decoded
@@ -62,8 +65,8 @@
 //! zero when none is declared — libhdf5's own default fill), matching what
 //! h5py returns for the same read, with no I/O and no provenance.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::io::Read as _;
 use std::sync::Arc;
 
 use object_store::path::Path;
@@ -74,6 +77,8 @@ use swath_core::source::{
 };
 use swath_core::trace::Provenance;
 use swath_manifest::{ChunkRef, Georef, VirtualArray, VirtualManifest};
+use zarrs::array::codec::{ShuffleCodec, ZlibCodec, ZlibCompressionLevel};
+use zarrs::array::{BytesRepresentation, BytesToBytesCodecTraits as _, CodecOptions};
 
 /// A [`RasterSource`] serving virtual-reference manifests from an
 /// [`ObjectStore`].
@@ -395,26 +400,26 @@ impl<'a> ChunkReader<'a> {
     }
 
     /// Decodes one stored chunk: the manifest codec chain applied in
-    /// reverse (module docs), then a hard size check against the chunk
-    /// shape — a short chunk is corruption, never padded over.
+    /// reverse (module docs), each stage through the matching [`zarrs`]
+    /// codec, then a hard size check against the chunk shape — a short
+    /// chunk is corruption, never padded over.
     fn decode(&self, asset: &AssetRef, raw: &[u8]) -> Result<Vec<u8>, SourceError> {
-        let mut bytes = raw.to_vec();
+        let mut bytes = Cow::Borrowed(raw);
         for codec in self.codecs.iter().rev() {
-            bytes = match codec
+            let (name, param) = codec
                 .split_once(':')
-                .map_or(codec.as_str(), |(name, _)| name)
-            {
-                "zlib" => {
-                    let mut decoded = Vec::new();
-                    flate2::read::ZlibDecoder::new(bytes.as_slice())
-                        .read_to_end(&mut decoded)
-                        .map_err(|e| SourceError::Format {
-                            asset: asset.clone(),
-                            detail: format!("zlib chunk decode failed: {e}"),
-                        })?;
-                    decoded
-                }
-                "shuffle" => unshuffle(&bytes, self.sample_bytes),
+                .map_or((codec.as_str(), None), |(name, param)| (name, Some(param)));
+            let decoded = match name {
+                "zlib" => zlib_codec(param).decode(
+                    bytes,
+                    &BytesRepresentation::UnboundedSize,
+                    &CodecOptions::default(),
+                ),
+                "shuffle" => ShuffleCodec::new(self.sample_bytes).decode(
+                    bytes,
+                    &BytesRepresentation::UnboundedSize,
+                    &CodecOptions::default(),
+                ),
                 other => {
                     return Err(SourceError::Unsupported {
                         asset: asset.clone(),
@@ -422,6 +427,10 @@ impl<'a> ChunkReader<'a> {
                     });
                 }
             };
+            bytes = decoded.map_err(|e| SourceError::Format {
+                asset: asset.clone(),
+                detail: format!("`{name}` chunk decode failed: {e}"),
+            })?;
         }
         let expected = usize::try_from(self.chunk_rows * self.chunk_cols)
             .expect("chunk sample count fits usize")
@@ -439,8 +448,24 @@ impl<'a> ChunkReader<'a> {
                 ),
             });
         }
-        Ok(bytes)
+        Ok(bytes.into_owned())
     }
+}
+
+/// The [`ZlibCodec`] for a manifest `zlib:<level>` entry. Decode ignores
+/// the level; it is carried faithfully when the manifest records a valid
+/// one, else zlib's own default (6) — a malformed level is never a reason
+/// to refuse an inflatable chunk.
+fn zlib_codec(param: Option<&str>) -> ZlibCodec {
+    ZlibCodec::new(zlib_level(param))
+}
+
+/// Parses the `<level>` of a manifest `zlib:<level>` codec string.
+fn zlib_level(param: Option<&str>) -> ZlibCompressionLevel {
+    param
+        .and_then(|p| p.parse::<u32>().ok())
+        .and_then(|l| ZlibCompressionLevel::try_from(l).ok())
+        .unwrap_or_else(|| ZlibCompressionLevel::try_from(6_u32).expect("6 is a valid zlib level"))
 }
 
 /// The object-store path of a chunk's source file.
@@ -458,24 +483,6 @@ fn source_path(asset: &AssetRef, chunk_ref: &ChunkRef) -> Result<Path, SourceErr
 fn parse_key(key: &str) -> Option<(u64, u64)> {
     let (row, col) = key.split_once('.')?;
     Some((row.parse().ok()?, col.parse().ok()?))
-}
-
-/// Undoes HDF5's byte-shuffle filter: shuffled storage groups byte 0 of
-/// every sample first, then byte 1, … — the inverse gathers each sample's
-/// bytes back together. (~n·size moves; allocation-for-allocation the
-/// same shape as libhdf5's own `H5Z_filter_shuffle` decode path.)
-fn unshuffle(bytes: &[u8], sample_bytes: usize) -> Vec<u8> {
-    if sample_bytes <= 1 || !bytes.len().is_multiple_of(sample_bytes) {
-        return bytes.to_vec();
-    }
-    let samples = bytes.len() / sample_bytes;
-    let mut out = vec![0_u8; bytes.len()];
-    for (byte_index, plane) in bytes.chunks_exact(samples).enumerate() {
-        for (sample_index, &byte) in plane.iter().enumerate() {
-            out[sample_index * sample_bytes + byte_index] = byte;
-        }
-    }
-    out
 }
 
 /// The output window as raw little-endian bytes, prefilled with the
@@ -593,7 +600,7 @@ fn map_store_error(asset: &AssetRef, err: object_store::Error) -> SourceError {
 
 #[cfg(test)]
 mod tests {
-    use super::{VirtualSource, dtype_of, parse_key, unshuffle};
+    use super::{VirtualSource, dtype_of, parse_key, zlib_level};
     use swath_core::raster::{AssetRef, DType};
 
     #[test]
@@ -609,12 +616,18 @@ mod tests {
     }
 
     #[test]
-    fn unshuffle_regroups_sample_bytes() {
-        // Two int16 samples shuffled: [lo0, lo1, hi0, hi1] planes.
-        let shuffled = [0x01, 0x02, 0x10, 0x20];
-        assert_eq!(unshuffle(&shuffled, 2), vec![0x01, 0x10, 0x02, 0x20]);
-        // Sample size 1 is the identity.
-        assert_eq!(unshuffle(&shuffled, 1), shuffled.to_vec());
+    fn zlib_levels_parse_and_malformed_levels_never_refuse_a_chunk() {
+        // Decode ignores the level, but a recorded valid one is carried.
+        for (param, level) in [
+            (Some("8"), 8),
+            (Some("0"), 0),
+            // Absent or malformed: zlib's own default, never an error.
+            (None, 6),
+            (Some("fast"), 6),
+            (Some("10"), 6),
+        ] {
+            assert_eq!(zlib_level(param).as_u32(), level, "param {param:?}");
+        }
     }
 
     #[test]

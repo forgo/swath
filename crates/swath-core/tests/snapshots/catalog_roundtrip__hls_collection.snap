@@ -3,7 +3,12 @@ source: crates/swath-core/tests/catalog_roundtrip.rs
 expression: dataset_to_stac_collection(&hls_dataset())
 ---
 {
+  "type": "Collection",
+  "stac_version": "1.1.0",
+  "id": "hls-s30",
+  "title": "HLS Sentinel-2 (S30)",
   "description": "Harmonized Landsat Sentinel-2, S30 product.",
+  "license": "CC0-1.0",
   "extent": {
     "spatial": {
       "bbox": [
@@ -24,10 +29,7 @@ expression: dataset_to_stac_collection(&hls_dataset())
       ]
     }
   },
-  "id": "hls-s30",
-  "license": "CC0-1.0",
   "links": [],
-  "stac_version": "1.1.0",
   "swath:bands": [
     "b02",
     "b03",
@@ -36,41 +38,39 @@ expression: dataset_to_stac_collection(&hls_dataset())
   ],
   "swath:layers": [
     {
-      "description": "B04/B03/B02 composite.",
       "id": "truecolor",
+      "title": "HLS true color",
+      "description": "B04/B03/B02 composite.",
       "plan": {
         "composite": {
-          "b": "b02",
+          "r": "b04",
           "g": "b03",
-          "r": "b04"
+          "b": "b02"
         }
       },
-      "resampling": "bilinear",
       "rescale": {
-        "max": 3000.0,
-        "min": 0.0
+        "min": 0.0,
+        "max": 3000.0
       },
-      "tile_size": 256,
-      "title": "HLS true color"
+      "resampling": "bilinear",
+      "tile_size": 256
     },
     {
-      "colormap": "grayscale",
-      "description": "(B8A - B04) / (B8A + B04), grayscale.",
       "id": "ndvi",
+      "title": "HLS NDVI",
+      "description": "(B8A - B04) / (B8A + B04), grayscale.",
       "plan": {
         "band_math": {
           "expression": "(b8a - b04) / (b8a + b04)"
         }
       },
-      "resampling": "bilinear",
       "rescale": {
-        "max": 1.0,
-        "min": -1.0
+        "min": -1.0,
+        "max": 1.0
       },
-      "tile_size": 256,
-      "title": "HLS NDVI"
+      "colormap": "grayscale",
+      "resampling": "bilinear",
+      "tile_size": 256
     }
-  ],
-  "title": "HLS Sentinel-2 (S30)",
-  "type": "Collection"
+  ]
 }

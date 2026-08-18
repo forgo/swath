@@ -8,6 +8,14 @@ all-features = true
 [advisories]
 # RustSec advisories: any advisory or yanked crate fails the gate.
 yanked = "deny"
+ignore = [
+    # paste (proc-macro) is archived-unmaintained, not vulnerable: dtolnay
+    # froze it at 1.0.15. It reaches the tree only as a mandatory dep of the
+    # zarrs core (#190), which uses it for token-pasting in macros.
+    # Compile-time only — never in a shipped binary. Re-examine at the #190
+    # supply-chain checkpoint and whenever the zarrs pin moves.
+    { id = "RUSTSEC-2024-0436", reason = "unmaintained-but-frozen proc-macro, compile-time only, via zarrs; revisit on zarrs bumps" },
+]
 
 [licenses]
 # Permissive-only allowlist (Apache-2.0 project, ADR 0003). Extend deliberately,
