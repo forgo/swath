@@ -357,15 +357,15 @@ where
         // so it lights up only for a local store root; on s3:// the legacy
         // extensions would be refused per granule (an honest Malformed),
         // and we say so up front.
-        if cfg.store_root.contains("://") {
-            tracing::warn!(
-                "store root `{root}` is remote: legacy granule referencing                  is disabled (requires a local store root)",
-                root = cfg.store_root,
-            );
-        } else {
+        if is_local_root(&cfg.store_root) {
             events = events.with_referencer(
                 std::sync::Arc::new(ReferencerShim::default()),
                 PathBuf::from(&cfg.store_root),
+            );
+        } else {
+            tracing::warn!(
+                "store root `{root}` is remote: legacy granule referencing                  is disabled (requires a local store root)",
+                root = cfg.store_root,
             );
         }
         tokio::spawn(ingest_loop(events, catalog.clone()));
@@ -385,13 +385,10 @@ where
     // adapters the tile handlers use — same store root, same pixels
     // (pyramid overlay included, so previews benefit from materialized
     // overviews exactly as tiles do).
-    let openeo_store = build_store(&cfg.store_root)?;
+    let store = build_store(&cfg.store_root)?;
     let openeo_state = Arc::new(swath_api::OpenEoState::new(
         provider.clone(),
-        PyramidSource::new(
-            CompositeSource::new(Arc::clone(&openeo_store)),
-            openeo_store,
-        ),
+        PyramidSource::new(CompositeSource::new(Arc::clone(&store)), Arc::clone(&store)),
         Proj4rsReproject,
         &cfg.base_url,
     ));
@@ -407,7 +404,7 @@ where
             false,
         )
     } else {
-        let (writes, uploads) = write_surface(cfg, &provider)?;
+        let (writes, uploads) = write_surface(cfg, &provider, &store);
         (
             swath_api::openeo_router(openeo_state)
                 .merge(granules)
@@ -418,40 +415,45 @@ where
     run_server(cfg, provider, layer_count, Some(extra), uploads, shutdown).await
 }
 
+/// The local-vs-remote line every local-only affordance gates on — legacy
+/// referencing (the watch-dir branch above) and the upload route (#197)
+/// share this one predicate so the two sites cannot drift.
+fn is_local_root(root: &str) -> bool {
+    !root.contains("://")
+}
+
 /// The write half of catalog serving, never mounted read-only: the
 /// dataset-creation surface (#196 — register datasets/granules by API,
 /// validated through the same source stack tiles read), plus, over a
 /// *local* store root only, the upload route (#197 — browser file drops
 /// land in the serving store, then register through the same surface; the
-/// local-vs-remote line is the one the legacy referencer draws — a remote
-/// store has real upload tooling). The returned flag is what the
-/// capabilities document advertises: exactly what mounted.
+/// local-vs-remote line is [`is_local_root`], shared with the legacy
+/// referencer gate — a remote store has real upload tooling). Both
+/// routers read/write through clones of the ONE serving store handle. The
+/// returned flag is what the capabilities document advertises: exactly
+/// what mounted.
 fn write_surface<C>(
     cfg: &Shared,
     provider: &CatalogLayers<C>,
-) -> Result<(axum::Router, bool), ServeError>
+    store: &Arc<dyn ObjectStore>,
+) -> (axum::Router, bool)
 where
     C: Catalog + Clone + Send + Sync + 'static,
 {
-    let datasets_store = build_store(&cfg.store_root)?;
     let datasets = swath_api::datasets_router(Arc::new(swath_api::DatasetsState::new(
         provider.clone(),
-        PyramidSource::new(
-            CompositeSource::new(Arc::clone(&datasets_store)),
-            datasets_store,
-        ),
+        PyramidSource::new(CompositeSource::new(Arc::clone(store)), Arc::clone(store)),
         Proj4rsReproject,
     )));
-    let uploads = !cfg.store_root.contains("://");
+    let uploads = is_local_root(&cfg.store_root);
     let router = if uploads {
-        let uploads_store = build_store(&cfg.store_root)?;
         datasets.merge(swath_api::uploads_router(Arc::new(
-            swath_api::UploadsState::new(uploads_store),
+            swath_api::UploadsState::new(Arc::clone(store)),
         )))
     } else {
         datasets
     };
-    Ok((router, uploads))
+    (router, uploads)
 }
 
 /// The mode-independent tail of `serve`: build the store, assemble the

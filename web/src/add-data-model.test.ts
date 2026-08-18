@@ -191,6 +191,11 @@ test("server refusals land under the field that caused them", () => {
   expect(mapProblem(400, problem("stac_item does not describe a granule: …"))).toMatchObject({
     field: "link",
   });
+  // The inline item's collection must agree with the dataset id — that
+  // refusal is about the dataset choice, not the link (review round 1).
+  expect(
+    mapProblem(400, problem("stac_item collection `hls-demo` does not match dataset `edited`")),
+  ).toMatchObject({ field: "dataset" });
   expect(mapProblem(400, problem("`datetime`: not RFC 3339"))).toMatchObject({
     field: "datetime",
   });

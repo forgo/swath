@@ -107,6 +107,10 @@ swath-add-data-panel input:focus-visible {
   outline: 2px solid #4ade80;
   outline-offset: 1px;
 }
+swath-add-data-panel input[readonly] {
+  border-style: dashed;
+  color: rgb(148 163 184 / 90%);
+}
 swath-add-data-panel .swath-add-data-help {
   font: 11px/1.5 system-ui, sans-serif;
   font-weight: 400;
@@ -180,6 +184,8 @@ interface Field {
   issue: (value: string) => string;
   /** Renders only for the direct (COG) form. */
   cogOnly?: boolean;
+  /** Shown but not editable (with the help text saying why). */
+  readOnly?: boolean;
 }
 
 export class SwathAddDataPanel extends HTMLElement {
@@ -195,6 +201,9 @@ export class SwathAddDataPanel extends HTMLElement {
   /** Editable overlay onto the draft. */
   #brightest = "10000";
   #inspecting = false;
+  /** Monotonic id of the latest `#inspect` call: a slow item fetch that
+   * resolves after a newer paste is stale and must not clobber it. */
+  #inspectToken = 0;
   #submitting = false;
   #uploading = false;
   #flowError = "";
@@ -247,17 +256,22 @@ export class SwathAddDataPanel extends HTMLElement {
   #togglePanel(): void {
     this.#open = !this.#open;
     if (this.#open && this.#capabilities === undefined) {
+      // Re-opening after a failed fetch retries it (the error note says
+      // to do exactly that).
       this.#ready = this.#ensureCapabilities();
     }
     this.#render();
   }
 
-  /** One capabilities fetch per panel life: `GET /` (JSON — the browser
-   * negotiation needs an explicit text/html, which this is not). */
+  /** One capabilities fetch per success: `GET /` (JSON — the browser
+   * negotiation needs an explicit text/html, which this is not). A failed
+   * fetch clears on the next attempt, so "close and re-open to retry" is
+   * a real retry, never a bricked panel. */
   async #ensureCapabilities(): Promise<void> {
     if (this.#capabilities !== undefined) {
       return;
     }
+    this.#capabilitiesError = undefined;
     try {
       const response = await this.#api("/", { headers: { accept: "application/json" } });
       if (!response.ok) {
@@ -274,6 +288,10 @@ export class SwathAddDataPanel extends HTMLElement {
    * in-browser (the server never fetches URLs — no SSRF surface); any
    * other link is handed to the server as the asset reference. */
   async #inspect(): Promise<void> {
+    const token = ++this.#inspectToken;
+    // This run owns the spinner from here on — a superseded run's flag
+    // must not outlive it (its early return below never clears state).
+    this.#inspecting = false;
     const link = this.#link.trim();
     this.#draft = undefined;
     this.#flowError = "";
@@ -302,6 +320,9 @@ export class SwathAddDataPanel extends HTMLElement {
       draft = stacDraft(await response.json());
     } catch (error) {
       draft = `could not read the item: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (token !== this.#inspectToken) {
+      return; // stale: the user pasted something newer while this fetched
     }
     this.#inspecting = false;
     if (typeof draft === "string") {
@@ -452,17 +473,25 @@ export class SwathAddDataPanel extends HTMLElement {
       issue,
       cogOnly,
     });
+    // A STAC item names its own collection, and registration must match
+    // it (the server refuses a mismatch) — so the id is shown, not
+    // editable, and the help says why in plain words.
+    const stac = this.#draft?.kind === "stac";
+    const datasetField = draftField(
+      "dataset",
+      "Dataset id",
+      stac
+        ? "Named by the item's collection — the granule registers into exactly this dataset."
+        : "Groups files that belong together; new id = new dataset, existing id adds to it.",
+      (d) => d.datasetId,
+      (d, v) => {
+        d.datasetId = v;
+      },
+      datasetIdIssue,
+    );
+    datasetField.readOnly = stac;
     return [
-      draftField(
-        "dataset",
-        "Dataset id",
-        "Groups files that belong together; new id = new dataset, existing id adds to it.",
-        (d) => d.datasetId,
-        (d, v) => {
-          d.datasetId = v;
-        },
-        datasetIdIssue,
-      ),
+      datasetField,
       draftField(
         "title",
         "Title",
@@ -671,6 +700,7 @@ export class SwathAddDataPanel extends HTMLElement {
     input.id = `swath-add-data-${field.key}`;
     input.type = "text";
     input.value = field.get(this);
+    input.readOnly = field.readOnly === true;
     input.addEventListener("input", () => {
       field.set(this, input.value);
       this.#touched.add(field.key);
