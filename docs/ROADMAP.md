@@ -99,6 +99,8 @@ it** (the PR that introduced this file carries the approval checkbox).
     (#191) and tiles served back from a commit, byte-identical and traced (#193); only the
     versioned-layer product UX remainder stays demand-triggered.*
 16. **Engine breadth bundle** (rows 8, 9, 10) — demand-triggered.
+    *UDF operational deferrals (ADR 0018 §v2): halo/f32 ABI v2, Python UDFs, module-store GC,
+    planner fuel feedback, `Module::serialize` cache — demand-triggered with it.*
 17. **WebP** (row 1) — deliberately cheap late.
 18. **Learned planner cost model** (row 4) — needs a real-operation Trace corpus.
 19. **Embeddings frontier** (Charter Phase 4) — the biggest bet, deliberately last.
