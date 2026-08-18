@@ -100,6 +100,10 @@ pub struct ApiState<S, R, L, C = NoCache> {
     /// vocabulary alongside the OGC one.
     openeo: bool,
     read_only: bool,
+    /// Whether the local-mode upload route (#197) is mounted beside this
+    /// router: the capabilities document then advertises
+    /// `PUT /uploads/{filename}`.
+    uploads: bool,
     /// The embedded UI bundle (issue #103): `GET /` negotiates browsers
     /// onto its `index.html`, and the router fallback serves its assets.
     /// `None` (or an empty bundle) serves exactly the pre-UI surface.
@@ -127,6 +131,7 @@ impl<S, R, L> ApiState<S, R, L> {
             traces: TraceBus::default(),
             openeo: false,
             read_only: false,
+            uploads: false,
             ui: None,
         }
     }
@@ -154,6 +159,7 @@ impl<S, R, L, C> ApiState<S, R, L, C> {
             traces: self.traces,
             openeo: self.openeo,
             read_only: self.read_only,
+            uploads: self.uploads,
             ui: self.ui,
         }
     }
@@ -186,6 +192,16 @@ impl<S, R, L, C> ApiState<S, R, L, C> {
     #[must_use]
     pub fn read_only(mut self) -> Self {
         self.read_only = true;
+        self
+    }
+
+    /// Declares that the local-mode upload route (#197) is merged beside
+    /// this router: the capabilities document then advertises
+    /// `PUT /uploads/{filename}` — the file-drop half of the add-data
+    /// panel is capabilities-driven, not guessed.
+    #[must_use]
+    pub fn with_uploads(mut self) -> Self {
+        self.uploads = true;
         self
     }
 
@@ -341,7 +357,7 @@ where
     };
     let mut doc = serde_json::to_value(page).expect("landing page serializes");
     if app.openeo {
-        crate::openeo::extend_capabilities(&mut doc, base, app.read_only);
+        crate::openeo::extend_capabilities(&mut doc, base, app.read_only, app.uploads);
     }
     Json(doc).into_response()
 }

@@ -16,6 +16,10 @@ publish = false
 # `Query` extractor the granule browsing route parses parameters with (#107).
 axum = { workspace = true, features = ["query", "tokio"] }
 futures-core = { workspace = true }
+# The local-mode upload surface (#197): `PUT /uploads/{filename}` writes
+# straight into the serving object store, so a browser-dropped file lands
+# under the same root granule registration then validates against.
+object_store = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # Content-derived service ids for the openEO surface (ADR 0010): the id of
@@ -43,7 +47,6 @@ image = { workspace = true }
 # surface).
 insta = { workspace = true }
 jsonschema = { workspace = true }
-object_store = { workspace = true }
 swath-cache-objectstore = { path = "../adapters/swath-cache-objectstore", version = "0.1.0-alpha.1" }
 swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.1.0-alpha.1" }
 swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.1.0-alpha.1" }

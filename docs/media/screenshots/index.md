@@ -6,8 +6,8 @@ HLS granule, no third-party basemap) at a pinned viewport (1528x860, DPR 1), and
 capture run must reproduce each shot within its perceptual-diff policy
 (tests/screenshots/verify_stable.py + swath-testkit pdiff) before the recipe passes.
 
-- capture sha: `81ed077fb4dbc932f2c501d7d4981358becdff00`
-- captured: 2026-08-13T11:07:02.486Z
+- capture sha: `e392594b75d912c12aaf28760d2ce7988d0884d9`
+- captured: 2026-08-18T12:45:06.138Z
 - machine-readable manifest (per-shot sha256 + pdiff policy): [`shots.json`](shots.json)
 
 | shot | evidences |

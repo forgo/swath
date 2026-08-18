@@ -125,14 +125,20 @@ const PREVIEW_MAX_ZOOM: u8 = 24;
 /// before tile selection (the projection is undefined beyond it).
 const WEB_MERCATOR_MAX_LAT: f64 = 85.051_128_779_806_59;
 
-/// Every openEO endpoint this surface serves, exactly as the capabilities
-/// `endpoints` array declares it (only what exists; the spec says the
-/// `GET /` entry itself is not listed). `/conformance` is the shared OGC
-/// document.
+/// Every endpoint this instance serves beside the OGC tiles surface,
+/// exactly as the capabilities `endpoints` array declares it (only what
+/// exists; the spec says the `GET /` entry itself is not listed).
+/// `/conformance` is the shared OGC document. The `/datasets` entries are
+/// Swath's dataset-creation surface (#196) and granule browsing (#107) —
+/// not openEO vocabulary, but the capabilities document is where a client
+/// (the #197 add-data panel) learns what is mounted, and the read-only
+/// filter (#198) prunes them with the other write methods.
 pub const OPENEO_ENDPOINTS: &[(&str, &[&str])] = &[
     ("/collections", &["GET"]),
     ("/collections/{collection_id}", &["GET"]),
     ("/conformance", &["GET"]),
+    ("/datasets", &["POST"]),
+    ("/datasets/{dataset_id}/granules", &["GET", "POST"]),
     ("/file_formats", &["GET"]),
     ("/processes", &["GET"]),
     ("/result", &["POST"]),
@@ -304,11 +310,13 @@ where
 /// document — `GET /` serves both standards' required fields from one
 /// root. Called by the landing handler when the openEO surface is
 /// enabled ([`ApiState::with_openeo`](crate::ApiState::with_openeo)).
-pub(crate) fn extend_capabilities(landing: &mut Value, base: &str, read_only: bool) {
+/// `uploads` additionally declares the local-mode upload route (#197) —
+/// mounted, like everything here, only where it is true.
+pub(crate) fn extend_capabilities(landing: &mut Value, base: &str, read_only: bool, uploads: bool) {
     // The capabilities document states what is MOUNTED: read-only serving
     // (#198) filters the write methods out rather than advertising routes
     // that do not exist.
-    let endpoints: Vec<Value> = OPENEO_ENDPOINTS
+    let mut endpoints: Vec<Value> = OPENEO_ENDPOINTS
         .iter()
         .filter_map(|(path, methods)| {
             let methods: Vec<&str> = methods
@@ -319,6 +327,9 @@ pub(crate) fn extend_capabilities(landing: &mut Value, base: &str, read_only: bo
             (!methods.is_empty()).then(|| json!({ "path": path, "methods": methods }))
         })
         .collect();
+    if uploads && !read_only {
+        endpoints.push(json!({ "path": "/uploads/{filename}", "methods": ["PUT"] }));
+    }
     let doc = landing.as_object_mut().expect("landing page is an object");
     doc.insert("api_version".into(), json!(OPENEO_API_VERSION));
     doc.insert("backend_version".into(), json!(env!("CARGO_PKG_VERSION")));

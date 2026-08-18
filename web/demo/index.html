@@ -81,6 +81,9 @@ or bring the stack up yourself and `pnpm exec vite dev`.
       <swath-layer-panel></swath-layer-panel>
 <!-- Collapsed by default; fetches nothing until opened (issue #110). -->
       <swath-dataset-panel></swath-dataset-panel>
+      <!-- Collapsed and lazy (issue #197); its first open reads the
+           capabilities document, so a read-only server shows no form. -->
+      <swath-add-data-panel></swath-add-data-panel>
       <!-- Also collapsed and lazy (issue #109): fetches nothing until opened. -->
       <swath-authoring-panel></swath-authoring-panel>
       <footer>granule → pixel</footer>

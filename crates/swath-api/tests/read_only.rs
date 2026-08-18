@@ -59,6 +59,7 @@ async fn write_routes_are_absent_not_403() {
         ("DELETE", "/services/some-id", None),
         ("POST", "/datasets", Some(json!({}))),
         ("POST", "/datasets/hls-s30/granules", Some(json!({}))),
+        ("PUT", "/uploads/scene.tif", Some(json!({}))),
     ] {
         let response = common::request_on(&app, method, path, body).await;
         assert!(
@@ -129,6 +130,18 @@ async fn capabilities_document_reflects_what_is_mounted() {
         ["POST"],
         "the preview stays declared"
     );
+    // The dataset-creation surface (#196) and the upload route (#197):
+    // POST-only /datasets disappears entirely, granule browsing keeps its
+    // GET, and no upload route is claimed.
+    assert!(
+        methods_of("/datasets").is_empty(),
+        "read-only advertises no dataset registration"
+    );
+    assert_eq!(methods_of("/datasets/{dataset_id}/granules"), ["GET"]);
+    assert!(
+        methods_of("/uploads/{filename}").is_empty(),
+        "read-only advertises no upload route"
+    );
     assert!(
         !doc["endpoints"].to_string().contains("DELETE"),
         "no write method advertised anywhere: {}",
@@ -144,5 +157,16 @@ async fn capabilities_document_reflects_what_is_mounted() {
     assert!(
         writable["endpoints"].to_string().contains("DELETE"),
         "writable serving still advertises the write surface"
+    );
+    let registers = writable["endpoints"]
+        .as_array()
+        .expect("writable endpoints")
+        .iter()
+        .any(|e| e["path"] == "/datasets" && e["methods"] == json!(["POST"]));
+    assert!(
+        registers,
+        "writable serving advertises dataset registration (#197's panel \
+         gates on exactly this): {}",
+        writable["endpoints"]
     );
 }

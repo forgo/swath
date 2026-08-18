@@ -52,6 +52,15 @@ test("withViewState preserves params it does not own (basemap)", () => {
   expect(query).toBe("?layer=ndvi&basemap=demo");
 });
 
+test("stac (the Open-in-Swath entry, issue #197) is foreign: passed through, never a view param", () => {
+  // Deep links like /?stac=<item-url> must survive URL rewrites…
+  const search = "?stac=https%3A%2F%2Fdata.test%2Fitem.json";
+  const query = withViewState(search, { layer: "ndvi", xray: false });
+  expect(query).toBe("?layer=ndvi&stac=https%3A%2F%2Fdata.test%2Fitem.json");
+  // …and must not count as view state (URL-beats-storage stays untouched).
+  expect(hasViewParams(search)).toBe(false);
+});
+
 test("format trims trailing zeros at fixed precision", () => {
   expect(formatCenter([-106.000004, 39.30001])).toBe("-106,39.30001");
   expect(formatZoom(12)).toBe("12");

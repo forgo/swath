@@ -131,6 +131,7 @@ mod routes;
 mod temporal;
 pub mod traces;
 pub mod ui;
+pub mod uploads;
 
 pub use cors::cors_layer;
 pub use datasets::{DatasetsState, datasets_router};
@@ -146,3 +147,4 @@ pub use registry::{Layer, LayerRegistry};
 pub use routes::{ApiState, CONFORMANCE_CLASSES, TraceExtension, router};
 pub use traces::{TraceBus, TraceEvent};
 pub use ui::UiAssets;
+pub use uploads::{UploadsState, uploads_router};
