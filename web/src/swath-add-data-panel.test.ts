@@ -298,6 +298,98 @@ test("no upload capability, no drop zone", async () => {
   expect(panel.querySelector("#swath-add-data-file")).toBeNull();
 });
 
+test("a transient capabilities failure retries on re-open (review round 1, finding 1)", async () => {
+  // First GET / fails; the panel must not stay bricked — the error note
+  // says "close and re-open to retry", and that retry must really run.
+  let calls = 0;
+  const stub = fetchStub({
+    [`GET ${SERVER}/`]: () => {
+      calls += 1;
+      return calls === 1 ? new Response("boom", { status: 500 }) : json(WRITABLE_CAPABILITIES);
+    },
+  });
+  const panel = mount(stub);
+  open(panel);
+  await panel.ready;
+  expect(panel.querySelector(".swath-add-data-error")?.textContent).toContain(
+    "Cannot reach the server",
+  );
+
+  open(panel); // close…
+  open(panel); // …and re-open: the promised retry
+  await panel.ready;
+  expect(panel.querySelector(".swath-add-data-error")).toBeNull();
+  expect(panel.querySelector("#swath-add-data-link")).not.toBeNull();
+  expect(calls).toBe(2);
+});
+
+test("the dataset id is read-only in STAC mode — a mismatch is unconstructible (finding 2)", async () => {
+  const stub = fetchStub({
+    [`GET ${SERVER}/`]: () => json(WRITABLE_CAPABILITIES),
+    [`GET ${ITEM_URL}`]: () => json(ITEM),
+  });
+  const panel = mount(stub);
+  open(panel);
+  await panel.ready;
+  await paste(panel, ITEM_URL);
+
+  // The item names its collection; registration must match it (the
+  // server refuses otherwise), so the field shows but does not edit —
+  // with the help text saying why in plain words.
+  const dataset = panel.querySelector<HTMLInputElement>("#swath-add-data-dataset");
+  expect(dataset?.readOnly).toBe(true);
+  expect(dataset?.value).toBe("hls-demo");
+  expect(dataset?.closest("label")?.textContent).toContain("Named by the item's collection");
+
+  // The direct (COG) form keeps the field editable.
+  await paste(panel, "scene.tif");
+  expect(panel.querySelector<HTMLInputElement>("#swath-add-data-dataset")?.readOnly).toBe(false);
+});
+
+test("a slow item fetch resolving late never clobbers a newer paste (finding 3)", async () => {
+  let releaseSlow: (() => void) | undefined;
+  const slow = new Promise<void>((resolve) => {
+    releaseSlow = resolve;
+  });
+  const base = fetchStub({ [`GET ${SERVER}/`]: () => json(WRITABLE_CAPABILITIES) });
+  const impl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    if (String(input) === ITEM_URL) {
+      await slow; // the stale fetch: held open until after the next paste
+      return json(ITEM);
+    }
+    return base.impl(input, init);
+  }) as typeof fetch;
+  const panel = mount({ impl });
+  open(panel);
+  await panel.ready;
+
+  // Paste the slow item…
+  const input = panel.querySelector<HTMLInputElement>("#swath-add-data-link");
+  if (input === null) {
+    throw new Error("link input missing");
+  }
+  input.value = ITEM_URL;
+  input.dispatchEvent(new Event("input"));
+  input.dispatchEvent(new Event("change"));
+  const stale = panel.ready;
+
+  // …then move on to a raster link before the item arrives.
+  await paste(panel, "newer-scene.tif");
+  expect(panel.querySelector<HTMLInputElement>("#swath-add-data-dataset")?.value).toBe(
+    "newer-scene",
+  );
+
+  // The stale response lands — and must change nothing: the newer draft
+  // stays, and no leftover "Reading the item…" spinner survives.
+  releaseSlow?.();
+  await stale;
+  expect(panel.querySelector<HTMLInputElement>("#swath-add-data-dataset")?.value).toBe(
+    "newer-scene",
+  );
+  expect(panel.querySelector<HTMLInputElement>("#swath-add-data-band")).not.toBeNull();
+  expect(panel.textContent).not.toContain("Reading the item…");
+});
+
 test("the stac attribute (the ?stac= deep link) opens pre-filled, sends nothing", async () => {
   const stub = fetchStub({
     [`GET ${SERVER}/`]: () => json(WRITABLE_CAPABILITIES),

@@ -345,6 +345,11 @@ export function mapProblem(status: number, body: unknown): ProblemNote {
       note: `the server could not read that file as a cloud-optimized GeoTIFF — ${detail}`,
     };
   }
+  if (detail.includes("does not match dataset")) {
+    // The inline item's `collection` must agree with the dataset id —
+    // this refusal is about the dataset choice, not the link.
+    return { field: "dataset", note: detail };
+  }
   if (detail.includes("stac_item")) {
     return { field: "link", note: detail };
   }
