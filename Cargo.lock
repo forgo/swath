@@ -3322,6 +3322,7 @@ dependencies = [
  "swath-source-cog",
  "swath-testkit",
  "swath-testsupport",
+ "swath-warp",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -3385,6 +3386,13 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "swath-core",
+]
+
+[[package]]
+name = "swath-warp"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "proptest",
 ]
 
 [[package]]

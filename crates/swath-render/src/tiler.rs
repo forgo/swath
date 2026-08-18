@@ -286,7 +286,9 @@ pub enum TileError {
 const fn window_margin(resampling: Resampling) -> u32 {
     match resampling {
         Resampling::Nearest => 1,
-        Resampling::Bilinear(_) => 4,
+        // `_` also covers `#[non_exhaustive]` (the enum lives in
+        // swath-warp): a new kernel must pick its margin here explicitly.
+        Resampling::Bilinear(_) | _ => 4,
     }
 }
 

@@ -15,6 +15,9 @@ image = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 swath-core = { path = "../swath-core", version = "0.1.0-alpha.1" }
+# The extracted GDAL-exact kernel (ADR 0016, #186): this crate consumes it
+# through the thin shim in src/shim.rs, with zero behavior change.
+swath-warp = { path = "../swath-warp", version = "0.1.0-alpha.1" }
 thiserror = { workspace = true }
 # Cache-failure policy logging (#36): a failed get is a miss, a failed
 # write-through is a warning — both logged, never a failed response.
