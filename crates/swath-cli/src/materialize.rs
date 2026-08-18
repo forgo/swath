@@ -111,6 +111,7 @@ pub(crate) enum MaterializeCliError {
 /// Resolves config, collects each layer's assets, and materializes them.
 pub(crate) fn run(args: &MaterializeArgs) -> Result<(), MaterializeCliError> {
     let cfg = config::resolve(&ServeArgs {
+        read_only: false,
         config: args.config.clone(),
         store_root: args.store_root.clone(),
         fixtures: false,

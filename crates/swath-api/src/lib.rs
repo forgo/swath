@@ -138,7 +138,8 @@ pub use error::ApiError;
 pub use granules::{GranuleList, GranulesState, granules_router};
 pub use model::{Conformance, LandingPage, Link, TileSetItem, TileSetList, TileSetMetadata};
 pub use openeo::{
-    OPENEO_API_VERSION, OpenEoError, OpenEoState, compile_service_layer, openeo_router,
+    OPENEO_API_VERSION, OpenEoError, OpenEoState, compile_service_layer, openeo_read_router,
+    openeo_router,
 };
 pub use provider::{CatalogLayer, CatalogLayers, LayerIdentity, LayerProvider, ResolvedLayer};
 pub use registry::{Layer, LayerRegistry};

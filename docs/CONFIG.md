@@ -32,6 +32,7 @@ by knob: defaults → `[budget]` → the global flags/env → per-layer
 | `--base-url` | `SWATH_BASE_URL` | `URL` | Base URL minted into OGC/openEO links. Default `http://localhost:<port>`. |
 | `--store-root` | `SWATH_STORE_ROOT` | `ROOT` | Object-store root: local directory or `s3://bucket[/prefix]`; required unless `--fixtures`. |
 | `--catalog` | `SWATH_CATALOG` | `URL` | Catalog mode: pgstac postgres URL; layers then come from `[[datasets]]`. |
+| `--read-only` | `SWATH_READ_ONLY` | — | Write routes absent, not 403'd (`POST /datasets`, granule registration, `POST`/`DELETE /services`); `POST /result` stays (budget-bounded preview, ADR 0014). The auth-less hosted-demo slice (#198). |
 | `--watch-dir` | `SWATH_WATCH_DIR` | `PATH` | Watch this directory for `<granule-id>.json` manifests (catalog mode only). |
 | `--cache` | `SWATH_CACHE` | `ROOT` | Tile-cache root (same grammar as the store root); absent: no cache. |
 | `--overview-oversample` | `SWATH_OVERVIEW_OVERSAMPLE` | `RATIO` | Global overview eligibility slack (default 1.2, GDAL's rule). |
