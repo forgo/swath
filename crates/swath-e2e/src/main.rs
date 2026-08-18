@@ -246,7 +246,44 @@ fn fire_time_dimension_checks() -> Result<(), Failure> {
     );
     fire_sse_carries_temporal_decision(&mut subscriber)?;
     fire_datetime_error_taxonomy()?;
-    fire_collection_serves_derived_temporal_extent()
+    fire_collection_serves_derived_temporal_extent()?;
+    qgis_xyz_template_serves_png()
+}
+
+/// The QGIS recipe's smoke (#194, docs/RECIPES.md): the documented XYZ
+/// template — placeholders expanded exactly as QGIS expands them
+/// (`{z}/{y}/{x}` in path position, `datetime=` passed through) — returns
+/// 200 + `image/png` + PNG magic, for both the plain and the dated form.
+/// A doc whose URL stops working fails this build.
+fn qgis_xyz_template_serves_png() -> Result<(), Failure> {
+    const CHECK: &str = "qgis_xyz_template_serves_png";
+    // docs/RECIPES.md, expanded at the proven tiles: truecolor plain,
+    // park-fire-ndvi with the documented `datetime=` query.
+    let expanded = [
+        TILE.to_owned(),
+        format!("{FIRE_TILE}?datetime={FIRE_PRE_INSTANT}"),
+    ];
+    for path in &expanded {
+        let resp = get(CHECK, path)?;
+        let content_type = resp.header("content-type").unwrap_or("").to_owned();
+        let is_png = resp.body.starts_with(&[0x89, b'P', b'N', b'G']);
+        if resp.status != 200 || !content_type.starts_with("image/png") || !is_png {
+            return Err(Failure::new(
+                CHECK,
+                path,
+                "200 with image/png bytes (the documented QGIS template)",
+                format!(
+                    "status {status}, content-type `{content_type}`, png magic: {is_png}",
+                    status = resp.status,
+                ),
+            ));
+        }
+    }
+    pass(
+        CHECK,
+        "documented XYZ template serves PNG (plain + datetime=)",
+    );
+    Ok(())
 }
 
 /// The fire layer exists (it is in the tilesets list) but its dataset has
