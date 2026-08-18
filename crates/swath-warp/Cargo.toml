@@ -1,0 +1,24 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-warp"
+description = "GDAL-exact warp/resample kernel in pure Rust: inverse-mapping nearest and bilinear resampling with GDAL 3.12 GDALWarpKernel semantics — scaled triangle filters under decimation, per-axis scale snapping, GDAL's exact validity cutoffs — proven against GDAL-oracle goldens."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Stays false until the M8.8 publish pipeline (#192) adds the crates tier
+# (tag-triggered dry-run + semver-checks) and flips exactly the four
+# ADR 0016 crates to true. Do not flip here.
+publish = false
+
+# Self-contained by decision (ADR 0016's standalone rule): zero dependencies —
+# the kernel takes its own minimal input types, never swath-core's.
+[dependencies]
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints]
+workspace = true

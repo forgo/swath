@@ -45,7 +45,7 @@ standards map ([`docs/media/standards-map.svg`](media/standards-map.svg), eviden
 flowchart TB
   FE["Frontend — web/src: map viewer, dataset/layer/authoring panels, x-ray overlay"]
   IN["swath-api (axum): OGC API - Tiles, openEO surface, control plane + Trace SSE, embedded UI"]
-  RENDER["swath-render: tiler, warp/resample kernels, process compiler, Render IR, encoder"]
+  RENDER["swath-render: tiler, warp/resample kernels (via swath-warp), process compiler, Render IR, encoder"]
   CORE["swath-core (no I/O): planner, catalog domain, ingest step, manifest v1 (re-exported from swath-manifest), tile/TMS math, Trace"]
   PORTS[["Ports (swath-core traits): RasterSource, Reproject, Catalog, TileCache, EventSource, IngestReferencer"]]
   ADS["Adapters: swath-source-cog, swath-source-virtual, swath-pyramid-objectstore, swath-reproject-proj4rs, swath-catalog-pgstac, swath-cache-objectstore, swath-events-filedrop, swath-referencer"]
@@ -63,7 +63,7 @@ All nodes are implemented (per-module detail lives in each crate's rustdoc); the
 `VirtualiZarr` sidecar is deliberately absent — the conformance *reference* for
 `swath-referencer` (ADR 0006), not a runtime component.
 
-_Last verified against sources `d71b06608c97`._
+_Last verified against sources `8f43009b1dc5`._
 
 ## 5. The Core (pure logic)
 
@@ -142,7 +142,7 @@ The core entry points (not ports — the logic itself; the stamp fingerprints th
 `crates/swath-render/src/tiler.rs` — free functions generic over the ports; the cached variant
 owns the probe + write-through.
 
-_Last verified against sources `1bb2d692dd3a`._
+_Last verified against sources `cfc1fb9728b7`._
 
 ## 7. Adapters and inbound APIs
 
@@ -218,15 +218,16 @@ stateless instances behind a load balancer.
 ## 12. Crate / repo layout (as built)
 
 The Cargo workspace is exactly the §4 component model on disk: `crates/` holds `swath-core`,
-`swath-manifest` (the extracted manifest v1 schema, ADR 0016), `swath-render`, `swath-api`,
-`swath-cli`, `swath-referencer`, `swath-e2e`, and the
-never-shipped test crates, with the seven adapter crates under `crates/adapters/`; beside it,
+`swath-manifest` (the extracted manifest v1 schema, ADR 0016), `swath-render`, `swath-warp`
+(the extracted GDAL-exact kernel, ADR 0016), `swath-api`, `swath-cli`, `swath-referencer`,
+`swath-e2e`, and the never-shipped test crates, with the seven adapter crates under
+`crates/adapters/`; beside it,
 `web/`, `python/`, `tests/`, `prototypes/` (dated experiments, immutable once concluded), and
 `docs/`. Phase-1 adapters are direct dependencies of the binary — Cargo features gate the
 embedded UI and HDF5 weight, not adapter selection (§14 covers extension beyond compile
 time).
 
-_Last verified against sources `d71b06608c97`._
+_Last verified against sources `8f43009b1dc5`._
 
 ## 13. Frontend architecture
 

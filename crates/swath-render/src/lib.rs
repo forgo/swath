@@ -18,11 +18,11 @@
 //!    ([`Resampling::Nearest`] for categorical data,
 //!    [`Resampling::Bilinear`] for continuous data).
 //!
-//! Where warp lives (in the core, calling the minimal `Reproject` port) is
-//! ARCHITECTURE.md's current proposal; §16.2 remains an open question and
-//! this crate does not close it — the kernels only require a
-//! `&dyn CoordTransform`, so a richer `Warp` port could later wrap them
-//! without rework.
+//! The GDAL-exact kernel itself lives in the published `swath-warp` crate
+//! (ADR 0016, #186); this crate consumes it through the thin type shim in
+//! `src/shim.rs` with zero behavior change — the kernels only require a
+//! `&dyn CoordTransform`, so a richer `Warp` port could still wrap them
+//! without rework (ARCHITECTURE.md §16.2 stays open).
 //!
 //! Correctness is defined by the GDAL/rio-tiler oracle (ADR 0002): the
 //! golden tests in `tests/golden.rs` render real HLS fixture tiles through
@@ -51,6 +51,7 @@ mod grid;
 pub mod ir;
 pub mod plan;
 pub mod process;
+mod shim;
 mod tiler;
 mod warp;
 mod window;

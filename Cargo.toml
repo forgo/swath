@@ -21,6 +21,7 @@ members = [
     "crates/swath-render",
     "crates/swath-testkit",
     "crates/swath-testsupport",
+    "crates/swath-warp",
 ]
 # Prototypes are standalone, dated experiments — never workspace members.
 exclude = ["prototypes/*"]
