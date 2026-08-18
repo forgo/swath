@@ -37,6 +37,14 @@ no workflows).
 Tool pins: release-plz / git-cliff / cargo-edit in the `justfile`; cargo-dist in
 `dist-workspace.toml` + the vendored `release.yml`; Renovate tracks all of them.
 
+## Crates tier (ADR 0016)
+
+Release tags also run `publish-crates.yml`: `just publish-dry` (part of `just check`)
+plus an informational cargo-semver-checks report. Exactly four crates publish —
+swath-manifest, swath-planner, swath-referencer, swath-warp — maintainer-executed
+from the tag, dependency-ordered; credentials never in CI (trusted publishing:
+decided at first publish).
+
 ## Recovery
 
 A lost release-plz run: re-dispatch it — tagging is idempotent. `release.yml` /
@@ -56,6 +64,8 @@ is the difference between "built and checksummed" and "other people can rely on 
 - [ ] **Semver commitment declared** — what the public surface *is* (CLI, config, HTTP
       API, cache format) is written down; from this release on, breaking it means a
       semver bump with deprecation notes.
+- [ ] **Crates graduate per crate** — semver-checks findings turn merge-blocking
+      for a crate at its first non-prerelease publish.
 - [ ] **Release mechanics graduate** — release-plz's stock release-PR flow takes over;
       decide installers, whether `latest` tracks releases, and artifact attestation
       (SLSA L2 — ENGINEERING.md §7).

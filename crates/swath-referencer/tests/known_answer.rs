@@ -15,6 +15,8 @@
 
 #![cfg(feature = "legacy-hdf5")]
 
+mod util;
+
 use std::path::PathBuf;
 
 use swath_referencer::manifest::{VirtualManifest, compare};
@@ -132,7 +134,7 @@ fn non_hdf5_bytes_are_a_malformed_error() {
 
     // Right extension, not an HDF5 container -> Malformed. (Copy the JSON
     // to a .h5 name in a temp dir.)
-    let dir = swath_testsupport::TempDir::new("referencer-malformed");
+    let dir = util::TempDir::new("referencer-malformed");
     let fake = dir.join("fake.h5");
     std::fs::copy(data("tiny.expected.json"), &fake).unwrap();
     let err = SwathReferencer::new().generate(&fake).unwrap_err();

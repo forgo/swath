@@ -3556,7 +3556,6 @@ dependencies = [
  "gribberish",
  "hdf5-metno",
  "swath-manifest",
- "swath-testsupport",
  "thiserror 2.0.20",
 ]
 

@@ -12,6 +12,8 @@
 // Real-granule HDF5 assertions: compiled out of feature-off builds (#99).
 #![cfg(feature = "legacy-hdf5")]
 
+mod util;
+
 use std::path::PathBuf;
 
 use swath_referencer::SwathReferencer;
@@ -22,7 +24,7 @@ use swath_referencer::manifest::GeorefCrs;
 fn vnp09ga_manifest_structure_and_georef() {
     // Belt and braces: even under --ignored, absent creds skip cleanly
     // (the workspace-wide skip semantics live in swath-testsupport, #97).
-    let Some(granule) = swath_testsupport::gated_var("SWATH_VNP09GA") else {
+    let Some(granule) = util::gated_var("SWATH_VNP09GA") else {
         return;
     };
     let path = PathBuf::from(granule);

@@ -1066,5 +1066,14 @@ docs-words:
     set -euo pipefail
     wc -w README.md docs/*.md | sort -n
 
+# Packaging dry-run for the four publishable crates (ADR 0016, #192): cargo
+# resolves the in-workspace publish order and builds each packaged crate in
+# isolation (path deps resolved via the multi-package local overlay, so the
+# not-yet-on-crates.io `swath-manifest` still verifies under
+# `swath-referencer`). This is the "can these actually publish?" gate; the
+# actual `cargo publish` stays maintainer-executed (docs/RELEASING.md).
+publish-dry:
+    cargo publish --dry-run --allow-dirty         -p swath-manifest -p swath-planner -p swath-referencer -p swath-warp
+
 # The one-command gate: everything CI enforces.
-check: fmt-check lint machete test deny zizmor reuse
+check: fmt-check lint machete test deny zizmor reuse publish-dry

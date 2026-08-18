@@ -8,10 +8,15 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-# Extracted for publication (ADR 0016, #189); flips `true` in the M8.8
-# publish pipeline (#192) — an alpha ships from a tagged commit through the
-# full gate, never before the pipeline exists.
-publish = false
+readme = "README.md"
+keywords = ["planner", "cost-model", "raster", "tiles", "gis"]
+categories = ["science::geo", "algorithms"]
+# One of exactly four publishable crates (ADR 0016, #192); the actual
+# `cargo publish` is maintainer-executed per docs/RELEASING.md's crates tier.
+publish = true
+
+[package.metadata.docs.rs]
+all-features = true
 
 [dependencies]
 serde = { workspace = true }

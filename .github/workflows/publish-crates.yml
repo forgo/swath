@@ -1,0 +1,90 @@
+# The crates tier of the release pipeline (ADR 0016, #192; docs/RELEASING.md).
+#
+# Tag-triggered, credential-free: on every release tag this proves the four
+# publishable crates (swath-manifest, swath-planner, swath-referencer,
+# swath-warp) actually package and verify-build from the tagged commit
+# (`just publish-dry` — the same recipe `just check` runs), and produces a
+# cargo-semver-checks report against the latest published baseline. The
+# actual `cargo publish` is MAINTAINER-EXECUTED from the tag — publish
+# credentials never live in this repository's CI (trusted publishing, if
+# adopted, is a maintainer decision recorded in docs/RELEASING.md).
+#
+# During the alpha tier the semver report is informational (breakage between
+# alphas is allowed, visible, and deliberate — ADR 0016); per-crate
+# graduation makes findings merge-blocking via RELEASING.md's checklist.
+
+name: Publish crates (dry-run + semver report)
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish-dry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tools: "none"
+      - run: just publish-dry
+      - name: Maintainer hand-off
+        run: |
+          {
+            echo "## Publish hand-off"
+            echo
+            echo "Dry-run green for the tagged commit. To publish (maintainer-only, in this order):"
+            echo
+            echo '```'
+            echo "git switch --detach ${GITHUB_REF_NAME}"
+            echo "cargo publish -p swath-manifest -p swath-planner -p swath-referencer -p swath-warp"
+            echo '```'
+            echo
+            echo "cargo orders the set by dependency (swath-manifest before swath-referencer)."
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+
+  semver-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tools: "none"
+      - uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+        with:
+          tool: cargo-semver-checks@0.45.0
+      - name: Semver report (informational during alpha)
+        run: |
+          {
+            echo "## cargo-semver-checks"
+            echo
+            for crate in swath-manifest swath-planner swath-referencer swath-warp; do
+              echo "### ${crate}"
+              # No published baseline yet (first release pending): note and move on.
+              if ! curl -sf "https://crates.io/api/v1/crates/${crate}" >/dev/null; then
+                echo "_no published baseline on crates.io yet — nothing to diff._"
+                continue
+              fi
+              echo '```'
+              # Informational in the alpha tier: report captured either way,
+              # findings do not fail the run (ADR 0016; graduation flips this
+              # per crate via RELEASING.md's checklist).
+              cargo semver-checks --package "${crate}" 2>&1 || true
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -11,8 +11,9 @@
 # over version bumps and the changelog — that regex matches from then on.
 
 [workspace]
-# No crates.io publishes in the pre-release tier: every crate is
-# `publish = false`, so releases are git state only.
+# release-plz never publishes to crates.io: the four publishable crates
+# (ADR 0016) are maintainer-published per docs/RELEASING.md's crates tier;
+# this keeps release-plz git-only either way.
 publish = false
 git_only = true
 # Nothing on a registry to diff against.
