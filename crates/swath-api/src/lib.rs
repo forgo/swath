@@ -120,6 +120,7 @@
 //! north-star metric's serve half. See [`provider`](CatalogLayers) docs.
 
 pub mod cors;
+pub mod datasets;
 mod error;
 pub mod granules;
 mod model;
@@ -132,6 +133,7 @@ pub mod traces;
 pub mod ui;
 
 pub use cors::cors_layer;
+pub use datasets::{DatasetsState, datasets_router};
 pub use error::ApiError;
 pub use granules::{GranuleList, GranulesState, granules_router};
 pub use model::{Conformance, LandingPage, Link, TileSetItem, TileSetList, TileSetMetadata};

@@ -247,7 +247,135 @@ fn fire_time_dimension_checks() -> Result<(), Failure> {
     fire_sse_carries_temporal_decision(&mut subscriber)?;
     fire_datetime_error_taxonomy()?;
     fire_collection_serves_derived_temporal_extent()?;
-    qgis_xyz_template_serves_png()
+    qgis_xyz_template_serves_png()?;
+    dataset_registration_checks()
+}
+
+/// The dataset-creation surface (#196) against the live stack: register a
+/// dataset + the fixture granule by API (asset headers validated by the
+/// server, bbox and extents DERIVED), see it in /collections, author an
+/// NDVI service on it, and serve a traced tile — register → author →
+/// serve, end to end, with a refusal check on a bad asset.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear e2e scenario: register, refuse, register, discover, \
+              author, serve — the harness style throughout this file"
+)]
+fn dataset_registration_checks() -> Result<(), Failure> {
+    const CHECK: &str = "api_registered_dataset_serves_traced_tiles";
+    let fail = |path: &str, expected: &str, got: String| -> Failure {
+        Failure::new(CHECK, path, expected, got)
+    };
+
+    let body = serde_json::json!({
+        "id": "api-hls", "title": "HLS, registered by API",
+        "bands": ["b04", "b8a"],
+    });
+    let resp = http::post_json("/datasets", &body)
+        .map_err(|e| fail("/datasets", "an HTTP response", e))?;
+    if resp.status != 201 {
+        return Err(fail("/datasets", "201 Created", format!("{}", resp.status)));
+    }
+
+    // A bad asset is refused with problem details naming it.
+    let bad = serde_json::json!({
+        "id": "bad", "datetime": "2024-06-06T17:54:00Z",
+        "assets": {"b04": "no-such-file.tif"},
+    });
+    let resp = http::post_json("/datasets/api-hls/granules", &bad)
+        .map_err(|e| fail("/datasets/api-hls/granules", "an HTTP response", e))?;
+    let problem = String::from_utf8_lossy(&resp.body).into_owned();
+    if resp.status != 400 || !problem.contains("no-such-file.tif") {
+        return Err(fail(
+            "/datasets/api-hls/granules",
+            "400 naming the failing asset",
+            format!("{} with {problem}", resp.status),
+        ));
+    }
+
+    // The real fixture granule: same store keys the drop registered, no
+    // bbox (derived from the asset header server-side).
+    let granule = serde_json::json!({
+        "id": "hlss30-t13sdd-2024158", "datetime": "2024-06-06T17:54:00Z",
+        "assets": {
+            "b04": "hlss30-t13sdd-2024158-b04.tif",
+            "b8a": "hlss30-t13sdd-2024158-b8a.tif",
+        },
+    });
+    let resp = http::post_json("/datasets/api-hls/granules", &granule)
+        .map_err(|e| fail("/datasets/api-hls/granules", "an HTTP response", e))?;
+    if resp.status != 201 {
+        return Err(fail(
+            "/datasets/api-hls/granules",
+            "201 Created",
+            format!(
+                "{} with {}",
+                resp.status,
+                String::from_utf8_lossy(&resp.body)
+            ),
+        ));
+    }
+
+    // In /collections, with the DERIVED extent (the fixture footprint).
+    let resp = get(CHECK, "/collections/api-hls")?;
+    let doc: serde_json::Value = serde_json::from_slice(&resp.body)
+        .map_err(|e| fail("/collections/api-hls", "a JSON document", e.to_string()))?;
+    let west = doc["extent"]["spatial"]["bbox"][0][0]
+        .as_f64()
+        .unwrap_or(0.0);
+    if resp.status != 200 || (west - -105.54).abs() > 0.02 {
+        return Err(fail(
+            "/collections/api-hls",
+            "200 with the derived fixture footprint (west ~ -105.54)",
+            format!("{} with west {west}", resp.status),
+        ));
+    }
+
+    // Author NDVI on it through the services surface, then serve, traced.
+    let service = serde_json::json!({
+        "type": "xyz", "title": "NDVI (API-registered)",
+        "process": {"process_graph": {
+            "load": {"process_id": "load_collection", "arguments": {
+                "id": "api-hls", "spatial_extent": null, "temporal_extent": null,
+                "bands": ["b8a", "b04"]}},
+            "ndvi": {"process_id": "ndvi", "arguments": {
+                "data": {"from_node": "load"}, "nir": "b8a", "red": "b04"}},
+            "scale": {"process_id": "linear_scale_range", "arguments": {
+                "x": {"from_node": "ndvi"},
+                "inputMin": -1, "inputMax": 1, "outputMin": 0, "outputMax": 255}},
+            "save": {"process_id": "save_result", "arguments": {
+                "data": {"from_node": "scale"}, "format": "png"}, "result": true},
+        }},
+    });
+    let resp = http::post_json("/services", &service)
+        .map_err(|e| fail("/services", "an HTTP response", e))?;
+    let sid = resp
+        .header("openeo-identifier")
+        .unwrap_or_default()
+        .to_owned();
+    if resp.status != 201 || sid.is_empty() {
+        return Err(fail(
+            "/services",
+            "201 with openeo-identifier",
+            format!("{}", resp.status),
+        ));
+    }
+    let tile = format!("/tilesets/{sid}/tiles/12/1561/848");
+    let resp = get(CHECK, &tile)?;
+    let traced = resp.header("x-swath-trace").is_some();
+    let is_png = resp.body.starts_with(&[0x89, b'P', b'N', b'G']);
+    if resp.status != 200 || !traced || !is_png {
+        return Err(fail(
+            &tile,
+            "200 image/png with x-swath-trace (registered data, through the engine)",
+            format!("status {}, traced: {traced}, png: {is_png}", resp.status),
+        ));
+    }
+    pass(
+        CHECK,
+        format_args!("register -> author -> serve, traced ({sid})"),
+    );
+    Ok(())
 }
 
 /// The QGIS recipe's smoke (#194, docs/RECIPES.md): the documented XYZ
