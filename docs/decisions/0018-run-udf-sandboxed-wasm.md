@@ -1,6 +1,6 @@
 # ADR 0018 — `run_udf` as sandboxed WASM in the tile path
 
-**Status:** Proposed (maintainer approval pending — issue #199's box) · **Date:** 2026-08-18 ·
+**Status:** Accepted (maintainer, 2026-08-18 — PR #250 merged) · **Date:** 2026-08-18 ·
 **Supersedes:** [ADR 0013](0013-extension-features-plus-openeo-graphs.md) **for the pixel stage
 only** · **Extends:** [ADR 0010](0010-openeo-bounded-profile.md) (the way
 [ADR 0014](0014-preview-bounded-sync-result.md) did) · **Source:** issue #199, ADR 0013's own
