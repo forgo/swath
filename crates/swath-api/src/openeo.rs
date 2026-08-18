@@ -265,6 +265,28 @@ where
     R: Reproject + 'static,
     C: Catalog + 'static,
 {
+    let writes = axum::Router::new()
+        .route("/services", axum::routing::post(create_service))
+        .route(
+            "/services/{service_id}",
+            axum::routing::delete(delete_service),
+        )
+        .with_state(Arc::clone(&state));
+    writes.merge(openeo_read_router(state))
+}
+
+/// The read half of the openEO surface alone — what `--read-only` serving
+/// mounts (#198): discovery, collections, processes, service listings,
+/// and `POST /result` (deliberately: the ADR 0014 preview is
+/// planner-budget-bounded by design and stays enabled — the demo wow).
+/// The write routes (`POST /services`, `DELETE /services/{id}`) are
+/// simply absent, not 403'd.
+pub fn openeo_read_router<S, R, C>(state: Arc<OpenEoState<S, R, C>>) -> axum::Router
+where
+    S: RasterSource + 'static,
+    R: Reproject + 'static,
+    C: Catalog + 'static,
+{
     axum::Router::new()
         .route("/.well-known/openeo", get(well_known))
         .route("/collections", get(collections))
@@ -273,11 +295,8 @@ where
         .route("/processes", get(processes))
         .route("/result", axum::routing::post(preview_result))
         .route("/service_types", get(service_types))
-        .route("/services", get(list_services).post(create_service))
-        .route(
-            "/services/{service_id}",
-            get(describe_service).delete(delete_service),
-        )
+        .route("/services", get(list_services))
+        .route("/services/{service_id}", get(describe_service))
         .with_state(state)
 }
 
@@ -285,10 +304,20 @@ where
 /// document — `GET /` serves both standards' required fields from one
 /// root. Called by the landing handler when the openEO surface is
 /// enabled ([`ApiState::with_openeo`](crate::ApiState::with_openeo)).
-pub(crate) fn extend_capabilities(landing: &mut Value, base: &str) {
+pub(crate) fn extend_capabilities(landing: &mut Value, base: &str, read_only: bool) {
+    // The capabilities document states what is MOUNTED: read-only serving
+    // (#198) filters the write methods out rather than advertising routes
+    // that do not exist.
     let endpoints: Vec<Value> = OPENEO_ENDPOINTS
         .iter()
-        .map(|(path, methods)| json!({ "path": path, "methods": methods }))
+        .filter_map(|(path, methods)| {
+            let methods: Vec<&str> = methods
+                .iter()
+                .copied()
+                .filter(|m| !read_only || *m == "GET" || (*m == "POST" && *path == "/result"))
+                .collect();
+            (!methods.is_empty()).then(|| json!({ "path": path, "methods": methods }))
+        })
         .collect();
     let doc = landing.as_object_mut().expect("landing page is an object");
     doc.insert("api_version".into(), json!(OPENEO_API_VERSION));

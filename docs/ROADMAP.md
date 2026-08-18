@@ -84,9 +84,10 @@ it** (the PR that introduced this file carries the approval checkbox).
 4. **Overview generation** (row 6). *Shipped by #183.*
 5. **#151 — authoring UX rethink** (guided flow, live preview-before-publish).
 6. **Dataset-creation API** — completes the "single pane of glass" claim.
-7. **Auth (OIDC/RBAC)** — Charter Phase 3; gates multi-tenancy, the hosted demo, the openEO
-   conformance class.
-8. **Hosted public demo** — needs auth (7) and the ops learnings (9).
+7. **Auth (OIDC/RBAC)** — Charter Phase 3; gates multi-tenancy, *writable* demos (maintainer
+   decision 2026-08-12), the openEO conformance class.
+8. **Hosted public demo** — read-only ships auth-less on `--read-only` (#198); a writable
+   demo needs auth (7) and the ops learnings (9).
 9. **Performance beyond the laptop** — the gaps `PERFORMANCE.md` §9 declines to claim.
 10. **Cache operations bundle** (rows 2, 3, 5) — real together, with mosaics and storage
     pressure.

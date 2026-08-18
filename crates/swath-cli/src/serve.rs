@@ -76,6 +76,14 @@ pub(crate) struct ServeArgs {
     )]
     pub(crate) catalog: Option<String>,
 
+    /// Serve read-only (#198): the write routes (POST /datasets, POST
+    /// /datasets/{id}/granules, POST/DELETE /services) are absent — not
+    /// 403'd — and the capabilities document reflects it. POST /result
+    /// stays enabled: the preview is planner-budget-bounded by design
+    /// (ADR 0014). The enabling slice for an auth-less hosted demo.
+    #[arg(long, env = "SWATH_READ_ONLY")]
+    pub(crate) read_only: bool,
+
     /// Watch this directory for granule manifests (catalog mode): each
     /// `<granule-id>.json` dropped in is ingested automatically.
     #[arg(
@@ -172,6 +180,7 @@ where
         store_root,
         cache,
         cors_allowed_origins,
+        read_only,
         layers,
     } = cfg;
     let shared = Shared {
@@ -180,6 +189,7 @@ where
         store_root,
         cache,
         cors_allowed_origins,
+        read_only,
     };
     match layers {
         LayerSource::Static(registry) => {
@@ -233,6 +243,7 @@ struct Shared {
     /// CORS origin allowlist (issue #103, ADR 0011); empty = no CORS
     /// layer at all (the default).
     cors_allowed_origins: Vec<String>,
+    read_only: bool,
 }
 
 /// Catalog mode: connect to pgstac, then hand over to the generic tail.
@@ -359,7 +370,7 @@ where
     // (pyramid overlay included, so previews benefit from materialized
     // overviews exactly as tiles do).
     let openeo_store = build_store(&cfg.store_root)?;
-    let openeo = swath_api::openeo_router(Arc::new(swath_api::OpenEoState::new(
+    let openeo_state = Arc::new(swath_api::OpenEoState::new(
         provider.clone(),
         PyramidSource::new(
             CompositeSource::new(Arc::clone(&openeo_store)),
@@ -367,27 +378,31 @@ where
         ),
         Proj4rsReproject,
         &cfg.base_url,
-    )));
-    // The dataset-creation surface (#196): register datasets/granules by
-    // API, validated through the same source stack tiles read. A separate
-    // router on purpose — the read-only slice (#198) will omit it.
-    let datasets_store = build_store(&cfg.store_root)?;
-    let datasets = swath_api::datasets_router(Arc::new(swath_api::DatasetsState::new(
-        provider.clone(),
-        PyramidSource::new(
-            CompositeSource::new(Arc::clone(&datasets_store)),
-            datasets_store,
-        ),
-        Proj4rsReproject,
-    )));
-    run_server(
-        cfg,
-        provider,
-        layer_count,
-        Some(openeo.merge(granules).merge(datasets)),
-        shutdown,
-    )
-    .await
+    ));
+    // Read-only serving (#198): the write routes are ABSENT, not 403'd —
+    // the openEO read half only (POST /result stays: the ADR 0014 preview
+    // is planner-budget-bounded by design), and no dataset-creation
+    // surface at all. The landing/capabilities document reflects exactly
+    // what mounted (run_server marks the state).
+    let extra = if cfg.read_only {
+        tracing::info!("read-only: write routes unmounted (#198)");
+        swath_api::openeo_read_router(openeo_state).merge(granules)
+    } else {
+        let openeo = swath_api::openeo_router(openeo_state);
+        // The dataset-creation surface (#196): register datasets/granules
+        // by API, validated through the same source stack tiles read.
+        let datasets_store = build_store(&cfg.store_root)?;
+        let datasets = swath_api::datasets_router(Arc::new(swath_api::DatasetsState::new(
+            provider.clone(),
+            PyramidSource::new(
+                CompositeSource::new(Arc::clone(&datasets_store)),
+                datasets_store,
+            ),
+            Proj4rsReproject,
+        )));
+        openeo.merge(granules).merge(datasets)
+    };
+    run_server(cfg, provider, layer_count, Some(extra), shutdown).await
 }
 
 /// The mode-independent tail of `serve`: build the store, assemble the
@@ -423,6 +438,9 @@ where
     );
     if extra.is_some() {
         state = state.with_openeo();
+    }
+    if cfg.read_only {
+        state = state.read_only();
     }
     // The embedded UI (issue #103, ADR 0011): browsers get index.html at
     // `/`, hashed assets serve from the router fallback, API clients see
@@ -791,6 +809,7 @@ mod tests {
             overview_oversample: None,
             max_estimated_live_bytes: None,
             cors_allowed_origins: Vec::new(),
+            read_only: false,
         }
     }
 
@@ -1109,6 +1128,7 @@ mod tests {
             store_root: cfg.store_root,
             cache: cfg.cache,
             cors_allowed_origins: cfg.cors_allowed_origins,
+            read_only: false,
         };
         serve_catalog_on(&shared, mode, catalog.clone(), ready(()))
             .await
@@ -1162,6 +1182,7 @@ mod tests {
             store_root: cfg.store_root,
             cache: cfg.cache,
             cors_allowed_origins: cfg.cors_allowed_origins,
+            read_only: false,
         };
         let err = serve_catalog_on(&shared, mode, MemoryCatalog::default(), ready(()))
             .await

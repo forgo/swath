@@ -49,6 +49,12 @@ survive.
 | GET, DELETE | `/services/{service_id}` | catalog mode | Describe / delete one service |
 <!-- docs-check:end routes -->
 
+Under `swath serve --read-only` (#198) the write routes — `POST /datasets`,
+`POST /datasets/{datasetId}/granules`, `POST /services`,
+`DELETE /services/{service_id}` — are **unmounted** (absent, not 403), the
+capabilities document reflects it, and `POST /result` deliberately remains:
+the preview is planner-budget-bounded by design (ADR 0014).
+
 ## OGC API - Tiles + control plane
 
 **`GET /`** — the OGC landing page; in catalog mode the same JSON also

@@ -99,6 +99,7 @@ pub struct ApiState<S, R, L, C = NoCache> {
     /// (ADR 0010): the landing page then serves the openEO capabilities
     /// vocabulary alongside the OGC one.
     openeo: bool,
+    read_only: bool,
     /// The embedded UI bundle (issue #103): `GET /` negotiates browsers
     /// onto its `index.html`, and the router fallback serves its assets.
     /// `None` (or an empty bundle) serves exactly the pre-UI surface.
@@ -125,6 +126,7 @@ impl<S, R, L> ApiState<S, R, L> {
             base_url,
             traces: TraceBus::default(),
             openeo: false,
+            read_only: false,
             ui: None,
         }
     }
@@ -151,6 +153,7 @@ impl<S, R, L, C> ApiState<S, R, L, C> {
             base_url: self.base_url,
             traces: self.traces,
             openeo: self.openeo,
+            read_only: self.read_only,
             ui: self.ui,
         }
     }
@@ -174,6 +177,15 @@ impl<S, R, L, C> ApiState<S, R, L, C> {
     #[must_use]
     pub fn with_openeo(mut self) -> Self {
         self.openeo = true;
+        self
+    }
+
+    /// Marks this serving read-only (#198): the landing/capabilities
+    /// document filters out the write methods, matching a router assembly
+    /// that mounted none of them (write routes are absent, never 403'd).
+    #[must_use]
+    pub fn read_only(mut self) -> Self {
+        self.read_only = true;
         self
     }
 
@@ -329,7 +341,7 @@ where
     };
     let mut doc = serde_json::to_value(page).expect("landing page serializes");
     if app.openeo {
-        crate::openeo::extend_capabilities(&mut doc, base);
+        crate::openeo::extend_capabilities(&mut doc, base, app.read_only);
     }
     Json(doc).into_response()
 }

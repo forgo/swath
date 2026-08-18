@@ -145,6 +145,8 @@ pub(crate) struct ResolvedConfig {
     /// `*` for any. Empty (the default) = no CORS layer at all — the
     /// same-origin story (embedded UI / vite proxy) needs none.
     pub(crate) cors_allowed_origins: Vec<String>,
+    /// Read-only serving (#198): write routes unmounted.
+    pub(crate) read_only: bool,
     /// Where the layers come from.
     pub(crate) layers: LayerSource,
 }
@@ -464,6 +466,7 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
         store_root,
         cache,
         cors_allowed_origins,
+        read_only: args.read_only,
         layers,
     })
 }
@@ -739,6 +742,7 @@ mod tests {
             overview_oversample: None,
             max_estimated_live_bytes: None,
             cors_allowed_origins: Vec::new(),
+            read_only: false,
         }
     }
 
