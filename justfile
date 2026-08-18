@@ -288,7 +288,25 @@ test-referencer:
     cargo run -q -p swath-referencer --bin vmanifest-compare --         "$dir/rs.vmanifest.json" "$dir/vz.vmanifest.json"
     # And the gated structural/georef assertions on the real granule.
     SWATH_VNP09GA="$granule" cargo test -q -p swath-referencer --test vnp09ga_real -- --ignored
+    # Icechunk interop round trip (#191, ADR 0017): commit the refs to a
+    # local Icechunk repo, then icechunk-python + xarray read every array
+    # back byte-equal to the HDF5 source (no Swath Rust in the read loop).
+    rm -rf "$dir/icechunk-repo"
+    cargo run -q -p swath-cli -- ingest reference "$granule"         --output "$dir/rs2.vmanifest.json" --icechunk "$dir/icechunk-repo"
+    uv run tests/referencer/icechunk_check.py "$dir/icechunk-repo" "$granule"
     echo "test-referencer PASS"
+
+# The credential-free Icechunk round trip (#191, ADR 0017) over the tiny
+# committed HDF-EOS fixture: the Rust committer writes a local Icechunk
+# repo; icechunk-python/zarr/xarray read every array back byte-equal to
+# the HDF5 source. The same check `just test-referencer` runs against a
+# real VNP09GA granule; this one needs only uv and runs anywhere.
+test-icechunk:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=target/icechunk-tiny && rm -rf "$dir" && mkdir -p "$dir"
+    cargo run -q -p swath-cli -- ingest reference         crates/swath-referencer/tests/data/tiny.h5         --output "$dir/tiny.vmanifest.json" --icechunk "$dir/repo"
+    uv run tests/referencer/icechunk_check.py "$dir/repo"         crates/swath-referencer/tests/data/tiny.h5
 
 # The gated virtual-serving run (issue #39, joins the test-referencer
 # pattern): reference a REAL VNP09GA granule, render a VIIRS NDVI Web

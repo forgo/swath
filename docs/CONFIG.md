@@ -60,6 +60,7 @@ same generation the filedrop legacy path performs at ingest.
 |---|---|---|
 | `<granule>` | `PATH` | The legacy granule file (HDF5/NetCDF4, GRIB2) to reference. |
 | `--output` | `PATH` | Where to write the manifest JSON. Default: `<granule>.vmanifest.json` beside the granule. |
+| `--icechunk` | `DIR` | Also commit the virtual references to the Icechunk repository at this directory (created if absent, committed to `main` — ADR 0017). Chunk paths resolve against the granule's directory. |
 
 <!-- config-check:end flags swath ingest reference -->
 
