@@ -77,7 +77,8 @@ pub(crate) struct ServeArgs {
     pub(crate) catalog: Option<String>,
 
     /// Serve read-only (#198): the write routes (POST /datasets, POST
-    /// /datasets/{id}/granules, POST/DELETE /services) are absent — not
+    /// /datasets/{id}/granules, POST/DELETE /services, PUT
+    /// /uploads/{filename}) are absent — not
     /// 403'd — and the capabilities document reflects it. POST /result
     /// stays enabled: the preview is planner-budget-bounded by design
     /// (ADR 0014). The enabling slice for an auth-less hosted demo.
@@ -194,7 +195,7 @@ where
     match layers {
         LayerSource::Static(registry) => {
             let layer_count = registry.identities().len();
-            run_server(&shared, registry, layer_count, None, shutdown).await
+            run_server(&shared, registry, layer_count, None, false, shutdown).await
         }
         LayerSource::Catalog(mode) => serve_catalog(&shared, mode, shutdown).await,
     }
@@ -384,25 +385,58 @@ where
     // is planner-budget-bounded by design), and no dataset-creation
     // surface at all. The landing/capabilities document reflects exactly
     // what mounted (run_server marks the state).
-    let extra = if cfg.read_only {
+    let (extra, uploads) = if cfg.read_only {
         tracing::info!("read-only: write routes unmounted (#198)");
-        swath_api::openeo_read_router(openeo_state).merge(granules)
+        (
+            swath_api::openeo_read_router(openeo_state).merge(granules),
+            false,
+        )
     } else {
-        let openeo = swath_api::openeo_router(openeo_state);
-        // The dataset-creation surface (#196): register datasets/granules
-        // by API, validated through the same source stack tiles read.
-        let datasets_store = build_store(&cfg.store_root)?;
-        let datasets = swath_api::datasets_router(Arc::new(swath_api::DatasetsState::new(
-            provider.clone(),
-            PyramidSource::new(
-                CompositeSource::new(Arc::clone(&datasets_store)),
-                datasets_store,
-            ),
-            Proj4rsReproject,
-        )));
-        openeo.merge(granules).merge(datasets)
+        let (writes, uploads) = write_surface(cfg, &provider)?;
+        (
+            swath_api::openeo_router(openeo_state)
+                .merge(granules)
+                .merge(writes),
+            uploads,
+        )
     };
-    run_server(cfg, provider, layer_count, Some(extra), shutdown).await
+    run_server(cfg, provider, layer_count, Some(extra), uploads, shutdown).await
+}
+
+/// The write half of catalog serving, never mounted read-only: the
+/// dataset-creation surface (#196 — register datasets/granules by API,
+/// validated through the same source stack tiles read), plus, over a
+/// *local* store root only, the upload route (#197 — browser file drops
+/// land in the serving store, then register through the same surface; the
+/// local-vs-remote line is the one the legacy referencer draws — a remote
+/// store has real upload tooling). The returned flag is what the
+/// capabilities document advertises: exactly what mounted.
+fn write_surface<C>(
+    cfg: &Shared,
+    provider: &CatalogLayers<C>,
+) -> Result<(axum::Router, bool), ServeError>
+where
+    C: Catalog + Clone + Send + Sync + 'static,
+{
+    let datasets_store = build_store(&cfg.store_root)?;
+    let datasets = swath_api::datasets_router(Arc::new(swath_api::DatasetsState::new(
+        provider.clone(),
+        PyramidSource::new(
+            CompositeSource::new(Arc::clone(&datasets_store)),
+            datasets_store,
+        ),
+        Proj4rsReproject,
+    )));
+    let uploads = !cfg.store_root.contains("://");
+    let router = if uploads {
+        let uploads_store = build_store(&cfg.store_root)?;
+        datasets.merge(swath_api::uploads_router(Arc::new(
+            swath_api::UploadsState::new(uploads_store),
+        )))
+    } else {
+        datasets
+    };
+    Ok((router, uploads))
 }
 
 /// The mode-independent tail of `serve`: build the store, assemble the
@@ -415,6 +449,7 @@ async fn run_server<L, F>(
     layers: L,
     layer_count: usize,
     extra: Option<axum::Router>,
+    uploads: bool,
     shutdown: F,
 ) -> Result<(), ServeError>
 where
@@ -441,6 +476,9 @@ where
     }
     if cfg.read_only {
         state = state.read_only();
+    }
+    if uploads {
+        state = state.with_uploads();
     }
     // The embedded UI (issue #103, ADR 0011): browsers get index.html at
     // `/`, hashed assets serve from the router fallback, API clients see

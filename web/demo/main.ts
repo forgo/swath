@@ -16,6 +16,7 @@
 // - localStorage tracks every state change as "the last session", so a
 //   later paramless visit resumes where this one ended.
 import { type GranuleBbox, GranuleFootprints } from "../src/granule-footprints.js";
+import { defineSwathAddDataPanel, SwathAddDataPanel } from "../src/swath-add-data-panel.js";
 import { defineSwathAuthoringPanel, SwathAuthoringPanel } from "../src/swath-authoring-panel.js";
 import {
   defineSwathDatasetPanel,
@@ -40,6 +41,7 @@ import {
 const mapElement = document.querySelector("swath-map");
 const panelElement = document.querySelector("swath-layer-panel");
 const datasetElement = document.querySelector("swath-dataset-panel");
+const addDataElement = document.querySelector("swath-add-data-panel");
 const authoringElement = document.querySelector("swath-authoring-panel");
 
 const storage = safeLocalStorage();
@@ -66,10 +68,19 @@ const basemap = new URLSearchParams(location.search).get("basemap");
 if (basemap !== null) {
   mapElement?.setAttribute("basemap", basemap);
 }
+// `stac` (issue #197) is the "Open in Swath" entry: pass-through page
+// config exactly like `basemap` — not view state, never persisted, never
+// rewritten on load (byte-stability), preserved by `withViewState`. The
+// add-data panel opens pre-filled; registering stays a user click.
+const stac = new URLSearchParams(location.search).get("stac");
+if (stac !== null && stac !== "") {
+  addDataElement?.setAttribute("stac", stac);
+}
 
 defineSwathMap();
 defineSwathLayerPanel();
 defineSwathDatasetPanel();
+defineSwathAddDataPanel();
 defineSwathAuthoringPanel();
 
 if (mapElement instanceof SwathMap && panelElement instanceof SwathLayerPanel) {
@@ -81,6 +92,20 @@ if (mapElement instanceof SwathMap && authoringElement instanceof SwathAuthoring
 
 if (mapElement instanceof SwathMap && datasetElement instanceof SwathDatasetPanel) {
   wireDatasetBrowser(mapElement, datasetElement);
+}
+
+// The add-data panel (issue #197) registers through the API and publishes
+// a quick-look service; the shell only routes the outcome to the map —
+// the switch refetches /tilesets, so the rail lists the new layer at once.
+if (mapElement instanceof SwathMap && addDataElement instanceof SwathAddDataPanel) {
+  const map = mapElement;
+  addDataElement.addEventListener("swath-data-added", (event) => {
+    const layer = (event as CustomEvent<{ dataset: string; layer: string }>).detail.layer;
+    if (layer !== "") {
+      // Failures surface via the map's own `swath-error` + retry loop.
+      map.setLayer(layer).catch(() => undefined);
+    }
+  });
 }
 
 /** Routes the dataset browser (issue #110) to the map: announced granules

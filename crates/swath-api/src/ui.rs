@@ -37,7 +37,7 @@ use axum::response::{IntoResponse, Response};
 /// these: the router's fallback priority already guarantees the API wins,
 /// and the `swath-cli` route-table test asserts the embedded bundle stays
 /// disjoint so no asset is silently unreachable.
-pub const API_ROUTE_PREFIXES: [&str; 10] = [
+pub const API_ROUTE_PREFIXES: [&str; 12] = [
     "conformance",
     "tiles",
     "tilesets",
@@ -45,9 +45,11 @@ pub const API_ROUTE_PREFIXES: [&str; 10] = [
     "healthz",
     ".well-known",
     "collections",
+    "datasets",
     "processes",
     "service_types",
     "services",
+    "uploads",
 ];
 
 /// True when `path` (relative, no leading slash) starts with a segment the
@@ -177,9 +179,11 @@ mod tests {
             "healthz",
             ".well-known/openeo",
             "collections",
+            "datasets/hls-s30/granules",
             "processes",
             "service_types",
             "services/abc",
+            "uploads/scene.tif",
         ] {
             assert!(collides_with_api_routes(path), "{path} must collide");
         }
