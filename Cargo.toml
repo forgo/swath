@@ -136,11 +136,20 @@ toml = { version = "0.9.5" }
 tracing = { version = "0.1.41" }
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt"] }
 
-# Chunk decompression for the virtual-reference source (#39): HDF5's
-# deflate filter is a zlib stream; flate2 (rust_backend — the same
-# miniz_oxide already in the tree under png/async-tiff) inflates it. No new
-# supply-chain surface: flate2 1.x was already a vetted transitive dep.
-flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
+# Codec-chain decode for the virtual-reference source (#190, supersedes the
+# hand-rolled flate2+unshuffle slice of #39): the manifest's HDF5 filter
+# pipeline (`zlib:<level>`, `shuffle`) decodes through zarrs's codec
+# implementations — the same crate a native-Zarr adapter (§16.1, still
+# demand-triggered) would BIND, so codec behavior is maintained upstream, not
+# duplicated here. Feature-trimmed hard: default features off (drops the
+# filesystem store, ndarray, blosc/zstd/crc32c codecs, sharding, transpose)
+# and exactly `zlib` on — the one gated codec the manifests use (`shuffle` is
+# ungated; gzip stays off until a manifest can emit it). flate2 returns to
+# being transitive (zarrs's zlib feature), still the rust_backend/miniz_oxide
+# already in the tree under png. The residual cost is zarrs's mandatory core
+# (rayon, moka, num, half, inventory, …) — measured and itemized in PR #190;
+# this dep is the supply-chain rehearsal for M9's wasmtime review.
+zarrs = { version = "0.23.13", default-features = false, features = ["zlib"] }
 # The production referencer (ADR 0006, issue #40). gribberish: GRIB2 section
 # metadata (offsets/lengths/grids/packing templates) — referencing needs no
 # field decode, so default features stay off. hdf5-metno `static`: builds the

@@ -63,7 +63,7 @@ All nodes are implemented (per-module detail lives in each crate's rustdoc); the
 `VirtualiZarr` sidecar is deliberately absent — the conformance *reference* for
 `swath-referencer` (ADR 0006), not a runtime component.
 
-_Last verified against sources `56221bb877aa`._
+_Last verified against sources `afca486758b2`._
 
 ## 5. The Core (pure logic)
 
@@ -228,7 +228,7 @@ crates, with the seven adapter crates under `crates/adapters/`; beside it,
 embedded UI and HDF5 weight, not adapter selection (§14 covers extension beyond compile
 time).
 
-_Last verified against sources `56221bb877aa`._
+_Last verified against sources `afca486758b2`._
 
 ## 13. Frontend architecture
 

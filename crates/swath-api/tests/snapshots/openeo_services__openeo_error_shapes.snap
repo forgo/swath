@@ -1,63 +1,62 @@
 ---
 source: crates/swath-api/tests/openeo_services.rs
-assertion_line: 348
 expression: shapes
 ---
 {
-  "missing process graph": {
-    "error": {
-      "code": "ProcessGraphMissing",
-      "message": "Invalid process specified. It doesn't contain a process graph."
-    },
-    "status": 400
-  },
-  "no result node": {
-    "error": {
-      "code": "ProcessGraphInvalid",
-      "message": "no result node: exactly one node must set \"result\": true"
-    },
-    "status": 400
-  },
-  "unknown band": {
-    "error": {
-      "code": "ProcessParameterInvalid",
-      "message": "node `load`: unknown band `swir22` — known bands and aliases: [\"b02\", \"b03\", \"b04\", \"b8a\"]"
-    },
-    "status": 400
-  },
-  "unknown collection": {
-    "error": {
-      "code": "CollectionNotFound",
-      "message": "Collection 'sentinel-99' does not exist."
-    },
-    "status": 404
-  },
-  "unknown process id": {
-    "error": {
-      "code": "ProcessUnsupported",
-      "message": "node `smooth`: unsupported process `apply_kernel` — the supported subset is: load_collection, filter_temporal, reduce_dimension, array_element, add, subtract, multiply, divide, linear_scale_range, ndvi, save_result"
-    },
-    "status": 400
-  },
-  "unsupported configuration setting": {
-    "error": {
-      "code": "ServiceConfigUnsupported",
-      "message": "Service parameter 'antialias' is not supported."
-    },
-    "status": 400
-  },
-  "unsupported output range": {
-    "error": {
-      "code": "ProcessParameterInvalid",
-      "message": "node `scale` (linear_scale_range): invalid argument `outputMin`: the Render IR quantizes to 8-bit; the output range must be exactly 0..255, got 0..1"
-    },
-    "status": 400
-  },
   "wrong service type": {
+    "status": 400,
     "error": {
       "code": "ServiceUnsupported",
       "message": "Service type 'wms' is not supported. Supported: \"xyz\"."
-    },
-    "status": 400
+    }
+  },
+  "missing process graph": {
+    "status": 400,
+    "error": {
+      "code": "ProcessGraphMissing",
+      "message": "Invalid process specified. It doesn't contain a process graph."
+    }
+  },
+  "unknown collection": {
+    "status": 404,
+    "error": {
+      "code": "CollectionNotFound",
+      "message": "Collection 'sentinel-99' does not exist."
+    }
+  },
+  "unknown process id": {
+    "status": 400,
+    "error": {
+      "code": "ProcessUnsupported",
+      "message": "node `smooth`: unsupported process `apply_kernel` — the supported subset is: load_collection, filter_temporal, reduce_dimension, array_element, add, subtract, multiply, divide, linear_scale_range, ndvi, save_result"
+    }
+  },
+  "unknown band": {
+    "status": 400,
+    "error": {
+      "code": "ProcessParameterInvalid",
+      "message": "node `load`: unknown band `swir22` — known bands and aliases: [\"b02\", \"b03\", \"b04\", \"b8a\"]"
+    }
+  },
+  "no result node": {
+    "status": 400,
+    "error": {
+      "code": "ProcessGraphInvalid",
+      "message": "no result node: exactly one node must set \"result\": true"
+    }
+  },
+  "unsupported output range": {
+    "status": 400,
+    "error": {
+      "code": "ProcessParameterInvalid",
+      "message": "node `scale` (linear_scale_range): invalid argument `outputMin`: the Render IR quantizes to 8-bit; the output range must be exactly 0..255, got 0..1"
+    }
+  },
+  "unsupported configuration setting": {
+    "status": 400,
+    "error": {
+      "code": "ServiceConfigUnsupported",
+      "message": "Service parameter 'antialias' is not supported."
+    }
   }
 }
