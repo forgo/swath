@@ -48,7 +48,43 @@ XYZ the same way (*Add Data → Data From Path → Tile Layer*), but a
 recipe we haven't exercised is a support liability, not a bridge.
 Revisit on the first real request.
 
-## Jupyter / openEO — arrives with #195
+## Jupyter — the standard openEO Python client (no bespoke SDK)
 
-The openeo-python-client notebook loop (connect → build graph →
-`POST /result` → PNG inline) lands here with issue #195.
+The stock [`openeo`](https://pypi.org/project/openeo/) client drives
+Swath's bounded profile (ADR 0010/0014); a Swath-specific SDK or widget
+is a recorded anti-goal. The notebook loop, verbatim
+(`pip install openeo`):
+
+```python
+import openeo
+from openeo.rest.datacube import THIS
+conn = openeo.connect("http://localhost:8080")
+conn.list_collection_ids()                       # ['hls-s30', …]
+cube = conn.load_collection("hls-s30", bands=["b04", "b8a"])
+cube = cube.ndvi(nir="b8a", red="b04")
+cube = cube.process("linear_scale_range", x=THIS,  # not .linear_scale_range():
+                    inputMin=-1, inputMax=1,       # the sugar emits `apply`,
+                    outputMin=0, outputMax=255)    # outside the subset
+cube = cube.save_result(format="png")
+png = cube.download()                            # POST /result
+from IPython.display import Image; Image(png)    # inline preview
+```
+
+Profile narrowings the client will surface honestly:
+
+- **No `apply`:** the client's `.linear_scale_range()` convenience wraps
+  its process in `apply`, which the subset excludes — use the explicit
+  `.process()` form above (finding recorded for ADR 0010's reopen list).
+- **Band names are the collection's declared values** (`b04`, `b8a`, …
+  from `cube:dimensions`) and `ndvi` takes explicit `nir=`/`red=`
+  targets — no common-name alias vocabulary is persisted.
+- **`POST /result` is the bounded preview** (ADR 0014): one small
+  overview-backed PNG of the graph's extent; over-budget requests are
+  refused with `ProcessGraphComplexity`, and PNG is the only output
+  format (`GET /file_formats`).
+- Publishing a graph as a live tile layer is
+  `conn.create_service(cube, type="xyz")` — the returned service id is a
+  `/tilesets/{id}` layer, QGIS-consumable per the recipe above.
+
+CI runs this exact loop with the pinned client on every stack change
+(`tests/openeo/client_check.py`, wired into `just e2e`).

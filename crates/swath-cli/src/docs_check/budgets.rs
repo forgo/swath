@@ -39,7 +39,7 @@ const BUDGETS: [(&str, usize); 17] = [
     ("docs/PERFORMANCE.md", 2050),
     ("docs/PITCH.md", 225),
     ("docs/QUICKSTART.md", 850),
-    ("docs/RECIPES.md", 350),
+    ("docs/RECIPES.md", 525),
     ("docs/RELEASING.md", 600),
     ("docs/REQUIREMENTS.md", 1400),
     ("docs/ROADMAP.md", 1375),
