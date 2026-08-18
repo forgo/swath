@@ -133,6 +133,7 @@ pub const OPENEO_ENDPOINTS: &[(&str, &[&str])] = &[
     ("/collections", &["GET"]),
     ("/collections/{collection_id}", &["GET"]),
     ("/conformance", &["GET"]),
+    ("/file_formats", &["GET"]),
     ("/processes", &["GET"]),
     ("/result", &["POST"]),
     ("/service_types", &["GET"]),
@@ -268,6 +269,7 @@ where
         .route("/.well-known/openeo", get(well_known))
         .route("/collections", get(collections))
         .route("/collections/{collection_id}", get(collection))
+        .route("/file_formats", get(file_formats))
         .route("/processes", get(processes))
         .route("/result", axum::routing::post(preview_result))
         .route("/service_types", get(service_types))
@@ -537,6 +539,23 @@ async fn processes<S, R, C>(State(app): State<Arc<OpenEoState<S, R, C>>>) -> Jso
 }
 
 // --- Secondary services (the authoring loop) ---
+
+/// `GET /file_formats` — the honest single-format answer: PNG out (the
+/// ADR 0014 preview), nothing in (`load_collection` is the only source).
+/// Standard clients (openeo-python-client's `save_result`) validate the
+/// requested format against this document before the POST (#195).
+async fn file_formats<S, R, C>(State(_): State<Arc<OpenEoState<S, R, C>>>) -> Json<Value> {
+    Json(json!({
+        "input": {},
+        "output": {
+            "PNG": {
+                "title": "Portable Network Graphics",
+                "gis_data_types": ["raster"],
+                "parameters": {},
+            },
+        },
+    }))
+}
 
 async fn service_types<S, R, C>(State(_): State<Arc<OpenEoState<S, R, C>>>) -> Json<Value> {
     Json(json!({

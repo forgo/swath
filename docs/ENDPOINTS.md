@@ -40,6 +40,7 @@ survive.
 | GET | `/.well-known/openeo` | catalog mode | openEO version discovery |
 | GET | `/collections` | catalog mode | openEO/STAC collections (one per dataset) |
 | GET | `/collections/{collection_id}` | catalog mode | One collection document |
+| GET | `/file_formats` | catalog mode | openEO output formats: PNG only (the ADR 0014 preview) |
 | GET | `/processes` | catalog mode | The supported openEO process subset |
 | POST | `/result` | catalog mode | Preview: one bounded synchronous render of a process graph (PNG) |
 | GET | `/service_types` | catalog mode | Secondary service types (`xyz`) |

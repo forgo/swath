@@ -444,6 +444,10 @@ e2e:
     trap 'docker compose down -v' EXIT
     SWATH_STACK_UP_ONLY=1 tests/e2e/stack-up.sh
     cargo run --quiet -p swath-e2e
+    # The standard openEO Python client against the same live stack
+    # (#195, docs/RECIPES.md): connect -> discover -> build -> download.
+    # No bespoke SDK — the pinned stock client is the compatibility bar.
+    uv run tests/openeo/client_check.py
 
 # The viewer e2e (issue #33): the same stack bring-up + granule drop as
 # `just e2e` (shared, tests/e2e/stack-up.sh — no duplicated drop logic),
