@@ -10,9 +10,15 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-# Flips to `true` in the publish pipeline PR (#192), per ADR 0016 — the name
-# is claimed only by a release carrying real content, never a placeholder.
-publish = false
+readme = "README.md"
+keywords = ["kerchunk", "virtualizarr", "zarr", "hdf5", "grib2"]
+categories = ["science::geo", "encoding"]
+# One of exactly four publishable crates (ADR 0016, #192); the actual
+# `cargo publish` is maintainer-executed per docs/RELEASING.md's crates tier.
+publish = true
+
+[package.metadata.docs.rs]
+all-features = true
 
 [dependencies]
 # The schema is serde all the way down; serde_json is the document format

@@ -1,0 +1,16 @@
+# REUSE 3.3 annotations for the files this **published package** carries
+# that cannot bear SPDX headers themselves (ADR 0016: each published crate
+# is REUSE-compliant standing alone, not only inside the repo aggregate).
+version = 1
+SPDX-PackageName = "swath-planner"
+SPDX-PackageDownloadLocation = "https://github.com/forgo/swath"
+
+[[annotations]]
+path = [
+    "Cargo.toml",
+    "README.md",
+    "REUSE.toml",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Elliott Richerson <elliott.richerson@gmail.com>"
+SPDX-License-Identifier = "Apache-2.0"

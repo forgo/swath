@@ -11,9 +11,9 @@ authors.workspace = true
 readme = "README.md"
 keywords = ["hdf5", "grib2", "kerchunk", "virtualizarr", "zarr"]
 categories = ["science::geo", "parser-implementations"]
-# Flips to `true` in the publish pipeline PR (#192), per ADR 0016 — the name
-# is claimed only by a release carrying real content, never a placeholder.
-publish = false
+# One of exactly four publishable crates (ADR 0016, #192); the actual
+# `cargo publish` is maintainer-executed per docs/RELEASING.md's crates tier.
+publish = true
 
 [package.metadata.docs.rs]
 # Document the full surface: the HDF5 half (`legacy-hdf5`) and the CLI.
@@ -72,7 +72,9 @@ swath-manifest = { path = "../swath-manifest", version = "0.1.0-alpha.1" }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-swath-testsupport = { path = "../swath-testsupport", version = "0.1.0-alpha.1" }
+# Nothing unpublished, on purpose: the packaged test suite is self-contained
+# (tests/util/mod.rs carries the std-only TempDir/gated_var helpers), so the
+# published crate resolves and tests outside this workspace.
 
 [lints]
 workspace = true

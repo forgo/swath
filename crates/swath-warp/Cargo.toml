@@ -8,10 +8,15 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-# Stays false until the M8.8 publish pipeline (#192) adds the crates tier
-# (tag-triggered dry-run + semver-checks) and flips exactly the four
-# ADR 0016 crates to true. Do not flip here.
-publish = false
+readme = "README.md"
+keywords = ["gdal", "warp", "resampling", "raster", "gis"]
+categories = ["science::geo", "algorithms"]
+# One of exactly four publishable crates (ADR 0016, #192); the actual
+# `cargo publish` is maintainer-executed per docs/RELEASING.md's crates tier.
+publish = true
+
+[package.metadata.docs.rs]
+all-features = true
 
 # Self-contained by decision (ADR 0016's standalone rule): zero dependencies —
 # the kernel takes its own minimal input types, never swath-core's.
