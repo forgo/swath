@@ -25,7 +25,7 @@ use super::repo_root;
 
 /// The committed budgets: (repo-relative doc, max whitespace-delimited
 /// words). Values are the post-sweep counts plus ~10%, rounded up to 25.
-const BUDGETS: [(&str, usize); 16] = [
+const BUDGETS: [(&str, usize); 17] = [
     ("README.md", 1025),
     ("docs/ARCHITECTURE.md", 2125),
     ("docs/CHARTER.md", 1350),
@@ -39,6 +39,7 @@ const BUDGETS: [(&str, usize); 16] = [
     ("docs/PERFORMANCE.md", 2050),
     ("docs/PITCH.md", 225),
     ("docs/QUICKSTART.md", 850),
+    ("docs/RECIPES.md", 350),
     ("docs/RELEASING.md", 600),
     ("docs/REQUIREMENTS.md", 1400),
     ("docs/ROADMAP.md", 1375),
