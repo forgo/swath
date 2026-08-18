@@ -27,8 +27,8 @@
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-use swath_core::ingest::ReferencerError;
-use swath_manifest::{ChunkRef, Georef, ManifestVersion, VirtualArray, VirtualManifest};
+use crate::ReferencerError;
+use crate::manifest::{ChunkRef, Georef, ManifestVersion, VirtualArray, VirtualManifest};
 
 use crate::eos::EosGrid;
 
@@ -253,7 +253,7 @@ fn attach_georefs(file: &hdf5_metno::File, grids: &[EosGrid], arrays: &mut [Virt
             .filter(|b| !b.is_empty());
         array.georef = Some(Georef {
             crs: grid.crs.clone(),
-            transform: grid.transform.into(),
+            transform: grid.transform,
             nodata: numeric_fill_value(file, &array.name),
             band,
         });

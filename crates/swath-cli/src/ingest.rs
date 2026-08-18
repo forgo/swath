@@ -14,8 +14,7 @@
 
 use std::path::PathBuf;
 
-use swath_core::ingest::{IngestReferencer as _, ReferencerError};
-use swath_referencer::SwathReferencer;
+use swath_referencer::{ReferencerError, SwathReferencer};
 
 /// `swath ingest <subcommand>` arguments.
 #[derive(Debug, clap::Args)]

@@ -810,8 +810,9 @@ perf-referencer runs="10":
 # artifacts (docs/perf/*.json + docs/perf/load-2cpu-16.7-evidence.md).
 # Everything between the `table:*` HTML-comment markers is owned by this
 # recipe, and so is the content of every inline
-# `<!-- number:<key> -->…<!-- /number:<key> -->` pair (README.md, DEMO.md,
-# CHARTER.md, REQUIREMENTS.md, PERFORMANCE.md, ARCHITECTURE.md,
+# `<!-- number:<key> -->…<!-- /number:<key> -->` pair (README.md, the
+# swath-referencer crate README, DEMO.md, CHARTER.md, REQUIREMENTS.md,
+# PERFORMANCE.md, ARCHITECTURE.md,
 # COMPARISON.md, media/wedge.notes.md); the prose around the markers is
 # hand-written. Idempotent — rerunning without artifact changes is a no-op.
 # The docs-check gate (crates/swath-cli/src/docs_check/numbers.rs) verifies
@@ -1004,6 +1005,7 @@ perf-doc:
 
     marker_docs = [
         "README.md",
+        "crates/swath-referencer/README.md",
         "docs/DEMO.md",
         "docs/CHARTER.md",
         "docs/REQUIREMENTS.md",

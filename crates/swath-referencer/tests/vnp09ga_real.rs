@@ -14,9 +14,8 @@
 
 use std::path::PathBuf;
 
-use swath_core::ingest::IngestReferencer as _;
-use swath_manifest::GeorefCrs;
 use swath_referencer::SwathReferencer;
+use swath_referencer::manifest::GeorefCrs;
 
 #[test]
 #[ignore = "needs a real VNP09GA granule (run via `just test-referencer`)"]

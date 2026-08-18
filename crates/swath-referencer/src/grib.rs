@@ -20,10 +20,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::ReferencerError;
+use crate::manifest::{ChunkRef, ManifestVersion, VirtualArray, VirtualManifest};
 use gribberish::message::read_messages;
 use gribberish::templates::product::tables::FixedSurfaceType;
-use swath_core::ingest::ReferencerError;
-use swath_manifest::{ChunkRef, ManifestVersion, VirtualArray, VirtualManifest};
 
 /// Generates the manifest for a GRIB2 granule.
 pub(crate) fn generate(granule: &Path) -> Result<VirtualManifest, ReferencerError> {

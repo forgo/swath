@@ -26,9 +26,8 @@
 //! with new known-answer tests, not a parser tweak (deferral tracked in
 //! `docs/ROADMAP.md`).
 
-use swath_core::ingest::ReferencerError;
-use swath_core::raster::GeoTransform;
-use swath_manifest::GeorefCrs;
+use crate::ReferencerError;
+use crate::manifest::{GeoTransform, GeorefCrs};
 
 /// One grid definition parsed out of `StructMetadata.0`.
 #[derive(Debug, Clone, PartialEq)]
@@ -154,7 +153,10 @@ fn grid_from_fields(block: &str, fields: &[(String, String)]) -> Result<EosGrid,
         (lrx - ulx) / xdim as f64,
         (lry - uly) / ydim as f64,
     );
-    if transform.determinant() == 0.0 {
+    // The manifest's GeoTransform is data-only (geometry lives with the
+    // consumer), so the degeneracy check is spelled here: north-up means
+    // both rotation terms are zero, so the determinant is the cell area.
+    if transform.pixel_width * transform.pixel_height == 0.0 {
         return Err(malformed(
             block,
             "degenerate corner points (zero-area grid)",
@@ -196,8 +198,8 @@ fn malformed(block: &str, detail: &str) -> ReferencerError {
 #[cfg(test)]
 mod tests {
     use super::{EosGrid, parse_grids};
-    use swath_core::ingest::ReferencerError;
-    use swath_manifest::GeorefCrs;
+    use crate::ReferencerError;
+    use crate::manifest::GeorefCrs;
 
     /// The real VNP09GA StructMetadata.0 text, committed verbatim from the
     /// bake-off granule (`VNP09GA.A2012019.h33v12.002.2023122182434.h5`).
@@ -236,10 +238,13 @@ mod tests {
         // internal consistency GDAL relies on for these products.
         let grids = parse_grids(VNP09GA).unwrap();
         for grid in &grids {
+            // North-up pixel->CRS by hand (the manifest's GeoTransform is
+            // data-only; both rotation terms are zero by construction).
             #[allow(clippy::cast_precision_loss)]
-            let (lrx, lry) = grid
-                .transform
-                .pixel_to_crs(grid.xdim as f64, grid.ydim as f64);
+            let (lrx, lry) = (
+                grid.transform.origin_x + grid.xdim as f64 * grid.transform.pixel_width,
+                grid.transform.origin_y + grid.ydim as f64 * grid.transform.pixel_height,
+            );
             assert!((lrx - 17_791_208.314_667).abs() < 1e-3, "{}", grid.name);
             assert!((lry - -4_447_802.078_667).abs() < 1e-3, "{}", grid.name);
         }
