@@ -86,7 +86,7 @@ const SECTIONS: [(&str, &[Section]); 2] = [
                     "crates/swath-core/src/cache.rs",
                     "crates/swath-core/src/events.rs",
                     "crates/swath-core/src/ingest.rs",
-                    "crates/swath-core/src/planner.rs",
+                    "crates/swath-planner/src/lib.rs",
                     "crates/swath-render/src/process.rs",
                     "crates/swath-render/src/tiler.rs",
                 ],
@@ -289,15 +289,33 @@ pub(super) fn check_doc(doc_label: &str, doc: &str) -> Result<(), String> {
     }
 }
 
+/// Whether `file` existed at commit `sha`.
+fn exists_at(sha: &str, file: &str) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(repo_root())
+        .args(["cat-file", "-e", &format!("{sha}:{file}")])
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 /// `doc` with every section's stamp replaced by the fingerprint its
 /// referenced sources had at commit `sha` — the mutation tests' way of
 /// reconstructing a genuinely pre-sweep stamp set (needs git history).
+/// A referenced file that did not exist at `sha` (source extracted or
+/// renamed since — e.g. the planner's ADR 0016 move into
+/// `swath-planner`) fingerprints as empty content rather than failing
+/// the reconstruction.
 pub(super) fn restamped_at(doc_label: &str, doc: &str, sha: &str) -> Result<String, String> {
     let mut out = doc.to_owned();
     for section in doc_sections(doc_label)? {
         let current = section_stamp(doc_label, doc, section.heading)?;
         let historical = fingerprint(section.files, |file| {
-            git_stdout(&["show", &format!("{sha}:{file}")])
+            if exists_at(sha, file) {
+                git_stdout(&["show", &format!("{sha}:{file}")])
+            } else {
+                Ok(String::new())
+            }
         })?;
         out = out.replace(&format!("`{current}`"), &format!("`{historical}`"));
     }

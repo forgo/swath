@@ -613,7 +613,7 @@ screenshots:
 # --- benchmarks (issue #100; ENGINEERING.md §2 criterion mandate) ---
 
 # All criterion benches across the workspace: the planner microbench
-# (swath-core) plus the render-stage suites (swath-render: warp, IR eval,
+# (swath-planner) plus the render-stage suites (swath-render: warp, IR eval,
 # PNG encode, source window, full-tile composite). Inputs are the committed
 # HLS fixtures — no network, no downloads. Compare runs against the
 # committed baseline in docs/perf/bench-baseline.json.
