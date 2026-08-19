@@ -40,6 +40,10 @@ granules a layer can pin are listed by `GET /tilesets/{layerId}/granules`.
 
 Remote stacks: substitute the host; nothing else changes.
 
+Evidence (hand-captured — the reproducible suite cannot drive a desktop app):
+
+![QGIS rendering truecolor via a stock XYZ connection](media/qgis-xyz-connection.png)
+
 ## ArcGIS — parked
 
 Deliberately not written until the QGIS recipe proves the
