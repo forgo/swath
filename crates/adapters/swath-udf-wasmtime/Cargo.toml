@@ -16,5 +16,11 @@ thiserror = { workspace = true }
 # (ADR 0018; the referencer's wasmtime-free guard pins the isolation).
 wasmtime = { workspace = true }
 
+[dev-dependencies]
+# The guest kit's encode/decode halves build the fixture tests' request
+# buffers and read their responses — the same code UDF authors round-trip
+# against, so host and guest can never drift apart silently.
+swath-udf-guest = { path = "../../swath-udf-guest", version = "0.1.0-alpha.1" }
+
 [lints]
 workspace = true

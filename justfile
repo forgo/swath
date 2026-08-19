@@ -138,6 +138,41 @@ zizmor:
 reuse:
     git ls-files -z | xargs -0 uvx --from 'reuse[charset-normalizer]' reuse lint-file
 
+# --- examples/udf (UDF guest kit, issue #202 / ADR 0018) ---
+
+# Rebuild the committed Rust UDF fixture modules from examples/udf (their
+# own wasm32-unknown-unknown workspace). Deterministic by construction —
+# pinned toolchain (rust-toolchain.toml), symbols stripped, panic=abort,
+# no host paths in the bytes — so a rebuild anywhere reproduces the
+# committed fixtures exactly; udf-fixtures-verify is that claim, gated.
+# (The AssemblyScript/TinyGo fixtures are deliberately prebuilt from the
+# pinned toolchains in examples/udf/README.md, not rebuilt here; the
+# swath-udf-wasmtime conformance suite keeps their committed bytes honest.)
+udf-fixtures:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rustup target add wasm32-unknown-unknown
+    (cd examples/udf && cargo build --release --target wasm32-unknown-unknown)
+    out=examples/udf/target/wasm32-unknown-unknown/release
+    dst=crates/adapters/swath-udf-wasmtime/tests/fixtures
+    cp "$out/swath_udf_example_ndvi.wasm"      "$dst/ndvi.wasm"
+    cp "$out/swath_udf_example_hillshade.wasm" "$dst/hillshade.wasm"
+    shasum -a 256 "$dst"/ndvi.wasm "$dst"/hillshade.wasm
+
+# The reproducibility gate (CI: the udf-guest job): rebuild the Rust
+# examples and byte-compare against the committed fixtures — committed
+# .wasm can never drift from its source.
+udf-fixtures-verify:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rustup target add wasm32-unknown-unknown
+    (cd examples/udf && cargo build --release --target wasm32-unknown-unknown)
+    out=examples/udf/target/wasm32-unknown-unknown/release
+    dst=crates/adapters/swath-udf-wasmtime/tests/fixtures
+    cmp "$out/swath_udf_example_ndvi.wasm"      "$dst/ndvi.wasm"
+    cmp "$out/swath_udf_example_hillshade.wasm" "$dst/hillshade.wasm"
+    echo "udf-fixtures-verify PASS"
+
 # --- tests/oracle (GDAL/rio-tiler correctness oracle, ADR 0002 / issue #19) ---
 
 # Passthrough to the reference renderer (PEP 723 script; uv resolves the pins).
@@ -1102,4 +1137,4 @@ publish-dry:
     cargo publish --dry-run --allow-dirty         -p swath-manifest -p swath-planner -p swath-referencer -p swath-warp
 
 # The one-command gate: everything CI enforces.
-check: fmt-check lint machete test deny zizmor reuse publish-dry
+check: fmt-check lint machete test deny zizmor reuse udf-fixtures-verify publish-dry

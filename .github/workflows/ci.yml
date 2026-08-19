@@ -65,6 +65,7 @@ jobs:
               - '.github/**'
             rust:
               - 'crates/**'
+              - 'examples/udf/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
@@ -220,6 +221,26 @@ jobs:
         with:
           tools: "none"
       - run: just check-fast
+
+  # The UDF guest-kit reproducibility gate (issue #202, ADR 0018): the
+  # committed Rust fixture modules (swath-udf-wasmtime/tests/fixtures) must
+  # be byte-identical to what examples/udf builds from source. wasm32
+  # codegen is host-independent under the pinned toolchain (macOS-arm64 vs
+  # Linux-x86_64 proven identical when the fixtures landed), so this single
+  # ubuntu job covers every platform's rebuild.
+  udf-guest:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tools: "none"
+      - run: just udf-fixtures-verify
 
   rust-coverage:
     needs: changes
@@ -436,7 +457,7 @@ jobs:
   # was skipped by the path filter; red on any failure, cancellation, or a
   # failed `changes` job (which would silently skip everything downstream).
   ci-ok:
-    needs: [changes, rust-fmt, rust-lint, rust-test, docs-check, rust-deny, rust-msrv, rust-check-fast, rust-coverage, zizmor, reuse, e2e, e2e-web, web, python, oracle]
+    needs: [changes, rust-fmt, rust-lint, rust-test, docs-check, rust-deny, rust-msrv, rust-check-fast, udf-guest, rust-coverage, zizmor, reuse, e2e, e2e-web, web, python, oracle]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

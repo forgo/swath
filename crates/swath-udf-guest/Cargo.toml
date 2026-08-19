@@ -1,0 +1,22 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-udf-guest"
+description = "Guest-side kit for Swath UDF ABI v1 (docs/udf-abi/v1.md, ADR 0018): the ABI structs, strict header parse/emit, and the swath_udf! macro producing the four exports — no_std-friendly, zero dependencies, built for wasm32-unknown-unknown."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "README.md"
+# In-tree authoring kit for now; publishing is the #209 SDK question,
+# decided there — not implied here.
+publish = false
+
+# Zero dependencies, deliberately: the wire header is four fixed integer
+# fields, hand-parsed strictly (deny-unknown), so guests carry no serde/JSON
+# machinery into their .wasm and the kit has no no_std feature battles.
+[dependencies]
+
+[lints]
+workspace = true

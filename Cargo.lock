@@ -4549,9 +4549,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "swath-udf-guest"
+version = "0.1.0-alpha.1"
+
+[[package]]
 name = "swath-udf-wasmtime"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "swath-udf-guest",
  "thiserror 2.0.20",
  "wasmtime",
 ]
