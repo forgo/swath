@@ -356,6 +356,120 @@ beforeAll(() => {
   defineSwathMap();
 });
 
+// --- per-side badges under the compare swipe (issue #210) ---
+
+/** Synthetic temporal payload: the side identity rides `requested`. */
+function temporal(requested: string | null, granule = "g0"): Partial<TraceJson> {
+  return {
+    temporal: {
+      granule_id: granule,
+      granule_datetime: requested ?? "2024-09-05T19:03:00Z",
+      requested,
+      rule: requested === null ? "latest" : "latest_at_or_before",
+    },
+  };
+}
+
+const T0 = "2024-06-07T19:03:00Z";
+const T1 = "2024-09-05T19:03:00Z";
+
+/** A date-vs-date compare state over the fake map's `fire` layer. */
+function dateCompare(fraction = 0.5) {
+  return {
+    fraction,
+    sides: {
+      mode: "date" as const,
+      left: { layer: "fire", requested: T0 },
+      right: { layer: "fire", requested: T1 },
+    },
+  };
+}
+
+test("compare, date mode: traces split into side-clipped badge layers by requested=", () => {
+  const host = mountHost();
+  const factory = fakeFactory();
+  const overlay = new XRayOverlay(host, fakeMap(), { createEventSource: factory.create });
+  overlay.connect(`${SERVER}/traces`);
+  overlay.setLayer("fire");
+  overlay.setCompare(dateCompare(0.25));
+  const source = factory.opened[0];
+
+  source?.emit("trace", envelope("fire", "2/1/1", temporal(T0)));
+  source?.emit("trace", envelope("fire", "2/1/1", { decision: "cache_hit", ...temporal(T1) }));
+  // Neither side: another layer, and a frame no side shows — dropped.
+  source?.emit("trace", envelope("other", "2/1/1", temporal(T0)));
+  source?.emit("trace", envelope("fire", "2/1/1", temporal("2024-07-22T19:03:00Z")));
+  overlay.refresh();
+
+  // Both sides of ONE tile coexist (side rides the store key).
+  const left = host.querySelectorAll<HTMLElement>(
+    '.swath-xray-side[data-side="left"] .swath-xray-badge',
+  );
+  const right = host.querySelectorAll<HTMLElement>(
+    '.swath-xray-side[data-side="right"] .swath-xray-badge',
+  );
+  expect(left.length).toBe(1);
+  expect(right.length).toBe(1);
+  expect(left[0]?.dataset.side).toBe("left");
+  expect(left[0]?.dataset.key).toBe("left:fire/2/1/1");
+  expect(left[0]?.dataset.decision).toBe("live");
+  expect(right[0]?.dataset.key).toBe("right:fire/2/1/1");
+  expect(right[0]?.dataset.decision).toBe("cache_hit");
+  // Every painted badge lives in a side layer while comparing — the
+  // plain layer (and the neither-side traces) paint nothing.
+  expect(badges(host).length).toBe(2);
+
+  // The clips split at the handle fraction.
+  const leftLayer = host.querySelector<HTMLElement>('.swath-xray-side[data-side="left"]');
+  const rightLayer = host.querySelector<HTMLElement>('.swath-xray-side[data-side="right"]');
+  expect(leftLayer?.style.clipPath).toBe("inset(0px 75% 0px 0px)");
+  expect(rightLayer?.style.clipPath).toBe("inset(0px 0px 0px 25%)");
+
+  // A fraction-only move re-clips WITHOUT dropping the side entries.
+  overlay.setCompare(dateCompare(0.6));
+  expect(leftLayer?.style.clipPath).toBe("inset(0px 40% 0px 0px)");
+  expect(overlay.traceFor("left:fire/2/1/1")).toBeDefined();
+
+  // Ending the compare purges side entries and restores normal painting.
+  overlay.setCompare(undefined);
+  source?.emit("trace", envelope("fire", "2/1/1", temporal(T0)));
+  overlay.refresh();
+  expect(overlay.traceFor("left:fire/2/1/1")).toBeUndefined();
+  expect(badges(host).length).toBe(1);
+  expect(badges(host)[0]?.dataset.key).toBe("fire/2/1/1");
+  overlay.dispose();
+});
+
+test("compare, layer mode: the envelope's layer picks the side", () => {
+  const host = mountHost();
+  const factory = fakeFactory();
+  const overlay = new XRayOverlay(host, fakeMap(), { createEventSource: factory.create });
+  overlay.connect(`${SERVER}/traces`);
+  overlay.setLayer("ndvi");
+  overlay.setCompare({
+    fraction: 0.5,
+    sides: {
+      mode: "layer",
+      left: { layer: "ndvi", requested: null },
+      right: { layer: "truecolor", requested: null },
+    },
+  });
+  const source = factory.opened[0];
+  source?.emit("trace", envelope("ndvi", "2/1/1"));
+  source?.emit("trace", envelope("truecolor", "2/2/1"));
+  source?.emit("trace", envelope("park-fire-ndvi", "2/3/1"));
+  overlay.refresh();
+  const left = host.querySelectorAll<HTMLElement>(
+    '.swath-xray-side[data-side="left"] .swath-xray-badge',
+  );
+  const right = host.querySelectorAll<HTMLElement>(
+    '.swath-xray-side[data-side="right"] .swath-xray-badge',
+  );
+  expect([...left].map((badge) => badge.dataset.key)).toEqual(["left:ndvi/2/1/1"]);
+  expect([...right].map((badge) => badge.dataset.key)).toEqual(["right:truecolor/2/2/1"]);
+  overlay.dispose();
+});
+
 test("the xray attribute opens the stream; removing it closes and cleans up", async () => {
   const factory = fakeFactory();
   const el = mountMap(factory.create, false);

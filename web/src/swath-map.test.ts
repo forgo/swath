@@ -441,6 +441,137 @@ test("scrubbing the built-in slider reflects the datetime attribute", async () =
   expect(tileTemplates(el)[0]).toContain(`datetime=${encodeURIComponent(FIRE_FRAMES[0] ?? "")}`);
 });
 
+// --- the compare swipe (issue #210) ---
+
+/** The compare (right-side) map's raster tile templates. */
+function compareTemplates(el: SwathMap): string[] {
+  const sources = el.compareMap?.getStyle().sources ?? {};
+  return Object.values(sources).flatMap((source) =>
+    source.type === "raster" ? (source.tiles ?? []) : [],
+  );
+}
+
+test("compare-datetime builds the clipped right map on the other frame", async () => {
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const el = mount({ server: SERVER, layer: "ndvi", datetime: FIRE_FRAMES[0] ?? "" });
+  await el.ready;
+  expect(el.compareMap).toBeUndefined();
+  expect(el.querySelector(".swath-map-compare")).toBeNull();
+
+  const comparechange = new Promise<void>((resolve) => {
+    el.addEventListener("swath-comparechange", () => resolve(), { once: true });
+  });
+  el.setAttribute("compare-datetime", FIRE_FRAMES[3] ?? "");
+  await comparechange;
+
+  // The right map exists, view-synced, on the compare frame's template.
+  await vi.waitFor(() =>
+    expect(compareTemplates(el)).toEqual([
+      `${SERVER}/tilesets/ndvi/tiles/{z}/{y}/{x}?datetime=${encodeURIComponent(
+        FIRE_FRAMES[3] ?? "",
+      )}`,
+    ]),
+  );
+  expect(el.compareMap?.getCenter().lng).toBeCloseTo(el.map?.getCenter().lng ?? 0, 6);
+  expect(el.compareMap?.getZoom()).toBeCloseTo(el.map?.getZoom() ?? 0, 6);
+  // The left map still shows ITS frame — untouched by the compare.
+  expect(tileTemplates(el)[0]).toContain(`datetime=${encodeURIComponent(FIRE_FRAMES[0] ?? "")}`);
+
+  // Handle + per-side chips: date mode shows the two frames.
+  const handle = el.querySelector<HTMLElement>(".swath-map-compare-handle");
+  expect(handle?.dataset["mode"]).toBe("date");
+  expect(handle?.getAttribute("role")).toBe("slider");
+  expect(el.querySelector('.swath-map-compare-label[data-side="left"]')?.textContent).toBe(
+    FIRE_FRAMES[0],
+  );
+  expect(el.querySelector('.swath-map-compare-label[data-side="right"]')?.textContent).toBe(
+    FIRE_FRAMES[3],
+  );
+  // Default handle position: centered, clip showing the right half.
+  expect(handle?.style.left).toBe("50%");
+  expect(el.querySelector<HTMLElement>(".swath-map-compare")?.style.clipPath).toBe(
+    "inset(0px 0px 0px 50%)",
+  );
+
+  // Ending the compare tears the right side down entirely.
+  el.removeAttribute("compare-datetime");
+  expect(el.compareMap).toBeUndefined();
+  expect(el.querySelector(".swath-map-compare")).toBeNull();
+  expect(el.querySelector(".swath-map-compare-handle")).toBeNull();
+});
+
+test("compare-layer builds the right map on the other layer", async () => {
+  const el = mount({ server: SERVER, layer: "ndvi", "compare-layer": "truecolor" });
+  await el.ready;
+  await vi.waitFor(() =>
+    expect(compareTemplates(el)).toEqual([`${SERVER}/tilesets/truecolor/tiles/{z}/{y}/{x}`]),
+  );
+  const handle = el.querySelector<HTMLElement>(".swath-map-compare-handle");
+  expect(handle?.dataset["mode"]).toBe("layer");
+  expect(el.querySelector('.swath-map-compare-label[data-side="left"]')?.textContent).toBe("ndvi");
+  expect(el.querySelector('.swath-map-compare-label[data-side="right"]')?.textContent).toBe(
+    "truecolor",
+  );
+  // Comparing a layer with itself is dropped — no right map, no handle.
+  el.setAttribute("compare-layer", "ndvi");
+  expect(el.compareMap).toBeUndefined();
+  expect(el.querySelector(".swath-map-compare-handle")).toBeNull();
+});
+
+test("swipe attribute moves the handle; arrow keys move the swipe attribute", async () => {
+  const el = mount({
+    server: SERVER,
+    layer: "ndvi",
+    "compare-layer": "truecolor",
+    swipe: "0.25",
+  });
+  await el.ready;
+  const handle = el.querySelector<HTMLElement>(".swath-map-compare-handle");
+  expect(handle?.style.left).toBe("25%");
+  expect(handle?.getAttribute("aria-valuenow")).toBe("25");
+
+  el.setAttribute("swipe", "0.75");
+  expect(handle?.style.left).toBe("75%");
+  expect(el.querySelector<HTMLElement>(".swath-map-compare")?.style.clipPath).toBe(
+    "inset(0px 0px 0px 75%)",
+  );
+
+  // Keyboard: the handle is a real slider — a nudge reflects into the
+  // attribute (the single source of truth), which moves the handle.
+  handle?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+  expect(el.getAttribute("swipe")).toBe("0.77");
+  expect(handle?.style.left).toBe("77%");
+  handle?.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+  expect(el.getAttribute("swipe")).toBe("0");
+});
+
+test("the compare toggle starts before-vs-after on a time series and ends any compare", async () => {
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const el = mount({ server: SERVER, layer: "ndvi" });
+  await el.ready;
+  const button = el.querySelector<HTMLButtonElement>(".swath-map-compare-toggle button");
+  expect(button?.closest<HTMLElement>(".swath-map-compare-toggle")?.hidden).toBe(false);
+  expect(button?.getAttribute("aria-pressed")).toBe("false");
+
+  // Viewing "latest": the toggle pins newest right, jumps left to oldest.
+  button?.click();
+  expect(el.getAttribute("datetime")).toBe(FIRE_FRAMES[0]);
+  expect(el.getAttribute("compare-datetime")).toBe(FIRE_FRAMES[3]);
+  expect(button?.getAttribute("aria-pressed")).toBe("true");
+  expect(el.querySelector(".swath-map-compare-handle")).not.toBeNull();
+
+  // Toggling again clears every compare attribute.
+  button?.click();
+  expect(el.getAttribute("compare-datetime")).toBeNull();
+  expect(el.getAttribute("swipe")).toBeNull();
+  expect(el.querySelector(".swath-map-compare-handle")).toBeNull();
+  expect(button?.getAttribute("aria-pressed")).toBe("false");
+
+  // A single-date layer cannot offer the default gesture: hidden button.
+  await el.setLayer("truecolor");
+  expect(el.querySelector<HTMLElement>(".swath-map-compare-toggle")?.hidden).toBe(true);
+});
+
 // --- finding the data: auto-frame + zoom-to-data (issue #182 follow-up) ---
 
 /** Resolves on the next user-initiated data framing (the shell's

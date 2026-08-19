@@ -27,7 +27,9 @@ import { defineSwathLayerPanel, SwathLayerPanel } from "../src/swath-layer-panel
 import { defineSwathMap, type SwathLayer, SwathMap } from "../src/swath-map.js";
 import {
   formatCenter,
+  formatSwipe,
   formatZoom,
+  parseSwipe,
   parseTime,
   parseViewState,
   resolveInitialState,
@@ -58,6 +60,17 @@ if (initial.zoom !== undefined) {
 }
 if (initial.time !== undefined) {
   mapElement?.setAttribute("datetime", initial.time);
+}
+// Compare swipe (issue #210): the parsed state is already coherent
+// (exclusive modes, validated swipe) — apply verbatim.
+if (initial.compareTime !== undefined) {
+  mapElement?.setAttribute("compare-datetime", initial.compareTime);
+}
+if (initial.compareLayer !== undefined) {
+  mapElement?.setAttribute("compare-layer", initial.compareLayer);
+}
+if (initial.swipe !== undefined) {
+  mapElement?.setAttribute("swipe", formatSwipe(initial.swipe));
 }
 if (initial.xray) {
   mapElement?.setAttribute("xray", "");
@@ -149,6 +162,27 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
     if (time !== undefined) {
       state.time = time;
     }
+    // Compare swipe (issue #210): same attribute-is-truth rule, with the
+    // same exclusivity the URL parser enforces — only coherent compare
+    // states ever enter a ViewState (and `swipe` only rides a compare).
+    const compareTime = parseTime(map.getAttribute("compare-datetime"));
+    const compareLayer = map.getAttribute("compare-layer");
+    if (compareTime !== undefined && compareLayer === null) {
+      state.compareTime = compareTime;
+    } else if (
+      compareLayer !== null &&
+      compareLayer !== "" &&
+      compareTime === undefined &&
+      compareLayer !== state.layer
+    ) {
+      state.compareLayer = compareLayer;
+    }
+    if (state.compareTime !== undefined || state.compareLayer !== undefined) {
+      const swipe = parseSwipe(map.getAttribute("swipe"));
+      if (swipe !== undefined) {
+        state.swipe = swipe;
+      }
+    }
     const inner = map.map;
     if (inner) {
       const center = inner.getCenter().wrap();
@@ -220,6 +254,16 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
   // byte-stable; `syncUrl` additionally skips the write whenever the
   // URL already encodes the same state.
   map.addEventListener("swath-timechange", () => {
+    persist();
+    syncUrl();
+  });
+
+  // Compare swipe (issue #210): the map announces every compare-state
+  // change (toggle, handle drag, or a programmatic attribute set) — the
+  // same mirror-into-URL-and-storage seam as time. Deep-linked compare
+  // attributes are applied BEFORE define(), so no event fires on load
+  // and pasted links stay byte-stable.
+  map.addEventListener("swath-comparechange", () => {
     persist();
     syncUrl();
   });

@@ -146,6 +146,96 @@ test("t joins the owned params: parsed, written verbatim, round-tripped (issue #
   expect(loadViewState(localStorage)).toEqual({ xray: false });
 });
 
+test("compare params (issue #210): ct/cl/swipe parse, write verbatim, round-trip", () => {
+  // Date-vs-date: `ct` shares `t`'s grammar and verbatim writing.
+  const dates: ViewState = {
+    layer: "park-fire-ndvi",
+    time: "2024-06-07T19:03:00Z",
+    compareTime: "2024-09-05T19:03:00Z",
+    swipe: 0.35,
+    xray: false,
+  };
+  const datesQuery = withViewState("", dates);
+  expect(datesQuery).toBe(
+    "?layer=park-fire-ndvi&t=2024-06-07T19:03:00Z&ct=2024-09-05T19:03:00Z&swipe=0.35",
+  );
+  expect(parseViewState(datesQuery)).toEqual(dates);
+
+  // Layer-vs-layer: `cl` is the right side's layer id.
+  const layers: ViewState = { layer: "ndvi", compareLayer: "truecolor", xray: false };
+  const layersQuery = withViewState("", layers);
+  expect(layersQuery).toBe("?layer=ndvi&cl=truecolor");
+  expect(parseViewState(layersQuery)).toEqual(layers);
+
+  // All compare params are owned: URL-beats-storage triggers on each.
+  expect(hasViewParams("?ct=2024-09-05T19:03:00Z")).toBe(true);
+  expect(hasViewParams("?cl=truecolor")).toBe(true);
+  expect(hasViewParams("?swipe=0.5")).toBe(true);
+});
+
+test("compare params degrade coherently: ambiguity, self-compare, junk", () => {
+  // Both modes at once is ambiguous — no compare, never a guess.
+  expect(parseViewState("?layer=ndvi&ct=2024-09-05T19:03:00Z&cl=truecolor")).toEqual({
+    layer: "ndvi",
+    xray: false,
+  });
+  // Comparing a layer with itself compares nothing.
+  expect(parseViewState("?layer=ndvi&cl=ndvi")).toEqual({ layer: "ndvi", xray: false });
+  // A malformed ct degrades to no compare (and drops the stray swipe).
+  expect(parseViewState("?layer=ndvi&ct=yesterday&swipe=0.4")).toEqual({
+    layer: "ndvi",
+    xray: false,
+  });
+  // A swipe without any compare means nothing.
+  expect(parseViewState("?layer=ndvi&swipe=0.4")).toEqual({ layer: "ndvi", xray: false });
+  // An out-of-range swipe degrades to the default (absent).
+  expect(parseViewState("?cl=truecolor&swipe=7")).toEqual({
+    compareLayer: "truecolor",
+    xray: false,
+  });
+  // The writer never emits swipe for a compare-less state either.
+  expect(withViewState("", { layer: "ndvi", swipe: 0.4, xray: false })).toBe("?layer=ndvi");
+});
+
+test("compare state: equality, storage round-trip, corrupt shapes dropped", () => {
+  const state: ViewState = {
+    layer: "park-fire-ndvi",
+    compareTime: "2024-09-05T19:03:00Z",
+    swipe: 0.5,
+    xray: false,
+  };
+  // Round trips through the URL compare equal; real changes do not.
+  expect(viewStatesEqual(state, parseViewState(withViewState("", state)))).toBe(true);
+  expect(viewStatesEqual(state, { ...state, compareTime: "2024-06-07T19:03:00Z" })).toBe(false);
+  expect(viewStatesEqual(state, { layer: "park-fire-ndvi", xray: false })).toBe(false);
+  expect(viewStatesEqual(state, { ...state, swipe: 0.7 })).toBe(false);
+  // Swipe tolerates its own write precision, not a deliberate move.
+  expect(viewStatesEqual(state, { ...state, swipe: 0.504 })).toBe(true);
+  const byLayer: ViewState = { layer: "ndvi", compareLayer: "truecolor", xray: false };
+  expect(viewStatesEqual(byLayer, { ...byLayer })).toBe(true);
+  expect(viewStatesEqual(byLayer, { ...byLayer, compareLayer: "other" })).toBe(false);
+
+  // Storage: compare state round-trips…
+  saveViewState(localStorage, state);
+  expect(loadViewState(localStorage)).toEqual(state);
+  // …ambiguous or junk stored shapes are dropped, never kept.
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ compareTime: "2024-09-05T19:03:00Z", compareLayer: "x", xray: false }),
+  );
+  expect(loadViewState(localStorage)).toEqual({ xray: false });
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ layer: "ndvi", compareLayer: "ndvi", swipe: 2, xray: false }),
+  );
+  expect(loadViewState(localStorage)).toEqual({ layer: "ndvi", xray: false });
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ compareTime: "junk", swipe: 0.4, xray: false }),
+  );
+  expect(loadViewState(localStorage)).toEqual({ xray: false });
+});
+
 test("storage codec survives corruption and junk shapes", () => {
   localStorage.setItem(STORAGE_KEY, "not json {");
   expect(loadViewState(localStorage)).toBeUndefined();
