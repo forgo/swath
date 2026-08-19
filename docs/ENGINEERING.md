@@ -86,7 +86,7 @@ release-plz turns merged release PRs into tags (pre-release *bumps* computed by
 embedded viewer, checksums, automatic prerelease marking; the workflow is vendored and
 hand-hardened); `release-image.yml` publishes versioned GHCR images, smoke-tested before push.
 Exactly five crates publish (swath-manifest/-planner/-referencer/-warp, ADR 0016, plus
-swath-udf-guest, the #209 UDF SDK; maintainer-executed, RELEASING.md's crates tier); every
+swath-udf-guest, the UDF SDK, ADR 0020; maintainer-executed, RELEASING.md's crates tier); every
 other crate stays `publish = false`.
 Installers, `cargo auditable`, and attestation (SLSA L2) are graduation-tier. Conventional commits via squash-only merges + PR-title lint — squashed titles
 are exactly what release-plz and git-cliff read.

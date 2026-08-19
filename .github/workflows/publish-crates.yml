@@ -2,7 +2,7 @@
 #
 # Tag-triggered, credential-free: on every release tag this proves the five
 # publishable crates (swath-manifest, swath-planner, swath-referencer,
-# swath-warp, swath-udf-guest — ADR 0016's four plus the #209 SDK) actually
+# swath-warp, swath-udf-guest — ADR 0016's four plus the #209 SDK, ADR 0020) actually
 # package and verify-build from the tagged commit
 # (`just publish-dry` — the same recipe `just check` runs), and produces a
 # cargo-semver-checks report against the latest published baseline. The

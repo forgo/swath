@@ -12,7 +12,7 @@
 
 [workspace]
 # release-plz never publishes to crates.io: the five publishable crates
-# (ADR 0016's four plus swath-udf-guest, #209) are maintainer-published per
+# (ADR 0016's four plus swath-udf-guest, ADR 0020) are maintainer-published per
 # docs/RELEASING.md's crates tier;
 # this keeps release-plz git-only either way.
 publish = false

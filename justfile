@@ -1139,7 +1139,7 @@ docs-words:
     wc -w README.md docs/*.md | sort -n
 
 # Packaging dry-run for the five publishable crates (ADR 0016's four, #192,
-# plus swath-udf-guest — the #209 SDK): cargo
+# plus swath-udf-guest — ADR 0020, the #209 SDK): cargo
 # resolves the in-workspace publish order and builds each packaged crate in
 # isolation (path deps resolved via the multi-package local overlay, so the
 # not-yet-on-crates.io `swath-manifest` still verifies under

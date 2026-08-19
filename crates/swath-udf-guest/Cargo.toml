@@ -12,8 +12,8 @@ readme = "README.md"
 keywords = ["wasm", "udf", "raster", "gis", "no-std"]
 categories = ["wasm", "no-std", "science::geo"]
 # One of the five publishable crates (ADR 0016's four, #192, plus this kit —
-# the #209 SDK decision, maintainer-approved name); the actual `cargo publish`
-# is maintainer-executed per docs/RELEASING.md's crates tier.
+# ADR 0020, the #209 SDK decision, maintainer-approved name); the actual
+# `cargo publish` is maintainer-executed per docs/RELEASING.md's crates tier.
 publish = true
 
 [package.metadata.docs.rs]
