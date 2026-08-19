@@ -17,5 +17,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "swath-udf-example-qamask"
+version = "0.0.0"
+dependencies = [
+ "swath-udf-guest",
+]
+
+[[package]]
 name = "swath-udf-guest"
 version = "0.1.0-alpha.1"

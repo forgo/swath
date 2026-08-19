@@ -1,8 +1,9 @@
 # The crates tier of the release pipeline (ADR 0016, #192; docs/RELEASING.md).
 #
-# Tag-triggered, credential-free: on every release tag this proves the four
+# Tag-triggered, credential-free: on every release tag this proves the five
 # publishable crates (swath-manifest, swath-planner, swath-referencer,
-# swath-warp) actually package and verify-build from the tagged commit
+# swath-warp, swath-udf-guest — ADR 0016's four plus the #209 SDK, ADR 0020) actually
+# package and verify-build from the tagged commit
 # (`just publish-dry` — the same recipe `just check` runs), and produces a
 # cargo-semver-checks report against the latest published baseline. The
 # actual `cargo publish` is MAINTAINER-EXECUTED from the tag — publish
@@ -47,7 +48,7 @@ jobs:
             echo
             echo '```'
             echo "git switch --detach ${GITHUB_REF_NAME}"
-            echo "cargo publish -p swath-manifest -p swath-planner -p swath-referencer -p swath-warp"
+            echo "cargo publish -p swath-manifest -p swath-planner -p swath-referencer -p swath-warp -p swath-udf-guest"
             echo '```'
             echo
             echo "cargo orders the set by dependency (swath-manifest before swath-referencer)."
@@ -73,7 +74,7 @@ jobs:
           {
             echo "## cargo-semver-checks"
             echo
-            for crate in swath-manifest swath-planner swath-referencer swath-warp; do
+            for crate in swath-manifest swath-planner swath-referencer swath-warp swath-udf-guest; do
               echo "### ${crate}"
               # No published baseline yet (first release pending): note and move on.
               if ! curl -sf "https://crates.io/api/v1/crates/${crate}" >/dev/null; then

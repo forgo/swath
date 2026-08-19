@@ -157,7 +157,17 @@ udf-fixtures:
     dst=crates/adapters/swath-udf-wasmtime/tests/fixtures
     cp "$out/swath_udf_example_ndvi.wasm"      "$dst/ndvi.wasm"
     cp "$out/swath_udf_example_hillshade.wasm" "$dst/hillshade.wasm"
-    shasum -a 256 "$dst"/ndvi.wasm "$dst"/hillshade.wasm
+    cp "$out/swath_udf_example_qamask.wasm"    "$dst/qamask.wasm"
+    shasum -a 256 "$dst"/ndvi.wasm "$dst"/hillshade.wasm "$dst"/qamask.wasm
+
+# Recapture the golden request/response buffers (the #209 verification-
+# lattice set: pinned OUTPUT planes over committed input tiles) after a
+# deliberate change to a reference UDF or its input tile. The ignored
+# capture test writes tests/fixtures/golden/*.bin; the un-ignored tests
+# in the same file are the gate that the committed goldens replay
+# byte-identically (they run in `just test`).
+udf-goldens: udf-fixtures
+    cargo test -p swath-udf-wasmtime --test golden_outputs -- --ignored golden_capture
 
 # The reproducibility gate (CI: the udf-guest job): rebuild the Rust
 # examples and byte-compare against the committed fixtures — committed
@@ -171,6 +181,7 @@ udf-fixtures-verify:
     dst=crates/adapters/swath-udf-wasmtime/tests/fixtures
     cmp "$out/swath_udf_example_ndvi.wasm"      "$dst/ndvi.wasm"
     cmp "$out/swath_udf_example_hillshade.wasm" "$dst/hillshade.wasm"
+    cmp "$out/swath_udf_example_qamask.wasm"    "$dst/qamask.wasm"
     echo "udf-fixtures-verify PASS"
 
 # --- tests/oracle (GDAL/rio-tiler correctness oracle, ADR 0002 / issue #19) ---
@@ -1127,14 +1138,15 @@ docs-words:
     set -euo pipefail
     wc -w README.md docs/*.md | sort -n
 
-# Packaging dry-run for the four publishable crates (ADR 0016, #192): cargo
+# Packaging dry-run for the five publishable crates (ADR 0016's four, #192,
+# plus swath-udf-guest — ADR 0020, the #209 SDK): cargo
 # resolves the in-workspace publish order and builds each packaged crate in
 # isolation (path deps resolved via the multi-package local overlay, so the
 # not-yet-on-crates.io `swath-manifest` still verifies under
 # `swath-referencer`). This is the "can these actually publish?" gate; the
 # actual `cargo publish` stays maintainer-executed (docs/RELEASING.md).
 publish-dry:
-    cargo publish --dry-run --allow-dirty         -p swath-manifest -p swath-planner -p swath-referencer -p swath-warp
+    cargo publish --dry-run --allow-dirty         -p swath-manifest -p swath-planner -p swath-referencer -p swath-warp -p swath-udf-guest
 
 # The one-command gate: everything CI enforces.
 check: fmt-check lint machete test deny zizmor reuse udf-fixtures-verify publish-dry

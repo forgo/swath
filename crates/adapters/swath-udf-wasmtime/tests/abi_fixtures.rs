@@ -7,7 +7,7 @@
 //! adapter that will consume them exists.
 //!
 //! Fixtures (tests/fixtures/):
-//! - `ndvi.wasm`, `hillshade.wasm` — built from `examples/udf/` by
+//! - `ndvi.wasm`, `hillshade.wasm`, `qamask.wasm` — built from `examples/udf/` by
 //!   `just udf-fixtures`; CI rebuilds and byte-compares
 //!   (`just udf-fixtures-verify`), so committed bytes always match source.
 //! - `assemblyscript-double.wasm`, `tinygo-negate.wasm` — prebuilt from
@@ -19,25 +19,25 @@
 //! four exports with the v1 signatures, exported linear memory, <= 64 MiB)
 //! and answer a real request correctly and deterministically.
 
+mod common;
+
+use common::{Guest, engine};
 use swath_udf_guest::{Plane, decode_response, encode_request};
-use swath_udf_wasmtime::deterministic_engine;
-use wasmtime::{Engine, ExternType, Instance, Module, Store};
+use wasmtime::{ExternType, Module};
 
 const NDVI: &[u8] = include_bytes!("fixtures/ndvi.wasm");
 const HILLSHADE: &[u8] = include_bytes!("fixtures/hillshade.wasm");
+const QAMASK: &[u8] = include_bytes!("fixtures/qamask.wasm");
 const AS_DOUBLE: &[u8] = include_bytes!("fixtures/assemblyscript-double.wasm");
 const TINYGO_NEGATE: &[u8] = include_bytes!("fixtures/tinygo-negate.wasm");
 
-const ALL_FIXTURES: [(&str, &[u8]); 4] = [
+const ALL_FIXTURES: [(&str, &[u8]); 5] = [
     ("ndvi", NDVI),
     ("hillshade", HILLSHADE),
+    ("qamask", QAMASK),
     ("assemblyscript-double", AS_DOUBLE),
     ("tinygo-negate", TINYGO_NEGATE),
 ];
-
-fn engine() -> Engine {
-    deterministic_engine().expect("engine builds on this host")
-}
 
 /// Registration-shaped checks: zero imports, the four v1 exports with the
 /// v1 signatures, an exported linear memory within the 64 MiB cap.
@@ -76,73 +76,6 @@ fn fixtures_meet_the_registration_rules() {
             memory.minimum() * 65536 <= 64 * 1024 * 1024,
             "{name}: declared memory over the 64 MiB cap"
         );
-    }
-}
-
-struct Guest {
-    store: Store<()>,
-    instance: Instance,
-}
-
-impl Guest {
-    fn new(bytes: &[u8]) -> Self {
-        let engine = engine();
-        let module = Module::new(&engine, bytes).expect("module compiles");
-        let mut store = Store::new(&engine, ());
-        store.set_fuel(1_000_000_000).expect("fuel on");
-        store.set_epoch_deadline(1);
-        let instance = Instance::new(&mut store, &module, &[]).expect("instantiates");
-        Self { store, instance }
-    }
-
-    fn call_i32(&mut self, name: &str, arg: i32) -> i32 {
-        self.instance
-            .get_typed_func::<i32, i32>(&mut self.store, name)
-            .expect("export")
-            .call(&mut self.store, arg)
-            .expect("call succeeds")
-    }
-
-    fn abi(&mut self) -> i32 {
-        self.instance
-            .get_typed_func::<(), i32>(&mut self.store, "swath_udf_abi")
-            .expect("export")
-            .call(&mut self.store, ())
-            .expect("call succeeds")
-    }
-
-    /// The host's side of one run: write the request at a guest-allocated
-    /// pointer, call `swath_udf_run`, read back the response bytes.
-    fn run(&mut self, request: &[u8]) -> Option<Vec<u8>> {
-        let len = i32::try_from(request.len()).expect("request fits i32");
-        let ptr = self.call_i32("swath_udf_alloc", len);
-        assert!(ptr > 0, "allocation failed");
-        let memory = self
-            .instance
-            .get_memory(&mut self.store, "memory")
-            .expect("exported memory");
-        memory
-            .write(&mut self.store, usize::try_from(ptr).unwrap(), request)
-            .expect("request fits guest memory");
-        let packed = self
-            .instance
-            .get_typed_func::<(i32, i32), i64>(&mut self.store, "swath_udf_run")
-            .expect("export")
-            .call(&mut self.store, (ptr, len))
-            .expect("run does not trap");
-        if packed == 0 {
-            return None;
-        }
-        #[allow(clippy::cast_sign_loss)] // the packed value is a (u32, u32) pair by contract
-        let (out_ptr, out_len) = (
-            (packed as u64 >> 32) as usize,
-            (packed as u64 & 0xFFFF_FFFF) as usize,
-        );
-        let mut out = vec![0u8; out_len];
-        memory
-            .read(&self.store, out_ptr, &mut out)
-            .expect("response in bounds");
-        Some(out)
     }
 }
 
@@ -238,6 +171,72 @@ fn hillshade_computes_the_interior_and_leaves_the_seam_ring_invalid() {
     // Determinism: an identical second run answers byte-identical output.
     let again = guest.run(&request).expect("second run succeeds");
     assert_eq!(out, again, "byte-identical across runs");
+}
+
+#[test]
+fn qamask_tests_the_fmask_bits_and_rejects_unrepresentable_words() {
+    let mut guest = Guest::new(QAMASK);
+    assert_eq!(guest.abi(), 1);
+    assert_eq!(guest.call_i32("swath_udf_output_planes", 1), 1);
+    assert_eq!(guest.call_i32("swath_udf_output_planes", 2), 0);
+
+    // Words 0..8: real Fmask bytes (bit 1 cloud, bit 2 adjacent, bit 3
+    // shadow are masked; cirrus/snow/water are not). 8..12: values with
+    // no honest u8 bit pattern — fractional, negative, out of range,
+    // NaN — plus an input-invalid pixel.
+    let qa = Plane {
+        values: vec![
+            0.0,
+            1.0,
+            2.0,
+            4.0,
+            8.0,
+            14.0,
+            16.0,
+            32.0, // bytes
+            3.5,
+            -1.0,
+            256.0,
+            f64::NAN, // unrepresentable
+            255.0,
+            0.0,
+            64.0,
+            0.0, // last one input-invalid
+        ],
+        validity: vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+    };
+    let request = encode_request(4, 4, std::slice::from_ref(&qa)).expect("encodes");
+    let out = guest.run(&request).expect("run succeeds");
+    let response = decode_response(4, 4, &out).expect("response decodes");
+    assert_eq!(response.planes.len(), 1);
+    let plane = &response.planes[0];
+    // (expected validity, expected value) per pixel.
+    let expected: [(u8, f64); 16] = [
+        (1, 1.0), // 0: clear
+        (1, 1.0), // 1: cirrus only — not masked
+        (1, 0.0), // 2: cloud
+        (1, 0.0), // 4: adjacent to cloud
+        (1, 0.0), // 8: cloud shadow
+        (1, 0.0), // 14: all three masked bits
+        (1, 1.0), // 16: snow/ice — not masked
+        (1, 1.0), // 32: water — not masked
+        (0, 0.0), // 3.5: fractional
+        (0, 0.0), // -1.0: negative
+        (0, 0.0), // 256.0: out of u8 range
+        (0, 0.0), // NaN
+        (1, 0.0), // 255: everything set, cloud included
+        (1, 1.0), // 0: clear
+        (1, 1.0), // 64: bit 6 (aerosol) — not masked
+        (0, 0.0), // input-invalid passes through as invalid
+    ];
+    for (i, (validity, value)) in expected.iter().enumerate() {
+        assert_eq!(plane.validity[i], *validity, "pixel {i} validity");
+        assert_eq!(
+            plane.values[i].to_bits(),
+            value.to_bits(),
+            "pixel {i} value"
+        );
+    }
 }
 
 /// The cross-language fixtures: same request, language-specific expected

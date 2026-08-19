@@ -30,14 +30,17 @@ suite (`tests/abi_fixtures.rs`) under the real deterministic engine.
 
 ## Rust (the supported kit)
 
-`crates/swath-udf-guest` is the authoring floor: strict header
-parse/emit, the `swath_udf!` macro producing the four exports, and the
-`no_std` runtime (bump allocator, aborting panic handler). A module is
-one `#![no_std]` cdylib crate — see
+`crates/swath-udf-guest` (published on crates.io as `swath-udf-guest`,
+alpha — #209) is the authoring floor: strict header parse/emit, the
+`swath_udf!` macro producing the four exports, and the `no_std` runtime
+(bump allocator, aborting panic handler). A module is one `#![no_std]`
+cdylib crate — see
 [`examples/udf/ndvi`](../../examples/udf/ndvi/src/lib.rs) (the
-dual-implementation oracle against built-in band math) and
+dual-implementation oracle against built-in band math),
 [`examples/udf/hillshade`](../../examples/udf/hillshade/src/lib.rs) (a
-neighborhood op band math cannot express):
+neighborhood op band math cannot express), and
+[`examples/udf/qamask`](../../examples/udf/qamask/src/lib.rs) (bitwise
+QA-word tests band math cannot express):
 
 ```rust
 #![no_std]

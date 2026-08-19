@@ -11,8 +11,9 @@
 # over version bumps and the changelog — that regex matches from then on.
 
 [workspace]
-# release-plz never publishes to crates.io: the four publishable crates
-# (ADR 0016) are maintainer-published per docs/RELEASING.md's crates tier;
+# release-plz never publishes to crates.io: the five publishable crates
+# (ADR 0016's four plus swath-udf-guest, ADR 0020) are maintainer-published per
+# docs/RELEASING.md's crates tier;
 # this keeps release-plz git-only either way.
 publish = false
 git_only = true
