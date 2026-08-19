@@ -848,6 +848,13 @@ export class SwathAuthoringPanel extends HTMLElement {
   #title = "";
   #error = "";
   #unavailable = false;
+  /** The catalog reads (`/collections` + `/services`) ride behind the
+   * canvas instead of gating it (issue #255): `pending` while they are
+   * in flight, `failed` when they answered non-OK or threw — the canvas
+   * stays up either way, and a failure re-arms the lazy load so the
+   * next open retries (the add-data panel's #254 contract). */
+  #catalogPending = false;
+  #catalogFailed = false;
   /** Field keys (`s1-id`) the user has interacted with — inline
    * required/type messages only show for these, so a freshly inserted
    * card is not a wall of red; the disabled submit still counts them. */
@@ -914,23 +921,68 @@ export class SwathAuthoringPanel extends HTMLElement {
   }
 
   async #load(): Promise<void> {
+    // The canvas gates ONLY on `/processes` — a static definitions
+    // document with no catalog round trip behind it. `/collections` and
+    // `/services` both read the catalog, and under a concurrent live
+    // tile-render burst (renders are inline on the runtime, ADR 0012)
+    // those reads can be slow or transiently non-OK; the Load card's
+    // readiness must not depend on them (issue #255). They start in
+    // parallel here and hydrate the already-open canvas when they land.
+    const catalog = this.#loadCatalog();
     try {
-      const [processes, collections, services] = await Promise.all([
-        this.#fetch("/processes", { headers: { accept: "application/json" } }),
+      const processes = await this.#fetch("/processes", {
+        headers: { accept: "application/json" },
+      });
+      if (!processes.ok) {
+        throw new Error(`openEO surface answered ${processes.status}`);
+      }
+      const processBody = (await processes.json()) as { processes?: ProcessDefinition[] };
+      this.#processes = (processBody.processes ?? []).filter((p) => typeof p.id === "string");
+      this.#unavailable = false;
+      // The permanent head and tail come from the served definitions —
+      // schema honesty: no served `load_collection`/`save_result`, no
+      // card. Existing cards survive a reload only if still served.
+      const definition = (id: string): ProcessDefinition | undefined =>
+        this.#processes.find((process) => process.id === id);
+      const loadDef = definition("load_collection");
+      const saveDef = definition("save_result");
+      this.#loadCard =
+        loadDef === undefined ? undefined : (this.#loadCard ?? this.#newCard(loadDef));
+      this.#saveCard =
+        saveDef === undefined ? undefined : (this.#saveCard ?? this.#newCard(saveDef));
+      this.#middle = this.#middle.filter((card) => definition(card.process.id) !== undefined);
+    } catch {
+      // A failed load re-arms the lazy fetch: the next open retries
+      // instead of showing the unreachable note forever (the add-data
+      // panel's #254 contract).
+      this.#unavailable = true;
+      this.#loadStarted = false;
+    }
+    if (this.isConnected) {
+      this.#render();
+    }
+    await catalog;
+  }
+
+  /** The catalog half of the lazy load: collections and services, off
+   * the canvas's critical path (issue #255). A failure keeps the canvas
+   * up, notes itself inline, and re-arms the lazy load so the next open
+   * retries. */
+  async #loadCatalog(): Promise<void> {
+    this.#catalogPending = true;
+    this.#catalogFailed = false;
+    try {
+      const [collections, services] = await Promise.all([
         this.#fetch("/collections", { headers: { accept: "application/json" } }),
         this.#fetch("/services", { headers: { accept: "application/json" } }),
       ]);
-      if (!processes.ok || !collections.ok || !services.ok) {
-        throw new Error(
-          `openEO surface answered ${processes.status}/${collections.status}/${services.status}`,
-        );
+      if (!collections.ok || !services.ok) {
+        throw new Error(`catalog reads answered ${collections.status}/${services.status}`);
       }
-      const processBody = (await processes.json()) as { processes?: ProcessDefinition[] };
       const collectionBody = (await collections.json()) as {
         collections?: Record<string, unknown>[];
       };
       const serviceBody = (await services.json()) as { services?: ServiceItem[] };
-      this.#processes = (processBody.processes ?? []).filter((p) => typeof p.id === "string");
       this.#collections = (collectionBody.collections ?? []).flatMap((doc) => {
         if (typeof doc["id"] !== "string") {
           return [];
@@ -947,21 +999,11 @@ export class SwathAuthoringPanel extends HTMLElement {
         ];
       });
       this.#services = (serviceBody.services ?? []).filter((s) => typeof s.id === "string");
-      this.#unavailable = false;
-      // The permanent head and tail come from the served definitions —
-      // schema honesty: no served `load_collection`/`save_result`, no
-      // card. Existing cards survive a reload only if still served.
-      const definition = (id: string): ProcessDefinition | undefined =>
-        this.#processes.find((process) => process.id === id);
-      const loadDef = definition("load_collection");
-      const saveDef = definition("save_result");
-      this.#loadCard =
-        loadDef === undefined ? undefined : (this.#loadCard ?? this.#newCard(loadDef));
-      this.#saveCard =
-        saveDef === undefined ? undefined : (this.#saveCard ?? this.#newCard(saveDef));
-      this.#middle = this.#middle.filter((card) => definition(card.process.id) !== undefined);
+      this.#catalogPending = false;
     } catch {
-      this.#unavailable = true;
+      this.#catalogPending = false;
+      this.#catalogFailed = true;
+      this.#loadStarted = false;
     }
     if (this.isConnected) {
       this.#render();
@@ -1533,6 +1575,18 @@ export class SwathAuthoringPanel extends HTMLElement {
     }
 
     const children: Element[] = [toggle, this.#renderForm()];
+    if (this.#catalogFailed) {
+      // The canvas stays up on a failed catalog read (issue #255); the
+      // note says what is missing and how to retry (the next open
+      // refetches — the add-data panel's #254 contract).
+      const note = document.createElement("p");
+      note.className = "swath-authoring-error";
+      note.setAttribute("role", "alert");
+      note.textContent =
+        "The collections and published-services lists could not be loaded — " +
+        "close and reopen to retry.";
+      children.push(note);
+    }
     if (this.#error !== "") {
       const error = document.createElement("p");
       error.className = "swath-authoring-error";
@@ -1960,21 +2014,34 @@ export class SwathAuthoringPanel extends HTMLElement {
       return select;
     };
 
-    if (hasSubtype(param.schema, "collection-id") && this.#collections.length > 0) {
-      // The collection picker: served ids only — an unknown collection
-      // cannot be submitted from here.
-      const select = dropdown(
-        this.#collections.map((collection) => collection.id),
-        "(choose a collection)",
-        false,
-      );
-      select.addEventListener("change", () => {
-        // A new collection means a new band vocabulary: drop picks that
-        // no longer exist, then re-render the dependent widgets.
-        this.#loadBands = this.#loadBands.filter((band) => this.#collectionBands().includes(band));
-        this.#render();
-      });
-      return select;
+    if (hasSubtype(param.schema, "collection-id")) {
+      if (this.#collections.length > 0) {
+        // The collection picker: served ids only — an unknown collection
+        // cannot be submitted from here.
+        const select = dropdown(
+          this.#collections.map((collection) => collection.id),
+          "(choose a collection)",
+          false,
+        );
+        select.addEventListener("change", () => {
+          // A new collection means a new band vocabulary: drop picks that
+          // no longer exist, then re-render the dependent widgets.
+          this.#loadBands = this.#loadBands.filter((band) =>
+            this.#collectionBands().includes(band),
+          );
+          this.#render();
+        });
+        return select;
+      }
+      if (this.#catalogPending) {
+        // The collections read rides behind the canvas (issue #255):
+        // the card is ready, the picker fills in when the list lands.
+        const select = dropdown([], "(loading collections…)", false);
+        select.disabled = true;
+        return select;
+      }
+      // Loaded empty (or failed, noted inline): fall through to the
+      // free-text input — there is nothing to choose from.
     }
     if (hasSubtype(param.schema, "output-format-options")) {
       // The subtype-specialized widget: the Swath colormap select. On a
