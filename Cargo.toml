@@ -24,10 +24,14 @@ members = [
     "crates/swath-render",
     "crates/swath-testkit",
     "crates/swath-testsupport",
+    "crates/swath-udf-guest",
     "crates/swath-warp",
 ]
 # Prototypes are standalone, dated experiments — never workspace members.
-exclude = ["prototypes/*"]
+# examples/udf is its own tiny workspace: wasm32-unknown-unknown cdylib
+# modules (no_std, panic=abort) that host-side workspace builds must not
+# try to compile, test, or link.
+exclude = ["prototypes/*", "examples/udf/*"]
 
 [workspace.package]
 version = "0.1.0-alpha.1"

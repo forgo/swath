@@ -1,0 +1,14 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-udf-example-ndvi"
+description = "Example Swath UDF (ABI v1): NDVI — the dual-implementation oracle against the built-in band math."
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+swath-udf-guest = { path = "../../../crates/swath-udf-guest" }

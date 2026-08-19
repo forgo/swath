@@ -1,0 +1,21 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+#
+# Standalone wasm32-unknown-unknown workspace for the example UDF modules
+# (issue #202) — excluded from the root workspace: these are `no_std`
+# cdylibs with `panic = "abort"` that only make sense compiled to WASM.
+# `just udf-fixtures` builds them (release, --locked) and commits the
+# resulting .wasm as the adapter's conformance fixtures;
+# `just udf-fixtures-verify` (CI) rebuilds and byte-compares.
+[workspace]
+resolver = "3"
+members = ["ndvi", "hillshade"]
+
+# Small, reproducible modules: size-optimized, one codegen unit, aborting
+# panics (no unwind tables), symbols stripped (no name section — nothing
+# host- or path-dependent left in the bytes).
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
