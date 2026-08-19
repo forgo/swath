@@ -39,7 +39,10 @@ const BUDGETS: [(&str, usize); 17] = [
     ("docs/PERFORMANCE.md", 2050),
     ("docs/PITCH.md", 225),
     ("docs/QUICKSTART.md", 850),
-    ("docs/RECIPES.md", 525),
+    // Raised 525 -> 545 with #194's evidence screenshot: the QGIS recipe
+    // gained its capture note and image line (an acceptance criterion,
+    // not prose regrowth), re-measured at 534 + the usual headroom.
+    ("docs/RECIPES.md", 545),
     ("docs/RELEASING.md", 600),
     ("docs/REQUIREMENTS.md", 1400),
     ("docs/ROADMAP.md", 1375),
