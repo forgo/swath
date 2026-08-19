@@ -403,6 +403,14 @@ pub enum PlanKind {
         /// The expression source text.
         expression: String,
     },
+    /// A sandboxed WASM `run_udf` stage (ADR 0018, #201), named by the
+    /// content hash of its registered module. The hash is the whole
+    /// persisted identity — arity and params live in the executable plan;
+    /// the module store (#204) owns hash → bytes.
+    Udf {
+        /// Lowercase sha256 hex of the module bytes.
+        code_hash: String,
+    },
 }
 
 /// Linear mapping of a value range onto 0..=255, clamping outside values.

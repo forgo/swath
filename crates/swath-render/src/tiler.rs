@@ -87,6 +87,7 @@ use crate::encode::{EncodeError, encode_png};
 use crate::error::RenderError;
 use crate::grid::TargetGrid;
 use crate::ir::{PlanError, RenderPlan, TileFormat, eval};
+use crate::udf::NoUdf;
 use crate::warp::{Resampling, WarpedBuffer, warp};
 use crate::window::{SourceExtent, clip_to_raster, source_extent};
 
@@ -612,9 +613,12 @@ async fn render_planned<S: RasterSource, R: Reproject + ?Sized>(
         warped.push(buffer);
     }
 
-    // Phase 4: pixel ops, then encode.
+    // Phase 4: pixel ops, then encode. No executor is wired through the
+    // serve path yet (#205 threads the configured one); until then a UDF
+    // plan refuses loudly via `NoUdf` — plans without UDF stages never
+    // consult it (ADR 0018, #201).
     let pixel_started = Instant::now();
-    let tile = eval(&request.plan, &warped)?;
+    let tile = eval(&request.plan, &warped, &NoUdf)?;
     let pixel_time = pixel_started.elapsed();
 
     let encode_started = Instant::now();

@@ -17,7 +17,7 @@ use proptest::prelude::*;
 use serde_json::{Value as Json, json};
 use swath_core::catalog::{Colormap as DomainColormap, PlanKind, Rescale};
 use swath_render::ir::{BinaryOp, Colormap, Expr, PixelOp};
-use swath_render::{CompileContext, PlanSpec, plan_for};
+use swath_render::{CompileContext, PlanSpec, UdfStage, plan_for};
 
 /// The dataset band vocabulary every generated spec draws from.
 const BANDS: [&str; 4] = ["b02", "b03", "b04", "b8a"];
@@ -270,6 +270,80 @@ fn rescale_node(
             );
             json!({"from_node": "scale"})
         }
+    }
+}
+
+/// Arbitrary valid UDF specs (ADR 0018, #201): random band bindings
+/// (possibly repeated), sha256-hex module identities, the two v1 output
+/// arities, opaque params, optional rescale.
+fn udf_spec() -> impl Strategy<Value = PlanSpec> {
+    (
+        prop::collection::vec(band(), 1..=4),
+        "[0-9a-f]{64}",
+        prop_oneof![Just(1u32), Just(3u32)],
+        prop_oneof![
+            Just(Json::Null),
+            (-4i32..=4).prop_map(|k| json!({ "k": k })),
+        ],
+        rescale(),
+    )
+        .prop_map(
+            |(bands, code_hash, output_planes, params, rescale)| PlanSpec::Udf {
+                bands,
+                stage: UdfStage::new(code_hash, output_planes, params),
+                rescale,
+            },
+        )
+}
+
+proptest! {
+    /// The UDF spec's dual representations (#201), through the same
+    /// single construction site the other kinds use: exactly one
+    /// producing UDF op (the v1 rule the `PlanSpec::Udf` type enforces),
+    /// the persisted `PlanKind::Udf` mirroring the stage's `code_hash`,
+    /// inputs derived first-reference-deduped, and the rescale record
+    /// agreeing with the op. The openEO authoring/compile leg of the
+    /// round trip arrives with the `run_udf` compiler work (#204) and
+    /// extends this file then.
+    #[test]
+    fn udf_specs_agree_with_their_metadata(s in udf_spec()) {
+        let (plan, meta) = plan_for(&s);
+        let PlanSpec::Udf { bands, stage, rescale } = &s else {
+            return Err(TestCaseError::fail("udf_spec generates only Udf specs"));
+        };
+
+        // One UDF op per plan (v1), leading — the producing op.
+        let udf_ops: Vec<_> = plan.ops.iter().filter(|op| matches!(op, PixelOp::Udf(_))).collect();
+        prop_assert_eq!(udf_ops.len(), 1);
+        prop_assert_eq!(plan.ops.first(), Some(&PixelOp::Udf(stage.clone())));
+
+        // Inputs: first-reference order, deduplicated.
+        let mut expected = Vec::new();
+        for band in bands {
+            if !expected.iter().any(|n| n == band) {
+                expected.push(band.clone());
+            }
+        }
+        prop_assert_eq!(
+            plan.inputs.iter().map(|i| i.name.clone()).collect::<Vec<_>>(),
+            expected
+        );
+
+        // The persisted mirror: the module hash is the whole identity.
+        prop_assert_eq!(
+            &meta.kind,
+            &PlanKind::Udf { code_hash: stage.code_hash.clone() }
+        );
+        let op_rescale = plan.ops.iter().find_map(|op| match op {
+            PixelOp::Rescale { min, max } => Some((*min, *max)),
+            _ => None,
+        });
+        prop_assert_eq!(op_rescale, *rescale);
+        prop_assert_eq!(
+            meta.rescale,
+            rescale.map_or(Rescale { min: 0.0, max: 255.0 }, |(min, max)| Rescale { min, max })
+        );
+        prop_assert_eq!(meta.colormap, None);
     }
 }
 

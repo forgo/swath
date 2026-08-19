@@ -18,7 +18,7 @@
 mod common;
 
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
-use swath_render::{NodataPolicy, Resampling, WarpedBuffer, encode_png, eval};
+use swath_render::{NoUdf, NodataPolicy, Resampling, WarpedBuffer, encode_png, eval};
 use swath_testkit::{DiffPolicy, RgbaImage, diff, load_png};
 
 const B02: &str = "hlss30-t13sdd-2024158-b02.tif";
@@ -90,7 +90,7 @@ async fn assert_matches_oracle(
     y: u32,
 ) {
     let warped = warp_bands(fixtures, z, x, y).await;
-    let tile = eval(plan, &warped).expect("plan evaluates");
+    let tile = eval(plan, &warped, &NoUdf).expect("plan evaluates");
     let ours = RgbaImage::from_raw(tile.width, tile.height, tile.pixels.clone())
         .expect("tile buffer matches dimensions");
     let reference = load_png(&common::goldens_dir().join(golden)).expect("golden loads");
@@ -229,8 +229,8 @@ fn ndvi_rdylgn_plan() -> RenderPlan {
 #[tokio::test]
 async fn ndvi_rdylgn_colormap_two_level_golden() {
     let warped = warp_bands(&[B8A, B04], 12, 848, 1561).await;
-    let gray = eval(&ndvi_plan(), &warped).expect("grayscale plan evaluates");
-    let colored = eval(&ndvi_rdylgn_plan(), &warped).expect("colormapped plan evaluates");
+    let gray = eval(&ndvi_plan(), &warped, &NoUdf).expect("grayscale plan evaluates");
+    let colored = eval(&ndvi_rdylgn_plan(), &warped, &NoUdf).expect("colormapped plan evaluates");
 
     // Level 1: every colormapped pixel is the LUT row of its
     // oracle-validated gray value; alpha (validity) is untouched.
@@ -250,7 +250,7 @@ async fn ndvi_rdylgn_colormap_two_level_golden() {
     }
 
     // Byte stability: double render + double encode, identical bytes.
-    let again = eval(&ndvi_rdylgn_plan(), &warped).expect("re-evaluates");
+    let again = eval(&ndvi_rdylgn_plan(), &warped, &NoUdf).expect("re-evaluates");
     assert_eq!(colored.pixels, again.pixels, "eval must be deterministic");
     let png_a = encode_png(&colored).expect("encodes");
     let png_b = encode_png(&again).expect("encodes");

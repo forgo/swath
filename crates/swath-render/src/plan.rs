@@ -5,8 +5,9 @@
 //!
 //! Every plan a layer serves — operator config (static and catalog mode),
 //! the built-in fixture registry, and the openEO process compiler — is one
-//! of two shapes: an RGB **composite** or a colormapped **band-math**
-//! expression, each optionally rescaled. [`PlanSpec`] names that shape
+//! of three shapes: an RGB **composite**, a colormapped **band-math**
+//! expression, or (ADR 0018, #201) a single sandboxed **UDF** stage, each
+//! optionally rescaled. [`PlanSpec`] names that shape
 //! once, and [`plan_for`] is the only place the shape becomes an
 //! executable [`RenderPlan`]: op order, input derivation, and the
 //! persisted-metadata mirror all live here, so the executable plan and the
@@ -23,6 +24,7 @@
 use swath_core::catalog::{Colormap as DomainColormap, PlanKind, Rescale};
 
 use crate::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
+use crate::udf::UdfStage;
 
 /// A plan kind with its band bindings: everything [`plan_for`] needs to
 /// build the executable plan and its persisted mirror.
@@ -51,6 +53,22 @@ pub enum PlanSpec {
         /// The palette applied to the gray result ([`Colormap::Grayscale`]
         /// is the identity).
         colormap: Colormap,
+    },
+    /// One sandboxed `run_udf` stage over named input bands (ADR 0018,
+    /// #201). Exactly **one** stage, by type: this single-stage field is
+    /// how the v1 one-UDF-per-plan rule is enforced at compile time —
+    /// the IR itself permits UDF sequences, so lifting the restriction
+    /// later is a change here, never an IR version bump.
+    Udf {
+        /// The input bands, in the order the module receives its request
+        /// planes (`docs/udf-abi/v1.md`). Deduplicated (first-reference
+        /// order) into the plan's inputs.
+        bands: Vec<String>,
+        /// The stage: module hash, pinned output arity, opaque params.
+        stage: UdfStage,
+        /// Linear rescale onto 0..=255 after the UDF; `None` = raw
+        /// values clamp at quantization (the identity 0..255 mapping).
+        rescale: Option<(f64, f64)>,
     },
 }
 
@@ -155,11 +173,34 @@ pub fn plan_for(spec: &PlanSpec) -> (RenderPlan, PlanMetadata) {
             };
             (bands, ops, kind, Some(domain_colormap(*colormap)))
         }
+        PlanSpec::Udf {
+            bands,
+            stage,
+            rescale,
+        } => {
+            let mut inputs = Vec::new();
+            for band in bands {
+                if !inputs.iter().any(|n| n == band) {
+                    inputs.push(band.clone());
+                }
+            }
+            let mut ops = vec![PixelOp::Udf(stage.clone())];
+            if let Some((min, max)) = *rescale {
+                ops.push(PixelOp::Rescale { min, max });
+            }
+            // The persisted mirror names the module by hash — the arity
+            // and params live in the plan (and its cache identity, #205),
+            // not the catalog vocabulary.
+            let kind = PlanKind::Udf {
+                code_hash: stage.code_hash.clone(),
+            };
+            (inputs, ops, kind, None)
+        }
     };
     let (min, max) = match spec {
-        PlanSpec::Composite { rescale, .. } | PlanSpec::BandMath { rescale, .. } => {
-            rescale.unwrap_or((0.0, 255.0))
-        }
+        PlanSpec::Composite { rescale, .. }
+        | PlanSpec::BandMath { rescale, .. }
+        | PlanSpec::Udf { rescale, .. } => rescale.unwrap_or((0.0, 255.0)),
     };
     let plan = RenderPlan::new(
         bands.iter().map(BandInput::new).collect(),
@@ -182,6 +223,7 @@ mod tests {
 
     use super::{PlanSpec, ndvi_expr, plan_for};
     use crate::ir::{Colormap, Expr, PixelOp, TileFormat};
+    use crate::udf::UdfStage;
 
     #[test]
     fn composite_spec_builds_ops_inputs_and_metadata_together() {
@@ -230,6 +272,48 @@ mod tests {
             }
         );
         assert_eq!(meta.colormap, Some(DomainColormap::RdYlGn));
+    }
+
+    /// The UDF spec (ADR 0018, #201): one stage by type — the v1
+    /// one-UDF-per-plan rule — lowered through the same single
+    /// construction site, mirrored as `PlanKind::Udf { code_hash }`.
+    #[test]
+    fn udf_spec_builds_one_stage_and_mirrors_the_code_hash() {
+        let stage = UdfStage::new("abc123", 1, serde_json::Value::Null);
+        let (plan, meta) = plan_for(&PlanSpec::Udf {
+            // A repeated band dedups into the inputs, like a composite.
+            bands: vec!["b8a".into(), "b04".into(), "b8a".into()],
+            stage: stage.clone(),
+            rescale: Some((-1.0, 1.0)),
+        });
+        let inputs: Vec<&str> = plan.inputs.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(inputs, ["b8a", "b04"], "first-reference order, deduped");
+        assert_eq!(
+            plan.ops,
+            [
+                PixelOp::Udf(stage),
+                PixelOp::Rescale {
+                    min: -1.0,
+                    max: 1.0
+                }
+            ],
+            "exactly one producing UDF op, then the transform"
+        );
+        assert_eq!(plan.output.format, TileFormat::Png);
+        assert_eq!(
+            meta.kind,
+            PlanKind::Udf {
+                code_hash: "abc123".to_owned()
+            }
+        );
+        assert_eq!(
+            meta.rescale,
+            Rescale {
+                min: -1.0,
+                max: 1.0
+            }
+        );
+        assert_eq!(meta.colormap, None, "UDF output renders directly");
     }
 
     #[test]

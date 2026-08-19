@@ -14,10 +14,11 @@
 //! # Pipeline model
 //!
 //! [`eval`] runs the ops in order over an RGB triple of `f64` planes plus a
-//! validity mask. [`PixelOp::BandMath`] and [`PixelOp::Composite`]
-//! *produce* planes (band math yields gray — all three channels equal;
-//! composite selects three input bands); [`PixelOp::Rescale`] and
-//! [`PixelOp::Colormap`] *transform* the current planes and are errors
+//! validity mask. [`PixelOp::BandMath`], [`PixelOp::Composite`], and
+//! [`PixelOp::Udf`] *produce* planes (band math yields gray — all three
+//! channels equal; composite selects three input bands; a UDF maps the
+//! input planes through a sandboxed module, ADR 0018); [`PixelOp::Rescale`]
+//! and [`PixelOp::Colormap`] *transform* the current planes and are errors
 //! before any producing op. After the last op, values are quantized to
 //! `u8` with numpy's `astype(uint8)` semantics (clamp to `0..=255`, then
 //! truncate toward zero) — the exact arithmetic of the rio-tiler oracle,
@@ -60,6 +61,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::udf::{UdfError, UdfExecutor, UdfStage};
 use crate::warp::WarpedBuffer;
 
 /// One named input band of a [`RenderPlan`].
@@ -277,6 +279,20 @@ pub enum PixelOp {
     },
     /// Apply a named colormap to the current planes.
     Colormap(Colormap),
+    /// Run a sandboxed WASM `run_udf` module over **all** input planes
+    /// (in [`RenderPlan::inputs`] order), producing the module's declared
+    /// output planes — 1 rendered as gray, 3 as RGB (ADR 0018, #201).
+    ///
+    /// The stage names the module by content hash; the bytes never enter
+    /// the IR. Execution goes through the [`UdfExecutor`] port
+    /// ([`crate::udf`]) — this crate stays wasmtime-free.
+    ///
+    /// The IR deliberately permits UDF ops anywhere in the sequence, any
+    /// number of times, so lifting the v1 one-UDF-per-plan restriction
+    /// needs no serde change; the restriction itself is enforced at
+    /// plan-construction time by [`PlanSpec::Udf`](crate::plan::PlanSpec)
+    /// carrying exactly one stage.
+    Udf(UdfStage),
 }
 
 /// The encodings a plan can request for its output tile.
@@ -418,6 +434,43 @@ pub enum PlanError {
         /// The palette that had no gray planes to map.
         map: Colormap,
     },
+    /// A UDF stage declares an output arity v1 cannot render: 1 plane
+    /// renders as gray, 3 as RGB, anything else has no image meaning
+    /// (ADR 0018; other arities are a v2 reopen condition). Checked
+    /// before the executor is consulted — a structural plan error.
+    #[error("UDF declares {declared} output planes; v1 renders 1 (gray) or 3 (RGB)")]
+    UdfOutputPlanes {
+        /// The stage's declared output arity.
+        declared: u32,
+    },
+    /// The [`UdfExecutor`] port refused or failed the stage — including
+    /// [`UdfError::NotConfigured`] from the default [`crate::udf::NoUdf`]
+    /// executor when a plan names a module no deployment wiring can run.
+    #[error("UDF stage failed")]
+    Udf(#[from] UdfError),
+    /// The executor violated its contract: it returned a plane set that
+    /// does not match the stage's declared arity or the tile's shape.
+    /// Never the module's fault alone — the adapter (#203) must have
+    /// failed to enforce the ABI (`docs/udf-abi/v1.md`) before returning.
+    #[error(
+        "UDF executor returned {actual_planes} planes of {got_w}x{got_h}, \
+         expected {expected_planes} of {want_w}x{want_h}"
+    )]
+    UdfOutputShape {
+        /// Planes the stage declared.
+        expected_planes: u32,
+        /// Planes the executor returned.
+        actual_planes: usize,
+        /// Returned width (of the first offending plane; the expected
+        /// width when only the count is wrong).
+        got_w: u32,
+        /// Returned height (as above).
+        got_h: u32,
+        /// The tile width every plane must have.
+        want_w: u32,
+        /// The tile height every plane must have.
+        want_h: u32,
+    },
 }
 
 /// The mutable pipeline state [`eval`] threads through the ops.
@@ -485,21 +538,87 @@ impl Planes {
     }
 }
 
+/// Folds a UDF stage's executor-returned planes into the pipeline state,
+/// enforcing the ABI's host post-conditions (`docs/udf-abi/v1.md`): every
+/// plane tile-shaped, output validity `ANDed` with the current mask, and
+/// non-finite values the executor claims valid canonicalized to invalid.
+/// The caller has already checked `stage.output_planes` is 1 or 3.
+fn udf_planes(
+    stage: &UdfStage,
+    outputs: Vec<WarpedBuffer>,
+    width: u32,
+    height: u32,
+    valid: &mut [bool],
+) -> Result<Planes, PlanError> {
+    let shape_error = |got_w, got_h, actual_planes| PlanError::UdfOutputShape {
+        expected_planes: stage.output_planes,
+        actual_planes,
+        got_w,
+        got_h,
+        want_w: width,
+        want_h: height,
+    };
+    if outputs.len() != stage.output_planes as usize {
+        return Err(shape_error(width, height, outputs.len()));
+    }
+    for plane in &outputs {
+        let own_len = plane.values.len() == valid.len() && plane.valid.len() == valid.len();
+        if plane.width != width || plane.height != height || !own_len {
+            return Err(shape_error(plane.width, plane.height, outputs.len()));
+        }
+    }
+    // A UDF can invalidate pixels, never resurrect them: AND, and treat a
+    // non-finite "valid" sample as invalid (ADR 0018).
+    for (i, ok) in valid.iter_mut().enumerate() {
+        *ok = *ok
+            && outputs
+                .iter()
+                .all(|plane| plane.valid[i] && plane.values[i].is_finite());
+    }
+    let mut planes = outputs.into_iter().map(|plane| plane.values);
+    let r = planes.next().unwrap_or_default();
+    Ok(match planes.next() {
+        // Three planes: RGB.
+        Some(g) => Planes {
+            r,
+            g,
+            b: planes.next().unwrap_or_default(),
+            gray: false,
+        },
+        // One plane: gray, colormappable like band-math output.
+        None => Planes {
+            g: r.clone(),
+            b: r.clone(),
+            r,
+            gray: true,
+        },
+    })
+}
+
 /// Executes `plan`'s pixel ops over `inputs` (positionally matched to
 /// `plan.inputs`), returning the quantized RGBA tile. See the module docs
 /// for the pipeline model, validity semantics, and quantization.
+///
+/// `udf` is the [`UdfExecutor`] port a [`PixelOp::Udf`] stage runs
+/// through (ADR 0018); it is consulted only when a UDF op is reached, so
+/// plans without UDF stages evaluate identically under any executor —
+/// pass [`crate::udf::NoUdf`] where none is wired.
 ///
 /// # Errors
 ///
 /// Any [`PlanError`]: mismatched input count or shapes, references to
 /// undeclared bands, a transform op before any producing op (or no
-/// producing op at all), a degenerate rescale range, or a palette
-/// colormap over non-gray planes.
+/// producing op at all), a degenerate rescale range, a palette
+/// colormap over non-gray planes, or a failed/unwired UDF stage.
 #[allow(
     clippy::too_many_lines,
     reason = "one match arm per PixelOp; splitting the loop would hide the pipeline"
 )]
-pub fn eval(plan: &RenderPlan, inputs: &[WarpedBuffer]) -> Result<RgbaTile, PlanError> {
+pub fn eval(
+    plan: &RenderPlan,
+    inputs: &[WarpedBuffer],
+    udf: &dyn UdfExecutor,
+) -> Result<RgbaTile, PlanError> {
     if plan.inputs.len() != inputs.len() {
         return Err(PlanError::InputCount {
             expected: plan.inputs.len(),
@@ -582,6 +701,17 @@ pub fn eval(plan: &RenderPlan, inputs: &[WarpedBuffer]) -> Result<RgbaTile, Plan
                     }
                 }
             }
+            PixelOp::Udf(stage) => {
+                // Arity first — a structural plan error, independent of
+                // (and checked before) any executor.
+                if !matches!(stage.output_planes, 1 | 3) {
+                    return Err(PlanError::UdfOutputPlanes {
+                        declared: stage.output_planes,
+                    });
+                }
+                let outputs = udf.run(stage, inputs)?;
+                planes = Some(udf_planes(stage, outputs, width, height, &mut valid)?);
+            }
             PixelOp::Colormap(map) => {
                 let planes = planes
                     .as_mut()
@@ -620,6 +750,7 @@ mod tests {
     use super::{
         BandInput, Colormap, Expr, OutputSpec, PixelOp, PlanError, RenderPlan, TileFormat, eval,
     };
+    use crate::udf::{NoUdf, UdfError, UdfExecutor, UdfStage};
     use crate::warp::WarpedBuffer;
 
     fn buffer(width: u32, height: u32, values: Vec<f64>) -> WarpedBuffer {
@@ -662,7 +793,7 @@ mod tests {
         // -> truncates to 191.
         let nir = buffer(2, 1, vec![3000.0, 1000.0]);
         let red = buffer(2, 1, vec![1000.0, 3000.0]);
-        let tile = eval(&ndvi_plan(), &[nir, red]).unwrap();
+        let tile = eval(&ndvi_plan(), &[nir, red], &NoUdf).unwrap();
         // Second pixel: NDVI -0.5 -> 63.75 -> 63.
         assert_eq!(tile.pixels, [191, 191, 191, 255, 63, 63, 63, 255]);
     }
@@ -672,7 +803,7 @@ mod tests {
         // nir = red = 0: denominator is exactly zero -> transparent black.
         let nir = buffer(1, 1, vec![0.0]);
         let red = buffer(1, 1, vec![0.0]);
-        let tile = eval(&ndvi_plan(), &[nir, red]).unwrap();
+        let tile = eval(&ndvi_plan(), &[nir, red], &NoUdf).unwrap();
         assert_eq!(tile.pixels, [0, 0, 0, 0]);
     }
 
@@ -683,7 +814,7 @@ mod tests {
             vec![PixelOp::BandMath(Expr::band("b") * Expr::Const(f64::MAX))],
             png_output(),
         );
-        let tile = eval(&plan, &[buffer(1, 1, vec![f64::MAX])]).unwrap();
+        let tile = eval(&plan, &[buffer(1, 1, vec![f64::MAX])], &NoUdf).unwrap();
         assert_eq!(tile.pixels, [0, 0, 0, 0]);
     }
 
@@ -698,7 +829,7 @@ mod tests {
             vec![PixelOp::BandMath(Expr::band("used"))],
             png_output(),
         );
-        let tile = eval(&plan, &[used, unused]).unwrap();
+        let tile = eval(&plan, &[used, unused], &NoUdf).unwrap();
         assert_eq!(tile.pixels, [0, 0, 0, 0]);
     }
 
@@ -726,7 +857,7 @@ mod tests {
             ],
             png_output(),
         );
-        let tile = eval(&plan, &[r, g, b]).unwrap();
+        let tile = eval(&plan, &[r, g, b], &NoUdf).unwrap();
         assert_eq!(tile.pixels, [255, 127, 0, 255]);
     }
 
@@ -734,7 +865,7 @@ mod tests {
     fn plan_errors_are_reported() {
         let plan = ndvi_plan();
         assert_eq!(
-            eval(&plan, &[buffer(1, 1, vec![1.0])]),
+            eval(&plan, &[buffer(1, 1, vec![1.0])], &NoUdf),
             Err(PlanError::InputCount {
                 expected: 2,
                 actual: 1
@@ -743,7 +874,8 @@ mod tests {
         assert_eq!(
             eval(
                 &plan,
-                &[buffer(1, 1, vec![1.0]), buffer(2, 1, vec![1.0, 2.0])]
+                &[buffer(1, 1, vec![1.0]), buffer(2, 1, vec![1.0, 2.0])],
+                &NoUdf
             ),
             Err(PlanError::ShapeMismatch {
                 name: "red".into(),
@@ -760,7 +892,7 @@ mod tests {
             png_output(),
         );
         assert_eq!(
-            eval(&unknown, &[buffer(1, 1, vec![1.0])]),
+            eval(&unknown, &[buffer(1, 1, vec![1.0])], &NoUdf),
             Err(PlanError::UnknownBand {
                 name: "nope".into()
             })
@@ -772,13 +904,13 @@ mod tests {
             png_output(),
         );
         assert_eq!(
-            eval(&bare_rescale, &[buffer(1, 1, vec![1.0])]),
+            eval(&bare_rescale, &[buffer(1, 1, vec![1.0])], &NoUdf),
             Err(PlanError::NothingToTransform { op: "Rescale" })
         );
 
         let empty = RenderPlan::new(vec![BandInput::new("a")], vec![], png_output());
         assert_eq!(
-            eval(&empty, &[buffer(1, 1, vec![1.0])]),
+            eval(&empty, &[buffer(1, 1, vec![1.0])], &NoUdf),
             Err(PlanError::NothingToTransform { op: "end of plan" })
         );
 
@@ -791,8 +923,177 @@ mod tests {
             png_output(),
         );
         assert_eq!(
-            eval(&degenerate, &[buffer(1, 1, vec![1.0])]),
+            eval(&degenerate, &[buffer(1, 1, vec![1.0])], &NoUdf),
             Err(PlanError::DegenerateRescale { min: 1.0, max: 1.0 })
+        );
+    }
+
+    /// An executor handing back canned output planes — the port's test
+    /// double (the real adapter is #203's wasmtime crate).
+    struct FakeUdf(Vec<WarpedBuffer>);
+
+    impl UdfExecutor for FakeUdf {
+        fn run(
+            &self,
+            _stage: &UdfStage,
+            _inputs: &[WarpedBuffer],
+        ) -> Result<Vec<WarpedBuffer>, UdfError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// An executor that must never be consulted.
+    struct PanicUdf;
+
+    impl UdfExecutor for PanicUdf {
+        fn run(
+            &self,
+            _stage: &UdfStage,
+            _inputs: &[WarpedBuffer],
+        ) -> Result<Vec<WarpedBuffer>, UdfError> {
+            panic!("the executor was consulted by a path that must not reach it")
+        }
+    }
+
+    /// A sha256-hex-shaped module identity for tests.
+    const HASH: &str = "cafe0000000000000000000000000000000000000000000000000000000000ff";
+
+    /// A plan running one UDF stage over two input bands.
+    fn udf_plan(output_planes: u32) -> RenderPlan {
+        RenderPlan::new(
+            vec![BandInput::new("nir"), BandInput::new("red")],
+            vec![PixelOp::Udf(UdfStage::new(
+                HASH,
+                output_planes,
+                serde_json::Value::Null,
+            ))],
+            png_output(),
+        )
+    }
+
+    /// The `NoUdf` refusal, pinned: a UDF plan under the default executor
+    /// is exactly `PlanError::Udf(UdfError::NotConfigured)` naming the
+    /// module (issue #201's acceptance test).
+    #[test]
+    fn no_udf_executor_refuses_udf_plans() {
+        let inputs = [buffer(1, 1, vec![1.0]), buffer(1, 1, vec![2.0])];
+        assert_eq!(
+            eval(&udf_plan(1), &inputs, &NoUdf),
+            Err(PlanError::Udf(UdfError::NotConfigured {
+                code_hash: HASH.to_owned()
+            }))
+        );
+    }
+
+    /// Plans without UDF stages never touch the executor — the property
+    /// that makes `NoUdf` a safe default everywhere.
+    #[test]
+    fn plans_without_udf_stages_never_touch_the_executor() {
+        let nir = buffer(1, 1, vec![3000.0]);
+        let red = buffer(1, 1, vec![1000.0]);
+        eval(&ndvi_plan(), &[nir, red], &PanicUdf).expect("plan evaluates without the executor");
+    }
+
+    #[test]
+    fn one_plane_udf_produces_gray() {
+        let out = buffer(2, 1, vec![0.0, 300.0]);
+        let executor = FakeUdf(vec![out]);
+        let inputs = [buffer(2, 1, vec![1.0, 1.0]), buffer(2, 1, vec![2.0, 2.0])];
+        let tile = eval(&udf_plan(1), &inputs, &executor).unwrap();
+        // Gray planes quantize like band math: 300 clamps to 255.
+        assert_eq!(tile.pixels, [0, 0, 0, 255, 255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn three_plane_udf_produces_rgb_and_transforms_apply_after() {
+        let (r, g, b) = (
+            buffer(1, 1, vec![4.0]),
+            buffer(1, 1, vec![2.0]),
+            buffer(1, 1, vec![0.0]),
+        );
+        let executor = FakeUdf(vec![r, g, b]);
+        let mut plan = udf_plan(3);
+        // A transform after the producing UDF op: the ordinary order rule.
+        plan.ops.push(PixelOp::Rescale { min: 0.0, max: 4.0 });
+        let inputs = [buffer(1, 1, vec![1.0]), buffer(1, 1, vec![2.0])];
+        let tile = eval(&plan, &inputs, &executor).unwrap();
+        assert_eq!(tile.pixels, [255, 127, 0, 255]);
+    }
+
+    /// The ABI's host post-conditions (docs/udf-abi/v1.md), enforced by
+    /// `eval` itself: a UDF can invalidate pixels but never resurrect
+    /// them, and a non-finite value it claims valid becomes invalid.
+    #[test]
+    fn udf_validity_is_anded_and_non_finite_is_invalid() {
+        // Pixel 0: invalid input the executor claims valid — stays invalid.
+        // Pixel 1: valid input, executor returns NaN as "valid" — invalid.
+        // Pixel 2: valid throughout.
+        let mut nir = buffer(3, 1, vec![1.0, 1.0, 1.0]);
+        nir.valid[0] = false;
+        let red = buffer(3, 1, vec![2.0, 2.0, 2.0]);
+        let out = buffer(3, 1, vec![9.0, f64::NAN, 9.0]);
+        let tile = eval(&udf_plan(1), &[nir, red], &FakeUdf(vec![out])).unwrap();
+        assert_eq!(
+            tile.pixels,
+            [0, 0, 0, 0, 0, 0, 0, 0, 9, 9, 9, 255],
+            "resurrected and non-finite pixels are transparent"
+        );
+    }
+
+    /// An unsupported output arity is a structural plan error, decided
+    /// before any executor runs (`PanicUdf` proves the order).
+    #[test]
+    fn udf_output_arity_is_checked_before_the_executor() {
+        let inputs = [buffer(1, 1, vec![1.0]), buffer(1, 1, vec![2.0])];
+        assert_eq!(
+            eval(&udf_plan(2), &inputs, &PanicUdf),
+            Err(PlanError::UdfOutputPlanes { declared: 2 })
+        );
+    }
+
+    /// An executor violating its contract — wrong plane count or shape —
+    /// errors loudly instead of rendering garbage.
+    #[test]
+    fn udf_executor_shape_violations_are_loud() {
+        let inputs = [buffer(1, 1, vec![1.0]), buffer(1, 1, vec![2.0])];
+        assert_eq!(
+            eval(&udf_plan(1), &inputs, &FakeUdf(Vec::new())),
+            Err(PlanError::UdfOutputShape {
+                expected_planes: 1,
+                actual_planes: 0,
+                got_w: 1,
+                got_h: 1,
+                want_w: 1,
+                want_h: 1
+            })
+        );
+        assert_eq!(
+            eval(
+                &udf_plan(1),
+                &inputs,
+                &FakeUdf(vec![buffer(2, 1, vec![0.0, 0.0])])
+            ),
+            Err(PlanError::UdfOutputShape {
+                expected_planes: 1,
+                actual_planes: 1,
+                got_w: 2,
+                got_h: 1,
+                want_w: 1,
+                want_h: 1
+            })
+        );
+    }
+
+    /// A UDF is a *producing* op: a transform before it still errors
+    /// (`PanicUdf` proves the order rule fires first).
+    #[test]
+    fn transform_before_udf_still_has_nothing_to_transform() {
+        let mut plan = udf_plan(1);
+        plan.ops.insert(0, PixelOp::Rescale { min: 0.0, max: 1.0 });
+        let inputs = [buffer(1, 1, vec![1.0]), buffer(1, 1, vec![2.0])];
+        assert_eq!(
+            eval(&plan, &inputs, &PanicUdf),
+            Err(PlanError::NothingToTransform { op: "Rescale" })
         );
     }
 
@@ -803,7 +1104,7 @@ mod tests {
             vec![PixelOp::BandMath(Expr::band("a"))],
             png_output(),
         );
-        let tile = eval(&plan, &[buffer(0, 0, vec![])]).unwrap();
+        let tile = eval(&plan, &[buffer(0, 0, vec![])], &NoUdf).unwrap();
         assert_eq!((tile.width, tile.height), (0, 0));
         assert!(tile.pixels.is_empty());
     }
