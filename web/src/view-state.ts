@@ -28,6 +28,19 @@ export interface ViewState {
   /** The viewed frame's `datetime=` instant (RFC 3339 UTC, issue #182);
    * absent means "latest" — a layer without a time dimension. */
   time?: string;
+  /** Compare swipe, date-vs-date (issue #210): the right side's frame
+   * (`ct=`, same RFC 3339 grammar as `time`); the left side is `time`.
+   * Mutually exclusive with `compareLayer` — an ambiguous URL carrying
+   * both degrades to "no compare". */
+  compareTime?: string;
+  /** Compare swipe, layer-vs-layer (issue #210): the right side's layer
+   * id (`cl=`); the left side is `layer`. Comparing a layer with itself
+   * is dropped at parse. Mutually exclusive with `compareTime`. */
+  compareLayer?: string;
+  /** The swipe handle position (`swipe=`), fraction 0..1 of the map's
+   * width; only meaningful (parsed, written) while a compare is active.
+   * Absent means the centered default. */
+  swipe?: number;
   /** Whether the x-ray overlay is enabled. */
   xray: boolean;
 }
@@ -36,7 +49,7 @@ export interface ViewState {
 export type ViewStateSource = "url" | "storage" | "default";
 
 /** The query params this module owns (everything else passes through). */
-const OWNED_PARAMS = ["layer", "center", "zoom", "t", "xray"] as const;
+const OWNED_PARAMS = ["layer", "center", "zoom", "t", "ct", "cl", "swipe", "xray"] as const;
 
 /** localStorage key; versioned so a future shape change can't misparse. */
 export const STORAGE_KEY = "swath.view-state.v1";
@@ -45,11 +58,18 @@ export const STORAGE_KEY = "swath.view-state.v1";
 const CENTER_DECIMALS = 5;
 /** Zoom precision: 2 decimals is finer than any visible difference. */
 const ZOOM_DECIMALS = 2;
+/** Swipe precision: 2 decimals (1% of the map width) is finer than a
+ * deliberate handle move. */
+const SWIPE_DECIMALS = 2;
 
 /** Equality tolerances, strictly looser than the write precision above so
  * a state round-tripped through its own URL always compares equal. */
 const CENTER_EPSILON = 10 ** -(CENTER_DECIMALS - 1);
 const ZOOM_EPSILON = 10 ** -(ZOOM_DECIMALS - 1);
+/** Just above the swipe write precision's half-step (0.005): round trips
+ * compare equal, while any deliberate handle move (≥ 1% of the width)
+ * still reads as a different state. */
+const SWIPE_EPSILON = 0.01;
 
 /** Parses `"lon,lat"`; undefined when absent or malformed. */
 export function parseCenter(value: string | null): [number, number] | undefined {
@@ -108,6 +128,22 @@ export function formatZoom(zoom: number): string {
   return trimmed(zoom, ZOOM_DECIMALS);
 }
 
+/** Canonical swipe-fraction string for URLs, attributes, and storage. */
+export function formatSwipe(swipe: number): string {
+  return trimmed(swipe, SWIPE_DECIMALS);
+}
+
+/** Parses a swipe fraction: a finite number in [0, 1]; undefined when
+ * absent or out of range (out-of-range degrades to the default handle
+ * position, never a half-off-screen handle). */
+export function parseSwipe(value: string | null): number | undefined {
+  const parsed = parseNumber(value);
+  if (parsed === undefined || parsed < 0 || parsed > 1) {
+    return undefined;
+  }
+  return parsed;
+}
+
 /** True when the query string carries any view param this module owns —
  * the trigger for "URL beats storage". */
 export function hasViewParams(search: string): boolean {
@@ -134,6 +170,29 @@ export function parseViewState(search: string): ViewState {
   const time = parseTime(params.get("t"));
   if (time !== undefined) {
     state.time = time;
+  }
+  // Compare (issue #210): the two modes are exclusive, so a URL carrying
+  // both `ct` and `cl` is ambiguous and degrades to "no compare" — as
+  // does comparing a layer with itself. `swipe` rides along only when a
+  // compare is actually active (a stray handle position means nothing).
+  const compareTime = parseTime(params.get("ct"));
+  const compareLayerRaw = params.get("cl");
+  const compareLayer =
+    compareLayerRaw === null || compareLayerRaw === "" ? undefined : compareLayerRaw;
+  if (compareTime !== undefined && compareLayer === undefined) {
+    state.compareTime = compareTime;
+  } else if (
+    compareLayer !== undefined &&
+    compareTime === undefined &&
+    compareLayer !== state.layer
+  ) {
+    state.compareLayer = compareLayer;
+  }
+  if (state.compareTime !== undefined || state.compareLayer !== undefined) {
+    const swipe = parseSwipe(params.get("swipe"));
+    if (swipe !== undefined) {
+      state.swipe = swipe;
+    }
   }
   return state;
 }
@@ -166,6 +225,19 @@ export function withViewState(search: string, state: ViewState): string {
     // so the deep link keeps the human-readable `t=2024-08-16T19:03:00Z`.
     parts.push(`t=${state.time}`);
   }
+  // Compare (issue #210): `ct` verbatim for the same TIME_PATTERN
+  // reason as `t`; `swipe` only ever rides an active compare.
+  if (state.compareTime !== undefined) {
+    parts.push(`ct=${state.compareTime}`);
+  } else if (state.compareLayer !== undefined) {
+    parts.push(`cl=${encodeURIComponent(state.compareLayer)}`);
+  }
+  if (
+    state.swipe !== undefined &&
+    (state.compareTime !== undefined || state.compareLayer !== undefined)
+  ) {
+    parts.push(`swipe=${formatSwipe(state.swipe)}`);
+  }
   if (state.xray) {
     parts.push("xray");
   }
@@ -180,6 +252,19 @@ export function withViewState(search: string, state: ViewState): string {
  * URL that already says this" guard behind byte-stable deep links. */
 export function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.layer !== b.layer || a.xray !== b.xray || a.time !== b.time) {
+    return false;
+  }
+  if (a.compareTime !== b.compareTime || a.compareLayer !== b.compareLayer) {
+    return false;
+  }
+  if ((a.swipe === undefined) !== (b.swipe === undefined)) {
+    return false;
+  }
+  if (
+    a.swipe !== undefined &&
+    b.swipe !== undefined &&
+    Math.abs(a.swipe - b.swipe) > SWIPE_EPSILON
+  ) {
     return false;
   }
   if ((a.center === undefined) !== (b.center === undefined)) {
@@ -277,6 +362,32 @@ export function loadViewState(storage: Storage): ViewState | undefined {
     if (time !== undefined) {
       state.time = time;
     }
+  }
+  // Compare (issue #210): the same exclusivity and validation as the URL
+  // path — a corrupt or ambiguous stored compare just loses the restore.
+  const compareTime =
+    typeof record["compareTime"] === "string" ? parseTime(record["compareTime"]) : undefined;
+  const compareLayer =
+    typeof record["compareLayer"] === "string" && record["compareLayer"] !== ""
+      ? record["compareLayer"]
+      : undefined;
+  if (compareTime !== undefined && compareLayer === undefined) {
+    state.compareTime = compareTime;
+  } else if (
+    compareLayer !== undefined &&
+    compareTime === undefined &&
+    compareLayer !== state.layer
+  ) {
+    state.compareLayer = compareLayer;
+  }
+  if (
+    (state.compareTime !== undefined || state.compareLayer !== undefined) &&
+    typeof record["swipe"] === "number" &&
+    Number.isFinite(record["swipe"]) &&
+    record["swipe"] >= 0 &&
+    record["swipe"] <= 1
+  ) {
+    state.swipe = record["swipe"];
   }
   return state;
 }
