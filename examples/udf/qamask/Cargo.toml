@@ -1,0 +1,14 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-udf-example-qamask"
+description = "Example Swath UDF (ABI v1): Fmask-style QA cloud mask — bitwise ops band math cannot express, and strict integer-representability validity."
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+swath-udf-guest = { path = "../../../crates/swath-udf-guest" }

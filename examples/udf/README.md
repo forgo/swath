@@ -2,10 +2,14 @@
 
 Reference `run_udf` modules for the wire contract in
 [`docs/udf-abi/v1.md`](../../docs/udf-abi/v1.md); the authoring guide is
-[`docs/udf-abi/authoring.md`](../../docs/udf-abi/authoring.md). All four
+[`docs/udf-abi/authoring.md`](../../docs/udf-abi/authoring.md). All five
 are committed as conformance fixtures under
 `crates/adapters/swath-udf-wasmtime/tests/fixtures/` and proven there by
-`tests/abi_fixtures.rs` under the real deterministic engine.
+`tests/abi_fixtures.rs` under the real deterministic engine. The three
+Rust modules are additionally the #209 golden set: their **outputs** over
+committed input tiles are pinned byte-for-byte
+(`tests/fixtures/golden/`, asserted by `tests/golden_outputs.rs`;
+recapture deliberately with `just udf-goldens`).
 
 ## Rust (this directory's cargo workspace — CI-rebuilt)
 
@@ -15,6 +19,10 @@ are committed as conformance fixtures under
 - **`hillshade/`** — Horn hillshade: a 3x3 neighborhood op that band math
   cannot express. Its outermost pixel ring is marked invalid (no halo in
   ABI v1 — the documented tile-seam caveat; see the authoring guide).
+- **`qamask/`** — Fmask-style QA cloud mask: bitwise tests over QA words
+  riding in `f64` planes — logic band math cannot express — with strict
+  integer-representability validity (fractions, negatives, out-of-range,
+  and non-finite words are invalid, never guessed at).
 
 This is a standalone wasm32 workspace (excluded from the root workspace).
 Regenerate the committed fixtures with `just udf-fixtures`; CI rebuilds

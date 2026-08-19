@@ -8,7 +8,7 @@
 # `just udf-fixtures-verify` (CI) rebuilds and byte-compares.
 [workspace]
 resolver = "3"
-members = ["ndvi", "hillshade"]
+members = ["ndvi", "hillshade", "qamask"]
 
 # Small, reproducible modules: size-optimized, one codegen unit, aborting
 # panics (no unwind tables), symbols stripped (no name section — nothing

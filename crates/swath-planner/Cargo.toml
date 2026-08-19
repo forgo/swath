@@ -11,7 +11,8 @@ authors.workspace = true
 readme = "README.md"
 keywords = ["planner", "cost-model", "raster", "tiles", "gis"]
 categories = ["science::geo", "algorithms"]
-# One of exactly four publishable crates (ADR 0016, #192); the actual
+# One of the five publishable crates (ADR 0016, #192; swath-udf-guest joined
+# in #209); the actual
 # `cargo publish` is maintainer-executed per docs/RELEASING.md's crates tier.
 publish = true
 

@@ -36,6 +36,7 @@ path = [
     "**/Cargo.lock",
     "examples/udf/tinygo/go.mod",
     "crates/adapters/swath-udf-wasmtime/tests/fixtures/*.wasm",
+    "crates/adapters/swath-udf-wasmtime/tests/fixtures/golden/*.bin",
     "rust-toolchain.toml",
     "release-plz.toml",
     "cliff.toml",

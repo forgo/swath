@@ -9,9 +9,15 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 readme = "README.md"
-# In-tree authoring kit for now; publishing is the #209 SDK question,
-# decided there — not implied here.
-publish = false
+keywords = ["wasm", "udf", "raster", "gis", "no-std"]
+categories = ["wasm", "no-std", "science::geo"]
+# One of the five publishable crates (ADR 0016's four, #192, plus this kit —
+# the #209 SDK decision, maintainer-approved name); the actual `cargo publish`
+# is maintainer-executed per docs/RELEASING.md's crates tier.
+publish = true
+
+[package.metadata.docs.rs]
+all-features = true
 
 # Zero dependencies, deliberately: the wire header is four fixed integer
 # fields, hand-parsed strictly (deny-unknown), so guests carry no serde/JSON

@@ -40,8 +40,9 @@ Tool pins: release-plz / git-cliff / cargo-edit in the `justfile`; cargo-dist in
 ## Crates tier (ADR 0016)
 
 Release tags also run `publish-crates.yml`: `just publish-dry` (part of `just check`)
-plus an informational cargo-semver-checks report. Exactly four crates publish —
-swath-manifest, swath-planner, swath-referencer, swath-warp — maintainer-executed
+plus an informational cargo-semver-checks report. Five crates publish —
+swath-manifest, swath-planner, swath-referencer, swath-warp, and
+swath-udf-guest (#209) — maintainer-executed
 from the tag, dependency-ordered; credentials never in CI (trusted publishing:
 decided at first publish).
 

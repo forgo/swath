@@ -8,7 +8,9 @@ aborting panic handler). Zero dependencies.
 
 Write a `#![no_std]` cdylib crate, decode a `Request`, return a
 `Response`, and the macro does the rest. Worked examples (NDVI,
-hillshade) live in `examples/udf/`; the authoring guide — including
+hillshade, QA cloud mask) live in the repository's `examples/udf/` —
+they double as the golden verification set, their outputs pinned
+byte-for-byte over committed input tiles; the authoring guide — including
 AssemblyScript/TinyGo and the v1 tile-seam caveat for neighborhood ops —
 is `docs/udf-abi/authoring.md`.
 

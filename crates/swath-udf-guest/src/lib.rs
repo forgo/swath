@@ -11,8 +11,12 @@
 //! allocator and panic handler a `no_std` `wasm32-unknown-unknown` build
 //! needs.
 //!
-//! ```ignore
-//! #![no_std]
+//! A real module is one `#![no_std]` crate with `crate-type = ["cdylib"]`,
+//! built for `wasm32-unknown-unknown` (worked examples: the swath repo's
+//! `examples/udf/`); everything below the attributes is identical there,
+//! and compiles — and runs — on the host too:
+//!
+//! ```
 //! extern crate alloc;
 //! use swath_udf_guest::{swath_udf, Plane, Request, Response};
 //!
@@ -30,6 +34,13 @@
 //!     }
 //!     Some(Response { planes: alloc::vec![out] })
 //! }
+//!
+//! # fn main() {
+//! // The macro produced the ABI exports; two are plain callable functions.
+//! assert_eq!(swath_udf_abi(), 1);
+//! assert_eq!(swath_udf_output_planes(1), 1);
+//! assert_eq!(swath_udf_output_planes(2), 0);
+//! # }
 //! ```
 //!
 //! The kit is strict on the wire (manifest-v1 discipline): unknown header
@@ -315,6 +326,16 @@ fn frame(header: &str, payload_len: usize) -> Vec<u8> {
 
 /// Decodes a request buffer (host -> guest), strictly per the ABI: exact
 /// header fields, `abi` = 1, payload length agreeing with the header.
+///
+/// ```
+/// use swath_udf_guest::{Plane, decode_request, encode_request};
+///
+/// let plane = Plane { values: vec![1.5, -2.0], validity: vec![1, 0] };
+/// let buf = encode_request(2, 1, &[plane.clone()]).unwrap();
+/// let request = decode_request(&buf).unwrap();
+/// assert_eq!((request.width, request.height), (2, 1));
+/// assert_eq!(request.planes, vec![plane]);
+/// ```
 pub fn decode_request(buf: &[u8]) -> Result<Request, AbiError> {
     let (header, payload) = split_frame(buf)?;
     let [abi, width, height, planes] =
