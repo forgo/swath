@@ -463,6 +463,12 @@ async function expectAnalyticsAgreement(page: Page, base: AnalyticsBaseline): Pr
  * driven burst of fresh renders agreed between panel and test stream.
  * Returns the quiet-stream baseline the burst was agreed against. */
 async function setUpAgreedAnalytics(page: Page, center: string, zoom: string): Promise<void> {
+  // The quiet-stream baseline needs a >1.2 s gap in the SHARED trace
+  // stream, and gaps got scarcer as suites joined the stack (the compare
+  // swipe, issue #210, live-renders both sides of the fire series from a
+  // parallel worker). The agreement stays exact — a quiet moment just
+  // needs more room to arrive than the 30 s default allows.
+  test.setTimeout(180_000);
   await page.goto(DEMO_PATH);
   await expect(page.locator("swath-map canvas.maplibregl-canvas")).toBeVisible();
   await subscribeToTraces(page);
