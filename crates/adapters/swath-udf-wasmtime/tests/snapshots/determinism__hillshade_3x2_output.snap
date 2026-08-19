@@ -1,0 +1,24 @@
+---
+source: crates/adapters/swath-udf-wasmtime/tests/determinism.rs
+expression: planes
+---
+[
+  {
+    "value_bits": [
+      "0000000000000000",
+      "0000000000000000",
+      "0000000000000000",
+      "0000000000000000",
+      "0000000000000000",
+      "0000000000000000"
+    ],
+    "valid": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  }
+]
