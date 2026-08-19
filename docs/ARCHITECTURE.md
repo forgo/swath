@@ -143,7 +143,7 @@ planner crate, ADR 0016 — re-exported at `swath_core::planner`; `PlanChoice` i
 `crates/swath-render/src/tiler.rs` — free functions generic over the ports; the cached variant
 owns the probe + write-through.
 
-_Last verified against sources `46d03b482a92`._
+_Last verified against sources `93e5b4d07b43`._
 
 ## 7. Adapters and inbound APIs
 

@@ -12,7 +12,7 @@ use serde_json::{Value as Json, json};
 use swath_render::ir::{
     BandInput, BinaryOp, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat,
 };
-use swath_render::{CompileContext, WarpedBuffer, eval};
+use swath_render::{CompileContext, NoUdf, WarpedBuffer, eval};
 
 /// The two-band context every generated graph loads against.
 fn ctx() -> CompileContext {
@@ -195,8 +195,8 @@ proptest! {
             .iter()
             .map(|band| buffer(if band == "band-a" { a.clone() } else { b.clone() }))
             .collect();
-        let ours = eval(&product.plan, &buffers).expect("compiled plan evaluates");
-        let reference = eval(&hand, &buffers).expect("hand plan evaluates");
+        let ours = eval(&product.plan, &buffers, &NoUdf).expect("compiled plan evaluates");
+        let reference = eval(&hand, &buffers, &NoUdf).expect("hand plan evaluates");
         prop_assert_eq!(ours.pixels, reference.pixels);
     }
 }

@@ -36,8 +36,8 @@ use swath_core::source::{BandSelection, RasterSource as _, ReadLevel, WindowData
 use swath_core::tile::TileCoord;
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
 use swath_render::{
-    NodataPolicy, Resampling, RgbaTile, TargetGrid, TileRequest, WarpedBuffer, encode_png, eval,
-    render_tile, source_window, warp,
+    NoUdf, NodataPolicy, Resampling, RgbaTile, TargetGrid, TileRequest, WarpedBuffer, encode_png,
+    eval, render_tile, source_window, warp,
 };
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
@@ -156,7 +156,7 @@ fn ndvi_inputs(p: &Prepared) -> Vec<WarpedBuffer> {
 /// A realistic encoded tile input: the fully rendered colormapped NDVI
 /// tile, so the deflate stage sees real spatial structure, not flat color.
 fn rendered_ndvi_tile(p: &Prepared) -> RgbaTile {
-    eval(&ndvi_plan(Colormap::RdYlGn), &ndvi_inputs(p)).expect("eval")
+    eval(&ndvi_plan(Colormap::RdYlGn), &ndvi_inputs(p), &NoUdf).expect("eval")
 }
 
 /// Stage 1 — the warp inner loop (`warp.rs`): a representative full-res
@@ -189,10 +189,10 @@ fn bench_eval(c: &mut Criterion) {
     let gray = ndvi_plan(Colormap::Grayscale);
     let rdylgn = ndvi_plan(Colormap::RdYlGn);
     c.bench_function("eval_ndvi_grayscale", |b| {
-        b.iter(|| eval(black_box(&gray), black_box(&inputs)));
+        b.iter(|| eval(black_box(&gray), black_box(&inputs), &NoUdf));
     });
     c.bench_function("eval_ndvi_rdylgn", |b| {
-        b.iter(|| eval(black_box(&rdylgn), black_box(&inputs)));
+        b.iter(|| eval(black_box(&rdylgn), black_box(&inputs), &NoUdf));
     });
 }
 

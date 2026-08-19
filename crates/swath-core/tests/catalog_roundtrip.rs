@@ -92,6 +92,9 @@ fn plan_kind() -> impl Strategy<Value = PlanKind> {
             b
         }),
         text().prop_map(|expression| PlanKind::BandMath { expression }),
+        // The `run_udf` mirror (ADR 0018, #201): the module content hash
+        // is the whole persisted identity.
+        "[0-9a-f]{64}".prop_map(|code_hash| PlanKind::Udf { code_hash }),
     ]
 }
 

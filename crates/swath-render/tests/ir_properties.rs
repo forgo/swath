@@ -14,8 +14,8 @@
 //!   never changes the other two channels.
 
 use proptest::prelude::*;
-use swath_render::WarpedBuffer;
 use swath_render::ir::{BandInput, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
+use swath_render::{NoUdf, WarpedBuffer};
 
 fn buffer(values: Vec<f64>, valid: Vec<bool>) -> WarpedBuffer {
     #[allow(clippy::cast_possible_truncation, reason = "test sizes are tiny")]
@@ -173,5 +173,5 @@ proptest! {
 }
 
 fn eval_ok(plan: &RenderPlan, inputs: &[WarpedBuffer]) -> swath_render::RgbaTile {
-    swath_render::eval(plan, inputs).expect("plan evaluates")
+    swath_render::eval(plan, inputs, &NoUdf).expect("plan evaluates")
 }

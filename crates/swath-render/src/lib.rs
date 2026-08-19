@@ -53,6 +53,7 @@ pub mod plan;
 pub mod process;
 mod shim;
 mod tiler;
+pub mod udf;
 mod warp;
 mod window;
 
@@ -63,5 +64,6 @@ pub use ir::{RenderPlan, RgbaTile, eval};
 pub use plan::{PlanMetadata, PlanSpec, ndvi_expr, plan_for};
 pub use process::{CompileContext, CompileError, CompiledProduct, compile};
 pub use tiler::{EncodedTile, TileError, TileRequest, render_tile, render_tile_cached};
+pub use udf::{NoUdf, UdfError, UdfExecutor, UdfStage};
 pub use warp::{NodataPolicy, Resampling, WarpedBuffer, warp};
 pub use window::{BOUNDARY_SAMPLES_PER_EDGE, source_window};

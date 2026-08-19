@@ -27,7 +27,9 @@ mod common;
 
 use serde_json::{Value as Json, json};
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
-use swath_render::{CompileContext, CompileError, NodataPolicy, Resampling, WarpedBuffer, eval};
+use swath_render::{
+    CompileContext, CompileError, NoUdf, NodataPolicy, Resampling, WarpedBuffer, eval,
+};
 use swath_testkit::{DiffPolicy, RgbaImage, diff, load_png};
 
 const B02: &str = "hlss30-t13sdd-2024158-b02.tif";
@@ -145,8 +147,9 @@ fn compiled_and_hand_built_ndvi_evaluate_byte_identically() {
     let product = swath_render::compile(&graph("ndvi-reduce.json"), &hls_ctx()).expect("compiles");
     let nir = buffer(2, 2, vec![3000.0, 1000.0, 0.0, 500.0]);
     let red = buffer(2, 2, vec![1000.0, 3000.0, 0.0, 250.0]);
-    let ours = eval(&product.plan, &[nir.clone(), red.clone()]).expect("compiled plan evaluates");
-    let hand = eval(&hand_ndvi_plan(), &[nir, red]).expect("hand plan evaluates");
+    let ours =
+        eval(&product.plan, &[nir.clone(), red.clone()], &NoUdf).expect("compiled plan evaluates");
+    let hand = eval(&hand_ndvi_plan(), &[nir, red], &NoUdf).expect("hand plan evaluates");
     assert_eq!(ours.pixels, hand.pixels);
 }
 
@@ -166,7 +169,7 @@ async fn assert_compiled_matches_oracle(graph_file: &str, fixtures: &[&str], gol
         .await;
         warped.push(buffer);
     }
-    let tile = eval(&product.plan, &warped).expect("compiled plan evaluates");
+    let tile = eval(&product.plan, &warped, &NoUdf).expect("compiled plan evaluates");
     let ours = RgbaImage::from_raw(tile.width, tile.height, tile.pixels).expect("tile buffer");
     let reference = load_png(&common::goldens_dir().join(golden)).expect("golden loads");
     let report = diff(&ours, &reference).expect("dimensions match");

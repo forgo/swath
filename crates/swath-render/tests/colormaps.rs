@@ -18,7 +18,7 @@
 use swath_render::ir::{
     BandInput, Colormap, Expr, OutputSpec, PixelOp, PlanError, RenderPlan, TileFormat,
 };
-use swath_render::{WarpedBuffer, eval};
+use swath_render::{NoUdf, WarpedBuffer, eval};
 
 /// The five sample stops every variant is pinned at.
 const STOPS: [f64; 5] = [0.0, 64.0, 128.0, 192.0, 255.0];
@@ -45,7 +45,7 @@ fn buffer(values: &[f64]) -> WarpedBuffer {
 
 /// Renders `values` through `map` and returns the RGBA bytes.
 fn render(map: Colormap, values: &[f64]) -> Vec<u8> {
-    eval(&colormap_plan(map), &[buffer(values)])
+    eval(&colormap_plan(map), &[buffer(values)], &NoUdf)
         .expect("plan evaluates")
         .pixels
 }
@@ -147,7 +147,7 @@ fn palette_indexing_quantizes_like_the_grayscale_path() {
 fn invalid_pixels_stay_transparent_black_under_a_palette() {
     let mut input = buffer(&[128.0, 128.0]);
     input.valid[1] = false;
-    let tile = eval(&colormap_plan(Colormap::RdYlGn), &[input]).expect("plan evaluates");
+    let tile = eval(&colormap_plan(Colormap::RdYlGn), &[input], &NoUdf).expect("plan evaluates");
     assert_eq!(&tile.pixels[0..4], &[254, 254, 189, 255]);
     assert_eq!(&tile.pixels[4..8], &[0, 0, 0, 0]);
 }
@@ -174,7 +174,7 @@ fn palette_over_a_composite_is_a_plan_error() {
     );
     let bands = [buffer(&[1.0]), buffer(&[2.0]), buffer(&[3.0])];
     assert_eq!(
-        eval(&plan, &bands),
+        eval(&plan, &bands, &NoUdf),
         Err(PlanError::ColormapNeedsGray {
             map: Colormap::Viridis
         })

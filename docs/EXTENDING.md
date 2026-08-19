@@ -181,7 +181,7 @@ matplotlib directly); the two-level relation to the oracle-validated gray tile
 (`golden_ir.rs`); the openEO → plan → persisted metadata → recompiled round trips; the
 diagnostics snapshots.
 
-_Last verified against sources `3f53388813c3`._
+_Last verified against sources `42eb71d7024c`._
 
 ## 5. The proof: a toy adapter built from §2
 

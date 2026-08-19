@@ -9,7 +9,7 @@
 //! re-tagging must fail loudly here — not in a downstream consumer.
 
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
-use swath_render::{WarpedBuffer, eval};
+use swath_render::{NoUdf, UdfStage, WarpedBuffer, eval};
 
 /// The canonical NDVI plan: band math, rescale, and — since issue #94 —
 /// the diverging `RdYlGn` colormap the built-in NDVI layer defaults to.
@@ -53,9 +53,35 @@ fn truecolor_plan() -> RenderPlan {
     )
 }
 
+/// The canonical UDF plan (ADR 0018, #201): one sandboxed stage over two
+/// bands, then a rescale. The module is named by content hash — bytes
+/// never appear in the IR, so this JSON stays small and cacheable.
+fn udf_plan() -> RenderPlan {
+    RenderPlan::new(
+        vec![BandInput::new("nir"), BandInput::new("red")],
+        vec![
+            PixelOp::Udf(UdfStage::new(
+                "cafe0000000000000000000000000000000000000000000000000000000000ff",
+                1,
+                serde_json::json!({"scale": 2.5}),
+            )),
+            PixelOp::Rescale {
+                min: -1.0,
+                max: 1.0,
+            },
+        ],
+        OutputSpec::new(TileFormat::Png),
+    )
+}
+
 #[test]
 fn ndvi_plan_json_shape() {
     insta::assert_json_snapshot!(ndvi_plan());
+}
+
+#[test]
+fn udf_plan_json_shape() {
+    insta::assert_json_snapshot!(udf_plan());
 }
 
 #[test]
@@ -65,7 +91,7 @@ fn truecolor_plan_json_shape() {
 
 #[test]
 fn plans_round_trip_through_json() {
-    for plan in [ndvi_plan(), truecolor_plan()] {
+    for plan in [ndvi_plan(), truecolor_plan(), udf_plan()] {
         let json = serde_json::to_string(&plan).expect("serializes");
         let back: RenderPlan = serde_json::from_str(&json).expect("deserializes");
         assert_eq!(back, plan);
@@ -98,6 +124,6 @@ fn tiny_eval_rgba_bytes() {
     nir.valid[5] = false;
     nir.values[3] = -500.0;
 
-    let tile = eval(&ndvi_plan(), &[nir, red]).expect("plan evaluates");
+    let tile = eval(&ndvi_plan(), &[nir, red], &NoUdf).expect("plan evaluates");
     insta::assert_debug_snapshot!((tile.width, tile.height, tile.pixels));
 }
