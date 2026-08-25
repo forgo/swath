@@ -24,7 +24,9 @@ use swath_core::reproject::Reproject;
 use swath_core::source::RasterSource;
 use swath_core::tile::{LonLatBounds, TileCoord};
 use swath_core::trace::{Strategy, TemporalRule, TemporalTrace, Trace};
-use swath_render::{render_tile, render_tile_cached};
+use swath_render::ir::PlanError;
+use swath_render::udf::UdfError;
+use swath_render::{NoUdf, TileError, render_tile, render_tile_cached};
 
 use crate::error::ApiError;
 use crate::model::{
@@ -33,6 +35,7 @@ use crate::model::{
 use crate::provider::{LayerIdentity, LayerProvider};
 use crate::registry::Layer;
 use crate::traces::TraceBus;
+use crate::udf::SharedUdfExecutor;
 use crate::ui::UiAssets;
 
 /// The OGC API - Tiles 1.0 (OGC 20-057) conformance classes this surface
@@ -89,6 +92,11 @@ pub struct ApiState<S, R, L, C = NoCache> {
     /// The write-through tile cache; `None` serves exactly as before #36
     /// (the render path never consults it).
     cache: Option<C>,
+    /// The `run_udf` executor the render path runs a plan's UDF stage
+    /// through (ADR 0018, #205). [`NoUdf`] until
+    /// [`ApiState::with_udf_executor`] — plans without a UDF stage never
+    /// consult it, and a UDF plan then refuses loudly.
+    udf: UdfPort,
     /// Base URL links are minted under (no trailing slash), e.g.
     /// `http://localhost:8080`.
     base_url: String,
@@ -127,6 +135,7 @@ impl<S, R, L> ApiState<S, R, L> {
             source,
             reproject,
             cache: None,
+            udf: UdfPort(Arc::new(NoUdf)),
             base_url,
             traces: TraceBus::default(),
             openeo: false,
@@ -137,7 +146,30 @@ impl<S, R, L> ApiState<S, R, L> {
     }
 }
 
+/// The shared executor handle behind a `Debug` the state can derive
+/// (the port trait itself is not `Debug`).
+#[derive(Clone)]
+struct UdfPort(SharedUdfExecutor);
+
+impl std::fmt::Debug for UdfPort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("UdfPort(..)")
+    }
+}
+
 impl<S, R, L, C> ApiState<S, R, L, C> {
+    /// Wires the `run_udf` executor (ADR 0018, #205) — the same object
+    /// the openEO surface registered modules with
+    /// ([`UdfPublish::executor`](crate::UdfPublish::executor)), so every
+    /// published module is runnable here. Absent, UDF plans refuse via
+    /// [`NoUdf`]; the serve path only ever holds such a plan when the
+    /// module store is wired, so the default is the honest one.
+    #[must_use]
+    pub fn with_udf_executor(mut self, udf: SharedUdfExecutor) -> Self {
+        self.udf = UdfPort(udf);
+        self
+    }
+
     /// Replaces the default trace bus — the seam tests use to shrink the
     /// subscriber buffer (forcing `lagged`) and the keepalive interval.
     #[must_use]
@@ -155,6 +187,7 @@ impl<S, R, L, C> ApiState<S, R, L, C> {
             source: self.source,
             reproject: self.reproject,
             cache: Some(cache),
+            udf: self.udf,
             base_url: self.base_url,
             traces: self.traces,
             openeo: self.openeo,
@@ -530,12 +563,19 @@ where
                 coord,
                 tile_size: request.tile_size,
             });
-            render_tile_cached(&app.source, &app.reproject, cache, &key, &request).await
+            render_tile_cached(
+                &app.source,
+                &app.reproject,
+                app.udf.0.as_ref(),
+                cache,
+                &key,
+                &request,
+            )
+            .await
         }
-        None => render_tile(&app.source, &app.reproject, &request).await,
+        None => render_tile(&app.source, &app.reproject, app.udf.0.as_ref(), &request).await,
     };
-    let (encoded, mut trace) =
-        render.map_err(|err| ApiError::internal(format!("tile render failed: {err}")))?;
+    let (encoded, mut trace) = render.map_err(render_error)?;
 
     // The temporal decision (ADR 0015) is resolution-time knowledge, so
     // the handler — not the tiler — records it: which granule this frame
@@ -584,22 +624,49 @@ where
     Ok(response)
 }
 
+/// A failed render as the RFC 7807 problem the tile route answers. Every
+/// render failure is a 500 (the request was well-formed; the server could
+/// not produce the tile it advertises), and a `run_udf` stage failure —
+/// the module exhausting the layer's `max_udf_fuel_per_tile`, tripping
+/// the epoch backstop, trapping — spells out the executor's own diagnosis
+/// in `detail`, since the outer `TileError`'s display alone
+/// (`pixel ops failed`) would hide the one fact an operator sizing the
+/// fuel axis needs (ADR 0018, #205). The shape is snapshot-pinned.
+fn render_error(err: TileError) -> ApiError {
+    match err {
+        TileError::Plan(PlanError::Udf(udf)) => {
+            let hint = match &udf {
+                UdfError::FuelExhausted { .. } => {
+                    " — raise the layer budget's max_udf_fuel_per_tile or cheapen the module"
+                }
+                _ => "",
+            };
+            ApiError::internal(format!("tile render failed: UDF stage failed: {udf}{hint}"))
+        }
+        other => ApiError::internal(format!("tile render failed: {other}")),
+    }
+}
+
 /// The `X-Swath-Trace` debug summary of a render: decision, bytes read,
 /// total time, and — when the assets came from a catalog granule — the
-/// north-star `ingest_to_pixel_ms`. Shared by the tile handler and the
-/// openEO preview (ADR 0014), so both renders read the same from a
-/// plain `curl -D`.
+/// north-star `ingest_to_pixel_ms`; when a `run_udf` stage ran, its
+/// deterministic `udf_fuel_used` (ADR 0018, #205). Shared by the tile
+/// handler and the openEO preview (ADR 0014), so both renders read the
+/// same from a plain `curl -D`.
 pub(crate) fn trace_debug_header(trace: &Trace) -> String {
     let ingest_to_pixel = trace
         .ingest_to_pixel_ms
         .map_or_else(String::new, |ms| format!(",\"ingest_to_pixel_ms\":{ms}"));
+    let udf_fuel = trace
+        .udf_fuel_used
+        .map_or_else(String::new, |fuel| format!(",\"udf_fuel_used\":{fuel}"));
     let decision = match &trace.decision {
         Strategy::Live => "live",
         Strategy::CacheHit { .. } => "cache_hit",
         Strategy::Overview { .. } => "overview",
     };
     format!(
-        "{{\"decision\":\"{decision}\",\"bytes_read\":{},\"total_ms\":{}{ingest_to_pixel}}}",
+        "{{\"decision\":\"{decision}\",\"bytes_read\":{},\"total_ms\":{}{ingest_to_pixel}{udf_fuel}}}",
         trace.bytes_read, trace.timings.total_ms,
     )
 }

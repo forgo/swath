@@ -9,8 +9,9 @@
 //! The surface is deliberately small: bind address, base URL, store root,
 //! optional tile-cache root (#36), optional materialization budgets
 //! (#37: a global `[budget]` default — its scalar knobs also reachable as
-//! `--overview-oversample`/`SWATH_OVERVIEW_OVERSAMPLE` and
-//! `--max-estimated-live-bytes`/`SWATH_MAX_ESTIMATED_LIVE_BYTES` — with
+//! `--overview-oversample`/`SWATH_OVERVIEW_OVERSAMPLE`,
+//! `--max-estimated-live-bytes`/`SWATH_MAX_ESTIMATED_LIVE_BYTES`, and
+//! `--max-udf-fuel-per-tile`/`SWATH_MAX_UDF_FUEL_PER_TILE` (#205) — with
 //! per-layer `[layers.budget]` overrides; see [`BudgetConfig`]), and
 //! layer definitions. Layers are file-only (or `--fixtures`) — a
 //! layer is a structure, not a scalar, and encoding structures in
@@ -289,6 +290,10 @@ struct BudgetConfig {
     /// never refuse). Per-layer values can set or tighten the ceiling,
     /// not clear a global one (set a huge value to effectively disable).
     max_estimated_live_bytes: Option<u64>,
+    /// Deterministic fuel a `run_udf` stage may consume per tile
+    /// (ADR 0018, #205; default 100 M — the planner crate's documented
+    /// calibration point). Only layers with a UDF stage spend any.
+    max_udf_fuel_per_tile: Option<u64>,
 }
 
 impl BudgetConfig {
@@ -300,6 +305,9 @@ impl BudgetConfig {
             max_estimated_live_bytes: self
                 .max_estimated_live_bytes
                 .or(base.max_estimated_live_bytes),
+            max_udf_fuel_per_tile: self
+                .max_udf_fuel_per_tile
+                .unwrap_or(base.max_udf_fuel_per_tile),
         }
     }
 }
@@ -430,6 +438,9 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
     }
     if let Some(limit) = args.max_estimated_live_bytes {
         default_budget.max_estimated_live_bytes = Some(limit);
+    }
+    if let Some(fuel) = args.max_udf_fuel_per_tile {
+        default_budget.max_udf_fuel_per_tile = fuel;
     }
 
     let layers = if let Some(url) = catalog {
@@ -752,6 +763,7 @@ mod tests {
             udf_store: None,
             overview_oversample: None,
             max_estimated_live_bytes: None,
+            max_udf_fuel_per_tile: None,
             cors_allowed_origins: Vec::new(),
             read_only: false,
         }
@@ -960,6 +972,7 @@ mod tests {
             [budget]
             overview-oversample = 1.5
             max-estimated-live-bytes = 50000000
+            max-udf-fuel-per-tile = 5000000
             [[layers]]
             id = "tc"
             kind = "truecolor"
@@ -979,6 +992,7 @@ mod tests {
             .overlay(&Budget::default());
         assert!((global.overview_oversample - 1.5).abs() < f64::EPSILON);
         assert_eq!(global.max_estimated_live_bytes, Some(50_000_000));
+        assert_eq!(global.max_udf_fuel_per_tile, 5_000_000);
         assert!(global.cache_enabled, "unset knob keeps its default");
         let layer = file.layers[0].to_layer(&global).expect("compiles");
         assert!(!layer.budget.cache_enabled);
@@ -988,6 +1002,10 @@ mod tests {
             Some(50_000_000),
             "unset per-layer knob inherits the global default"
         );
+        assert_eq!(
+            layer.budget.max_udf_fuel_per_tile, 5_000_000,
+            "unset per-layer fuel inherits the global default"
+        );
 
         // Flags/env act as the global default (resolve() wiring): they
         // override the file's [budget] scalars.
@@ -995,6 +1013,7 @@ mod tests {
             fixtures: true,
             overview_oversample: Some(2.0),
             max_estimated_live_bytes: Some(123),
+            max_udf_fuel_per_tile: Some(456),
             ..args()
         })
         .expect("resolves");
@@ -1004,6 +1023,24 @@ mod tests {
         let budget = &registry.get("truecolor").expect("layer").budget;
         assert!((budget.overview_oversample - 2.0).abs() < f64::EPSILON);
         assert_eq!(budget.max_estimated_live_bytes, Some(123));
+        assert_eq!(budget.max_udf_fuel_per_tile, 456);
+        // Absent everywhere: the planner crate's documented default.
+        let cfg = resolve(&ServeArgs {
+            fixtures: true,
+            ..args()
+        })
+        .expect("resolves");
+        let LayerSource::Static(registry) = &cfg.layers else {
+            panic!("fixtures mode is static");
+        };
+        assert_eq!(
+            registry
+                .get("truecolor")
+                .expect("layer")
+                .budget
+                .max_udf_fuel_per_tile,
+            swath_core::planner::DEFAULT_MAX_UDF_FUEL_PER_TILE
+        );
 
         // A typo inside [layers.budget] fails loudly like every other key.
         assert!(

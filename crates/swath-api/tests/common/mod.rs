@@ -552,16 +552,19 @@ where
     let provider = CatalogLayers::new(catalog.clone(), Vec::new());
     let store: Arc<dyn object_store::ObjectStore> =
         Arc::new(LocalFileSystem::new_with_prefix(fixtures_dir()).expect("fixture dir exists"));
+    let executor = Arc::new(WasmtimeUdf::new().expect("engine builds on this host"));
+    let modules = ObjectStoreModuleStore::new(Arc::new(object_store::memory::InMemory::new()));
+    let publish = UdfPublish::new(executor, modules.clone(), fetcher);
+    // The tile handlers run UDF stages through the very executor the
+    // publish motion registered them with (#205) — the binary's wiring.
     let state = ApiState::new(
         provider.clone(),
         CogSource::new(Arc::clone(&store)),
         Proj4rsReproject,
         BASE_URL,
     )
-    .with_openeo();
-    let executor = Arc::new(WasmtimeUdf::new().expect("engine builds on this host"));
-    let modules = ObjectStoreModuleStore::new(Arc::new(object_store::memory::InMemory::new()));
-    let publish = UdfPublish::new(executor, modules.clone(), fetcher);
+    .with_openeo()
+    .with_udf_executor(publish.executor());
     let openeo_state =
         OpenEoState::new(provider, CogSource::new(store), Proj4rsReproject, BASE_URL)
             .with_udf(publish.clone());

@@ -53,7 +53,14 @@
 //!   never equality, and determinism tests must exclude them. `read_ms`
 //!   covers all source I/O (`describe` + `read_window`); `total_ms` is
 //!   recorded, not derived, so parts need not sum to it once stages overlap
-//!   under future concurrency.
+//!   under future concurrency. `udf_ms` is the `run_udf` stage's share of
+//!   `pixel_ops_ms` (0 without one).
+//! - [`Trace::udf_fuel_used`] is the **deterministic** cost of the
+//!   `run_udf` stage (ADR 0018, #205): the fuel the executor charged,
+//!   bounded by the request budget's `max_udf_fuel_per_tile`
+//!   ([`UdfLimits`]). Same inputs, same fuel — unlike the timings it may
+//!   be pinned. `None` when the plan has no UDF stage or the tile was a
+//!   cache hit (a hit never consults the executor).
 //! - [`Trace::ingest_to_pixel_ms`] is the north-star number (REQUIREMENTS.md
 //!   §3): when the request carries [`TileRequest::ingested_at`] (its assets
 //!   were resolved from a catalog granule), the Trace records
@@ -86,8 +93,8 @@ use swath_core::trace::{PlanTraceExt as _, Provenance, Strategy, Timings, Trace}
 use crate::encode::{EncodeError, encode_png};
 use crate::error::RenderError;
 use crate::grid::TargetGrid;
-use crate::ir::{PlanError, RenderPlan, TileFormat, eval};
-use crate::udf::NoUdf;
+use crate::ir::{PlanError, RenderPlan, TileFormat, eval_with};
+use crate::udf::{UdfExecutor, UdfLimits};
 use crate::warp::{Resampling, WarpedBuffer, warp};
 use crate::window::{SourceExtent, clip_to_raster, source_extent};
 
@@ -522,26 +529,46 @@ async fn read_and_warp<S: RasterSource>(
     Ok(buffer)
 }
 
+/// Every distinct asset the bands read, in declaration order —
+/// [`Trace::sources`].
+fn distinct_assets(bands: &[BandAsset<'_>]) -> Vec<AssetRef> {
+    let mut sources: Vec<AssetRef> = Vec::new();
+    for band in bands {
+        if !sources.contains(band.asset) {
+            sources.push(band.asset.clone());
+        }
+    }
+    sources
+}
+
 /// Renders one tile end-to-end: for each declared band — describe (once
 /// per distinct asset), compute the source window — then **plan** the
 /// materialization strategy (#37), execute it (read at the planned level,
 /// warp), run the plan's pixel ops, encode, and assemble the [`Trace`]
 /// (the planner's full reasoning included as [`Trace::plan`]).
 ///
-/// Generic over the two ports it consumes; no dynamic dispatch is needed
-/// while every caller knows its adapters at compile time.
+/// Generic over the source and reprojection ports it consumes (no dynamic
+/// dispatch is needed while every caller knows its adapters at compile
+/// time); the `run_udf` executor is the one `dyn` port, `udf` — pass
+/// [`NoUdf`](crate::udf::NoUdf) where none is wired (ADR 0018, #205): a
+/// plan without a UDF stage never consults it, and a plan with one then
+/// refuses loudly. The request budget's `max_udf_fuel_per_tile` bounds the
+/// stage; its cost lands on the Trace (module docs).
 ///
 /// # Errors
 ///
 /// Any [`TileError`]; see its variants for the taxonomy. A tile that
 /// simply has no source data where it falls is **not** an error (module
-/// docs); a tile the budget refuses ([`TileError::BudgetExceeded`]) is.
+/// docs); a tile the budget refuses ([`TileError::BudgetExceeded`]) is,
+/// and so is a UDF stage that exhausts its fuel ([`TileError::Plan`]
+/// wrapping [`UdfError::FuelExhausted`](crate::udf::UdfError::FuelExhausted)).
 pub async fn render_tile<S: RasterSource, R: Reproject + ?Sized>(
     source: &S,
     reproject: &R,
+    udf: &dyn UdfExecutor,
     request: &TileRequest,
 ) -> Result<(EncodedTile, Trace), TileError> {
-    render_planned(source, reproject, request, CacheProbe::NotConfigured).await
+    render_planned(source, reproject, udf, request, CacheProbe::NotConfigured).await
 }
 
 /// [`render_tile`] with an explicit cache probe result for the planner's
@@ -552,6 +579,7 @@ pub async fn render_tile<S: RasterSource, R: Reproject + ?Sized>(
 async fn render_planned<S: RasterSource, R: Reproject + ?Sized>(
     source: &S,
     reproject: &R,
+    udf: &dyn UdfExecutor,
     request: &TileRequest,
     probe: CacheProbe,
 ) -> Result<(EncodedTile, Trace), TileError> {
@@ -613,27 +641,26 @@ async fn render_planned<S: RasterSource, R: Reproject + ?Sized>(
         warped.push(buffer);
     }
 
-    // Phase 4: pixel ops, then encode. No executor is wired through the
-    // serve path yet (#205 threads the configured one); until then a UDF
-    // plan refuses loudly via `NoUdf` — plans without UDF stages never
-    // consult it (ADR 0018, #201).
+    // Phase 4: pixel ops, then encode. A `run_udf` stage runs through the
+    // configured executor under the layer budget's per-tile fuel (ADR
+    // 0018, #205); plans without one never consult it.
     let pixel_started = Instant::now();
-    let tile = eval(&request.plan, &warped, &NoUdf)?;
+    let evaluated = eval_with(
+        &request.plan,
+        &warped,
+        udf,
+        &UdfLimits::new(request.budget.max_udf_fuel_per_tile),
+    )?;
     let pixel_time = pixel_started.elapsed();
 
     let encode_started = Instant::now();
     let bytes = match request.plan.output.format {
-        TileFormat::Png => encode_png(&tile)?,
+        TileFormat::Png => encode_png(&evaluated.tile)?,
     };
     let encode_time = encode_started.elapsed();
 
     // Phase 5: the Trace — every field real (R4).
-    let mut sources: Vec<AssetRef> = Vec::new();
-    for band in &bands {
-        if !sources.contains(band.asset) {
-            sources.push(band.asset.clone());
-        }
-    }
+    let sources = distinct_assets(&bands);
     // The executed strategy is exactly the planned one (module docs).
     let decision = match factor {
         Some(level) => Strategy::Overview { level },
@@ -653,6 +680,7 @@ async fn render_planned<S: RasterSource, R: Reproject + ?Sized>(
             pixel_ops_ms: millis(pixel_time),
             encode_ms: millis(encode_time),
             total_ms: millis(started.elapsed()),
+            udf_ms: evaluated.udf.map_or(0, |cost| millis(cost.elapsed)),
         },
         ingest_to_pixel_ms: request.ingested_at.as_ref().map(ingest_to_pixel_ms),
         plan: planned.trace(),
@@ -660,6 +688,7 @@ async fn render_planned<S: RasterSource, R: Reproject + ?Sized>(
         // layer (which resolved the granule) fills it in after the render
         // (ADR 0015); the tiler itself only knows assets.
         temporal: None,
+        udf_fuel_used: evaluated.udf.and_then(|cost| cost.fuel_used),
     };
 
     Ok((
@@ -712,7 +741,11 @@ async fn render_planned<S: RasterSource, R: Reproject + ?Sized>(
 /// - `timings` are zero except `total_ms` (the cache fetch is the whole
 ///   render);
 /// - `ingest_to_pixel_ms` is `None`: the north-star number belongs to
-///   the *first* render after ingest, which is by construction a miss.
+///   the *first* render after ingest, which is by construction a miss;
+/// - `udf_fuel_used` is `None` and `udf_ms` is 0: a hit **never runs the
+///   UDF** (ADR 0018, #205) — the executor is not consulted at all, which
+///   is exactly why the cache key must bind the module identity (it
+///   does: `plan_json` carries the stage's `code_hash` and `params`).
 ///
 /// # Errors
 ///
@@ -720,6 +753,7 @@ async fn render_planned<S: RasterSource, R: Reproject + ?Sized>(
 pub async fn render_tile_cached<S, R, C>(
     source: &S,
     reproject: &R,
+    udf: &dyn UdfExecutor,
     cache: &C,
     key: &TileKey,
     request: &TileRequest,
@@ -736,7 +770,7 @@ where
     // opts out entirely — no probe, no write-through; the planner sees
     // `Disabled` and the Trace says so.
     if !request.budget.cache_enabled {
-        return render_planned(source, reproject, request, CacheProbe::Disabled).await;
+        return render_planned(source, reproject, udf, request, CacheProbe::Disabled).await;
     }
 
     match cache.get(key).await {
@@ -780,7 +814,8 @@ where
         }
     }
 
-    let (encoded, trace) = render_planned(source, reproject, request, CacheProbe::Miss).await?;
+    let (encoded, trace) =
+        render_planned(source, reproject, udf, request, CacheProbe::Miss).await?;
     if let Err(err) = cache.put(key, &encoded.bytes, content_type).await {
         tracing::warn!(
             key = %key,
@@ -818,6 +853,7 @@ fn cache_hit(
         ingest_to_pixel_ms: None,
         plan: planned.trace(),
         temporal: None,
+        udf_fuel_used: None,
     };
     (
         EncodedTile {

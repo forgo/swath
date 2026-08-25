@@ -93,8 +93,8 @@ use swath_core::reproject::Reproject;
 use swath_core::source::RasterSource;
 use swath_core::tile::TileCoord;
 use swath_render::{
-    CompileContext, CompileError, NodataPolicy, Resampling, TileError, compile, plan_for,
-    render_tile,
+    CompileContext, CompileError, NoUdf, NodataPolicy, Resampling, TileError, UdfExecutor, compile,
+    plan_for, render_tile,
 };
 
 use crate::provider::{CatalogLayer, CatalogLayers};
@@ -1152,6 +1152,10 @@ where
         PREVIEW_TILE_SIZE,
     )
     .await?;
+    // The preview budget: the byte ceiling is the preview's own; the
+    // `run_udf` fuel axis rides along at the budget default
+    // (`max_udf_fuel_per_tile`, #205) — a preview of a UDF graph runs
+    // the module under exactly the budget its published service would.
     template.budget = Budget {
         max_estimated_live_bytes: Some(app.preview_ceiling),
         ..Budget::default()
@@ -1168,7 +1172,14 @@ where
         .await
         .map_err(preview_resolution_error)?;
     let request = resolved.tile_request(coord);
-    let (encoded, trace) = render_tile(&app.source, &app.reproject, &request)
+    // The same executor the graph's module was just registered with
+    // (#205); a deployment without UDF wiring could not have compiled a
+    // UDF graph above, so `NoUdf` is never reached by one.
+    let executor = app.udf.as_ref().map(UdfPublish::executor);
+    let udf: &dyn UdfExecutor = executor
+        .as_deref()
+        .map_or(&NoUdf, |executor| executor as &dyn UdfExecutor);
+    let (encoded, trace) = render_tile(&app.source, &app.reproject, udf, &request)
         .await
         .map_err(preview_render_error)?;
 

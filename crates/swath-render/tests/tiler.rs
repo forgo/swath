@@ -30,7 +30,9 @@ use swath_core::source::{BandSelection, RasterSource, ReadLevel, SourceError, Wi
 use swath_core::tile::TileCoord;
 use swath_core::trace::{Strategy, Trace};
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
-use swath_render::{EncodedTile, NodataPolicy, Resampling, TileError, TileRequest, render_tile};
+use swath_render::{
+    EncodedTile, NoUdf, NodataPolicy, Resampling, TileError, TileRequest, render_tile,
+};
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
 use swath_testkit::{DiffPolicy, RgbaImage, diff, load_png};
@@ -117,7 +119,7 @@ fn ndvi_request(z: u8, x: u32, y: u32) -> TileRequest {
 }
 
 async fn render(request: &TileRequest) -> (EncodedTile, Trace) {
-    render_tile(&cog_source(), &Proj4rsReproject, request)
+    render_tile(&cog_source(), &Proj4rsReproject, &NoUdf, request)
         .await
         .expect("render_tile succeeds")
 }
@@ -313,7 +315,7 @@ async fn overview_render_reads_fewer_bytes_than_full_res() {
     let hidden = OverviewHider {
         inner: cog_source(),
     };
-    let (_, live_trace) = render_tile(&hidden, &Proj4rsReproject, &request)
+    let (_, live_trace) = render_tile(&hidden, &Proj4rsReproject, &NoUdf, &request)
         .await
         .expect("full-res control render");
     assert_eq!(live_trace.decision, Strategy::Live);
@@ -401,7 +403,7 @@ async fn plan_estimates_are_within_3x_of_measured_bytes() {
     let hidden = OverviewHider {
         inner: cog_source(),
     };
-    let (_, trace) = render_tile(&hidden, &Proj4rsReproject, &request)
+    let (_, trace) = render_tile(&hidden, &Proj4rsReproject, &NoUdf, &request)
         .await
         .expect("full-res control render");
     assert_eq!(trace.decision, Strategy::Live);
@@ -455,7 +457,7 @@ async fn live_over_the_ceiling_is_refused_loudly() {
             max_estimated_live_bytes: Some(1_000),
             ..Budget::default()
         });
-    let err = render_tile(&hidden, &Proj4rsReproject, &request)
+    let err = render_tile(&hidden, &Proj4rsReproject, &NoUdf, &request)
         .await
         .expect_err("a busted budget must refuse");
     match err {
@@ -677,7 +679,7 @@ async fn tile_outside_the_raster_is_transparent_and_explained() {
 async fn missing_band_asset_is_an_error() {
     let mut request = truecolor_request(12, 848, 1561);
     request.bands.remove("b02");
-    let err = render_tile(&cog_source(), &Proj4rsReproject, &request)
+    let err = render_tile(&cog_source(), &Proj4rsReproject, &NoUdf, &request)
         .await
         .expect_err("unmapped band must fail");
     assert!(
@@ -695,7 +697,7 @@ async fn plan_without_inputs_is_an_error() {
         256,
         BILINEAR,
     );
-    let err = render_tile(&cog_source(), &Proj4rsReproject, &request)
+    let err = render_tile(&cog_source(), &Proj4rsReproject, &NoUdf, &request)
         .await
         .expect_err("empty plan must fail");
     assert!(matches!(err, TileError::NoBands), "unexpected error: {err}");
@@ -737,6 +739,7 @@ async fn mixed_source_crs_is_a_clear_unsupported_error() {
     let err = render_tile(
         &source,
         &Proj4rsReproject,
+        &NoUdf,
         &truecolor_request(12, 848, 1561),
     )
     .await

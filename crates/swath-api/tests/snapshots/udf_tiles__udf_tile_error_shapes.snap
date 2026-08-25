@@ -1,0 +1,24 @@
+---
+source: crates/swath-api/tests/udf_tiles.rs
+expression: "json!({\n    \"udf exhausts the layer's max_udf_fuel_per_tile\": starved,\n    \"udf plan on a deployment without an executor\": unwired,\n})"
+---
+{
+  "udf exhausts the layer's max_udf_fuel_per_tile": {
+    "status": 500,
+    "body": {
+      "type": "about:blank",
+      "title": "Internal Server Error",
+      "status": 500,
+      "detail": "tile render failed: UDF stage failed: UDF exhausted its fuel budget of 1000 — raise the layer budget's max_udf_fuel_per_tile or cheapen the module"
+    }
+  },
+  "udf plan on a deployment without an executor": {
+    "status": 500,
+    "body": {
+      "type": "about:blank",
+      "title": "Internal Server Error",
+      "status": 500,
+      "detail": "tile render failed: UDF stage failed: no UDF executor is configured: plan names module `f6ebc62bf553a7e82a618cd37d0d8940f557a46ed984d1cb1dd8a1597a6fc78b` (ADR 0018)"
+    }
+  }
+}

@@ -16,7 +16,7 @@ use swath_core::crs::Crs;
 use swath_core::tile::TileCoord;
 use swath_core::trace::Strategy;
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
-use swath_render::{NodataPolicy, Resampling, TileRequest, render_tile};
+use swath_render::{NoUdf, NodataPolicy, Resampling, TileRequest, render_tile};
 use swath_reproject_proj4rs::Proj4rsReproject;
 
 /// The z11 `WebMercatorQuad` tile containing the `TinyGrid` center
@@ -58,7 +58,7 @@ async fn virtual_ndvi_render_traces_back_to_the_original_granule() {
         Resampling::Bilinear(NodataPolicy::ExcludeRenormalize),
     );
 
-    let (tile, trace) = render_tile(&source, &Proj4rsReproject, &request)
+    let (tile, trace) = render_tile(&source, &Proj4rsReproject, &NoUdf, &request)
         .await
         .expect("virtual-cube render succeeds");
     assert_eq!(tile.format, TileFormat::Png);

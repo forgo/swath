@@ -14,7 +14,7 @@
 
 use proptest::prelude::*;
 use swath_render::ir::{BandInput, OutputSpec, PixelOp, TileFormat};
-use swath_render::udf::{UdfExecutor, UdfStage};
+use swath_render::udf::{UdfExecutor, UdfLimits, UdfStage};
 use swath_render::{NoUdf, RenderPlan, WarpedBuffer, eval};
 use swath_udf_guest::{Plane, Response, encode_response};
 use swath_udf_wasmtime::WasmtimeUdf;
@@ -66,11 +66,13 @@ proptest! {
             });
         let (executor, hash) = &*EXECUTOR;
         let once = executor
-            .run(&stage(hash), std::slice::from_ref(&input))
+            .run(&stage(hash), std::slice::from_ref(&input), &UdfLimits::default())
             .expect("first negate");
-        let twice = executor.run(&stage(hash), &once).expect("second negate");
-        prop_assert_eq!(twice.len(), 1);
-        let round_tripped = &twice[0];
+        let twice = executor
+            .run(&stage(hash), &once.planes, &UdfLimits::default())
+            .expect("second negate");
+        prop_assert_eq!(twice.planes.len(), 1);
+        let round_tripped = &twice.planes[0];
         prop_assert_eq!(&round_tripped.valid, &input.valid, "validity passthrough");
         for (index, (got, want)) in round_tripped
             .values

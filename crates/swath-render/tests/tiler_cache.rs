@@ -26,7 +26,7 @@ use swath_core::raster::AssetRef;
 use swath_core::tile::TileCoord;
 use swath_core::trace::Strategy;
 use swath_render::ir::{BandInput, OutputSpec, PixelOp, RenderPlan, TileFormat};
-use swath_render::{NodataPolicy, Resampling, TileRequest, render_tile_cached};
+use swath_render::{NoUdf, NodataPolicy, Resampling, TileRequest, render_tile_cached};
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
 
@@ -87,7 +87,7 @@ async fn miss_renders_live_then_hit_serves_identical_bytes() {
 
     // First request: live render (miss), written through.
     let (first, first_trace) =
-        render_tile_cached(&source, &Proj4rsReproject, &cache, &key, &request)
+        render_tile_cached(&source, &Proj4rsReproject, &NoUdf, &cache, &key, &request)
             .await
             .expect("renders");
     assert_eq!(first_trace.decision, Strategy::Live);
@@ -95,7 +95,7 @@ async fn miss_renders_live_then_hit_serves_identical_bytes() {
 
     // Second request: served from cache, byte-identical.
     let (second, second_trace) =
-        render_tile_cached(&source, &Proj4rsReproject, &cache, &key, &request)
+        render_tile_cached(&source, &Proj4rsReproject, &NoUdf, &cache, &key, &request)
             .await
             .expect("serves from cache");
     assert_eq!(second.bytes, first.bytes, "hit must be byte-identical");
@@ -159,9 +159,10 @@ async fn disabled_cache_budget_skips_probe_and_write_through() {
 
     // Two identical requests: both live (nothing is ever stored).
     for _ in 0..2 {
-        let (_, trace) = render_tile_cached(&source, &Proj4rsReproject, &cache, &key, &request)
-            .await
-            .expect("renders");
+        let (_, trace) =
+            render_tile_cached(&source, &Proj4rsReproject, &NoUdf, &cache, &key, &request)
+                .await
+                .expect("renders");
         assert_eq!(trace.decision, Strategy::Live);
         let plan = trace.plan.expect("planned");
         assert_eq!(plan.considered[0].reason, "cache disabled by budget");
@@ -170,7 +171,7 @@ async fn disabled_cache_budget_skips_probe_and_write_through() {
     // The write-through was skipped too: re-enabling the cache still
     // misses under the same key.
     let enabled = request.clone().with_budget(Budget::default());
-    let (_, trace) = render_tile_cached(&source, &Proj4rsReproject, &cache, &key, &enabled)
+    let (_, trace) = render_tile_cached(&source, &Proj4rsReproject, &NoUdf, &cache, &key, &enabled)
         .await
         .expect("renders");
     assert_eq!(
@@ -189,6 +190,7 @@ async fn a_new_granule_version_misses_cleanly() {
     let (_, trace) = render_tile_cached(
         &source,
         &Proj4rsReproject,
+        &NoUdf,
         &cache,
         &key(&request, "g-2024158"),
         &request,
@@ -202,6 +204,7 @@ async fn a_new_granule_version_misses_cleanly() {
     let (_, trace) = render_tile_cached(
         &source,
         &Proj4rsReproject,
+        &NoUdf,
         &cache,
         &key(&request, "g-2024165"),
         &request,
@@ -243,9 +246,10 @@ async fn cache_failures_never_fail_the_response() {
     let request = request();
     let key = key(&request, "g-2024158");
 
-    let (encoded, trace) = render_tile_cached(&source, &Proj4rsReproject, &cache, &key, &request)
-        .await
-        .expect("a broken cache must not break serving");
+    let (encoded, trace) =
+        render_tile_cached(&source, &Proj4rsReproject, &NoUdf, &cache, &key, &request)
+            .await
+            .expect("a broken cache must not break serving");
     assert_eq!(trace.decision, Strategy::Live);
     assert!(!encoded.bytes.is_empty());
     assert_eq!(
@@ -276,7 +280,7 @@ async fn read_only_cache_directory_still_serves_live() {
 
     for _ in 0..2 {
         let (encoded, trace) =
-            render_tile_cached(&source, &Proj4rsReproject, &cache, &key, &request)
+            render_tile_cached(&source, &Proj4rsReproject, &NoUdf, &cache, &key, &request)
                 .await
                 .expect("read-only cache must not break serving");
         assert_eq!(trace.decision, Strategy::Live);

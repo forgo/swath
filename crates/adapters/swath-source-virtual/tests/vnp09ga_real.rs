@@ -24,7 +24,7 @@ use swath_core::raster::AssetRef;
 use swath_core::tile::TileCoord;
 use swath_manifest::VirtualManifest;
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
-use swath_render::{NodataPolicy, Resampling, TileRequest, render_tile};
+use swath_render::{NoUdf, NodataPolicy, Resampling, TileRequest, render_tile};
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_virtual::VirtualSource;
 
@@ -149,7 +149,7 @@ async fn real_vnp09ga_ndvi_tile_renders_from_original_bytes() {
         Resampling::Bilinear(NodataPolicy::ExcludeRenormalize),
     );
 
-    let (tile, trace) = render_tile(&source, &Proj4rsReproject, &request)
+    let (tile, trace) = render_tile(&source, &Proj4rsReproject, &NoUdf, &request)
         .await
         .expect("real-granule virtual render succeeds");
 

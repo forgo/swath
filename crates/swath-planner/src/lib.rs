@@ -90,17 +90,33 @@ pub const WARP_COST_WEIGHT: f64 = 1.0;
 /// it and diverge).
 pub const DEFAULT_OVERVIEW_OVERSAMPLE: f64 = 1.2;
 
-/// The v1 per-layer budget: three explicit knobs trading storage against
-/// latency (spec §1 documents each; §16.4 resolved — knobs + transparent
-/// estimates, no learned model in v1).
+/// The default of [`Budget::max_udf_fuel_per_tile`]: 100 M fuel per
+/// tile — the M9 cost axis's calibration point (spec §1), a documented
+/// constant like the oversample slack, not a fit.
+///
+/// Wasmtime fuel counts roughly one unit per WASM instruction, so 100 M
+/// fuel is on the order of 100 M instructions — tens of milliseconds
+/// of CPU for one 256×256 tile, comparable to the ~37 ms a full built-in
+/// tile costs end to end (the ADR 0012 measurement). The reference NDVI
+/// UDF (`examples/udf/ndvi`) consumes a few million fuel per tile, so
+/// the default admits ~30× that work per pixel while still bounding a
+/// runaway module well inside the 250 ms epoch backstop. Fuel is
+/// deterministic (same inputs, same fuel), which is why it — not wall
+/// clock — is the budget knob.
+pub const DEFAULT_MAX_UDF_FUEL_PER_TILE: u64 = 100_000_000;
+
+/// The per-layer budget: explicit knobs trading storage (and, for
+/// sandboxed user code, CPU) against latency (spec §1 documents each;
+/// §16.4 resolved — knobs + transparent estimates, no learned model).
 ///
 /// Deliberately **not** `#[non_exhaustive]`: configuration layers build
 /// budgets field-by-field (`..Budget::default()`), and a new knob *should*
-/// be a visible, reviewed change at every construction site. The planned
-/// M9 fuel/CPU cost axis therefore arrives as a plain new field — additive
-/// to the model, defaulted for existing budgets, but source-visible (a
-/// semver-major under strict rules, deliberate and reported by the
-/// semver-checks gate, not accidental).
+/// be a visible, reviewed change at every construction site. The M9
+/// fuel cost axis ([`max_udf_fuel_per_tile`](Self::max_udf_fuel_per_tile))
+/// arrived exactly this way — a plain new field, defaulted for existing
+/// budgets, source-visible at every literal construction (a semver-major
+/// under strict rules, deliberate and reported by the semver-checks gate,
+/// not accidental).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Budget {
     /// Consult the tile cache and write fresh renders through (`true`,
@@ -116,6 +132,13 @@ pub struct Budget {
     /// when nothing cheaper can serve — an explicit error instead of an
     /// unbounded full-res read. `None` (default) never refuses.
     pub max_estimated_live_bytes: Option<u64>,
+    /// The deterministic fuel a `run_udf` stage may consume per tile
+    /// (ADR 0018's primary bound; the M9 cost axis). A tile whose module
+    /// exhausts it fails loudly with a per-tile UDF error — reproducibly,
+    /// since identical inputs consume identical fuel — never a hung
+    /// worker. Layers without a UDF stage never spend any. Default
+    /// [`DEFAULT_MAX_UDF_FUEL_PER_TILE`].
+    pub max_udf_fuel_per_tile: u64,
 }
 
 impl Default for Budget {
@@ -124,6 +147,7 @@ impl Default for Budget {
             cache_enabled: true,
             overview_oversample: DEFAULT_OVERVIEW_OVERSAMPLE,
             max_estimated_live_bytes: None,
+            max_udf_fuel_per_tile: DEFAULT_MAX_UDF_FUEL_PER_TILE,
         }
     }
 }
@@ -711,6 +735,27 @@ mod tests {
             vec![band(2048.0, 2048.0, &[2, 4, 8]), band(2048.0, 2048.0, &[])],
         );
         assert_eq!(*choice(&plan(&Budget::default(), &a)), PlanChoice::Live);
+    }
+
+    /// The fuel axis (M9, #205) is a budget knob the *executor* enforces,
+    /// not a planning input: the materialization choice is identical at
+    /// any fuel setting, and the default is the documented 100 M
+    /// calibration point.
+    #[test]
+    fn udf_fuel_is_a_budget_knob_the_planner_does_not_consult() {
+        assert_eq!(
+            Budget::default().max_udf_fuel_per_tile,
+            super::DEFAULT_MAX_UDF_FUEL_PER_TILE
+        );
+        assert_eq!(super::DEFAULT_MAX_UDF_FUEL_PER_TILE, 100_000_000);
+        let a = avail(CacheProbe::Miss, vec![band(505.0, 505.0, &[2])]);
+        for fuel in [1, 1_000, super::DEFAULT_MAX_UDF_FUEL_PER_TILE, u64::MAX] {
+            let budget = Budget {
+                max_udf_fuel_per_tile: fuel,
+                ..Budget::default()
+            };
+            assert_eq!(plan(&budget, &a), plan(&Budget::default(), &a));
+        }
     }
 
     /// Every plan records all three candidates in the fixed order.

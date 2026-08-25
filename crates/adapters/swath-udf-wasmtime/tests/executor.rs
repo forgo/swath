@@ -14,7 +14,7 @@
 use std::time::Instant;
 
 use swath_render::WarpedBuffer;
-use swath_render::udf::{UdfError, UdfExecutor, UdfStage};
+use swath_render::udf::{UdfError, UdfExecutor, UdfLimits, UdfStage};
 use swath_udf_wasmtime::{MODULE_LRU_CAPACITY, WasmtimeUdf};
 
 const NDVI: &[u8] = include_bytes!("fixtures/ndvi.wasm");
@@ -250,7 +250,7 @@ fn one_plane() -> Vec<WarpedBuffer> {
 fn unknown_hash_is_refused_never_compiled_inline() {
     let executor = executor();
     let err = executor
-        .run(&stage("cafe", 1), &one_plane())
+        .run(&stage("cafe", 1), &one_plane(), &UdfLimits::default())
         .expect_err("unknown module");
     assert_eq!(
         err,
@@ -265,30 +265,65 @@ fn empty_inputs_are_a_typed_request_error() {
     let executor = executor();
     let hash = executor.compile(TINYGO_NEGATE).expect("fixture compiles");
     assert!(matches!(
-        executor.run(&stage(&hash, 1), &[]),
+        executor.run(&stage(&hash, 1), &[], &UdfLimits::default()),
         Err(UdfError::InvalidRequest { .. })
     ));
 }
 
+/// The per-call [`UdfLimits`] (#205) is the fuel bound: the error names
+/// exactly the budget the call ran under, and a budget that admits the
+/// call reports the fuel it charged — deterministic, so two runs agree.
 #[test]
-fn fuel_exhaustion_is_its_own_variant() {
-    let executor = executor().with_fuel_budget(10_000);
+fn fuel_exhaustion_is_its_own_variant_naming_the_call_budget() {
+    let executor = executor();
     let spin = wasm::abi_module(&wasm::AbiModule {
         run: wasm::spin_i64(),
         ..wasm::AbiModule::default()
     });
     let hash = executor.compile(&spin).expect("spin module compiles");
     let err = executor
-        .run(&stage(&hash, 1), &one_plane())
+        .run(&stage(&hash, 1), &one_plane(), &UdfLimits::new(10_000))
         .expect_err("fuel must trip");
     assert_eq!(err, UdfError::FuelExhausted { budget: 10_000 });
+
+    // A real module under a real budget: the fuel meter reads back.
+    let hash = executor.compile(NDVI).expect("fixture compiles");
+    let (nir, red) = (one_plane().remove(0), one_plane().remove(0));
+    let charge = |budget: u64| {
+        executor
+            .run(
+                &stage(&hash, 1),
+                &[nir.clone(), red.clone()],
+                &UdfLimits::new(budget),
+            )
+            .expect("ndvi runs")
+            .fuel_used
+            .expect("the wasmtime executor meters fuel")
+    };
+    let used = charge(UdfLimits::default().max_fuel);
+    assert!(used > 0, "a 2x2 NDVI costs fuel");
+    assert!(
+        used < UdfLimits::default().max_fuel,
+        "well inside the default budget: {used}"
+    );
+    assert_eq!(charge(used * 2), used, "fuel is independent of the budget");
+    // Fuel is charged per basic block, so the trap fires when a block's
+    // charge overdraws the remaining fuel — a budget one unit short of
+    // the measured cost may still complete (the meter reads the budget).
+    // Well short of it is exactly a refusal naming that budget.
+    assert_eq!(
+        executor
+            .run(&stage(&hash, 1), &[nir, red], &UdfLimits::new(used / 2))
+            .expect_err("half the fuel"),
+        UdfError::FuelExhausted { budget: used / 2 }
+    );
 }
 
 #[test]
 fn epoch_deadline_stops_a_runaway_module_within_bounds() {
     // Effectively unlimited fuel: only the 250 ms wall-clock backstop can
     // stop the spin — the ADR 0012 inline posture must survive it.
-    let executor = executor().with_fuel_budget(u64::MAX / 2);
+    let executor = executor();
     let spin = wasm::abi_module(&wasm::AbiModule {
         run: wasm::spin_i64(),
         ..wasm::AbiModule::default()
@@ -296,7 +331,11 @@ fn epoch_deadline_stops_a_runaway_module_within_bounds() {
     let hash = executor.compile(&spin).expect("spin module compiles");
     let started = Instant::now();
     let err = executor
-        .run(&stage(&hash, 1), &one_plane())
+        .run(
+            &stage(&hash, 1),
+            &one_plane(),
+            &UdfLimits::new(u64::MAX / 2),
+        )
         .expect_err("deadline must trip");
     assert_eq!(err, UdfError::EpochDeadline { deadline_ms: 250 });
     assert!(
@@ -316,7 +355,7 @@ fn guest_allocation_failure_is_memory_limit() {
     });
     let hash = executor.compile(&alloc_zero).expect("compiles");
     assert!(matches!(
-        executor.run(&stage(&hash, 1), &one_plane()),
+        executor.run(&stage(&hash, 1), &one_plane(), &UdfLimits::default()),
         Err(UdfError::MemoryLimit { .. })
     ));
 }
@@ -334,7 +373,7 @@ fn memory_growth_past_the_cap_is_denied() {
     // ever let the grow through, the module would answer `0` and this
     // would fail as GuestFailure — the assertion pins the 64 MiB cap.
     assert!(matches!(
-        executor.run(&stage(&hash, 1), &one_plane()),
+        executor.run(&stage(&hash, 1), &one_plane(), &UdfLimits::default()),
         Err(UdfError::MalformedOutput { .. })
     ));
 }
@@ -348,7 +387,7 @@ fn a_trapping_module_is_a_typed_trap() {
     });
     let hash = executor.compile(&trapper).expect("compiles");
     assert!(matches!(
-        executor.run(&stage(&hash, 1), &one_plane()),
+        executor.run(&stage(&hash, 1), &one_plane(), &UdfLimits::default()),
         Err(UdfError::Trap { .. })
     ));
 }
@@ -359,7 +398,7 @@ fn guest_declared_failure_is_its_own_variant() {
     let executor = executor();
     let hash = executor.compile(NDVI).expect("fixture compiles");
     let err = executor
-        .run(&stage(&hash, 1), &one_plane())
+        .run(&stage(&hash, 1), &one_plane(), &UdfLimits::default())
         .expect_err("wrong arity");
     assert_eq!(err, UdfError::GuestFailure { code_hash: hash });
 }
@@ -375,7 +414,7 @@ fn an_out_of_bounds_response_pointer_is_malformed_output() {
     });
     let hash = executor.compile(&liar).expect("compiles");
     assert!(matches!(
-        executor.run(&stage(&hash, 1), &one_plane()),
+        executor.run(&stage(&hash, 1), &one_plane(), &UdfLimits::default()),
         Err(UdfError::MalformedOutput { .. })
     ));
 }
@@ -385,7 +424,7 @@ fn output_planes_disagreement_is_pinned() {
     let executor = executor();
     let hash = executor.compile(TINYGO_NEGATE).expect("fixture compiles");
     let err = executor
-        .run(&stage(&hash, 3), &one_plane())
+        .run(&stage(&hash, 3), &one_plane(), &UdfLimits::default())
         .expect_err("negate answers 1 plane, stage pins 3");
     assert_eq!(
         err,
@@ -509,7 +548,7 @@ fn the_module_lru_holds_32_and_evicts_the_least_recently_used() {
     // Still resident: running it fails past the lookup (GuestFailure —
     // the skeleton's run answers 0), never UnknownModule.
     assert!(matches!(
-        executor.run(&stage(&first, 1), &one_plane()),
+        executor.run(&stage(&first, 1), &one_plane(), &UdfLimits::default()),
         Err(UdfError::GuestFailure { .. })
     ));
     // A 33rd distinct module evicts the *least recently used*. The run
@@ -517,7 +556,7 @@ fn the_module_lru_holds_32_and_evicts_the_least_recently_used() {
     // victim, which is exactly what this pins.
     executor.compile(&module_variant(32)).expect("compiles");
     assert!(matches!(
-        executor.run(&stage(&first, 1), &one_plane()),
+        executor.run(&stage(&first, 1), &one_plane(), &UdfLimits::default()),
         Err(UdfError::GuestFailure { .. })
     ));
 }
@@ -544,8 +583,10 @@ fn register_pins_the_content_hash_and_the_output_arity() {
     let stage = stage(&registration.code_hash, registration.output_planes);
     let nir = one_plane().remove(0);
     let red = one_plane().remove(0);
-    let out = executor.run(&stage, &[nir, red]).expect("runs");
-    assert_eq!(out.len(), 1);
+    let out = executor
+        .run(&stage, &[nir, red], &UdfLimits::default())
+        .expect("runs");
+    assert_eq!(out.planes.len(), 1);
 }
 
 /// `swath_udf_output_planes` answering `<= 0` is the module refusing the

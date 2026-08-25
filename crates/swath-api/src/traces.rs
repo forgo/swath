@@ -261,6 +261,7 @@ mod tests {
                 pixel_ops_ms: 1,
                 encode_ms: 2,
                 total_ms: 18,
+                udf_ms: 0,
             },
             ingest_to_pixel_ms: None,
             // Synthetic direct-publish trace: no planner ran. Planned
@@ -268,6 +269,7 @@ mod tests {
             // plan payload is pinned in swath-core (trace.rs).
             plan: None,
             temporal: None,
+            udf_fuel_used: None,
         }
     }
 
@@ -336,6 +338,7 @@ mod tests {
             ingest_to_pixel_ms: None,
             plan: None,
             temporal: None,
+            udf_fuel_used: None,
         };
         let envelope = Envelope {
             tile: "12/848/1561",

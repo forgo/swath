@@ -24,7 +24,7 @@ use swath_core::tile::TileCoord;
 use swath_icechunk::{IcechunkSource, commit_manifest};
 use swath_manifest::VirtualManifest;
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
-use swath_render::{NodataPolicy, Resampling, TileRequest, render_tile};
+use swath_render::{NoUdf, NodataPolicy, Resampling, TileRequest, render_tile};
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_virtual::VirtualSource;
 
@@ -131,6 +131,7 @@ async fn icechunk_commit_serves_the_ndvi_tile_byte_identical() {
     let (tile_a, trace_a) = render_tile(
         &via_manifest,
         &Proj4rsReproject,
+        &NoUdf,
         &ndvi_request(
             AssetRef::new(format!("{manifest_key}#{M7}")),
             AssetRef::new(format!("{manifest_key}#{M5}")),
@@ -143,6 +144,7 @@ async fn icechunk_commit_serves_the_ndvi_tile_byte_identical() {
     let (tile_b, trace_b) = render_tile(
         &via_icechunk,
         &Proj4rsReproject,
+        &NoUdf,
         &ndvi_request(
             AssetRef::new(format!("{snapshot}#{M7}")),
             AssetRef::new(format!("{snapshot}#{M5}")),

@@ -123,6 +123,7 @@ pub(crate) fn run(args: &MaterializeArgs) -> Result<(), MaterializeCliError> {
         udf_store: None,
         overview_oversample: None,
         max_estimated_live_bytes: None,
+        max_udf_fuel_per_tile: None,
         cors_allowed_origins: Vec::new(),
     })?;
     let runtime = tokio::runtime::Builder::new_multi_thread()

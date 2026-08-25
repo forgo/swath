@@ -123,6 +123,13 @@ pub(crate) struct ServeArgs {
     #[arg(long, value_name = "BYTES", env = "SWATH_MAX_ESTIMATED_LIVE_BYTES")]
     pub(crate) max_estimated_live_bytes: Option<u64>,
 
+    /// Global default for the deterministic fuel a `run_udf` stage may
+    /// consume per tile (ADR 0018, #205): a module that exhausts it
+    /// fails that tile loudly. Default 100000000 (100 M). Per-layer
+    /// `[layers.budget]` values override it.
+    #[arg(long, value_name = "FUEL", env = "SWATH_MAX_UDF_FUEL_PER_TILE")]
+    pub(crate) max_udf_fuel_per_tile: Option<u64>,
+
     /// Serve CORS headers for these origins (comma-separated exact
     /// origins, or `*` for any — cross-origin dev). Default: none — no
     /// CORS headers at all; same-origin serving (the embedded UI, or the
@@ -204,7 +211,9 @@ where
     match layers {
         LayerSource::Static(registry) => {
             let layer_count = registry.identities().len();
-            run_server(&shared, registry, layer_count, None, false, shutdown).await
+            // Static layers are config kinds (truecolor/ndvi) — never a
+            // UDF plan — so no executor is wired and `NoUdf` is honest.
+            run_server(&shared, registry, layer_count, None, None, false, shutdown).await
         }
         LayerSource::Catalog(mode) => serve_catalog(&shared, mode, shutdown).await,
     }
@@ -335,6 +344,10 @@ where
 /// earlier runs), start the ingest loop, serve — with the openEO authoring
 /// router merged in (ADR 0010). Generic over the [`Catalog`] so tests can
 /// drive it against an in-memory catalog.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the catalog serve tail wires every surface in one readable sequence; splitting it would hide which mode wires what"
+)]
 async fn serve_catalog_on<C, F>(
     cfg: &Shared,
     mut mode: CatalogMode,
@@ -453,7 +466,9 @@ where
         &cfg.base_url,
     );
     // `run_udf` (ADR 0018, #204): offered exactly where the module store
-    // and the WASM runtime are wired.
+    // and the WASM runtime are wired — and then served by the tile
+    // handlers through the same executor (#205).
+    let executor = udf.as_ref().map(swath_api::UdfPublish::executor);
     if let Some(udf) = udf {
         openeo_state = openeo_state.with_udf(udf);
     }
@@ -478,7 +493,16 @@ where
             uploads,
         )
     };
-    run_server(cfg, provider, layer_count, Some(extra), uploads, shutdown).await
+    run_server(
+        cfg,
+        provider,
+        layer_count,
+        Some(extra),
+        executor,
+        uploads,
+        shutdown,
+    )
+    .await
 }
 
 /// The local-vs-remote line every local-only affordance gates on — legacy
@@ -526,12 +550,20 @@ where
 /// state, bind, run until SIGINT/SIGTERM. `extra` merges an additional
 /// router into the OGC one — catalog mode passes the openEO authoring
 /// surface (ADR 0010), which also switches the landing page into its
-/// dual OGC + openEO-capabilities form.
+/// dual OGC + openEO-capabilities form. `udf` is the `run_udf` executor
+/// the tile handlers render UDF plans through (ADR 0018, #205) — the
+/// object the openEO surface registers modules with; `None` leaves the
+/// `NoUdf` default, honest wherever no UDF plan can exist.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the serve tail names every wired surface explicitly; a builder would hide which mode wires what"
+)]
 async fn run_server<L, F>(
     cfg: &Shared,
     layers: L,
     layer_count: usize,
     extra: Option<axum::Router>,
+    udf: Option<swath_api::SharedUdfExecutor>,
     uploads: bool,
     shutdown: F,
 ) -> Result<(), ServeError>
@@ -556,6 +588,9 @@ where
     );
     if extra.is_some() {
         state = state.with_openeo();
+    }
+    if let Some(udf) = udf {
+        state = state.with_udf_executor(udf);
     }
     if cfg.read_only {
         state = state.read_only();
@@ -930,6 +965,7 @@ mod tests {
             udf_store: None,
             overview_oversample: None,
             max_estimated_live_bytes: None,
+            max_udf_fuel_per_tile: None,
             cors_allowed_origins: Vec::new(),
             read_only: false,
         }

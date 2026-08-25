@@ -150,10 +150,11 @@ The core entry points (not ports — the logic itself; the stamp fingerprints th
 planner crate, ADR 0016 — re-exported at `swath_core::planner`; `PlanChoice` is
 `CacheHit | Overview { factor } | Live | Refuse { .. }`); `compile(graph, ctx)` in
 `crates/swath-render/src/process.rs`; `render_tile` / `render_tile_cached` in
-`crates/swath-render/src/tiler.rs` — free functions generic over the ports; the cached variant
-owns the probe + write-through.
+`crates/swath-render/src/tiler.rs` — free functions generic over the ports, taking the
+`run_udf` executor as a `dyn` port (ADR 0018); the cached variant owns the probe +
+write-through.
 
-_Last verified against sources `d2b1d04e80b0`._
+_Last verified against sources `db7d098f7391`._
 
 ## 7. Adapters and inbound APIs
 
@@ -189,7 +190,7 @@ seam.
 | OGC API - EDR | 3 | not started |
 | OGC API - Features | 3 | not started |
 
-_Last verified against sources `92e7d8acfeb0`._
+_Last verified against sources `68a8bd6b3759`._
 
 ## 8. Data flows
 
@@ -206,7 +207,8 @@ and the planner decides its materialization per tile.
 
 Every `render_tile` returns a `Trace` and streams it over SSE: the decision
 (`Live | Overview{level} | CacheHit`), source, CRS hop, bytes and chunks/byte-ranges read,
-per-stage timings, the cache key, `ingest_to_pixel_ms` when known. The overlay paints from it;
+per-stage timings, the cache key, `ingest_to_pixel_ms` when known, and a `run_udf` stage's
+`udf_ms` plus deterministic `udf_fuel_used` (ADR 0018). The overlay paints from it;
 the test suite asserts against the same struct — observability and correctness are one
 surface.
 

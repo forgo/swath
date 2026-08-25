@@ -11,7 +11,7 @@
 //! rendered tiles must match byte for byte.
 
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, TileFormat};
-use swath_render::udf::{UdfExecutor, UdfStage};
+use swath_render::udf::{UdfExecutor, UdfLimits, UdfStage};
 use swath_render::{RenderPlan, WarpedBuffer, eval};
 use swath_udf_wasmtime::WasmtimeUdf;
 
@@ -80,9 +80,11 @@ fn ndvi_renders_bit_identical_across_16_fresh_stores_and_executors() {
         let hash = executor.compile(NDVI).expect("fixture compiles");
         let stage = stage(hash, 1);
         for run in 0..8 {
-            let out = executor.run(&stage, &inputs).expect("ndvi runs");
-            assert_eq!(out.len(), 1);
-            let got = bits(&out[0]);
+            let out = executor
+                .run(&stage, &inputs, &UdfLimits::default())
+                .expect("ndvi runs");
+            assert_eq!(out.planes.len(), 1);
+            let got = bits(&out.planes[0]);
             match &baseline {
                 None => baseline = Some(got),
                 Some(want) => {
@@ -167,8 +169,11 @@ fn fixture_outputs_are_snapshot_pinned() {
     for (name, bytes, arity) in cases {
         let hash = executor.compile(bytes).expect(name);
         let inputs: Vec<WarpedBuffer> = [tile_a.clone(), tile_b.clone()][..arity].to_vec();
-        let out = executor.run(&stage(hash, 1), &inputs).expect(name);
+        let out = executor
+            .run(&stage(hash, 1), &inputs, &UdfLimits::default())
+            .expect(name);
         let planes: Vec<PlaneBits> = out
+            .planes
             .iter()
             .map(|plane| PlaneBits {
                 value_bits: plane

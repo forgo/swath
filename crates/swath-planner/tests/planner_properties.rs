@@ -56,12 +56,21 @@ fn arb_budget() -> impl Strategy<Value = Budget> {
         proptest::bool::ANY,
         1.0..2.0f64,
         prop_oneof![Just(None), (1u64..2_000_000_000).prop_map(Some)],
+        1u64..1_000_000_000_000,
     )
         .prop_map(
-            |(cache_enabled, overview_oversample, max_estimated_live_bytes)| Budget {
+            |(
                 cache_enabled,
                 overview_oversample,
                 max_estimated_live_bytes,
+                max_udf_fuel_per_tile,
+            )| {
+                Budget {
+                    cache_enabled,
+                    overview_oversample,
+                    max_estimated_live_bytes,
+                    max_udf_fuel_per_tile,
+                }
             },
         )
 }

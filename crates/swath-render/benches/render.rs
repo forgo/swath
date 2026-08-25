@@ -257,6 +257,7 @@ fn bench_composite(c: &mut Criterion) {
             render_tile(
                 black_box(&source),
                 black_box(&Proj4rsReproject),
+                &NoUdf,
                 black_box(&request),
             )
             .await
