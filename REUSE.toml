@@ -58,6 +58,7 @@ path = [
     "crates/swath-render/tests/data/*.png",
     "crates/swath-render/tests/data/openeo/graphs/*.json",
     "crates/swath-render/tests/snapshots/*.snap",
+    "crates/adapters/swath-udf-wasmtime/tests/snapshots/*.snap",
     "tests/fixtures/*.tif",
     "tests/fixtures/*.png",
     "tests/fixtures/SHA256SUMS",

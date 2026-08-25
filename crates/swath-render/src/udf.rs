@@ -70,9 +70,17 @@ impl UdfStage {
 /// Why a UDF stage could not be executed. Distinct from
 /// [`PlanError`](crate::ir::PlanError)'s structural variants: these are
 /// the executor port's failures, wrapped into the plan taxonomy as
-/// [`PlanError::Udf`](crate::ir::PlanError::Udf). `#[non_exhaustive]`:
-/// the wasmtime adapter (#203) adds its trap/fuel/deadline variants here
-/// without breaking the port's consumers.
+/// [`PlanError::Udf`](crate::ir::PlanError::Udf).
+///
+/// The taxonomy is pinned by issue #203 and implemented by the wasmtime
+/// adapter (`swath-udf-wasmtime`); every ADR 0018 failure mode is a
+/// distinct variant — a loud per-tile error, never a hung worker and
+/// never a stringly-typed catch-all. Registration-motion failures
+/// ([`InvalidModule`](Self::InvalidModule) through
+/// [`UnsupportedAbiVersion`](Self::UnsupportedAbiVersion)) and tile-path
+/// failures ([`UnknownModule`](Self::UnknownModule) onward) share the one
+/// enum because the port has one error channel. `#[non_exhaustive]`: a
+/// future adapter may still add variants without breaking consumers.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum UdfError {
@@ -83,6 +91,127 @@ pub enum UdfError {
     NotConfigured {
         /// The module the plan asked for.
         code_hash: String,
+    },
+    /// The WASM runtime is unavailable on this host: the deterministic
+    /// engine configuration (ADR 0018) was rejected at executor
+    /// construction. A startup-time failure — the configuration is
+    /// static, so this only trips on an unsupported host.
+    #[error("WASM runtime unavailable: {detail}")]
+    NoRuntime {
+        /// The runtime's explanation.
+        detail: String,
+    },
+    /// Registration: the bytes are not a valid WASM module the engine
+    /// can compile.
+    #[error("module does not compile: {detail}")]
+    InvalidModule {
+        /// The compiler's explanation.
+        detail: String,
+    },
+    /// Registration: the module imports something. Zero-import modules
+    /// are ADR 0018's structural determinism guarantee — with no imports
+    /// there is nothing nondeterministic to call.
+    #[error("module imports `{module}`.`{name}`: zero-import rule (ADR 0018)")]
+    ForbiddenImport {
+        /// The import's module namespace.
+        module: String,
+        /// The imported symbol.
+        name: String,
+    },
+    /// Registration: a required ABI v1 export (`swath_udf_abi`,
+    /// `swath_udf_output_planes`, `swath_udf_alloc`, `swath_udf_run`, or
+    /// the linear `memory`) is absent or has the wrong signature.
+    #[error("module export `{export}` missing or mis-typed: {detail}")]
+    MissingExport {
+        /// The export that failed the check.
+        export: String,
+        /// What was found instead.
+        detail: String,
+    },
+    /// Registration: `swath_udf_abi` answered something other than `1`
+    /// (`docs/udf-abi/v1.md`: the next incompatible contract is a new
+    /// version, never a silent blend).
+    #[error("module speaks UDF ABI {got}, this host speaks 1")]
+    UnsupportedAbiVersion {
+        /// The version the module claimed.
+        got: i32,
+    },
+    /// Tile path: the stage names a module hash the executor has not
+    /// compiled. Compilation happens at the publish/preview motion, never
+    /// the tile path — an unknown hash is refused, not compiled inline.
+    #[error("module `{code_hash}` is not registered with this executor")]
+    UnknownModule {
+        /// The hash the plan asked for.
+        code_hash: String,
+    },
+    /// Tile path: the input planes cannot be encoded as an ABI v1
+    /// request (no planes, zero dimensions, mismatched plane shapes, or
+    /// a request too large for the wire). Host-side and unreachable
+    /// through a validated plan — kept loud rather than panicking.
+    #[error("input planes cannot form a v1 request: {detail}")]
+    InvalidRequest {
+        /// Which precondition failed.
+        detail: String,
+    },
+    /// The deterministic fuel budget — ADR 0018's primary bound — ran
+    /// out. Reproducible: identical inputs consume identical fuel, so
+    /// this either always trips for a given tile or never does.
+    #[error("UDF exhausted its fuel budget of {budget}")]
+    FuelExhausted {
+        /// The budget the call was given.
+        budget: u64,
+    },
+    /// The wall-clock epoch deadline — the backstop that keeps ADR
+    /// 0012's inline-render posture alive under a pathological module —
+    /// interrupted the call.
+    #[error("UDF exceeded the {deadline_ms} ms epoch deadline")]
+    EpochDeadline {
+        /// The deadline, in milliseconds.
+        deadline_ms: u64,
+    },
+    /// The 64 MiB per-instance memory cap (ADR 0018): the module
+    /// declares more than the cap, instantiation failed, or the guest
+    /// could not allocate the request buffer (`swath_udf_alloc` answered
+    /// `0` — growth past the cap is denied, so allocation failure is the
+    /// shape a memory overrun takes inside a conforming guest).
+    #[error("UDF memory limit: {detail}")]
+    MemoryLimit {
+        /// Which allocation failed, and how.
+        detail: String,
+    },
+    /// The module trapped for any reason other than fuel or the epoch
+    /// deadline (unreachable, out-of-bounds access, stack overflow, a
+    /// guest panic — the guest kit's panic handler traps deliberately).
+    #[error("UDF trapped: {detail}")]
+    Trap {
+        /// The runtime's trap description.
+        detail: String,
+    },
+    /// The guest declared failure: `swath_udf_run` answered `0` (the
+    /// ABI's own error signal — e.g. the module refuses the input
+    /// arity, or the UDF itself returned an error).
+    #[error("module `{code_hash}` declared failure (swath_udf_run answered 0)")]
+    GuestFailure {
+        /// The module that refused.
+        code_hash: String,
+    },
+    /// The guest's answer violated the ABI framing: an out-of-bounds
+    /// allocation or response pointer, or a response buffer that does
+    /// not decode as a v1 response. Always a typed error, never UB —
+    /// every guest byte is bounds-checked and strictly parsed.
+    #[error("malformed UDF response: {detail}")]
+    MalformedOutput {
+        /// What failed to parse or bounds-check.
+        detail: String,
+    },
+    /// The response header's plane count disagrees with the stage's
+    /// pinned `swath_udf_output_planes` answer.
+    #[error("UDF answered {actual} output planes, stage pins {declared}")]
+    OutputPlanes {
+        /// Planes the stage declares (pinned at registration).
+        declared: u32,
+        /// Planes the response header claimed.
+        actual: u32,
     },
 }
 

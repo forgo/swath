@@ -1,7 +1,7 @@
 # SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
 [package]
 name = "swath-udf-wasmtime"
-description = "run_udf executor adapter: sandboxed, deterministic WASM per ADR 0018 — zero-import modules, NaN canonicalization, fuel + epoch bounds, pooled instantiation. #200 lands the engine configuration and the supply-chain gate; execution wiring arrives with #203."
+description = "run_udf executor adapter: sandboxed, deterministic WASM per ADR 0018 — zero-import modules, NaN canonicalization, fuel + epoch bounds, pooled instantiation behind the swath-render UdfExecutor port."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,16 +11,27 @@ authors.workspace = true
 publish = false
 
 [dependencies]
+# Content-addressed module identity (ADR 0018): the compile LRU is keyed
+# by lowercase sha256 hex of the module bytes — the same hash discipline
+# the tile cache key uses. Already licensed/vetted in the tree.
+sha2 = { workspace = true }
+# The UdfExecutor port this adapter implements (#201/#203). The dependency
+# points this way only: swath-render never names wasmtime.
+swath-render = { path = "../../swath-render", version = "0.1.0-alpha.1" }
+# The guest kit's encode/decode halves ARE the host's wire code: requests
+# are built and responses parsed by the same strict codec UDF authors
+# round-trip against, so host and guest can never drift apart silently.
+swath-udf-guest = { path = "../../swath-udf-guest", version = "0.1.0-alpha.1" }
 thiserror = { workspace = true }
 # The ONLY crate in the workspace allowed to name this dependency
 # (ADR 0018; the referencer's wasmtime-free guard pins the isolation).
 wasmtime = { workspace = true }
 
 [dev-dependencies]
-# The guest kit's encode/decode halves build the fixture tests' request
-# buffers and read their responses — the same code UDF authors round-trip
-# against, so host and guest can never drift apart silently.
-swath-udf-guest = { path = "../../swath-udf-guest", version = "0.1.0-alpha.1" }
+insta = { workspace = true }
+proptest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true
