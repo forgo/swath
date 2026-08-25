@@ -136,7 +136,7 @@ sources (that is §2), no cross-granule pixels, no state between requests. Tempo
 compile into the product's granule-resolution *window* — frame selection per ADR 0015, never
 how pixels combine. Products needing more are the reopen territory of ADR 0013.
 
-_Last verified against sources `0d7b4874aa0b`._
+_Last verified against sources `cdfbc457b1a0`._
 
 ## 4. A new colormap
 

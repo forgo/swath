@@ -1,0 +1,55 @@
+---
+source: crates/swath-api/tests/openeo_udf.rs
+expression: shapes
+---
+{
+  "module does not compile": {
+    "status": 400,
+    "error": {
+      "code": "ProcessParameterInvalid",
+      "message": "node `udf` (run_udf): invalid argument `udf`: module rejected at registration: module does not compile: failed to parse WebAssembly module"
+    }
+  },
+  "module refuses the input arity": {
+    "status": 400,
+    "error": {
+      "code": "ProcessParameterInvalid",
+      "message": "node `udf` (run_udf): invalid argument `udf`: module rejected at registration: module answers 0 output planes for 3 input planes"
+    }
+  },
+  "unsupported runtime": {
+    "status": 400,
+    "error": {
+      "code": "ProcessParameterInvalid",
+      "message": "node `udf` (run_udf): invalid argument `runtime`: only the \"wasm\" runtime is supported (InvalidRuntime), got \"Python\""
+    }
+  },
+  "udf argument in no supported form": {
+    "status": 400,
+    "error": {
+      "code": "ProcessParameterInvalid",
+      "message": "node `udf` (run_udf): invalid argument `udf`: expected `data:application/wasm;base64,…` or an absolute http(s) URL, got `udf.py`"
+    }
+  },
+  "remote module unreachable": {
+    "status": 400,
+    "error": {
+      "code": "ProcessParameterInvalid",
+      "message": "node `udf` (run_udf): invalid argument `udf`: cannot fetch `https://udf.example.org/missing.wasm`: not found"
+    }
+  },
+  "inline module over the size limit": {
+    "status": 400,
+    "error": {
+      "code": "ProcessParameterInvalid",
+      "message": "node `udf` (run_udf): invalid argument `udf`: inline module is over the 8388608-byte limit (11184816 base64 characters)"
+    }
+  },
+  "run_udf on a deployment without UDF wiring": {
+    "status": 400,
+    "error": {
+      "code": "ProcessUnsupported",
+      "message": "node `udf`: run_udf is not available — this deployment wires no UDF executor or module store (ADR 0018)"
+    }
+  }
+}

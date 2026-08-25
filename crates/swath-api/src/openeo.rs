@@ -65,6 +65,16 @@
 //! - Service ids are content-derived (`xyz-` + a hash of the process
 //!   graph): re-POSTing an identical graph updates the same service
 //!   rather than minting a duplicate — creation is idempotent.
+//! - **`run_udf`** (ADR 0018, #204) is offered only where the deployment
+//!   wires a [`UdfPublish`] (executor + module store + fetcher): the
+//!   process list includes it exactly then, and the compile motion
+//!   registers the module, fetches a remote `udf` URL **once**, and
+//!   persists the bytes by content hash in the module store before the
+//!   service is published. Rehydration resolves the hash from the store
+//!   and never fetches (see [`crate::udf`]). Rejected modules are
+//!   `ProcessParameterInvalid` naming the node and the `udf` argument;
+//!   without the wiring, `run_udf` is `ProcessUnsupported` — the same
+//!   answer as any process outside the served list.
 
 use std::sync::Arc;
 
@@ -88,6 +98,7 @@ use swath_render::{
 };
 
 use crate::provider::{CatalogLayer, CatalogLayers};
+use crate::udf::{UdfModules, UdfPublish};
 
 /// The openEO API version this surface implements against (the pinned
 /// spec under `tests/data/openeo/`, ADR 0010).
@@ -105,6 +116,14 @@ const TILE_SIZES: [u32; 2] = [256, 512];
 
 /// Side length of the preview render (ADR 0014): one classic tile.
 const PREVIEW_TILE_SIZE: u32 = 256;
+
+/// Request-body limit on the graph-accepting routes (`POST /services`,
+/// `POST /result`): an inline `run_udf` module is at most 8 MiB of WASM
+/// (`swath_core::udf::MODULE_MAX_BYTES`), which base64 inflates by 4/3
+/// — so a valid graph can be ~11.2 MiB, over axum's 2 MiB default. 16
+/// MiB admits every module the compiler could accept and refuses the
+/// rest at the transport (413) before any parsing.
+const GRAPH_BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 
 /// The preview budget's default `max_estimated_live_bytes` ceiling
 /// (ADR 0014: "strict budget, refusal over degradation"). A documented
@@ -194,17 +213,23 @@ impl IntoResponse for OpenEoError {
 impl From<CompileError> for OpenEoError {
     fn from(err: CompileError) -> Self {
         let (status, code) = match &err {
-            CompileError::UnsupportedProcess { .. } => {
+            // `run_udf` where nothing is wired is exactly a process this
+            // deployment does not offer (its process list omits it too).
+            CompileError::UnsupportedProcess { .. } | CompileError::UdfUnavailable { .. } => {
                 (StatusCode::BAD_REQUEST, "ProcessUnsupported")
             }
             CompileError::UnknownCollection { .. } => (StatusCode::NOT_FOUND, "CollectionNotFound"),
             CompileError::MissingArgument { .. } => {
                 (StatusCode::BAD_REQUEST, "ProcessParameterRequired")
             }
+            // A rejected or mis-typed module is a bad `udf` parameter on
+            // the named node.
             CompileError::InvalidArgument { .. }
             | CompileError::UnknownBand { .. }
             | CompileError::EmptyTemporalWindow { .. }
-            | CompileError::DimensionNotAvailable { .. } => {
+            | CompileError::DimensionNotAvailable { .. }
+            | CompileError::UdfModule { .. }
+            | CompileError::UdfOutputPlanes { .. } => {
                 (StatusCode::BAD_REQUEST, "ProcessParameterInvalid")
             }
             _ => (StatusCode::BAD_REQUEST, "ProcessGraphInvalid"),
@@ -228,6 +253,9 @@ pub struct OpenEoState<S, R, C> {
     /// The preview budget's `max_estimated_live_bytes` ceiling
     /// ([`PREVIEW_MAX_ESTIMATED_LIVE_BYTES`] unless overridden).
     preview_ceiling: u64,
+    /// The `run_udf` publish wiring (ADR 0018, #204); `None` = the
+    /// process is not offered here.
+    udf: Option<UdfPublish>,
 }
 
 impl<S, R, C> OpenEoState<S, R, C> {
@@ -250,7 +278,18 @@ impl<S, R, C> OpenEoState<S, R, C> {
             reproject,
             base_url,
             preview_ceiling: PREVIEW_MAX_ESTIMATED_LIVE_BYTES,
+            udf: None,
         }
+    }
+
+    /// Enables `run_udf` on this surface (ADR 0018, #204): graphs compile
+    /// their module through `udf`'s registrar, remote modules are fetched
+    /// once through its fetcher, and published modules persist in its
+    /// store. `GET /processes` lists `run_udf` exactly when this is set.
+    #[must_use]
+    pub fn with_udf(mut self, udf: UdfPublish) -> Self {
+        self.udf = Some(udf);
+        self
     }
 
     /// Overrides the preview budget's byte ceiling — a calibration seam
@@ -277,6 +316,7 @@ where
             "/services/{service_id}",
             axum::routing::delete(delete_service),
         )
+        .layer(axum::extract::DefaultBodyLimit::max(GRAPH_BODY_LIMIT_BYTES))
         .with_state(Arc::clone(&state));
     writes.merge(openeo_read_router(state))
 }
@@ -303,6 +343,7 @@ where
         .route("/service_types", get(service_types))
         .route("/services", get(list_services))
         .route("/services/{service_id}", get(describe_service))
+        .layer(axum::extract::DefaultBodyLimit::max(GRAPH_BODY_LIMIT_BYTES))
         .with_state(state)
 }
 
@@ -535,11 +576,25 @@ const PROCESS_DEFINITIONS: &[(&str, &str)] = &[
         "only `dimension: \"bands\"` is supported.",
     ),
     (
+        include_str!("../data/openeo-processes/run_udf.json"),
+        "runs a sandboxed WASM module per tile (ADR 0018) over the loaded cube, one request \
+         plane per loaded band in load order, producing 1 (gray) or 3 (RGB) output planes; \
+         `runtime` must be \"wasm\" and `version` omitted, null, or \"1\"; `udf` is either \
+         `data:application/wasm;base64,…` (at most 8 MiB) or an absolute http(s) URL fetched \
+         exactly once when the graph is submitted — the module is thereafter addressed by \
+         its content hash, so a changed remote never changes a published service; `context` \
+         passes through to the module verbatim; the module must import nothing and export \
+         the Swath UDF ABI v1 symbols (docs/udf-abi/v1.md); one `run_udf` per graph, over a \
+         loaded (unreduced, unscaled) cube; its result accepts only `linear_scale_range` and \
+         a colormap-less `save_result`. Listed only where this deployment wires a UDF \
+         executor and module store.",
+    ),
+    (
         include_str!("../data/openeo-processes/save_result.json"),
         "`format` must be \"png\" (case-insensitive); `options` accepts exactly one optional \
          key, `colormap` (\"grayscale\" | \"viridis\" | \"magma\" | \"rdylgn\"), the palette \
-         applied to a gray result (rejected on a multi-band composite; absent, gray results \
-         default to \"grayscale\"); must be the graph's result node.",
+         applied to a gray result (rejected on a multi-band composite or a run_udf result; \
+         absent, gray results default to \"grayscale\"); must be the graph's result node.",
     ),
     (
         include_str!("../data/openeo-processes/subtract.json"),
@@ -548,8 +603,9 @@ const PROCESS_DEFINITIONS: &[(&str, &str)] = &[
 ];
 
 /// The served process list, built once: pinned definitions with the
-/// narrowing note appended.
-fn process_list() -> &'static Vec<Value> {
+/// narrowing note appended. `run_udf` is included only when `udf` is
+/// wired — the list states what this deployment offers.
+fn process_list(udf: bool) -> Vec<&'static Value> {
     static LIST: std::sync::OnceLock<Vec<Value>> = std::sync::OnceLock::new();
     LIST.get_or_init(|| {
         PROCESS_DEFINITIONS
@@ -565,11 +621,14 @@ fn process_list() -> &'static Vec<Value> {
             })
             .collect()
     })
+    .iter()
+    .filter(|doc| udf || doc["id"] != "run_udf")
+    .collect()
 }
 
 async fn processes<S, R, C>(State(app): State<Arc<OpenEoState<S, R, C>>>) -> Json<Value> {
     Json(json!({
-        "processes": process_list(),
+        "processes": process_list(app.udf.is_some()),
         "links": [{
             "rel": "self",
             "href": format!("{base}/processes", base = app.base_url),
@@ -733,7 +792,11 @@ fn compile_context(dataset: &Dataset) -> CompileContext {
 /// Compiles a persisted service layer (one carrying its authoring
 /// `process`) back into the servable [`CatalogLayer`] template — the
 /// single lowering both `POST /services` and serve-time rehydration use,
-/// so a restarted server serves exactly what was published.
+/// so a restarted server serves exactly what was published. `udf` is the
+/// graph's `run_udf` inputs ([`UdfPublish::rehydrate`] at startup —
+/// resolved from the module store by hash, never fetched; `None` where
+/// no UDF support is wired, which makes a `run_udf` graph
+/// [`CompileError::UdfUnavailable`]).
 ///
 /// # Errors
 ///
@@ -743,6 +806,7 @@ fn compile_context(dataset: &Dataset) -> CompileContext {
 pub fn compile_service_layer(
     dataset: &Dataset,
     layer: &DomainLayer,
+    udf: Option<&UdfModules>,
 ) -> Result<CatalogLayer, CompileError> {
     let graph = layer
         .process
@@ -753,7 +817,11 @@ pub fn compile_service_layer(
                 id = layer.id
             ),
         })?;
-    let product = compile(graph, &compile_context(dataset))?;
+    let ctx = match udf {
+        Some(udf) => udf.apply(compile_context(dataset)),
+        None => compile_context(dataset),
+    };
+    let product = compile(graph, &ctx)?;
     Ok(CatalogLayer {
         id: layer.id.clone(),
         title: layer.title.clone(),
@@ -901,17 +969,29 @@ async fn graph_dataset<S, R, C: Catalog>(
 /// constructor, and derives the servable [`CatalogLayer`] template from
 /// the persisted form — exactly the `POST /services` motion, shared with
 /// `POST /result` so a preview renders precisely what publishing the
-/// same graph would serve.
-fn lower_graph(
+/// same graph would serve. A `run_udf` graph resolves its remote module
+/// **once**, here (ADR 0018, #204); the module bytes come back for the
+/// publish path to persist (a preview persists nothing).
+async fn lower_graph(
+    udf: Option<&UdfPublish>,
     dataset: &Dataset,
     process: &Value,
     id: String,
     title: Option<String>,
     description: Option<String>,
     tile_size: u32,
-) -> Result<(DomainLayer, CatalogLayer), OpenEoError> {
+) -> Result<(DomainLayer, CatalogLayer, Option<Vec<u8>>), OpenEoError> {
+    // The compile motion's UDF inputs: remote modules fetched now, once.
+    let modules = match udf {
+        Some(udf) => Some(udf.resolve(process).await?),
+        None => None,
+    };
+    let ctx = match &modules {
+        Some(modules) => modules.apply(compile_context(dataset)),
+        None => compile_context(dataset),
+    };
     // Validate: the whole #32 compiler, against the collection's bands.
-    let product = compile(process, &compile_context(dataset))?;
+    let product = compile(process, &ctx)?;
 
     // Lower the compiled product to the persisted layer vocabulary: the
     // single #95 constructor derives the metadata from the same spec the
@@ -930,9 +1010,9 @@ fn lower_graph(
     };
     // One lowering for the live insert, every future rehydration, and
     // the preview render.
-    let template = compile_service_layer(dataset, &layer)
+    let template = compile_service_layer(dataset, &layer, modules.as_ref())
         .map_err(|err| OpenEoError::internal(format!("service template compile failed: {err}")))?;
-    Ok((layer, template))
+    Ok((layer, template, product.udf_module))
 }
 
 /// `POST /services` — the authoring loop in one motion (R3, ADR 0010):
@@ -948,14 +1028,30 @@ async fn create_service<S, R, C: Catalog>(
     let mut dataset = graph_dataset(&app, &request.process).await?;
 
     let id = service_id(&request.process);
-    let (layer, template) = lower_graph(
+    let (layer, template, module) = lower_graph(
+        app.udf.as_ref(),
         &dataset,
         &request.process,
         id.clone(),
         request.title,
         request.description,
         request.tile_size,
-    )?;
+    )
+    .await?;
+
+    // The module persists by content hash BEFORE the service does: a
+    // published `PlanKind::Udf { code_hash }` must always resolve
+    // (ADR 0018, #204). Idempotent — re-publishing the same bytes is a
+    // no-op put.
+    if let (Some(udf), Some(bytes)) = (app.udf.as_ref(), module.as_deref()) {
+        let stored = udf.persist(bytes).await.map_err(|err| {
+            OpenEoError::internal(format!("persisting the UDF module failed: {err}"))
+        })?;
+        debug_assert!(
+            matches!(&layer.plan, swath_core::catalog::PlanKind::Udf { code_hash } if *code_hash == stored),
+            "the store and the compiler disagree on the module's content hash"
+        );
+    }
 
     // Persist on the dataset (replace-or-append: identical graph, same id
     // — idempotent), then make it servable.
@@ -1046,14 +1142,16 @@ where
     // `POST /services`, so the preview pixels are exactly what
     // publishing this graph would serve. The template stays ephemeral —
     // never persisted, never inserted into the provider.
-    let (_, mut template) = lower_graph(
+    let (_, mut template, _) = lower_graph(
+        app.udf.as_ref(),
         &dataset,
         &process,
         "preview".to_owned(),
         None,
         None,
         PREVIEW_TILE_SIZE,
-    )?;
+    )
+    .await?;
     template.budget = Budget {
         max_estimated_live_bytes: Some(app.preview_ceiling),
         ..Budget::default()
@@ -1413,7 +1511,7 @@ mod tests {
                 process: Some(graph),
             };
             let template =
-                compile_service_layer(&dataset, &layer).expect("persisted layer recompiles");
+                compile_service_layer(&dataset, &layer, None).expect("persisted layer recompiles");
             assert_eq!(
                 template.plan, product.plan,
                 "{name}: rehydrated plan must equal the originally compiled plan"

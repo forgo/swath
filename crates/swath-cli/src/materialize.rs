@@ -120,6 +120,7 @@ pub(crate) fn run(args: &MaterializeArgs) -> Result<(), MaterializeCliError> {
         catalog: None,
         watch_dir: None,
         cache: None,
+        udf_store: None,
         overview_oversample: None,
         max_estimated_live_bytes: None,
         cors_allowed_origins: Vec::new(),

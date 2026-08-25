@@ -12,9 +12,9 @@ publish = false
 
 [dependencies]
 # Content-addressed module identity (ADR 0018): the compile LRU is keyed
-# by lowercase sha256 hex of the module bytes — the same hash discipline
-# the tile cache key uses. Already licensed/vetted in the tree.
-sha2 = { workspace = true }
+# by `swath_core::udf::code_hash` — the ONE hash function the module
+# store, the persisted layer, and this LRU all agree on (#204).
+swath-core = { path = "../../swath-core", version = "0.1.0-alpha.1" }
 # The UdfExecutor port this adapter implements (#201/#203). The dependency
 # points this way only: swath-render never names wasmtime.
 swath-render = { path = "../../swath-render", version = "0.1.0-alpha.1" }

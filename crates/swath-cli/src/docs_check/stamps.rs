@@ -86,6 +86,7 @@ const SECTIONS: [(&str, &[Section]); 2] = [
                     "crates/swath-core/src/cache.rs",
                     "crates/swath-core/src/events.rs",
                     "crates/swath-core/src/ingest.rs",
+                    "crates/swath-core/src/udf.rs",
                     "crates/swath-planner/src/lib.rs",
                     "crates/swath-render/src/process.rs",
                     "crates/swath-render/src/tiler.rs",

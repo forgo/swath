@@ -397,7 +397,7 @@ fn unsupported_and_unknown_error_displays_are_pinned() {
                 "result": true
             }
         }))),
-        @"node `blur`: unsupported process `apply_kernel` — the supported subset is: load_collection, filter_temporal, reduce_dimension, array_element, add, subtract, multiply, divide, linear_scale_range, ndvi, save_result"
+        @"node `blur`: unsupported process `apply_kernel` — the supported subset is: load_collection, filter_temporal, reduce_dimension, array_element, add, subtract, multiply, divide, linear_scale_range, ndvi, run_udf, save_result"
     );
     // UnknownCollection.
     let mut wrong_collection = load_node();
@@ -911,4 +911,308 @@ fn temporal_window_errors_are_pinned() {
         err(&filtered_graph(json!(null), json!({}))),
         @"node `filter` (filter_temporal): missing required argument `extent`"
     );
+}
+
+// --- run_udf (ADR 0018, #204): the compiler + registrar seam ------------
+
+mod udf {
+    use std::sync::{Arc, Mutex};
+
+    use base64::Engine as _;
+    use serde_json::{Value as Json, json};
+    use swath_core::udf::code_hash;
+    use swath_render::ir::PixelOp;
+    use swath_render::{
+        CompileContext, CompileError, PlanSpec, UdfError, UdfRegistrar, UdfRegistration, UdfStage,
+    };
+
+    use super::{err, hls_ctx, param, param_names, process_def};
+
+    /// A registrar double: hashes like the real one, answers a fixed
+    /// output arity (or a fixed refusal), and records every call.
+    struct FakeRegistrar {
+        answer: Result<u32, UdfError>,
+        calls: Mutex<Vec<(String, u32)>>,
+    }
+
+    impl FakeRegistrar {
+        fn planes(output_planes: u32) -> Arc<Self> {
+            Arc::new(Self {
+                answer: Ok(output_planes),
+                calls: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn refusing(err: UdfError) -> Arc<Self> {
+            Arc::new(Self {
+                answer: Err(err),
+                calls: Mutex::new(Vec::new()),
+            })
+        }
+    }
+
+    impl UdfRegistrar for FakeRegistrar {
+        fn register(&self, bytes: &[u8], input_planes: u32) -> Result<UdfRegistration, UdfError> {
+            let hash = code_hash(bytes);
+            self.calls
+                .lock()
+                .unwrap()
+                .push((hash.clone(), input_planes));
+            self.answer
+                .clone()
+                .map(|planes| UdfRegistration::new(hash, planes))
+        }
+    }
+
+    /// Stand-in module bytes (the compiler never parses them; the
+    /// registrar double accepts anything).
+    const MODULE: &[u8] = b"\0asm\x01\0\0\0 not really";
+
+    fn data_url(bytes: &[u8]) -> String {
+        format!(
+            "data:application/wasm;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )
+    }
+
+    fn ctx(registrar: &Arc<FakeRegistrar>) -> CompileContext {
+        hls_ctx().with_udf_registrar(Arc::clone(registrar) as Arc<dyn UdfRegistrar>)
+    }
+
+    /// `load(b8a, b04)` → `run_udf` (with `extra` merged in) → scale → save.
+    fn udf_graph(udf: &str, extra: &Json) -> Json {
+        let mut arguments = json!({
+            "data": { "from_node": "load" },
+            "udf": udf,
+            "runtime": "wasm",
+            "version": "1",
+        });
+        for (key, value) in extra.as_object().expect("object") {
+            arguments[key] = value.clone();
+        }
+        json!({ "process_graph": {
+            "load": { "process_id": "load_collection", "arguments": {
+                "id": "hls-s30", "bands": ["b8a", "b04"],
+            }},
+            "udf": { "process_id": "run_udf", "arguments": arguments },
+            "scale": { "process_id": "linear_scale_range", "arguments": {
+                "x": { "from_node": "udf" },
+                "inputMin": -1, "inputMax": 1, "outputMin": 0, "outputMax": 255,
+            }},
+            "save": { "process_id": "save_result", "arguments": {
+                "data": { "from_node": "scale" }, "format": "png",
+            }, "result": true },
+        }})
+    }
+
+    #[test]
+    fn inline_module_compiles_to_the_udf_plan_and_carries_the_bytes_out() {
+        let registrar = FakeRegistrar::planes(1);
+        let graph = udf_graph(&data_url(MODULE), &json!({ "context": { "scale": 2 } }));
+        let product = swath_render::compile(&graph, &ctx(&registrar)).expect("compiles");
+        let stage = UdfStage::new(code_hash(MODULE), 1, json!({ "scale": 2 }));
+        assert_eq!(
+            product.spec,
+            PlanSpec::Udf {
+                bands: vec!["b8a".into(), "b04".into()],
+                stage: stage.clone(),
+                rescale: Some((-1.0, 1.0)),
+            }
+        );
+        assert_eq!(
+            product.plan.ops,
+            [
+                PixelOp::Udf(stage),
+                PixelOp::Rescale {
+                    min: -1.0,
+                    max: 1.0
+                }
+            ]
+        );
+        assert_eq!(product.bands, ["b8a", "b04"]);
+        assert_eq!(product.udf_module.as_deref(), Some(MODULE));
+        // Registered exactly once, against the plan's input arity.
+        assert_eq!(*registrar.calls.lock().unwrap(), [(code_hash(MODULE), 2)]);
+        // The IR shape a published UDF service persists: hash, arity,
+        // params — never bytes.
+        insta::assert_json_snapshot!("run_udf_plan_json_shape", product.plan);
+    }
+
+    #[test]
+    fn context_defaults_to_null_and_version_may_be_omitted_or_null() {
+        let registrar = FakeRegistrar::planes(3);
+        for version in [json!({}), json!({ "version": null })] {
+            let product =
+                swath_render::compile(&udf_graph(&data_url(MODULE), &version), &ctx(&registrar))
+                    .expect("compiles");
+            let PlanSpec::Udf { stage, .. } = &product.spec else {
+                panic!("udf spec");
+            };
+            assert_eq!(stage.params, Json::Null);
+            assert_eq!(stage.output_planes, 3);
+        }
+    }
+
+    #[test]
+    fn duplicate_loaded_bands_register_the_deduplicated_arity() {
+        let registrar = FakeRegistrar::planes(1);
+        let mut graph = udf_graph(&data_url(MODULE), &json!({}));
+        graph["process_graph"]["load"]["arguments"]["bands"] = json!(["b8a", "b04", "b8a"]);
+        let product = swath_render::compile(&graph, &ctx(&registrar)).expect("compiles");
+        assert_eq!(product.bands, ["b8a", "b04"]);
+        assert_eq!(*registrar.calls.lock().unwrap(), [(code_hash(MODULE), 2)]);
+    }
+
+    /// Remote modules are never fetched by the compiler: the caller hands
+    /// the bytes in under the exact URL, or the node fails.
+    #[test]
+    fn remote_modules_come_from_the_context_never_from_the_network() {
+        let registrar = FakeRegistrar::planes(1);
+        let url = "https://udf.example/ndvi.wasm";
+        let graph = udf_graph(url, &json!({}));
+        let product = swath_render::compile(
+            &graph,
+            &ctx(&registrar).with_udf_module(url, MODULE.to_vec()),
+        )
+        .expect("compiles");
+        assert_eq!(product.udf_module.as_deref(), Some(MODULE));
+        let PlanSpec::Udf { stage, .. } = &product.spec else {
+            panic!("udf spec");
+        };
+        assert_eq!(stage.code_hash, code_hash(MODULE));
+        insta::assert_snapshot!(
+            swath_render::compile(&graph, &ctx(&registrar)).expect_err("not fetched"),
+            @"node `udf` (run_udf): invalid argument `udf`: remote module `https://udf.example/ndvi.wasm` was not fetched for this compile motion"
+        );
+    }
+
+    #[test]
+    fn without_a_registrar_run_udf_is_unavailable() {
+        insta::assert_snapshot!(
+            err(&udf_graph(&data_url(MODULE), &json!({}))),
+            @"node `udf`: run_udf is not available — this deployment wires no UDF executor or module store (ADR 0018)"
+        );
+    }
+
+    #[test]
+    fn argument_error_displays_are_pinned() {
+        let registrar = FakeRegistrar::planes(1);
+        let fail = |graph: &Json| -> CompileError {
+            swath_render::compile(graph, &ctx(&registrar)).expect_err("must not compile")
+        };
+        insta::assert_snapshot!(
+            fail(&udf_graph(&data_url(MODULE), &json!({ "runtime": "Python" }))),
+            @r#"node `udf` (run_udf): invalid argument `runtime`: only the "wasm" runtime is supported (InvalidRuntime), got "Python""#
+        );
+        insta::assert_snapshot!(
+            fail(&udf_graph(&data_url(MODULE), &json!({ "version": "2" }))),
+            @r#"node `udf` (run_udf): invalid argument `version`: the wasm runtime speaks version "1" only (InvalidVersion), got "2""#
+        );
+        insta::assert_snapshot!(
+            fail(&udf_graph("udf.py", &json!({}))),
+            @"node `udf` (run_udf): invalid argument `udf`: expected `data:application/wasm;base64,…` or an absolute http(s) URL, got `udf.py`"
+        );
+        insta::assert_snapshot!(
+            fail(&udf_graph("data:application/wasm;base64,!!!", &json!({}))),
+            @"node `udf` (run_udf): invalid argument `udf`: inline module is not valid base64: Invalid symbol 33, offset 0."
+        );
+        let mut missing = udf_graph(&data_url(MODULE), &json!({}));
+        missing["process_graph"]["udf"]["arguments"]
+            .as_object_mut()
+            .unwrap()
+            .remove("udf");
+        insta::assert_snapshot!(
+            fail(&missing),
+            @"node `udf` (run_udf): missing required argument `udf`"
+        );
+        // The registrar refusing the bytes: the port's typed reason,
+        // naming the node and the parameter.
+        let refusing = FakeRegistrar::refusing(UdfError::ForbiddenImport {
+            module: "wasi_snapshot_preview1".into(),
+            name: "fd_write".into(),
+        });
+        insta::assert_snapshot!(
+            swath_render::compile(&udf_graph(&data_url(MODULE), &json!({})), &ctx(&refusing))
+                .expect_err("rejected"),
+            @"node `udf` (run_udf): invalid argument `udf`: module rejected at registration: module imports `wasi_snapshot_preview1`.`fd_write`: zero-import rule (ADR 0018)"
+        );
+        // An arity the IR cannot render.
+        let two = FakeRegistrar::planes(2);
+        insta::assert_snapshot!(
+            swath_render::compile(&udf_graph(&data_url(MODULE), &json!({})), &ctx(&two))
+                .expect_err("rejected"),
+            @"node `udf` (run_udf): invalid argument `udf`: module declares 2 output planes for 2 input bands; v1 renders 1 (gray) or 3 (RGB)"
+        );
+    }
+
+    /// One `run_udf` per graph, over a loaded cube: its result feeds
+    /// nothing but `linear_scale_range` and `save_result`.
+    #[test]
+    fn udf_results_are_terminal_in_v1() {
+        let registrar = FakeRegistrar::planes(1);
+        let fail = |graph: &Json| -> CompileError {
+            swath_render::compile(graph, &ctx(&registrar)).expect_err("must not compile")
+        };
+        // A second run_udf over the first's result.
+        let mut chained = udf_graph(&data_url(MODULE), &json!({}));
+        chained["process_graph"]["udf2"] = json!({ "process_id": "run_udf", "arguments": {
+            "data": { "from_node": "udf" }, "udf": data_url(MODULE), "runtime": "wasm",
+        }});
+        chained["process_graph"]["scale"]["arguments"]["x"] = json!({ "from_node": "udf2" });
+        insta::assert_snapshot!(
+            fail(&chained),
+            @"node `udf2` (run_udf): type mismatch — expected a loaded (multi-band) data cube — v1 runs one run_udf per graph, after any reduction, got a UDF result data cube"
+        );
+        // ndvi over a UDF result.
+        let mut reduced = udf_graph(&data_url(MODULE), &json!({}));
+        reduced["process_graph"]["ndvi"] = json!({ "process_id": "ndvi", "arguments": {
+            "data": { "from_node": "udf" },
+        }});
+        reduced["process_graph"]["scale"]["arguments"]["x"] = json!({ "from_node": "ndvi" });
+        insta::assert_snapshot!(
+            fail(&reduced),
+            @"node `ndvi` (ndvi): type mismatch — expected a loaded (multi-band) data cube — v1 runs one run_udf per graph, after any reduction, got a UDF result data cube"
+        );
+        // run_udf over an already-reduced (gray) cube.
+        let mut over_gray = udf_graph(&data_url(MODULE), &json!({}));
+        over_gray["process_graph"]["ndvi"] = json!({ "process_id": "ndvi", "arguments": {
+            "data": { "from_node": "load" },
+        }});
+        over_gray["process_graph"]["udf"]["arguments"]["data"] = json!({ "from_node": "ndvi" });
+        insta::assert_snapshot!(
+            fail(&over_gray),
+            @"node `udf` (run_udf): type mismatch — expected a data cube with a bands dimension, got a gray (reduced) data cube"
+        );
+        // A colormap on a UDF result.
+        let mut mapped = udf_graph(&data_url(MODULE), &json!({}));
+        mapped["process_graph"]["save"]["arguments"]["options"] = json!({ "colormap": "viridis" });
+        insta::assert_snapshot!(
+            fail(&mapped),
+            @"node `save` (save_result): invalid argument `options`: a colormap cannot apply to a run_udf result in v1 — UDF output renders directly (1 plane gray, 3 planes RGB)"
+        );
+    }
+
+    /// The pinned openeo-processes 1.2.0 definition still says what the
+    /// compiler assumes: the parameter names, `version`'s null default
+    /// (= the runtime's default, which is "1" here), `context` optional,
+    /// and the two exceptions the diagnostics mirror.
+    #[test]
+    fn pinned_run_udf_definition_still_says_what_the_compiler_assumes() {
+        let def = process_def("run_udf");
+        assert_eq!(
+            param_names(&def),
+            ["data", "udf", "runtime", "version", "context"]
+        );
+        assert_eq!(param(&def, "version")["default"], Json::Null);
+        assert_eq!(param(&def, "version")["optional"], json!(true));
+        assert_eq!(param(&def, "context")["optional"], json!(true));
+        let exceptions = def["exceptions"].as_object().expect("exceptions");
+        assert!(exceptions.contains_key("InvalidRuntime"));
+        assert!(exceptions.contains_key("InvalidVersion"));
+        // The spec's `udf` schema offers an absolute URL form: the
+        // profile keeps it (plus `data:`), drops workspace paths and
+        // inline source code.
+        let udf_forms = param(&def, "udf")["schema"].as_array().expect("schemas");
+        assert!(udf_forms.iter().any(|s| s["pattern"] == "^https?://"));
+    }
 }

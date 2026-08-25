@@ -12,6 +12,7 @@ members = [
     "crates/adapters/swath-reproject-proj4rs",
     "crates/adapters/swath-source-cog",
     "crates/adapters/swath-icechunk",
+    "crates/adapters/swath-modulestore-objectstore",
     "crates/adapters/swath-source-virtual",
     "crates/adapters/swath-udf-wasmtime",
     "crates/swath-api",
@@ -97,6 +98,10 @@ sqlx = { version = "0.9.0", default-features = false, features = ["postgres", "r
 # it is SHA-256, never `DefaultHasher`. Pure computation — no I/O, keeps
 # the core runtime-free. Already licensed/vetted in the tree (MIT/Apache).
 sha2 = { version = "0.10.9" }
+# `run_udf`'s inline module form (`data:application/wasm;base64,…`, ADR
+# 0018 / #204) decodes in the process compiler. Already in the tree
+# transitively (reqwest/object_store); pure computation, MIT/Apache.
+base64 = { version = "0.22.1" }
 # Projection math is BIND, never build (ADR 0002): pure-Rust proj4 for the
 # common CRS set; PROJ C-bindings feature-gated later for the long tail.
 # Default features off: they only add binaries and multi-thread NAD-grid

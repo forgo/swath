@@ -130,6 +130,7 @@ mod registry;
 mod routes;
 mod temporal;
 pub mod traces;
+pub mod udf;
 pub mod ui;
 pub mod uploads;
 
@@ -146,5 +147,6 @@ pub use provider::{CatalogLayer, CatalogLayers, LayerIdentity, LayerProvider, Re
 pub use registry::{Layer, LayerRegistry};
 pub use routes::{ApiState, CONFORMANCE_CLASSES, TraceExtension, router};
 pub use traces::{TraceBus, TraceEvent};
+pub use udf::{RehydrateError, UdfModules, UdfPublish};
 pub use ui::UiAssets;
 pub use uploads::{UploadsState, uploads_router};

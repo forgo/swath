@@ -198,7 +198,9 @@ async fn processes_are_schema_valid_and_exactly_the_compiler_subset() {
         .map(|process| process["id"].as_str().expect("id"))
         .collect();
     // Exactly the subset the compiler's conformance statement declares
-    // (swath_render::process module docs), alphabetical.
+    // (swath_render::process module docs), alphabetical — minus
+    // `run_udf`, offered only where a UDF executor and module store are
+    // wired (openeo_udf.rs covers the wired list).
     assert_eq!(
         ids,
         [
@@ -251,7 +253,7 @@ fn runtime_process_definitions_match_the_pinned_oracle_copies() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 11, "all eleven supported definitions are served");
+    assert_eq!(checked, 12, "all twelve supported definitions are served");
 }
 
 // --- Service types ---

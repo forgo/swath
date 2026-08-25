@@ -37,9 +37,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use sha2::{Digest, Sha256};
+use swath_core::udf::code_hash;
 use swath_render::WarpedBuffer;
-use swath_render::udf::{UdfError, UdfExecutor, UdfStage};
+use swath_render::udf::{UdfError, UdfExecutor, UdfRegistrar, UdfRegistration, UdfStage};
 use swath_udf_guest::{AbiError, Plane, decode_response, encode_request};
 use wasmtime::{
     Config, Engine, ExternType, Instance, InstanceAllocationStrategy, Memory, Module,
@@ -228,7 +228,7 @@ impl WasmtimeUdf {
     /// [`UdfError::EpochDeadline`] if the version probe itself
     /// misbehaves.
     pub fn compile(&self, bytes: &[u8]) -> Result<String, UdfError> {
-        let code_hash = format!("{:x}", Sha256::digest(bytes));
+        let code_hash = code_hash(bytes);
         if self.lookup(&code_hash).is_some() {
             return Ok(code_hash);
         }
@@ -253,6 +253,41 @@ impl WasmtimeUdf {
         modules.insert(0, (code_hash.clone(), module));
         modules.truncate(MODULE_LRU_CAPACITY);
         Ok(code_hash)
+    }
+
+    /// The output-arity probe of the registration motion
+    /// (`docs/udf-abi/v1.md`): `swath_udf_output_planes(input_planes)` on
+    /// a compiled module, in a bounded store. `<= 0` is the module
+    /// refusing the arity — [`UdfError::UnsupportedArity`].
+    ///
+    /// # Errors
+    ///
+    /// [`UdfError::UnknownModule`] for an uncompiled hash,
+    /// [`UdfError::UnsupportedArity`] for a refusal, or the probe call's
+    /// own execution failure.
+    pub fn output_planes(&self, code_hash: &str, input_planes: u32) -> Result<u32, UdfError> {
+        let module = self
+            .lookup(code_hash)
+            .ok_or_else(|| UdfError::UnknownModule {
+                code_hash: code_hash.to_owned(),
+            })?;
+        let mut store = self.fresh_store();
+        let instance = instantiate(&mut store, &module)?;
+        let probe: TypedFunc<i32, i32> =
+            typed_export(&instance, &mut store, "swath_udf_output_planes")?;
+        let inputs = i32::try_from(input_planes).map_err(|_| UdfError::InvalidRequest {
+            detail: format!("{input_planes} input planes exceed the i32 wire limit"),
+        })?;
+        let got = probe
+            .call(&mut store, inputs)
+            .map_err(|err| self.map_call_error(&err))?;
+        u32::try_from(got)
+            .ok()
+            .filter(|planes| *planes > 0)
+            .ok_or(UdfError::UnsupportedArity {
+                input_planes,
+                output_planes: got,
+            })
     }
 
     /// Looks `code_hash` up in the LRU, marking it most recently used.
@@ -300,6 +335,17 @@ impl WasmtimeUdf {
                 detail: format!("{err:#}"),
             },
         }
+    }
+}
+
+/// The compile-motion port (#204): [`WasmtimeUdf::compile`] then the
+/// output-arity probe, so a module the compiler accepted is exactly a
+/// module this executor can run.
+impl UdfRegistrar for WasmtimeUdf {
+    fn register(&self, bytes: &[u8], input_planes: u32) -> Result<UdfRegistration, UdfError> {
+        let code_hash = self.compile(bytes)?;
+        let output_planes = self.output_planes(&code_hash, input_planes)?;
+        Ok(UdfRegistration::new(code_hash, output_planes))
     }
 }
 
