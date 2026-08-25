@@ -285,7 +285,13 @@ const DECISION_COLORS: Record<"live" | "overview" | "cache_hit", { border: strin
   };
 
 const OVERLAY_CSS = `
-.swath-xray { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
+/* No z-index, deliberately: the root must NOT form a stacking context.
+ * MapLibre's control corners sit at z-index 2, so badges (z auto) stay
+ * beneath the toggles — a badge under the x-ray button must never
+ * intercept its click — while the inspector (z 3) and feed (z 2) still
+ * compete at the host level and rise above them. The compare swipe's
+ * right map (issue #210) is kept underneath by DOM order instead. */
+.swath-xray { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 /* Per-side badge layers (issue #210): clipped to their side of the
  * compare handle; empty and unclipped while no compare is active. */
 .swath-xray-side { position: absolute; inset: 0; pointer-events: none; }

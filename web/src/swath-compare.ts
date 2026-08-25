@@ -115,7 +115,14 @@ export class CompareView {
       }
     });
 
-    host.append(this.#clip, this.#handle);
+    // Stacking by DOM order (no z-index anywhere on the clip): the right
+    // map goes IMMEDIATELY after the primary map's container, so it
+    // paints over the primary canvas and under whatever the host
+    // appended after that container — the x-ray overlay root above all,
+    // whichever of compare/x-ray was enabled first. The handle carries
+    // its own z-index and can go last.
+    primary.getContainer().after(this.#clip);
+    host.append(this.#handle);
     this.#applyFraction();
 
     this.#onPrimaryMove = () => this.#sync();

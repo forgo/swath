@@ -528,6 +528,94 @@ test("the toggle control mirrors and flips the xray attribute", async () => {
   expect(factory.opened[0]?.closed).toBe(true);
 });
 
+/** Two animation frames: the overlay's rAF-throttled paint has landed. */
+async function painted(): Promise<void> {
+  for (let i = 0; i < 2; i += 1) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+}
+
+/** The topmost element at the center of `target`'s box — the real
+ * hit-test a click performs, unlike `element.click()`. */
+function hitAt(target: Element): Element | null {
+  const box = target.getBoundingClientRect();
+  return document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+}
+
+// The stacking contract between the overlay, MapLibre's control corners,
+// and the compare swipe's right map (issue #210) — pinned by hit-testing
+// because CI found the regression: an overlay root with a z-index equal
+// to the control corners lifted badges OVER the x-ray toggle, and a badge
+// under the button swallowed its click (`subtree intercepts pointer
+// events`). Both enable orders, since the compare container and the
+// overlay root are inserted at different times.
+for (const order of ["compare first", "x-ray first"] as const) {
+  test(`controls stay clickable over badges, badges over the compare map (${order})`, async () => {
+    const factory = fakeFactory();
+    const el = mountMap(factory.create, order === "x-ray first");
+    if (order === "compare first") {
+      el.setAttribute("compare-layer", "ndvi");
+    }
+    await el.ready;
+    if (order === "compare first") {
+      el.setAttribute("xray", "");
+    } else {
+      el.setAttribute("compare-layer", "ndvi");
+    }
+
+    // DOM order IS the stacking order at z auto: primary container, then
+    // the compare clip right after it, then the overlay root.
+    const container = el.querySelector(".swath-map-container");
+    const compare = el.querySelector(".swath-map-compare");
+    const overlay = el.querySelector(".swath-xray");
+    expect(container?.nextElementSibling).toBe(compare);
+    expect(compare && overlay ? compare.compareDocumentPosition(overlay) : 0).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+
+    // Paint a badge over the control corner: at style zoom 2 (a 2048px
+    // world) the 320x240 view on 0,0 shows 256px z3 tiles, and tile
+    // 3/4/3 spans container x 160..320, y 0..120 — the top-right corner
+    // the controls live in. Tile 3/4/4 is the right half's lower
+    // quadrant: over the compare map, clear of every control. Both as
+    // RIGHT-side (ndvi) traces: the right badge layer is the one clipped
+    // to x >= 160, i.e. the one actually painted under the corner.
+    factory.opened[0]?.emit("trace", envelope("ndvi", "3/4/3"));
+    factory.opened[0]?.emit("trace", envelope("ndvi", "3/4/4"));
+    await painted();
+    const toggle = el.querySelector<HTMLButtonElement>(".swath-map-xray-toggle button");
+    if (!toggle) {
+      throw new Error("no x-ray toggle");
+    }
+    const badge = el.querySelector<HTMLElement>('.swath-xray-badge[data-key="right:ndvi/3/4/3"]');
+    expect(badge).not.toBeNull();
+    // A badge really does underlie the toggle...
+    const toggleBox = toggle.getBoundingClientRect();
+    const badgeBox = badge?.getBoundingClientRect();
+    expect(badgeBox && toggleBox.left < badgeBox.right && toggleBox.right > badgeBox.left).toBe(
+      true,
+    );
+    // ...and still the toggle wins the hit-test (the click lands).
+    const hit = hitAt(toggle);
+    expect(hit).toBe(toggle);
+    // A badge clear of the controls is hit over the compare map — the
+    // overlay paints above the right side, not under it.
+    const clear = el.querySelector<HTMLElement>('.swath-xray-badge[data-key="right:ndvi/3/4/4"]');
+    // (The tile box overhangs the 320x240 host, which the overlay clips —
+    // so probe the visible part: the badge's intersection with the host.)
+    const host = el.getBoundingClientRect();
+    const clearBox = clear?.getBoundingClientRect();
+    if (!clear || !clearBox) {
+      throw new Error("no clear badge");
+    }
+    const clearHit = document.elementFromPoint(
+      (Math.max(clearBox.left, host.left) + Math.min(clearBox.right, host.right)) / 2,
+      (Math.max(clearBox.top, host.top) + Math.min(clearBox.bottom, host.bottom)) / 2,
+    );
+    expect(clearHit?.closest(".swath-xray-badge")).toBe(clear);
+  });
+}
+
 // --- x-ray v1 (issue #42): why-view, bytes heatmap, live trace feed ---
 
 /** The pinned plan payload (swath-core `trace`/`planner`): an overview

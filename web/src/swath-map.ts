@@ -221,13 +221,17 @@ swath-map .swath-map-time input[type="range"] {
   accent-color: #4ade80;
 }
 swath-map .swath-map-time-label { white-space: nowrap; }
-/* The compare swipe (issue #210): the right-side map rides z-index 1 —
- * below MapLibre's control corners (z 2), the time slider (z 2), and
- * the x-ray overlay (z 2), so every control stays reachable over it. */
+/* The compare swipe (issue #210): the right-side map stacks by DOM
+ * ORDER, not z-index — CompareView inserts it immediately after the
+ * primary map container, so at z auto it paints over the primary canvas
+ * and under everything appended later (the x-ray overlay root), while
+ * MapLibre's control corners (z 2), the time slider (z 2), and the
+ * x-ray inspector (z 3) rise above it. A positive z-index here would
+ * force the overlay root to one too, which would lift badges over the
+ * control buttons and swallow their clicks (the CI-found regression). */
 swath-map .swath-map-compare {
   position: absolute;
   inset: 0;
-  z-index: 1;
   overflow: hidden;
   pointer-events: none;
 }
