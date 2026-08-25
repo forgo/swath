@@ -20,8 +20,38 @@ use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
 use tower::ServiceExt as _;
 
+pub(crate) mod wasm;
+
 /// Base URL the test app mints links under.
 pub(crate) const BASE_URL: &str = "http://localhost";
+
+/// The committed reference NDVI module (`examples/udf/ndvi`, the #205
+/// dual-implementation golden): 2 planes in, 1 out.
+pub(crate) const NDVI_WASM: &[u8] =
+    include_bytes!("../../../adapters/swath-udf-wasmtime/tests/fixtures/ndvi.wasm");
+
+/// A module fetcher serving nothing: for suites whose every module is
+/// inline.
+#[derive(Clone, Default)]
+pub(crate) struct NoFetch;
+
+impl swath_core::udf::ModuleFetcher for NoFetch {
+    async fn fetch(&self, url: &str) -> Result<Vec<u8>, swath_core::udf::ModuleFetchError> {
+        Err(swath_core::udf::ModuleFetchError::NotFound {
+            url: url.to_owned(),
+        })
+    }
+}
+
+/// `bytes` as the inline `data:application/wasm;base64,…` a `run_udf`
+/// node's `udf` argument accepts.
+pub(crate) fn wasm_data_url(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    format!(
+        "data:application/wasm;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
+}
 
 /// The committed HLS fixture directory (tests/fixtures/README.md, ADR 0004).
 pub(crate) fn fixtures_dir() -> PathBuf {

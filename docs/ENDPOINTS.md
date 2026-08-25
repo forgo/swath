@@ -181,15 +181,19 @@ anything is 400 `ProcessParameterInvalid`.
 The preview: the openEO synchronous-execute endpoint as a
 **preview-bounded subset** ([ADR 0014](decisions/0014-preview-bounded-sync-result.md),
 #170). The spec-shaped body compiles through the exact `POST /services`
-path — same narrowing, same typed diagnostics — and answers **one**
-small overview-backed `image/png` render covering the graph's
+path — same narrowing, same diagnostics — and answers **one** small
+overview-backed `image/png` render covering the graph's
 `spatial_extent` (the collection's extent when null); nothing is
-persisted. Two debug headers: `x-swath-trace`, and
-`x-swath-preview-tile` naming the tile a published service would serve
-the identical bytes under. Compile failures answer the same registry
-codes as `POST /services`; a live estimate over the bounded budget with
-no overview to serve it is `ProcessGraphComplexity` (400) — refusal
-over degradation, never silently rendering a different extent.
+persisted. Debug headers: `x-swath-trace`, and `x-swath-preview-tile`
+naming the tile a published service serves the identical bytes under.
+Compile failures answer the same registry codes as `POST /services`; a
+live estimate over the bounded budget with no overview to serve it is
+`ProcessGraphComplexity` (400) — refusal over degradation. A `run_udf`
+graph previews under the per-tile fuel budget publishing enforces
+(ADR 0018) — the validation loop: out of fuel or time is
+`ProcessGraphComplexity`; a trap, declared failure, or malformed output
+is `ProcessParameterInvalid` with the executor's diagnosis (400,
+user-fixable).
 
 ### `GET /service_types`
 
