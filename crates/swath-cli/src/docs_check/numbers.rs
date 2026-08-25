@@ -68,6 +68,8 @@ const DOCS: [(&str, &[&str]); 11] = [
             "ov-live-p50-approx",
             "ov-pyramid-p50-approx",
             "materialize-ms",
+            "udf-storm-healthz-p99",
+            "udf-fuelbomb-healthz-p99",
         ],
     ),
     // ARCHITECTURE's §16 ledger (#220) links its load evidence instead of
@@ -252,7 +254,7 @@ pub(super) fn expected() -> Result<BTreeMap<&'static str, String>, String> {
         .as_u64()
         .ok_or("temporal-baseline.json has no integer `materialize.wall_ms`")?;
 
-    Ok(BTreeMap::from([
+    let mut markers = BTreeMap::from([
         ("i2p-ms", format!("{i2p_value} ms")),
         ("i2p-sha", format!("`{sha}`", sha = &i2p_sha[..7])),
         ("hot-p50-approx", format!("~{} ms", sig2(hot_p50))),
@@ -271,7 +273,35 @@ pub(super) fn expected() -> Result<BTreeMap<&'static str, String>, String> {
         ("ov-live-p50-approx", format!("~{} ms", sig2(ov_live))),
         ("ov-pyramid-p50-approx", format!("~{} ms", sig2(ov_pyramid))),
         ("materialize-ms", format!("{materialize_ms} ms")),
-    ]))
+    ]);
+    markers.extend(udf_healthz_markers()?);
+    Ok(markers)
+}
+
+/// The `run_udf` load evidence's two headline markers (issue #207): the
+/// `/healthz` p99 held under each storm, rendered exactly as `just
+/// perf-doc` renders them.
+fn udf_healthz_markers() -> Result<[(&'static str, String); 2], String> {
+    let udf =
+        serde_json::from_str::<serde_json::Value>(&read_repo("docs/perf/load-udf-baseline.json"))
+            .map_err(|err| format!("load-udf-baseline.json is not JSON: {err}"))?;
+    let p99 = |scenario: &str| {
+        f64_at(
+            "load-udf-baseline.json",
+            &udf,
+            &["scenarios", scenario, "p99_ms"],
+        )
+    };
+    Ok([
+        (
+            "udf-storm-healthz-p99",
+            format!("{} ms", p99("healthz_under_udf_storm")?),
+        ),
+        (
+            "udf-fuelbomb-healthz-p99",
+            format!("{} ms", p99("healthz_under_fuelbomb")?),
+        ),
+    ])
 }
 
 /// `text` split at triple-backtick fences, fenced (odd) segments dropped
@@ -413,6 +443,27 @@ fn detectors(expected: &BTreeMap<&'static str, String>) -> Result<Vec<String>, S
             let value = f64_at(
                 "temporal-baseline.json",
                 &temporal,
+                &["scenarios", scenario, percentile],
+            )?;
+            tokens.push(value.to_string());
+        }
+    }
+    // The run_udf load scenarios' published percentiles (issue #207),
+    // same rule: no p50/p95/p99 of any committed row may reappear
+    // hand-typed.
+    let udf =
+        serde_json::from_str::<serde_json::Value>(&read_repo("docs/perf/load-udf-baseline.json"))
+            .map_err(|err| format!("load-udf-baseline.json is not JSON: {err}"))?;
+    for scenario in [
+        "udf_storm",
+        "healthz_under_udf_storm",
+        "fuelbomb_storm",
+        "healthz_under_fuelbomb",
+    ] {
+        for percentile in ["p50_ms", "p95_ms", "p99_ms"] {
+            let value = f64_at(
+                "load-udf-baseline.json",
+                &udf,
                 &["scenarios", scenario, percentile],
             )?;
             tokens.push(value.to_string());

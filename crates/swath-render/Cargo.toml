@@ -34,6 +34,9 @@ swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", versio
 swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.1.0-alpha.1" }
 swath-testkit = { path = "../swath-testkit", version = "0.1.0-alpha.1" }
 swath-testsupport = { path = "../swath-testsupport", version = "0.1.0-alpha.1" }
+# The UDF bench (issue #207) drives the real executor through this crate's
+# own `UdfExecutor` port — a dev-only cycle; the lib never names wasmtime.
+swath-udf-wasmtime = { path = "../adapters/swath-udf-wasmtime", version = "0.1.0-alpha.1" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [[bench]]

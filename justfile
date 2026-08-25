@@ -579,6 +579,33 @@ load-temporal:
     tests/e2e/stack-up.sh
     tests/load/temporal.sh "$started"
 
+# `just load-udf` (issue #207): the `run_udf` live-latency evidence under
+# the ADR 0012 reopen guard. Brings up the SAME compose stack — whose
+# catalog now wires a `udf-store` (tests/e2e/swath-catalog.toml) so
+# run_udf is offered — then tests/load/load_udf.sh publishes two services
+# and runs the pinned scenarios: (u) the reference NDVI UDF stormed on its
+# heaviest Live tiles WHILE /healthz + SSE /traces are probed (the ADR
+# 0012 signals, recorded and verdicted against the 50 ms trigger); (f) a
+# runaway-loop UDF refused on the tile path (500 RFC 7807 fuel) and the
+# preview (400 ProcessGraphComplexity) with the same probes proving zero
+# collateral. Distills docs/perf/load-udf-baseline.{json,md}. The report
+# fails on scenario-integrity violations (storm not Live-through-UDF, or
+# the bomb not refused) but never on the ADR 0012 signals themselves — a
+# trip is a maintainer lane-decision on committed evidence, not a silent
+# fix (ADR 0018 rollback / ADR 0012 reopen).
+load-udf: (setup-ci "oha")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Port discipline (as `just load-temporal`/`just demo`): refuse to
+    # collide with a live sibling stack sharing :8080.
+    if curl -sf http://localhost:8080/healthz >/dev/null 2>&1; then
+        echo "FAIL: a swath stack is already up on :8080 — 'docker compose down -v' first"; exit 1
+    fi
+    started=$(date +%s)
+    trap 'docker compose down -v' EXIT
+    tests/e2e/stack-up.sh
+    tests/load/load_udf.sh "$started"
+
 # THE stopwatch demo (issue #35, CHARTER.md §10 Phase 1): the same
 # north-star path the e2e asserts forever, run for human eyes. Brings up
 # the full stack (shared tests/e2e/stack-up.sh), serves the viewer, then
@@ -903,6 +930,7 @@ perf-doc:
     i2p = json.loads((perf / "i2p-baseline.json").read_text())
     ref = json.loads((perf / "referencer-baseline.json").read_text())
     temporal = json.loads((perf / "temporal-baseline.json").read_text())
+    udf = json.loads((perf / "load-udf-baseline.json").read_text())
 
     def human_ns(ns: float) -> str:
         if ns < 1_000:
@@ -922,6 +950,7 @@ perf-doc:
             f"| load scenarios (`just load`) | `docs/perf/load-baseline.json` | `{load['git_sha']}` | {load['generated']} |",
             f"| referencer (`just perf-referencer`) | `docs/perf/referencer-baseline.json` | `{ref['git_sha'][:7]}` | {ref['captured']} |",
             f"| temporal + overview (`just load-temporal`) | `docs/perf/temporal-baseline.json` | `{temporal['git_sha']}` | {temporal['generated']} |",
+            f"| run_udf load (`just load-udf`) | `docs/perf/load-udf-baseline.json` | `{udf['git_sha']}` | {udf['generated']} |",
         ]
     )
 
@@ -1012,6 +1041,41 @@ perf-doc:
     )
     blocks["temporal"] = "\n".join(rows)
 
+    rows = [
+        "| scenario | requests | errors | rps | p50 ms | p95 ms | p99 ms | max ms |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    labels = {
+        "udf_storm": "(u) UDF mixed storm (Live NDVI + cache, buster on)",
+        "healthz_under_udf_storm": "(u) healthz UNDER the UDF storm",
+        "fuelbomb_storm": "(f) fuel-bomb storm — every tile refused",
+        "healthz_under_fuelbomb": "(f) healthz UNDER the fuel-bomb refusals",
+    }
+    for key, label in labels.items():
+        s = udf["scenarios"][key]
+        rows.append(
+            f"| {label} | {s['requests']} | {s['errors']} | {s['rps']} "
+            f"| {s['p50_ms']} | {s['p95_ms']} | {s['p99_ms']} | {s['max_ms']} |"
+        )
+    storm_v = udf["adr_0012"]["udf_storm"]
+    bomb_v = udf["adr_0012"]["fuel_bomb"]
+    storm_sse = udf["scenarios"]["sse_under_udf_storm"]
+    bomb_sse = udf["scenarios"]["sse_under_fuelbomb"]
+    rows.append(
+        f"\nADR 0012 signals — UDF storm: `/healthz` p99 "
+        f"{storm_v['healthz_p99_ms']} ms (trigger {storm_v['healthz_p99_trigger_ms']} ms), "
+        f"SSE {'survived' if storm_v['sse_survived'] else 'DROPPED'} "
+        f"({storm_sse['trace_events_received']} events), "
+        f"tripped: **{'yes' if storm_v['adr_0012_trigger_tripped'] else 'no'}**. "
+        f"Fuel bomb (refused, zero collateral): `/healthz` p99 "
+        f"{bomb_v['healthz_p99_ms']} ms, SSE "
+        f"{'survived' if bomb_v['sse_survived'] else 'DROPPED'} "
+        f"({bomb_sse['trace_events_received']} events); tile 500 RFC 7807 fuel, "
+        f"preview {udf['fuelbomb_preview']['status']} `{udf['fuelbomb_preview']['code']}`; "
+        f"tripped: **{'yes' if bomb_v['adr_0012_trigger_tripped'] else 'no'}**."
+    )
+    blocks["udf-load"] = "\n".join(rows)
+
     doc = pathlib.Path("docs/PERFORMANCE.md")
     text = doc.read_text()
     for name, body in blocks.items():
@@ -1073,6 +1137,8 @@ perf-doc:
         "ov-live-p50-approx": f"~{sig2(temporal['scenarios']['overview_live_z12']['p50_ms'])} ms",
         "ov-pyramid-p50-approx": f"~{sig2(temporal['scenarios']['overview_pyramid_z10']['p50_ms'])} ms",
         "materialize-ms": f"{temporal['materialize']['wall_ms']} ms",
+        "udf-storm-healthz-p99": f"{udf['scenarios']['healthz_under_udf_storm']['p99_ms']} ms",
+        "udf-fuelbomb-healthz-p99": f"{udf['scenarios']['healthz_under_fuelbomb']['p99_ms']} ms",
     }
 
     marker_docs = [

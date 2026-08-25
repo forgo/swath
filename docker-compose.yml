@@ -28,6 +28,11 @@ services:
       # own mount so the data plane stays read-only. stack-up.sh creates
       # it world-writable (the container runs as 65534, local-dev-only).
       - ./target/e2e/cache:/cache
+      # `run_udf` module store (ADR 0018): published WASM modules persist
+      # here by content hash — its own writable mount, so neither the
+      # read-only data plane nor the tile cache (which load harnesses
+      # clear) holds user code.
+      - ./target/e2e/udf:/udf
     depends_on:
       pgstac:
         condition: service_healthy
