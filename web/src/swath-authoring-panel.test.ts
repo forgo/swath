@@ -966,3 +966,122 @@ test("B11 preview: incomplete drafts show no preview and make no request", async
   expect(panel.querySelector<HTMLElement>("#swath-authoring-preview")?.hidden).toBe(true);
   expect(previewImage(panel)?.getAttribute("src")).toBeNull();
 });
+
+// --- Issue #255: the canvas must not gate on the catalog reads ---
+// The e2e-web flake: the Load card missed its open deadline exactly
+// while another suite's registration triggered a live tile-render burst
+// (renders are inline on the runtime, ADR 0012) — because opening
+// awaited /collections and /services (both catalog reads) before
+// rendering anything. Pinned here: the card renders from /processes
+// alone, the catalog hydrates the open canvas when it lands, and a
+// transient catalog failure neither hides the canvas nor bricks the
+// panel (it retries on re-open, the add-data panel's #254 contract).
+
+function toggleOpen(panel: SwathAuthoringPanel): void {
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-toggle")?.click();
+}
+
+function collectionOptions(panel: SwathAuthoringPanel): string[] {
+  return [...panel.querySelectorAll<HTMLOptionElement>("#swath-authoring-s1-id option")].map(
+    (option) => option.value,
+  );
+}
+
+test("#255: the Load card renders from /processes alone — in-flight catalog reads cannot delay it", async () => {
+  // /collections and /services hang until released; /processes answers
+  // immediately. The canvas (permanent Load card) must not wait.
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const base = fetchStub({});
+  const impl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    if (method === "GET" && (url.endsWith("/collections") || url.endsWith("/services"))) {
+      await gate;
+    }
+    return base.impl(input, init);
+  }) as typeof fetch;
+  const panel = document.createElement("swath-authoring-panel") as SwathAuthoringPanel;
+  panel.fetchImpl = impl;
+  document.body.append(panel);
+  toggleOpen(panel);
+
+  // The card is up while the catalog reads are still in flight, and the
+  // picker says what it is waiting for instead of pretending emptiness.
+  await expect.poll(() => panel.querySelector('[data-step="s1"]')).not.toBeNull();
+  const pending = field<HTMLSelectElement>(panel, "s1-id");
+  expect(pending.tagName).toBe("SELECT");
+  expect(pending.disabled).toBe(true);
+  expect([...pending.options].map((option) => option.textContent)).toEqual([
+    "(loading collections…)",
+  ]);
+
+  // When the catalog lands, the picker hydrates in place — the whole
+  // authoring flow works from there.
+  release();
+  await expect.poll(() => collectionOptions(panel)).toContain("hls-s30");
+  expect(field<HTMLSelectElement>(panel, "s1-id").disabled).toBe(false);
+  choose(panel, "s1-id", "hls-s30");
+  expect(field(panel, "s1-bands").textContent).not.toContain("Choose a dataset first");
+});
+
+test("#255: a transient catalog non-OK keeps the canvas up and retries on re-open", async () => {
+  let calls = 0;
+  const base = fetchStub({});
+  const impl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if ((init?.method ?? "GET") === "GET" && url.endsWith("/collections")) {
+      calls += 1;
+      if (calls === 1) {
+        return new Response("boom", { status: 503 });
+      }
+    }
+    return base.impl(input, init);
+  }) as typeof fetch;
+  const panel = document.createElement("swath-authoring-panel") as SwathAuthoringPanel;
+  panel.fetchImpl = impl;
+  document.body.append(panel);
+  toggleOpen(panel);
+
+  // The canvas still renders (the flake's 5s wait would have passed),
+  // with the inline note saying what is missing and how to retry.
+  await expect.poll(() => panel.querySelector('[data-step="s1"]')).not.toBeNull();
+  await expect
+    .poll(() => panel.querySelector(".swath-authoring-error")?.textContent ?? "")
+    .toContain("close and reopen to retry");
+
+  toggleOpen(panel); // close…
+  toggleOpen(panel); // …and re-open: the promised retry really runs
+  await expect.poll(() => collectionOptions(panel)).toContain("hls-s30");
+  expect(panel.querySelector(".swath-authoring-error")).toBeNull();
+  expect(calls).toBe(2);
+});
+
+test("#255: a transient /processes failure retries on re-open instead of bricking", async () => {
+  let calls = 0;
+  const base = fetchStub({});
+  const impl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if ((init?.method ?? "GET") === "GET" && url.endsWith("/processes")) {
+      calls += 1;
+      if (calls === 1) {
+        return new Response("boom", { status: 500 });
+      }
+    }
+    return base.impl(input, init);
+  }) as typeof fetch;
+  const panel = document.createElement("swath-authoring-panel") as SwathAuthoringPanel;
+  panel.fetchImpl = impl;
+  document.body.append(panel);
+  toggleOpen(panel);
+  await expect
+    .poll(() => panel.querySelector(".swath-authoring-empty")?.textContent ?? "")
+    .toContain("not reachable");
+
+  toggleOpen(panel); // close…
+  toggleOpen(panel); // …and re-open refetches the definitions
+  await expect.poll(() => panel.querySelector('[data-step="s1"]')).not.toBeNull();
+  expect(calls).toBe(2);
+});
