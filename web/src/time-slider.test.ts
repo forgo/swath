@@ -157,3 +157,48 @@ test("play advances a frame per tick (wrapping) and prefetches the frame after n
   slider.dispose();
   expect(slider.element.isConnected).toBe(false);
 });
+
+test("a vetoed tick holds the frame; user acts announce themselves first (issue #211)", () => {
+  vi.useFakeTimers();
+  const acts: string[] = [];
+  let painted = false;
+  const hooks: TimeSliderHooks & { scrubbed: string[] } = {
+    ...recordingHooks(),
+    canAdvance: () => painted,
+    interact: () => acts.push("interact"),
+  };
+  const scrubbed = hooks.scrubbed;
+  hooks.scrubTo = (datetime) => {
+    scrubbed.push(datetime);
+    acts.push(`scrub:${datetime}`);
+  };
+  const slider = new TimeSlider(document, hooks);
+  document.body.append(slider.element);
+  slider.setDomain(FRAMES, FRAMES[0] ?? null);
+
+  // Programmatic play (the cinematic landing's path): no user act.
+  slider.play();
+  expect(acts).toEqual([]);
+  // The frame is still painting: ticks pass without advancing...
+  vi.advanceTimersByTime(3 * PLAY_INTERVAL_MS);
+  expect(scrubbed).toEqual([]);
+  expect(slider.element.dataset["index"]).toBe("0");
+  // ...and the first tick after it lands advances exactly one frame.
+  painted = true;
+  vi.advanceTimersByTime(PLAY_INTERVAL_MS);
+  expect(scrubbed).toEqual([FRAMES[1]]);
+
+  // A scrub: `interact` BEFORE the scrub, so the host can attribute
+  // the frame change to the user; the play button likewise.
+  const range = slider.element.querySelector<HTMLInputElement>('input[type="range"]');
+  if (!range) {
+    throw new Error("no range input");
+  }
+  range.value = "3";
+  range.dispatchEvent(new Event("input"));
+  expect(acts).toEqual([`scrub:${FRAMES[1]}`, "interact", `scrub:${FRAMES[3]}`]);
+  slider.element.querySelector<HTMLButtonElement>(".swath-map-time-play")?.click();
+  expect(acts.at(-1)).toBe("interact");
+  expect(slider.playing).toBe(false); // the click after interact still pauses
+  slider.dispose();
+});

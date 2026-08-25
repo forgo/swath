@@ -8,6 +8,8 @@
 // ordering — without a network. The real-server proof is `just e2e-web`.
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { defineSwathMap, SwathMap } from "./swath-map.js";
+import type { EventSourceLike } from "./swath-xray.js";
+import { PLAY_INTERVAL_MS } from "./time-slider.js";
 
 const SERVER = "https://swath.test";
 const OTHER_SERVER = "https://other.test";
@@ -182,6 +184,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const el of document.querySelectorAll("swath-map")) {
     el.remove(); // disposes the WebGL context (disconnectedCallback)
   }
@@ -649,4 +652,210 @@ test("zoom to data: frames known bounds; hidden when nothing is known", async ()
   const unknowable = mount({ server: SERVER, layer: "truecolor", center: "10,20", zoom: "3" });
   await unknowable.ready;
   expect(unknowable.querySelector<HTMLElement>(".swath-map-zoomdata")?.hidden).toBe(true);
+});
+
+// --- the cinematic landing (issue #211) ---
+
+/** Fakes only the play loop's clock: MapLibre's own rAF/timeouts stay
+ * real so the map still loads and settles under `await el.ready`. */
+function fakePlayClock(): void {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+}
+
+/** The landing card and the slider's play button of a mounted map. */
+function landing(el: SwathMap): { card: HTMLElement; play: HTMLButtonElement } {
+  const card = el.querySelector<HTMLElement>(".swath-map-landing");
+  const play = el.querySelector<HTMLButtonElement>(".swath-map-time-play");
+  if (!card || !play) {
+    throw new Error("landing chrome missing");
+  }
+  return { card, play };
+}
+
+/** Every `swath-timechange` the map fires, as `[datetime, cinematic]`. */
+function recordTimechanges(el: SwathMap): [string | null, boolean][] {
+  const seen: [string | null, boolean][] = [];
+  el.addEventListener("swath-timechange", (event) => {
+    const detail = (event as CustomEvent<{ datetime: string | null; cinematic: boolean }>).detail;
+    seen.push([detail.datetime, detail.cinematic]);
+  });
+  return seen;
+}
+
+/** The loop only advances over a painted frame (`canAdvance`), so wait
+ * for the map's tiles before expecting a tick to land. */
+async function waitForTiles(el: SwathMap): Promise<void> {
+  await vi.waitFor(() => {
+    expect(el.map?.areTilesLoaded()).toBe(true);
+  });
+}
+
+function scrub(el: SwathMap, index: number): void {
+  const range = el.querySelector<HTMLInputElement>('.swath-map-time input[type="range"]');
+  if (!range) {
+    throw new Error("no slider range input");
+  }
+  range.value = String(index);
+  range.dispatchEvent(new Event("input"));
+}
+
+test("cinematic: the playable layer beats the first tileset, and the loop plays itself", async () => {
+  fakePlayClock();
+  const { requests } = stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const el = mount({ server: SERVER, cinematic: "" });
+  const changes = recordTimechanges(el);
+  await el.ready;
+
+  // The listing says truecolor first; the landing picked the series —
+  // and the apply reused the scan's granules read (one, not two).
+  expect(tileTemplates(el)[0]).toContain("/tilesets/ndvi/tiles/");
+  expect(requests.filter((url) => url.includes("/granules"))).toHaveLength(1);
+  const { card, play } = landing(el);
+  expect(card.hidden).toBe(false);
+  expect(card.dataset["state"]).toBe("playing");
+  expect(card.textContent).toContain("HLS NDVI — 4 frames");
+  expect(play.getAttribute("aria-pressed")).toBe("true");
+
+  // A tick advances the frame (latest wraps to oldest) and the event
+  // says it was the landing's own doing — the shell leaves the URL alone.
+  await waitForTiles(el);
+  vi.advanceTimersByTime(PLAY_INTERVAL_MS);
+  expect(el.getAttribute("datetime")).toBe(FIRE_FRAMES[0]);
+  expect(changes.at(-1)).toEqual([FIRE_FRAMES[0], true]);
+
+  // Hover pauses (no ticks land), leaving resumes.
+  el.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
+  expect(play.getAttribute("aria-pressed")).toBe("false");
+  expect(card.dataset["state"]).toBe("hover");
+  vi.advanceTimersByTime(3 * PLAY_INTERVAL_MS);
+  expect(el.getAttribute("datetime")).toBe(FIRE_FRAMES[0]);
+  el.dispatchEvent(new PointerEvent("pointerleave", { pointerType: "mouse" }));
+  expect(play.getAttribute("aria-pressed")).toBe("true");
+  expect(card.dataset["state"]).toBe("playing");
+
+  // A scrub takes over: the frame change is the user's, the loop is
+  // theirs (still running — the slider's own controls decide), and a
+  // later hover no longer touches it.
+  scrub(el, 2);
+  expect(card.dataset["state"]).toBe("over");
+  expect(changes.at(-1)).toEqual([FIRE_FRAMES[2], false]);
+  expect(play.getAttribute("aria-pressed")).toBe("true");
+  el.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
+  expect(play.getAttribute("aria-pressed")).toBe("true");
+  await waitForTiles(el);
+  vi.advanceTimersByTime(PLAY_INTERVAL_MS);
+  expect(changes.at(-1)).toEqual([FIRE_FRAMES[3], false]);
+});
+
+test("cinematic: reduced motion waits with a play affordance, and that affordance hands over", async () => {
+  fakePlayClock();
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query.includes("prefers-reduced-motion"),
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  }));
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const el = mount({ server: SERVER, cinematic: "" });
+  const changes = recordTimechanges(el);
+  await el.ready;
+
+  const { card, play } = landing(el);
+  expect(card.dataset["state"]).toBe("reduced");
+  expect(play.getAttribute("aria-pressed")).toBe("false");
+  const affordance = el.querySelector<HTMLButtonElement>(".swath-map-landing-play");
+  expect(affordance?.hidden).toBe(false);
+  await waitForTiles(el);
+  vi.advanceTimersByTime(3 * PLAY_INTERVAL_MS);
+  expect(changes).toEqual([]); // nothing moved on its own
+
+  affordance?.click();
+  expect(play.getAttribute("aria-pressed")).toBe("true");
+  expect(card.dataset["state"]).toBe("over");
+  vi.advanceTimersByTime(PLAY_INTERVAL_MS);
+  expect(changes.at(-1)).toEqual([FIRE_FRAMES[0], false]); // the user's loop
+});
+
+test("cinematic: a drag pauses and hands over; the invitation turns x-ray on and retires the card", async () => {
+  fakePlayClock();
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const el = mount({ server: SERVER, cinematic: "" });
+  const sources: string[] = [];
+  el.xrayEventSource = (url): EventSourceLike => {
+    sources.push(url);
+    return { addEventListener: () => undefined, close: () => undefined };
+  };
+  await el.ready;
+  const { card, play } = landing(el);
+  expect(play.getAttribute("aria-pressed")).toBe("true");
+
+  // A user-driven move (MapLibre stamps drags/wheels with originalEvent).
+  el.map?.fire("movestart", { originalEvent: new MouseEvent("mousedown") });
+  expect(play.getAttribute("aria-pressed")).toBe("false");
+  expect(card.dataset["state"]).toBe("over");
+  expect(card.hidden).toBe(false); // the invitation outlives the loop
+  await waitForTiles(el);
+  vi.advanceTimersByTime(3 * PLAY_INTERVAL_MS);
+  expect(play.getAttribute("aria-pressed")).toBe("false");
+
+  // "watch the machine work": the overlay comes up, the card steps aside.
+  el.querySelector<HTMLButtonElement>(".swath-map-landing-invite")?.click();
+  expect(el.hasAttribute("xray")).toBe(true);
+  expect(sources).toEqual([`${SERVER}/traces`]);
+  expect(card.hidden).toBe(true);
+  el.removeAttribute("xray");
+  expect(card.hidden).toBe(false);
+});
+
+test("cinematic: with no playable layer, today's landing — first tileset, nothing plays, no card", async () => {
+  const el = mount({ server: SERVER, cinematic: "" });
+  await el.ready;
+  expect(tileTemplates(el)[0]).toContain("/tilesets/truecolor/tiles/");
+  const { card, play } = landing(el);
+  expect(card.hidden).toBe(true);
+  expect(card.dataset["state"]).toBe("off");
+  expect(play.getAttribute("aria-pressed")).toBe("false");
+});
+
+test("without the cinematic attribute a playable layer never plays itself (deep links)", async () => {
+  fakePlayClock();
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const el = mount({ server: SERVER, layer: "ndvi", center: "-121.7,40.02", zoom: "12" });
+  const changes = recordTimechanges(el);
+  await el.ready;
+  const { card, play } = landing(el);
+  expect(card.hidden).toBe(true);
+  expect(play.getAttribute("aria-pressed")).toBe("false");
+  await waitForTiles(el);
+  vi.advanceTimersByTime(3 * PLAY_INTERVAL_MS);
+  expect(changes).toEqual([]);
+});
+
+test("cinematic: a layer switch drops the loop's frame back to latest; a scrubbed frame stays", async () => {
+  fakePlayClock();
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const el = mount({ server: SERVER, cinematic: "" });
+  await el.ready;
+  await waitForTiles(el);
+  vi.advanceTimersByTime(PLAY_INTERVAL_MS);
+  expect(el.getAttribute("datetime")).toBe(FIRE_FRAMES[0]); // the loop's doing
+  // The user picks another layer: nobody chose that frame, so the new
+  // layer applies at "latest" — no `datetime=` carried over.
+  await el.setLayer("truecolor");
+  expect(el.getAttribute("datetime")).toBeNull();
+  expect(tileTemplates(el)).toEqual([`${SERVER}/tilesets/truecolor/tiles/{z}/{y}/{x}`]);
+  el.remove();
+
+  // Whereas a frame the user scrubbed to is theirs: it survives the switch.
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const scrubbed = mount({ server: SERVER, cinematic: "" });
+  await scrubbed.ready;
+  scrub(scrubbed, 2);
+  expect(scrubbed.getAttribute("datetime")).toBe(FIRE_FRAMES[2]);
+  await scrubbed.setLayer("truecolor");
+  expect(scrubbed.getAttribute("datetime")).toBe(FIRE_FRAMES[2]);
 });

@@ -321,7 +321,11 @@ test("the signature loop: first pass renders live, second pass replays from cach
     await expect(analytics).toHaveAttribute("data-frame", frame);
     const live = Number(await analytics.getAttribute("data-frame-live"));
     expect(live).toBeGreaterThanOrEqual(settled);
-    await expect(analytics).toHaveAttribute("data-frame-cache-hit", "0");
+    // No `data-frame-cache-hit == 0` here: the per-frame line reduces
+    // the server-wide /traces stream, and since issue #211 sibling
+    // workers' pages loop this very series on landing — their cache
+    // hits for this frame land on this page's card. The viewport-scoped
+    // badge check above is the isolated "first pass renders live" proof.
   }
 
   // --- Second pass over the whole season (the newest frame included:

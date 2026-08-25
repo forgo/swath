@@ -19,10 +19,24 @@ import { defineConfig } from "@playwright/test";
 const binaryMode = process.env.SWATH_E2E_MODE === "binary";
 process.env.SWATH_DEMO_PATH ??= binaryMode ? "/" : "/demo/";
 
+/** The one test that restarts the server under the stack (the x-ray
+ * suite's kill-and-resume). A whole-stack outage cannot share the stack
+ * with sibling workers: an in-flight tile request dies with the server
+ * and MapLibre never refetches a failed tile, so any concurrent test
+ * mid-render (the time slider's signature loop, the cinematic landing's
+ * loops since issue #211) stalls on it — and its own "counters hold
+ * through the outage" baseline catches whatever the siblings traced in
+ * the second before the kill. It runs alone, after everything else. */
+const RESTART_TEST = /kill-and-resume/;
+
 export default defineConfig({
   testDir: "e2e",
   testMatch: /.*\.e2e\.ts/,
   reporter: [["list"]],
+  projects: [
+    { name: "suites", grepInvert: RESTART_TEST },
+    { name: "restart", grep: RESTART_TEST, dependencies: ["suites"] },
+  ],
   use: {
     baseURL: binaryMode ? "http://localhost:8080" : "http://localhost:5173",
     // The entry page (issue #108) spends 248px on the layer rail, which

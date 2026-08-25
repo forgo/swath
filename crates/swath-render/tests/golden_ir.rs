@@ -269,3 +269,91 @@ async fn ndvi_rdylgn_colormap_two_level_golden() {
          (regenerate deliberately with SWATH_BLESS=1 and inspect the diff)"
     );
 }
+
+// --- Park Fire NDVI, colormapped (issue #211): the same two-level scheme ---
+
+/// The Park Fire fixture series' proven z13 tile (`tests/fixtures/README.md`),
+/// OGC z/x/y as the render path addresses it.
+const FIRE_TILE: (u8, u32, u32) = (13, 1326, 3100);
+
+/// The two dated frames the compose e2e pins (`swath-e2e`: pre-fire and
+/// fresh burn scar) and the grayscale oracle goldens their values carry.
+const FIRE_DAYS: [&str; 2] = ["2024204", "2024229"];
+
+/// **The Park Fire layer is `RdYlGn`** (the landing's opening frame, issue
+/// #211), so its served frames need the two-level scheme of
+/// [`ndvi_rdylgn_colormap_two_level_golden`]: per dated frame, (1) the
+/// grayscale render is pinned against the rio-tiler oracle golden
+/// (`fire-ndvi-13-1326-3100-<day>.png`, `just render-goldens`) and every
+/// colormapped pixel is proven `lut[q(gray)]` of it; (2) the colormapped
+/// bytes are frozen as a committed self-golden
+/// (`fire-ndvi-rdylgn-13-1326-3100-<day>.png`, regenerate with
+/// `SWATH_BLESS=1`) that `just e2e` pins the compose stack's `datetime=`
+/// frames against byte-for-byte.
+#[allow(clippy::print_stdout, reason = "bless mode reports what it wrote")]
+#[tokio::test]
+async fn fire_ndvi_rdylgn_two_level_golden_per_date() {
+    let (z, x, y) = FIRE_TILE;
+    let lut = swath_render::colormaps::lut(Colormap::RdYlGn).expect("RdYlGn has a LUT");
+    for day in FIRE_DAYS {
+        let b8a = format!("hlss30-t10tfk-{day}-b8a.tif");
+        let b04 = format!("hlss30-t10tfk-{day}-b04.tif");
+        let fixtures = [b8a.as_str(), b04.as_str()];
+        // Level 1: values against the oracle.
+        assert_matches_oracle(
+            &ndvi_plan(),
+            &fixtures,
+            &format!("fire-ndvi-13-1326-3100-{day}.png"),
+            z,
+            x,
+            y,
+        )
+        .await;
+        let warped = warp_bands(&fixtures, z, x, y).await;
+        let gray = eval(&ndvi_plan(), &warped, &NoUdf).expect("grayscale plan evaluates");
+        let colored =
+            eval(&ndvi_rdylgn_plan(), &warped, &NoUdf).expect("colormapped plan evaluates");
+        assert_eq!(gray.pixels.len(), colored.pixels.len());
+        for (g_px, c_px) in gray
+            .pixels
+            .chunks_exact(4)
+            .zip(colored.pixels.chunks_exact(4))
+        {
+            assert_eq!(
+                c_px[3], g_px[3],
+                "{day}: alpha must come from validity alone"
+            );
+            if g_px[3] == 0 {
+                assert_eq!(c_px, [0, 0, 0, 0], "{day}: invalid stays transparent black");
+            } else {
+                assert_eq!(
+                    &c_px[0..3],
+                    &lut[usize::from(g_px[0])],
+                    "{day}: lut[q(gray)]"
+                );
+            }
+        }
+        // Byte stability, then level 2: the committed self-golden.
+        let again = eval(&ndvi_rdylgn_plan(), &warped, &NoUdf).expect("re-evaluates");
+        assert_eq!(
+            colored.pixels, again.pixels,
+            "{day}: eval must be deterministic"
+        );
+        let png_a = encode_png(&colored).expect("encodes");
+        let png_b = encode_png(&again).expect("encodes");
+        assert_eq!(png_a, png_b, "{day}: PNG encode must be deterministic");
+        let golden_path =
+            common::goldens_dir().join(format!("fire-ndvi-rdylgn-13-1326-3100-{day}.png"));
+        if std::env::var_os("SWATH_BLESS").is_some() {
+            std::fs::write(&golden_path, &png_a).expect("golden written");
+            println!("blessed {}", golden_path.display());
+        }
+        let committed =
+            std::fs::read(&golden_path).expect("committed colormapped fire golden exists");
+        assert_eq!(
+            png_a, committed,
+            "{day}: colormapped fire bytes drifted from the committed golden \
+             (regenerate deliberately with SWATH_BLESS=1 and inspect the diff)"
+        );
+    }
+}

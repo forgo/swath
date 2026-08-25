@@ -82,27 +82,29 @@ test("granule fetch is lazy: zero browse requests until the panel opens", async 
   await page.goto(DEMO_PATH);
   await waitForFittedView(page);
   // The page is fully up — map, tiles, layer panel — and the closed
-  // dataset browser has added NOTHING to the request log. The one
-  // granules request that IS here belongs to the map, not the panel:
-  // since issue #182 every catalog-backed layer apply reads its
-  // dataset's granule listing once — the time slider's domain (which
-  // for this single-date layer resolves to "hidden").
+  // dataset browser has added NOTHING to the request log. The granules
+  // requests that ARE here belong to the map, not the panel: the
+  // cinematic landing (issue #211) scans tilesets in id order for a
+  // playable series — `ndvi`'s dataset (one date: skipped), then
+  // `park-fire-ndvi`'s (six: chosen) — and the apply reuses that read
+  // for the slider's domain (issue #182), so exactly two, no more.
   await expect(panelToggle(page)).toBeVisible();
   expect(hits.filter((path) => path.endsWith("/collections"))).toEqual([]);
-  expect(hits).toEqual(["/datasets/hls-s30/granules"]);
+  expect(hits).toEqual(["/datasets/hls-s30/granules", "/datasets/hls-s30-fire/granules"]);
 
   // Opening fetches the dataset listing exactly once, still no further
   // granules requests — the panel stays lazy.
   await panelToggle(page).click();
   await expect(datasetButton(page, "hls-s30")).toBeVisible();
   expect(hits.filter((path) => path.endsWith("/collections"))).toHaveLength(1);
-  expect(hits.filter((path) => path.includes("granules"))).toHaveLength(1);
+  expect(hits.filter((path) => path.includes("granules"))).toHaveLength(2);
 
   // Expanding the dataset fetches its granules exactly once more.
   await datasetButton(page, "hls-s30").click();
   await expect(page.locator("swath-dataset-panel button[data-granule]").first()).toBeVisible();
   expect(hits.filter((path) => path.includes("granules"))).toEqual([
     "/datasets/hls-s30/granules",
+    "/datasets/hls-s30-fire/granules",
     "/datasets/hls-s30/granules",
   ]);
 });

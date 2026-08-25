@@ -259,8 +259,11 @@ render-goldens:
     done
     # Time-dimension goldens (ADR 0015 / issue #180): the Park Fire series'
     # proven z13 tile (fully inside the t10tfk fixture window) at a pre-fire
-    # and a fresh-burn-scar date — grayscale NDVI, matched by the e2e
-    # datetime= frame checks and the swath-api tiles_datetime suite.
+    # and a fresh-burn-scar date — grayscale NDVI, matched by the swath-api
+    # tiles_datetime suite and, as level 1 of the #94 scheme, by
+    # swath-render's golden_ir fire test, which blesses the RdYlGn
+    # self-goldens (fire-ndvi-rdylgn-*, SWATH_BLESS=1) the e2e datetime=
+    # frame checks pin the compose stack's colormapped frames against.
     FIRE=tests/fixtures/hlss30-t10tfk
     for day in 2024204 2024229; do
         compose 13 1326 3100 "$D/fire-ndvi-13-1326-3100-$day.png" \

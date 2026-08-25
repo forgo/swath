@@ -17,6 +17,11 @@
 //   policy (tolerance, max bad-pixel fraction) that budget needs; the
 //   recipe's second capture run is diffed shot-by-shot against the first
 //   (tests/screenshots/verify_stable.py).
+// - Painted, provably. Every shot opens its view through
+//   `gotoAndWaitForTiles` (a real tile 200 before the fitted-view gate),
+//   and the verifier judges each image alone (`pdiff --content`): a
+//   run-vs-run diff cannot tell two identical blanks from two identical
+//   scenes, which is exactly how the #211 review caught unpainted shots.
 // - Provenance. After the last shot this suite writes shots.json (the
 //   machine-readable manifest: caption, policy, sha256 per shot) and
 //   index.md (the human index), both stamped with the capture git sha
@@ -94,6 +99,25 @@ async function waitForFittedView(page: Page): Promise<void> {
     const map = (document.querySelector("swath-map") as SwathMapLike | null)?.map;
     return Boolean(map?.loaded() && map.areTilesLoaded() && map.getZoom() > 5);
   });
+}
+
+/**
+ * Opens a view and waits for a REAL tile of `layer` to answer 200 before
+ * the fitted-view gate. The gate alone is not enough (the #211 review
+ * found blank shots): a layer apply reads tileset metadata and the
+ * granule listing before its first tile request, and during that round
+ * trip the map is loaded, needs zero tiles (`areTilesLoaded` is true of
+ * an empty source), and already sits at the deep link's zoom — every
+ * condition met, nothing painted. Registering the response wait BEFORE
+ * navigation means a fast tile cannot be missed either.
+ */
+async function gotoAndWaitForTiles(page: Page, url: string, layer: string): Promise<void> {
+  const tile = page.waitForResponse(
+    (response) => response.url().includes(`/tilesets/${layer}/tiles/`) && response.status() === 200,
+  );
+  await page.goto(url);
+  await tile;
+  await waitForFittedView(page);
 }
 
 async function waitForMapIdle(page: Page): Promise<void> {
@@ -183,23 +207,31 @@ async function waitForAuthoringPreview(page: Page): Promise<void> {
   });
 }
 
-test("landing page: layer rail + default layer on a fitted view", async ({ page }) => {
-  const tile = page.waitForResponse(
-    (response) => response.url().includes("/tilesets/ndvi/tiles/") && response.status() === 200,
-  );
-  await page.goto(DEMO_PATH);
-  await tile;
-  await waitForFittedView(page);
-  await capture(
-    page,
-    "01-landing-layer-rail.png",
-    "Zero-config landing page: the layer rail beside the map, default NDVI layer fitted to the fixture granule's footprint.",
-  );
+test.describe("landing", () => {
+  // The cinematic landing (issue #211) loops the fire season on load —
+  // a moving target no second capture run could reproduce. Under
+  // `prefers-reduced-motion` it waits on the latest frame with a play
+  // affordance instead: a real, deterministic state of the same page,
+  // and the accessibility path evidenced in the process.
+  test.use({ contextOptions: { reducedMotion: "reduce" } });
+
+  test("landing page: the fire-season loop, held for reduced motion", async ({ page }) => {
+    await gotoAndWaitForTiles(page, DEMO_PATH, "park-fire-ndvi");
+    await expect(page.locator("swath-map .swath-map-landing")).toHaveAttribute(
+      "data-state",
+      "reduced",
+    );
+    await expect(page.locator("#swath-share")).toBeEnabled();
+    await capture(
+      page,
+      "01-landing-layer-rail.png",
+      "Zero-config landing page: the Park Fire series auto-framed and playable (held on its latest frame here — the reduced-motion state, with its play affordance), the x-ray invitation top-center, the Share button in the rail.",
+    );
+  });
 });
 
 test("colormapped NDVI at z12", async ({ page }) => {
-  await page.goto(`${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`);
-  await waitForFittedView(page);
+  await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`, "ndvi");
   await capture(
     page,
     "02-ndvi-colormapped.png",
@@ -208,8 +240,11 @@ test("colormapped NDVI at z12", async ({ page }) => {
 });
 
 test("true color at the same view", async ({ page }) => {
-  await page.goto(`${DEMO_PATH}?layer=truecolor&center=${CENTER}&zoom=12`);
-  await waitForFittedView(page);
+  await gotoAndWaitForTiles(
+    page,
+    `${DEMO_PATH}?layer=truecolor&center=${CENTER}&zoom=12`,
+    "truecolor",
+  );
   await capture(
     page,
     "03-truecolor-live.png",
@@ -220,8 +255,11 @@ test("true color at the same view", async ({ page }) => {
 test("x-ray decisions + why-view inspector", async ({ page }) => {
   // z13 tiles are untouched at this point in the run, so with the cold
   // per-run cache every badge shows a real live-render decision.
-  await page.goto(`${DEMO_PATH}?xray&layer=truecolor&center=${CENTER}&zoom=13`);
-  await waitForFittedView(page);
+  await gotoAndWaitForTiles(
+    page,
+    `${DEMO_PATH}?xray&layer=truecolor&center=${CENTER}&zoom=13`,
+    "truecolor",
+  );
   await waitForXRay(page);
   await capture(
     page,
@@ -256,8 +294,7 @@ test("x-ray decisions + why-view inspector", async ({ page }) => {
 test("x-ray bytes heatmap + trace feed", async ({ page }) => {
   // NDVI at z13 is also untouched in this run: live renders with real
   // bytes_read, so the log-scale heatmap has an actual range to show.
-  await page.goto(`${DEMO_PATH}?xray&layer=ndvi&center=${CENTER}&zoom=13`);
-  await waitForFittedView(page);
+  await gotoAndWaitForTiles(page, `${DEMO_PATH}?xray&layer=ndvi&center=${CENTER}&zoom=13`, "ndvi");
   await waitForXRay(page);
 
   const modes = page.locator(".swath-xray-modes");
@@ -282,8 +319,7 @@ test("x-ray bytes heatmap + trace feed", async ({ page }) => {
 });
 
 test("authoring panel: the always-valid canvas with field help", async ({ page }) => {
-  await page.goto(`${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`);
-  await waitForFittedView(page);
+  await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`, "ndvi");
   await openAuthoringPanel(page);
 
   // Compose the first NDVI steps on the Model B canvas (issue #168):
@@ -305,8 +341,7 @@ test("authoring panel: the always-valid canvas with field help", async ({ page }
 });
 
 test("authoring panel: template narrative + advanced fields open", async ({ page }) => {
-  await page.goto(`${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`);
-  await waitForFittedView(page);
+  await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`, "ndvi");
   await openAuthoringPanel(page);
 
   await page.locator("swath-authoring-panel .swath-authoring-template").click();
@@ -322,8 +357,7 @@ test("authoring panel: template narrative + advanced fields open", async ({ page
 });
 
 test("authoring publish: the authored layer serves immediately", async ({ page }) => {
-  await page.goto(`${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`);
-  await waitForFittedView(page);
+  await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`, "ndvi");
   await openAuthoringPanel(page);
   await page.locator("swath-authoring-panel .swath-authoring-template").click();
   await expect(page.locator("swath-authoring-panel .swath-authoring-submit")).toBeEnabled();
@@ -373,8 +407,7 @@ test("authoring publish: the authored layer serves immediately", async ({ page }
 });
 
 test("dataset browser: granule footprints on the map", async ({ page }) => {
-  await page.goto(`${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`);
-  await waitForFittedView(page);
+  await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`, "ndvi");
   await page.locator("swath-dataset-panel .swath-dataset-panel-toggle").click();
   await page.locator('swath-dataset-panel button[data-dataset="hls-s30"]').click();
   await expect(page.locator("swath-dataset-panel button[data-granule]").first()).toBeVisible();
@@ -405,8 +438,7 @@ test("dataset browser: granule footprints on the map", async ({ page }) => {
 });
 
 test("trace analytics panel under load", async ({ page }) => {
-  await page.goto(`${DEMO_PATH}?xray&layer=ndvi&center=${CENTER}&zoom=12`);
-  await waitForFittedView(page);
+  await gotoAndWaitForTiles(page, `${DEMO_PATH}?xray&layer=ndvi&center=${CENTER}&zoom=12`, "ndvi");
   await waitForXRay(page);
 
   // Generate load beyond the initial view: a zoom-out to z11 (fresh
@@ -451,8 +483,11 @@ test("time slider: first pass live, second pass cached (issue #182)", async ({ p
     .sort((a, b) => Date.parse(a) - Date.parse(b));
   expect(frames.length).toBeGreaterThanOrEqual(3);
 
-  await page.goto(`${DEMO_PATH}?xray&layer=park-fire-ndvi&center=-121.6932,40.0208&zoom=12`);
-  await waitForFittedView(page);
+  await gotoAndWaitForTiles(
+    page,
+    `${DEMO_PATH}?xray&layer=park-fire-ndvi&center=-121.6932,40.0208&zoom=12`,
+    "park-fire-ndvi",
+  );
   await waitForXRay(page);
   const slider = page.locator("swath-map .swath-map-time");
   await expect(slider).toHaveAttribute("data-frames", String(frames.length));
@@ -532,7 +567,8 @@ test.afterAll(() => {
     "",
     "Generated by `just screenshots` — never edit or hand-replace a shot; re-run the recipe.",
     "Every image is captured from the fixture compose stack (tests/e2e/stack-up.sh, committed",
-    "HLS granule, no third-party basemap) at a pinned viewport (1528x860, DPR 1), and a second",
+    "HLS granule, no third-party basemap) at a pinned viewport (1528x860, DPR 1); every shot must",
+    "show a painted map (`pdiff --content`: the map region is never near-uniform), and a second",
     "capture run must reproduce each shot within its perceptual-diff policy",
     "(tests/screenshots/verify_stable.py + swath-testkit pdiff) before the recipe passes.",
     "",

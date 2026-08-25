@@ -83,19 +83,24 @@ function tileResponse(page: Page, layerId: string): Promise<{ url: string; conte
 }
 
 test("map loads, fetches real tiles, renders pixels, and switches layers", async ({ page }) => {
+  // The landing's cold first pass (issue #211) has every worker's page
+  // looping live fire renders through the one renderer at once; the
+  // idle waits below share it, so give them real headroom.
+  test.setTimeout(120_000);
   // A tile request must reach the swath service and come back 200 PNG.
-  // Zero-config demo: no `layer` attribute, so the first tileset wins —
-  // the API lists tilesets in layer-id order, so that is `ndvi`.
-  const initialTile = tileResponse(page, "ndvi");
+  // Zero-config demo: no `layer` attribute, so the landing's default
+  // wins — since issue #211 the first PLAYABLE tileset (the Park Fire
+  // series, `park-fire-ndvi`) ahead of the first by id (`ndvi`).
+  const initialTile = tileResponse(page, "park-fire-ndvi");
 
   await page.goto(DEMO_PATH);
   await expect(page.locator("swath-map canvas.maplibregl-canvas")).toBeVisible();
 
   const tile = await initialTile;
   expect(tile.contentType).toBe("image/png");
-  // OGC ordering on the wire: the requested path is z/row/col inside the
-  // fixture footprint (z12: row 1561..1562, col 848).
-  expect(tile.url).toMatch(/\/tilesets\/ndvi\/tiles\/\d+\/\d+\/\d+$/);
+  // OGC ordering on the wire: the requested path is z/row/col (the
+  // landing loop may already carry a `datetime=` frame).
+  expect(tile.url).toMatch(/\/tilesets\/park-fire-ndvi\/tiles\/\d+\/\d+\/\d+(\?.*)?$/);
 
   // The canvas actually shows imagery: not blank, not a flat wash.
   await waitForMapIdle(page);
@@ -108,7 +113,9 @@ test("map loads, fetches real tiles, renders pixels, and switches layers", async
   // tileset and succeed against the same granule.
   const truecolorButton = page.getByRole("button", { name: "HLS true color" });
   const ndviButton = page.getByRole("button", { name: "HLS NDVI" });
-  await expect(ndviButton).toHaveAttribute("aria-pressed", "true");
+  const fireButton = page.getByRole("button", { name: "Park Fire NDVI" });
+  await expect(fireButton).toHaveAttribute("aria-pressed", "true");
+  await expect(ndviButton).toHaveAttribute("aria-pressed", "false");
   await expect(truecolorButton).toHaveAttribute("aria-pressed", "false");
 
   const truecolorTile = tileResponse(page, "truecolor");

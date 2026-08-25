@@ -27,8 +27,9 @@ docker run -p 8080:8080 ghcr.io/forgo/swath serve --fixtures
 The first run pulls the image (~120 MB). Open <http://localhost:8080> — the
 viewer, with the fixture granule (a 512×512-pixel HLS subset over the Rockies)
 fitted in view; NDVI is computed live from the band COGs on every uncached
-tile request
-([`media/screenshots/01-landing-layer-rail.png`](media/screenshots/01-landing-layer-rail.png)).
+tile request. (A catalog with a time series — the checkout stack's Park Fire
+season — opens on that loop instead, with a Share button for the exact view:
+[`media/screenshots/01-landing-layer-rail.png`](media/screenshots/01-landing-layer-rail.png).)
 Prefer proof over pixels? `/healthz` answers `ok`,
 `/tilesets/ndvi/tiles/12/1561/848` answers `200 image/png`. `ctrl-c` stops
 the container; every route is in [`ENDPOINTS.md`](ENDPOINTS.md).

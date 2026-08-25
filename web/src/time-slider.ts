@@ -97,6 +97,17 @@ export interface TimeSliderHooks {
   /** Warm this frame: the host fetches its visible tile URLs so the
    * server's write-through cache holds them before the frame displays. */
   prefetch(datetime: string): void;
+  /** May the play loop advance right now? A tick that lands while the
+   * current frame is still painting (cold cache, slow renderer) is
+   * skipped and retried next interval — the loop never runs ahead of
+   * the imagery, and a cold first pass adapts to the server's pace
+   * instead of thrashing it. Absent = always. */
+  canAdvance?(): boolean;
+  /** The user touched the control (play/pause click, a scrub): the
+   * host's cue that any automated playback — the cinematic landing loop
+   * (issue #211) — is now the user's. Called BEFORE the act itself, so
+   * the host can attribute the resulting frame change to the user. */
+  interact?(): void;
 }
 
 /**
@@ -132,6 +143,7 @@ export class TimeSlider {
     this.#play.setAttribute("aria-label", "Play the layer's time series");
     this.#play.setAttribute("aria-pressed", "false");
     this.#play.addEventListener("click", () => {
+      this.#hooks.interact?.();
       if (this.playing) {
         this.pause();
       } else {
@@ -148,6 +160,7 @@ export class TimeSlider {
       const index = Number(this.#range.value);
       const frame = this.#frames[index];
       if (frame !== undefined && index !== this.#index) {
+        this.#hooks.interact?.();
         this.#show(index);
         this.#hooks.scrubTo(frame);
       }
@@ -199,7 +212,8 @@ export class TimeSlider {
 
   /** Starts the loop: each tick advances one frame (wrapping) and
    * prefetches the frame after next, so the next advance's tiles are
-   * already warm by the time it lands. */
+   * already warm by the time it lands. A tick the host vetoes
+   * (`canAdvance` false: the frame is still painting) is skipped. */
   play(): void {
     if (this.playing || this.#frames.length < 2) {
       return;
@@ -213,6 +227,9 @@ export class TimeSlider {
       this.#hooks.prefetch(prefetch);
     }
     this.#timer = window.setInterval(() => {
+      if (this.#hooks.canAdvance?.() === false) {
+        return; // the current frame is still painting — hold it
+      }
       const index = next(this.#index);
       const frame = this.#frames[index];
       if (frame === undefined) {

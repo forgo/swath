@@ -38,6 +38,19 @@
  *   before-vs-after default on layers with a time series.
  * - `swipe` — the handle position, fraction 0..1 (default 0.5); dragging
  *   the handle reflects back into the attribute, the source of truth.
+ * - `cinematic` — the zero-config landing's opening move (issue #211),
+ *   read at apply time: with no `layer` given, the default becomes the
+ *   first tileset with a playable time series (two or more granule
+ *   dates; a bounded metadata scan) instead of the first tileset, and
+ *   once that layer's domain lands the loop plays on its own — unless
+ *   `prefers-reduced-motion` is set, in which case it waits with a play
+ *   affordance. Hovering the map pauses the loop (moving off resumes
+ *   it); any real interaction — a scrub, the play button, a drag or
+ *   wheel, a layer switch — hands playback to the user for good. A
+ *   top-center landing card narrates the state and carries the one-line
+ *   x-ray invitation; it hides once the overlay is on. Hosts must set
+ *   this ONLY for a view nobody asked for explicitly: a deep link or a
+ *   restored session is never overridden (the entry page's precedence).
  *
  * When neither `center` nor `zoom` is given, the view fits the layer's
  * geographic bounds from `/tilesets/{id}` metadata — a bare
@@ -133,6 +146,31 @@ const DEMO_BASEMAP_URL = "https://demotiles.maplibre.org/style.json";
  * "viewer open before the granule exists" flow, then quiet). */
 const RETRY_INTERVAL_MS = 3000;
 const MAX_TILE_RETRIES = 60;
+
+/** Bound on the `cinematic` default's search for a playable layer: how
+ * many tilesets (in listing order) get their metadata — and, when
+ * catalog-backed, their granule listing — read before the search gives
+ * up and today's first-tileset rule applies. Datasets are read once
+ * each (sibling layers share a domain). Small: the landing must open in
+ * seconds, and a demo catalog lists its playable series early. */
+const CINEMATIC_SCAN_MAX = 8;
+
+/** The temporal domain + footprint a granules listing yields. */
+interface LayerDomain {
+  frames: string[];
+  footprints: GranuleBbox[];
+}
+
+const EMPTY_DOMAIN: LayerDomain = { frames: [], footprints: [] };
+
+/** The OS-level "no animation, please" signal the cinematic landing
+ * honors (issue #211): true means wait with a play affordance. */
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
 
 const basemapCache = new Map<string, Promise<Record<string, unknown> | undefined>>();
 
@@ -301,6 +339,59 @@ swath-map .swath-map-compare-toggle button[aria-pressed="true"] {
   background: rgb(37 99 235 / 15%);
 }
 swath-map .swath-map-compare-toggle[hidden] { display: none; }
+/* The cinematic landing card (issue #211): top-center, the same dark
+ * telemetry card as the slider — one status line, the x-ray invitation
+ * as the single accent-colored action. Hidden once x-ray is on. */
+swath-map .swath-map-landing {
+  position: absolute;
+  top: 8px;
+  /* Centered by auto margins, not left:50%: an absolutely positioned
+   * box at left:50% shrink-wraps to HALF the container and clips its
+   * status line. Capped short of the top-right controls. */
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 260px);
+  padding: 5px 6px 5px 10px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 75%);
+  color: #e2e8f0;
+  font: 11px/1.5 ui-monospace, monospace;
+}
+swath-map .swath-map-landing[hidden] { display: none; }
+swath-map .swath-map-landing-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+swath-map .swath-map-landing-status[hidden] { display: none; }
+swath-map .swath-map-landing button {
+  flex: none;
+  margin: 0;
+  padding: 1px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: rgb(255 255 255 / 12%);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+swath-map .swath-map-landing button[hidden] { display: none; }
+swath-map .swath-map-landing button:focus-visible { outline: 2px solid #4ade80; outline-offset: 1px; }
+swath-map .swath-map-landing-play { color: #4ade80; font-weight: 700; }
+swath-map .swath-map-landing-invite {
+  border-color: rgb(74 222 128 / 45%);
+  background: rgb(74 222 128 / 10%);
+  color: #4ade80;
+  font-weight: 700;
+}
+swath-map .swath-map-landing-invite:hover { background: rgb(74 222 128 / 22%); }
+swath-map .swath-map-landing-dismiss {
+  padding: 1px 5px;
+  background: none;
+  color: #94a3b8;
+}
 `;
 
 /** Injects MapLibre's CSS + the component chrome once per document. */
@@ -509,6 +600,112 @@ class ZoomToDataControl implements IControl {
   }
 }
 
+/** Where the cinematic landing is (issue #211): `off` — nothing to
+ * narrate (no `cinematic`, no playable domain); `playing` — the loop is
+ * the component's; `hover` — paused under the pointer, resumes on
+ * leave; `reduced` — waiting with a play affordance (reduced motion);
+ * `over` — the user took over (the invitation stays, the status goes). */
+type LandingState = "off" | "playing" | "hover" | "reduced" | "over";
+
+/** The landing card's actions, wired by the host. */
+interface LandingHooks {
+  /** The reduced-motion play affordance: start the loop as the user. */
+  play(): void;
+  /** The invitation: turn the x-ray overlay on. */
+  invite(): void;
+}
+
+/** The cinematic landing card (issue #211): a one-line status of the
+ * loop plus the "watch the machine work" x-ray invitation. Pure DOM,
+ * like the slider — the host decides the state. Exact state rides
+ * `data-state` for the tests. Hidden while there is nothing to say,
+ * while the x-ray overlay is on (the invitation has been accepted),
+ * and after the viewer dismisses it. */
+class LandingCard {
+  readonly element: HTMLElement;
+  readonly #status: HTMLSpanElement;
+  readonly #play: HTMLButtonElement;
+  #title = "";
+  #frames = 0;
+  #state: LandingState = "off";
+  #xray = false;
+  #dismissed = false;
+
+  constructor(doc: Document, hooks: LandingHooks) {
+    this.element = doc.createElement("div");
+    this.element.className = "swath-map-landing";
+    this.element.setAttribute("role", "status");
+    this.element.hidden = true;
+
+    this.#status = doc.createElement("span");
+    this.#status.className = "swath-map-landing-status";
+
+    this.#play = doc.createElement("button");
+    this.#play.type = "button";
+    this.#play.className = "swath-map-landing-play";
+    this.#play.textContent = "play the season";
+    this.#play.setAttribute("aria-label", "Play the season");
+    this.#play.hidden = true;
+    this.#play.addEventListener("click", () => hooks.play());
+
+    const invite = doc.createElement("button");
+    invite.type = "button";
+    invite.className = "swath-map-landing-invite";
+    invite.textContent = "watch the machine work →";
+    invite.setAttribute(
+      "aria-label",
+      "Watch the machine work: turn on the x-ray overlay of every tile's render decision",
+    );
+    invite.addEventListener("click", () => hooks.invite());
+
+    const dismiss = doc.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "swath-map-landing-dismiss";
+    dismiss.textContent = "×";
+    dismiss.setAttribute("aria-label", "Dismiss");
+    dismiss.addEventListener("click", () => {
+      this.#dismissed = true;
+      this.#render();
+    });
+
+    this.element.append(this.#status, this.#play, invite, dismiss);
+  }
+
+  /** What the loop is over: the layer's title and its frame count. */
+  set(title: string, frames: number): void {
+    this.#title = title;
+    this.#frames = frames;
+    this.#render();
+  }
+
+  setState(state: LandingState): void {
+    this.#state = state;
+    this.#render();
+  }
+
+  /** The invitation is accepted while the overlay is on: card hidden. */
+  setXray(on: boolean): void {
+    this.#xray = on;
+    this.#render();
+  }
+
+  #render(): void {
+    const state = this.#state;
+    this.element.dataset["state"] = state;
+    this.element.hidden = state === "off" || this.#xray || this.#dismissed;
+    this.#play.hidden = state !== "reduced";
+    const status = {
+      off: "",
+      playing: `${this.#title} — ${this.#frames} frames, looping. Hover to pause, scrub or drag to take over.`,
+      hover: `${this.#title} — paused. Move off the map to resume.`,
+      reduced: `${this.#title} — ${this.#frames} frames, paused for reduced motion.`,
+      over: "",
+    }[state];
+    this.#status.textContent = status;
+    this.#status.hidden = status === "";
+  }
+}
+
 export class SwathMap extends HTMLElement {
   static readonly tagName = "swath-map";
 
@@ -540,6 +737,19 @@ export class SwathMap extends HTMLElement {
   #xrayToggle: XRayToggleControl | undefined;
   #xray: XRayOverlay | undefined;
   #time: TimeSlider | undefined;
+  #landing: LandingCard | undefined;
+  /** The cinematic landing (issue #211) has started — or offered — its
+   * loop for the applied layer; a re-apply of the same view (liveness
+   * refresh) leaves a running loop alone. */
+  #cinematicArmed = false;
+  /** The user took over (scrub, play button, drag, layer switch): the
+   * component never again starts, pauses, or resumes playback itself. */
+  #cinematicOver = false;
+  /** Reduced motion: the landing is waiting with a play affordance
+   * rather than looping. */
+  #cinematicReduced = false;
+  /** The cinematic loop is paused under the pointer (resumes on leave). */
+  #hoverPaused = false;
   #zoomData: ZoomToDataControl | undefined;
   /** The compare swipe (issue #210): present exactly while a coherent
    * compare is asked for via `compare-datetime` / `compare-layer`. */
@@ -635,12 +845,131 @@ export class SwathMap extends HTMLElement {
       prefetch: (datetime) => {
         this.#prefetchFrame(datetime);
       },
+      canAdvance: () => this.#map?.areTilesLoaded() ?? true,
+      interact: () => {
+        this.#endCinematic(false);
+      },
     });
-    this.append(this.#time.element);
+    this.#landing = new LandingCard(this.ownerDocument, {
+      play: () => {
+        // The reduced-motion affordance IS a user act: the loop it
+        // starts is the user's (no hover-pause, and the URL follows).
+        this.#endCinematic(false);
+        this.#time?.play();
+      },
+      invite: () => {
+        this.setAttribute("xray", "");
+      },
+    });
+    this.#landing.setXray(this.hasAttribute("xray"));
+    this.append(this.#time.element, this.#landing.element);
+    this.#cinematicArmed = false;
+    this.#hoverPaused = false;
+    // Hover pauses the cinematic loop, leaving resumes it — on the host,
+    // not the map container: the slider and cards float above the
+    // container, and reaching for them must not count as leaving.
+    this.addEventListener("pointerenter", this.#onPointerEnter);
+    this.addEventListener("pointerleave", this.#onPointerLeave);
+    // A user-driven move (drag, wheel, keyboard — MapLibre stamps those
+    // with `originalEvent`; programmatic fits carry none) takes over.
+    this.#map.on("movestart", (event) => {
+      if ((event as { originalEvent?: Event }).originalEvent) {
+        this.#endCinematic(true);
+      }
+    });
     if (this.hasAttribute("xray")) {
       this.#enableXRay();
     }
     this.#startApply();
+  }
+
+  /** The cinematic loop is the component's own right now: armed, not
+   * handed over, not waiting on reduced motion. What the
+   * `swath-timechange` event reports as `cinematic` — the shell's cue
+   * that a frame change was nobody's doing. */
+  get #cinematicPlaying(): boolean {
+    return this.#cinematicArmed && !this.#cinematicOver && !this.#cinematicReduced;
+  }
+
+  readonly #onPointerEnter = (event: PointerEvent): void => {
+    // Mouse only: a touch fires enter/leave around every tap.
+    if (event.pointerType !== "mouse" || !this.#cinematicPlaying || !this.#time?.playing) {
+      return;
+    }
+    this.#time.pause();
+    this.#hoverPaused = true;
+    this.#landing?.setState("hover");
+  };
+
+  readonly #onPointerLeave = (event: PointerEvent): void => {
+    if (event.pointerType !== "mouse" || !this.#hoverPaused) {
+      return;
+    }
+    this.#hoverPaused = false;
+    if (this.#cinematicPlaying) {
+      this.#time?.play();
+      this.#landing?.setState("playing");
+    }
+  };
+
+  /** Starts (or, under reduced motion, offers) the cinematic loop once
+   * the applied layer's domain is known — the `cinematic` attribute's
+   * second half. No-op without the attribute, after a takeover (the
+   * invitation stays), below two frames, or when already running. */
+  #armCinematic(title: string, frames: number): void {
+    const landing = this.#landing;
+    const time = this.#time;
+    if (!landing || !time || !this.hasAttribute("cinematic")) {
+      return;
+    }
+    if (this.#cinematicOver) {
+      landing.setState("over");
+      return;
+    }
+    if (frames < 2) {
+      landing.setState("off");
+      return;
+    }
+    if (this.#cinematicArmed) {
+      return;
+    }
+    this.#cinematicArmed = true;
+    landing.set(title, frames);
+    this.#cinematicReduced = prefersReducedMotion();
+    if (this.#cinematicReduced) {
+      landing.setState("reduced");
+      return;
+    }
+    landing.setState("playing");
+    time.play();
+  }
+
+  /** The user took over (idempotent): the loop is theirs from here.
+   * `pause` stops a cinematic loop that is still running — a drag or a
+   * layer switch pauses so the user can look; the slider's own controls
+   * pass false because the click that follows decides (a "pause" press
+   * must not be undone into a restart). */
+  #endCinematic(pause: boolean, options: { resetFrame?: boolean } = {}): void {
+    if (this.#cinematicOver) {
+      return;
+    }
+    const wasPlaying = this.#cinematicPlaying;
+    this.#cinematicOver = true;
+    if (!this.#cinematicArmed) {
+      return;
+    }
+    if (pause && wasPlaying) {
+      this.#time?.pause();
+    }
+    // A frame the loop advanced to is nobody's choice: a layer switch
+    // that ends the loop drops it back to "latest" rather than carrying
+    // a fire-season instant onto the next layer (where it may not even
+    // resolve). A frame the user scrubbed to (a takeover before this
+    // point) is theirs and stays.
+    if (options.resetFrame === true && wasPlaying) {
+      this.removeAttribute("datetime");
+    }
+    this.#landing?.setState("over");
   }
 
   /** Re-applies the current layer (style + sources) — refetches tiles. */
@@ -661,6 +990,9 @@ export class SwathMap extends HTMLElement {
     this.#compareTemplate = "";
     this.#time?.dispose();
     this.#time = undefined;
+    this.#landing = undefined;
+    this.removeEventListener("pointerenter", this.#onPointerEnter);
+    this.removeEventListener("pointerleave", this.#onPointerLeave);
     this.#map?.remove();
     this.#map = undefined;
     this.#switcher = undefined;
@@ -721,6 +1053,7 @@ export class SwathMap extends HTMLElement {
           this.#enableXRay();
         }
         this.#xrayToggle?.update(newValue !== null);
+        this.#landing?.setXray(newValue !== null);
         break;
       default:
         break;
@@ -756,6 +1089,7 @@ export class SwathMap extends HTMLElement {
    * attribute directly and never auto-frame (a shared URL's view wins,
    * the issue #108 precedence contract). */
   async setLayer(id: string): Promise<void> {
+    this.#endCinematic(true, { resetFrame: true }); // a user's pick: the loop is over
     this.#pendingAutoFrame = true;
     this.setAttribute("layer", id);
     await this.#ready;
@@ -869,6 +1203,7 @@ export class SwathMap extends HTMLElement {
         sides: this.#compareSides,
       });
     }
+    this.#xray.setFrame(this.getAttribute("datetime"));
   }
 
   /** Tears the x-ray overlay down (idempotent): closes its EventSource
@@ -913,7 +1248,9 @@ export class SwathMap extends HTMLElement {
    * no style rebuild, no bounds refit, no `/tilesets` round trip. Before
    * the first apply lands there is no source yet and the pending apply
    * reads the attribute itself. The slider mirrors the attribute; the
-   * bubbling `swath-timechange` is the page shell's URL-sync seam.
+   * bubbling `swath-timechange` is the page shell's URL-sync seam —
+   * its `cinematic` flag marks a frame the landing loop advanced on its
+   * own (issue #211), which no shareable URL should follow.
    */
   #repointTime(datetime: string | null): void {
     const map = this.#map;
@@ -941,8 +1278,12 @@ export class SwathMap extends HTMLElement {
     // right templates are unchanged and the identical-template guard
     // keeps the right source untouched then.
     this.#applyCompare();
+    this.#xray?.setFrame(datetime);
     this.dispatchEvent(
-      new CustomEvent("swath-timechange", { detail: { datetime }, bubbles: true }),
+      new CustomEvent("swath-timechange", {
+        detail: { datetime, cinematic: this.#cinematicPlaying },
+        bubbles: true,
+      }),
     );
   }
 
@@ -1008,17 +1349,28 @@ export class SwathMap extends HTMLElement {
     }
     const epoch = ++this.#epoch;
     const available = await this.layers();
-    const requested = this.getAttribute("layer");
-    const layerId = requested ?? available[0]?.id;
+    if (epoch !== this.#epoch) {
+      return;
+    }
+    // The default layer: the first tileset — or, for the cinematic
+    // landing (issue #211), the first PLAYABLE one when any exists.
+    let layerId = this.getAttribute("layer") ?? undefined;
+    let picked: PlayablePick | undefined;
+    if (layerId === undefined && this.hasAttribute("cinematic")) {
+      picked = await this.#pickPlayable(available, epoch);
+      layerId = picked?.id;
+    }
+    layerId ??= available[0]?.id;
     if (epoch !== this.#epoch || layerId === undefined) {
       return;
     }
+    const title = available.find((layer) => layer.id === layerId)?.title ?? layerId;
 
     // The tileset metadata carries both the geographic bounds (the
     // zero-config fit below) and, for catalog-backed layers, the
     // granules link the time slider's domain comes from (issue #182).
     const fit = this.getAttribute("center") === null && this.getAttribute("zoom") === null;
-    const metadata = await this.#layerMetadata(layerId);
+    const metadata = picked?.metadata ?? (await this.#layerMetadata(layerId));
     const bounds = fit ? metadata?.bounds : undefined;
 
     // Optional basemap under the imagery: fetch (cached) and merge our raster
@@ -1075,7 +1427,7 @@ export class SwathMap extends HTMLElement {
     // cache, so reordering it flips a badge between live and cache_hit),
     // while the domain only feeds the slider and the data-framing.
     // `ready` still covers it — tests may await and then inspect.
-    await this.#applyDataDomain(metadata, epoch);
+    await this.#applyDataDomain(title, metadata, epoch, picked?.domain);
     if (epoch !== this.#epoch) {
       return;
     }
@@ -1179,42 +1531,88 @@ export class SwathMap extends HTMLElement {
     return metadata;
   }
 
-  /** Feeds the time slider AND the data-framing (issue #182): fetches
-   * the layer's granule listing (when its metadata linked one), hands
-   * the acquisition datetimes to the slider, and records where the data
-   * IS — the union of granule footprints, falling back to the tileset
-   * metadata bounds for static layers, unknown when neither exists (the
-   * zoom-to-data control hides then). Failures are tolerated: both are
-   * bonus affordances, never a reason the imagery fails to paint. */
-  async #applyDataDomain(metadata: LayerMetadata | undefined, epoch: number): Promise<void> {
-    let frames: string[] = [];
-    let footprints: GranuleBbox[] = [];
-    if (metadata?.dataset !== undefined) {
-      try {
-        const url = `${this.server}/datasets/${encodeURIComponent(metadata.dataset)}/granules`;
-        const response = await fetch(url, { headers: { accept: "application/json" } });
-        if (response.ok) {
-          const body: unknown = await response.json();
-          frames = parseGranuleDatetimes(body);
-          footprints = ((body as { granules?: { bbox?: unknown }[] }).granules ?? [])
-            .map((granule) => parseBbox(granule.bbox))
-            .filter((bbox): bbox is GranuleBbox => bbox !== undefined);
-        }
-      } catch {
-        frames = [];
-        footprints = [];
+  /** The `cinematic` default (issue #211): the first listed layer whose
+   * dataset has two or more granule dates — a playable time series —
+   * within the scan bound, with the metadata and domain already read
+   * (the apply reuses both: no second round trip). Undefined when no
+   * scanned layer is playable, or when a newer apply superseded this
+   * one mid-scan. */
+  async #pickPlayable(
+    available: readonly SwathLayer[],
+    epoch: number,
+  ): Promise<PlayablePick | undefined> {
+    const seen = new Set<string>();
+    for (const layer of available.slice(0, CINEMATIC_SCAN_MAX)) {
+      const metadata = await this.#layerMetadata(layer.id);
+      if (epoch !== this.#epoch) {
+        return undefined;
+      }
+      const dataset = metadata?.dataset;
+      if (metadata === undefined || dataset === undefined || seen.has(dataset)) {
+        continue;
+      }
+      seen.add(dataset);
+      const domain = await this.#fetchDomain(dataset);
+      if (epoch !== this.#epoch) {
+        return undefined;
+      }
+      if (domain.frames.length >= 2) {
+        return { id: layer.id, metadata, domain };
       }
     }
+    return undefined;
+  }
+
+  /** A dataset's granule listing, reduced to what the component needs:
+   * the acquisition datetimes (the slider's domain) and the footprints
+   * (the data bounds). Failures yield the empty domain — both are bonus
+   * affordances, never a reason the imagery fails to paint. */
+  async #fetchDomain(dataset: string): Promise<LayerDomain> {
+    try {
+      const url = `${this.server}/datasets/${encodeURIComponent(dataset)}/granules`;
+      const response = await fetch(url, { headers: { accept: "application/json" } });
+      if (!response.ok) {
+        return EMPTY_DOMAIN;
+      }
+      const body: unknown = await response.json();
+      return {
+        frames: parseGranuleDatetimes(body),
+        footprints: ((body as { granules?: { bbox?: unknown }[] }).granules ?? [])
+          .map((granule) => parseBbox(granule.bbox))
+          .filter((bbox): bbox is GranuleBbox => bbox !== undefined),
+      };
+    } catch {
+      return EMPTY_DOMAIN;
+    }
+  }
+
+  /** Feeds the time slider AND the data-framing (issue #182): fetches
+   * the layer's granule listing (when its metadata linked one, unless
+   * the cinematic scan already did), hands the acquisition datetimes to
+   * the slider, and records where the data IS — the union of granule
+   * footprints, falling back to the tileset metadata bounds for static
+   * layers, unknown when neither exists (the zoom-to-data control hides
+   * then). Last, the cinematic landing gets its chance (issue #211). */
+  async #applyDataDomain(
+    title: string,
+    metadata: LayerMetadata | undefined,
+    epoch: number,
+    prefetched: LayerDomain | undefined,
+  ): Promise<void> {
+    const domain =
+      prefetched ??
+      (metadata?.dataset === undefined ? EMPTY_DOMAIN : await this.#fetchDomain(metadata.dataset));
     if (epoch !== this.#epoch) {
       return;
     }
-    const union = unionBbox(footprints);
+    const union = unionBbox(domain.footprints);
     this.#dataBounds = union
       ? { west: union[0], south: union[1], east: union[2], north: union[3] }
       : metadata?.bounds;
     this.#zoomData?.update(this.#dataBounds !== undefined);
-    this.#frames = frames;
-    this.#time?.setDomain(frames, this.getAttribute("datetime"));
+    this.#frames = domain.frames;
+    this.#time?.setDomain(domain.frames, this.getAttribute("datetime"));
+    this.#armCinematic(title, domain.frames.length);
   }
 
   /** The map style for one side: the swath raster (from `template`) on
@@ -1305,6 +1703,14 @@ export class SwathMap extends HTMLElement {
       }),
     );
   }
+}
+
+/** What the cinematic scan hands the apply: the chosen layer with its
+ * metadata and domain already fetched. */
+interface PlayablePick {
+  id: string;
+  metadata: LayerMetadata;
+  domain: LayerDomain;
 }
 
 /** Registers `<swath-map>`; safe to call more than once. */

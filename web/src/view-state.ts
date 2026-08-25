@@ -248,6 +248,19 @@ export function withViewState(search: string, state: ViewState): string {
   return parts.length === 0 ? "" : `?${parts.join("&")}`;
 }
 
+/**
+ * The share link (issue #211): the page's own URL with `state` written
+ * in full — every owned param the view has a value for, foreign params
+ * preserved. This is exactly the string the shell writes to the address
+ * bar on interaction ([`withViewState`] on the same search), so a copied
+ * link and the bar agree byte-for-byte; on a bare landing it is the
+ * explicit form of what the viewer resolved to.
+ */
+export function shareUrl(href: string, state: ViewState): string {
+  const url = new URL(href);
+  return `${url.origin}${url.pathname}${withViewState(url.search, state)}${url.hash}`;
+}
+
 /** Semantic equality within the write precision — the "don't rewrite a
  * URL that already says this" guard behind byte-stable deep links. */
 export function viewStatesEqual(a: ViewState, b: ViewState): boolean {

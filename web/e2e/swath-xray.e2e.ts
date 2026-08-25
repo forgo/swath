@@ -21,6 +21,14 @@ const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 // serves the embedded production bundle (set by playwright.config.ts).
 const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
 
+/** The Colorado fixture layer, asked for explicitly: a paramless visit
+ * is the cinematic landing since issue #211 — the fire-season loop,
+ * re-pointing tiles every second — and this suite's quiet-stream and
+ * fresh-render premises need a still, single-date view. An explicit
+ * `layer` is deep-link state (never animated over); the bounds fit
+ * still lands, so `waitForFittedView` applies unchanged. */
+const STATIC_LANDING = `${DEMO_PATH}?layer=ndvi`;
+
 /** Waits until the zero-config bounds fit has landed and settled. The
  * fit is async (tileset metadata fetch -> setStyle -> fitBounds): a view
  * jump issued before it lands is silently clobbered back to the fitted
@@ -86,7 +94,7 @@ function latestByKey(received: Envelope[]): Map<string, Envelope> {
 test("overlay paints decisions matching the traces the test received over SSE", async ({
   page,
 }) => {
-  await page.goto(DEMO_PATH);
+  await page.goto(STATIC_LANDING);
   await expect(page.locator("swath-map canvas.maplibregl-canvas")).toBeVisible();
 
   // Subscribe FIRST: the broadcast bus delivers every event published
@@ -215,7 +223,7 @@ interface ReceivedPlan {
 }
 
 test("v1: heatmap buckets, feed lines, and why-view match the SSE stream", async ({ page }) => {
-  await page.goto(DEMO_PATH);
+  await page.goto(STATIC_LANDING);
   await expect(page.locator("swath-map canvas.maplibregl-canvas")).toBeVisible();
   await subscribeToTraces(page);
 
@@ -372,8 +380,11 @@ test("v1: heatmap buckets, feed lines, and why-view match the SSE stream", async
 /** Waits until no new envelope arrived for >1.2 s — both streams have
  * drained, so a baseline snapshot cannot straddle an in-flight event. */
 async function waitForQuietStream(page: Page): Promise<void> {
+  // Scoped to this suite's layer: the stream is server-wide, and since
+  // issue #211 sibling workers' landing pages loop the fire series —
+  // a stream that is never globally quiet while they run.
   await page.waitForFunction(() => {
-    const len = (window.__received ?? []).length;
+    const len = (window.__received ?? []).filter((envelope) => envelope.layer === "ndvi").length;
     const now = Date.now();
     if (window.__quietLen !== len || window.__quietAt === undefined) {
       window.__quietLen = len;
@@ -463,7 +474,7 @@ async function expectAnalyticsAgreement(page: Page, base: AnalyticsBaseline): Pr
  * driven burst of fresh renders agreed between panel and test stream.
  * Returns the quiet-stream baseline the burst was agreed against. */
 async function setUpAgreedAnalytics(page: Page, center: string, zoom: string): Promise<void> {
-  await page.goto(DEMO_PATH);
+  await page.goto(STATIC_LANDING);
   await expect(page.locator("swath-map canvas.maplibregl-canvas")).toBeVisible();
   await subscribeToTraces(page);
 
