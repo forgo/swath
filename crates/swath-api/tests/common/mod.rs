@@ -535,6 +535,53 @@ pub(crate) fn openeo_app_with_preview_ceiling(ceiling: Option<u64>) -> (Router, 
     (app, catalog)
 }
 
+/// The openEO app with `run_udf` wired (ADR 0018, #204): the real
+/// wasmtime registrar, an in-memory `object_store` module store, and the
+/// caller's fetcher (a counting double in the UDF suite). Returns the
+/// publish wiring and the store so tests can rehydrate and inspect.
+pub(crate) fn openeo_app_with_udf<F>(fetcher: F) -> UdfApp
+where
+    F: swath_core::udf::ModuleFetcher + 'static,
+{
+    use swath_api::{CatalogLayers, OpenEoState, UdfPublish, openeo_router};
+    use swath_modulestore_objectstore::ObjectStoreModuleStore;
+    use swath_udf_wasmtime::WasmtimeUdf;
+
+    let catalog = MemoryCatalog::default();
+    catalog.seed(hls_catalog_dataset(), vec![hls_catalog_granule()]);
+    let provider = CatalogLayers::new(catalog.clone(), Vec::new());
+    let store: Arc<dyn object_store::ObjectStore> =
+        Arc::new(LocalFileSystem::new_with_prefix(fixtures_dir()).expect("fixture dir exists"));
+    let state = ApiState::new(
+        provider.clone(),
+        CogSource::new(Arc::clone(&store)),
+        Proj4rsReproject,
+        BASE_URL,
+    )
+    .with_openeo();
+    let executor = Arc::new(WasmtimeUdf::new().expect("engine builds on this host"));
+    let modules = ObjectStoreModuleStore::new(Arc::new(object_store::memory::InMemory::new()));
+    let publish = UdfPublish::new(executor, modules.clone(), fetcher);
+    let openeo_state =
+        OpenEoState::new(provider, CogSource::new(store), Proj4rsReproject, BASE_URL)
+            .with_udf(publish.clone());
+    let app = router(Arc::new(state)).merge(openeo_router(Arc::new(openeo_state)));
+    UdfApp {
+        app,
+        catalog,
+        publish,
+        store: modules,
+    }
+}
+
+/// What [`openeo_app_with_udf`] hands back.
+pub(crate) struct UdfApp {
+    pub(crate) app: Router,
+    pub(crate) catalog: MemoryCatalog,
+    pub(crate) publish: swath_api::UdfPublish,
+    pub(crate) store: swath_modulestore_objectstore::ObjectStoreModuleStore,
+}
+
 /// One in-process request against a specific router instance.
 pub(crate) async fn request_on(
     app: &Router,

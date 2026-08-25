@@ -35,6 +35,7 @@ by knob: defaults → `[budget]` → the global flags/env → per-layer
 | `--read-only` | `SWATH_READ_ONLY` | — | Write routes absent, not 403'd (`POST /datasets`, granule registration, `POST`/`DELETE /services`); `POST /result` stays (budget-bounded preview, ADR 0014). The auth-less hosted-demo slice (#198). |
 | `--watch-dir` | `SWATH_WATCH_DIR` | `PATH` | Watch this directory for `<granule-id>.json` manifests (catalog mode only). |
 | `--cache` | `SWATH_CACHE` | `ROOT` | Tile-cache root (same grammar as the store root); absent: no cache. |
+| `--udf-store` | `SWATH_UDF_STORE` | `ROOT` | `run_udf` module-store root (same grammar): published WASM modules persist here by content hash (ADR 0018); absent: `run_udf` is not offered. |
 | `--overview-oversample` | `SWATH_OVERVIEW_OVERSAMPLE` | `RATIO` | Global overview eligibility slack (default 1.2, GDAL's rule). |
 | `--max-estimated-live-bytes` | `SWATH_MAX_ESTIMATED_LIVE_BYTES` | `BYTES` | Global live-render ceiling: refuse tiles estimated over this when nothing cheaper can serve; absent: never refuse. |
 | `--cors-allowed-origins` | `SWATH_CORS_ALLOWED_ORIGINS` | `ORIGINS` | Comma-separated exact origins, or `*`; default empty — no CORS headers. |
@@ -99,6 +100,7 @@ a typo fails loudly at startup.
 | `base-url` | string | `http://localhost:<port>` | Base URL minted into OGC/openEO links. |
 | `store-root` | string | — (required) | Object-store root: local directory or `s3://bucket[/prefix]`. |
 | `cache` | string | none | Tile-cache root (same grammar as `store-root`). Absent: no cache. |
+| `udf-store` | string | none | `run_udf` module-store root (same grammar). Absent: `run_udf` not offered. |
 | `catalog` | string | none | Postgres URL of a pgstac database — presence selects catalog mode. |
 | `watch-dir` | string | none | Drop directory watched for granule manifests (catalog mode only). |
 | `cors-allowed-origins` | array of strings | `[]` (CORS off) | Origin allowlist; `["*"]` allows any origin. |

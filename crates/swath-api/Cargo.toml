@@ -37,6 +37,8 @@ tokio = { workspace = true, features = ["sync"] }
 tower-http = { workspace = true, features = ["cors"] }
 
 [dev-dependencies]
+# Encoding the fixture module as a `data:` URL in the run_udf suite.
+base64 = { workspace = true }
 # `http1` (+ the `tokio` feature above): the SSE tests drive a real
 # `axum::serve` on an ephemeral port — `tower::oneshot` has no streaming-
 # body affordance. Dev-only; the production server wiring stays with #29.
@@ -51,6 +53,11 @@ swath-cache-objectstore = { path = "../adapters/swath-cache-objectstore", versio
 swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.1.0-alpha.1" }
 swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.1.0-alpha.1" }
 swath-testkit = { path = "../swath-testkit", version = "0.1.0-alpha.1" }
+# The real run_udf publish motion end to end (#204): the wasmtime
+# registrar over the committed fixture modules, the object_store module
+# store in memory.
+swath-modulestore-objectstore = { path = "../adapters/swath-modulestore-objectstore", version = "0.1.0-alpha.1" }
+swath-udf-wasmtime = { path = "../adapters/swath-udf-wasmtime", version = "0.1.0-alpha.1" }
 # `net`/`io-util`/`time`: the SSE tests' hand-rolled HTTP client (TCP +
 # chunked-transfer reader + timeouts).
 tokio = { workspace = true, features = [

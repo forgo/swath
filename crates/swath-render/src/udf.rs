@@ -14,13 +14,23 @@
 //! this trait, not an IR redesign.
 //!
 //! A [`UdfStage`] names the module by **content hash** — the module bytes
-//! never enter the IR; the module store (#204) resolves the hash at
-//! execution time. [`NoUdf`] is the default executor for deployments with
+//! never enter the IR; the module store (`swath_core::udf`, #204) owns
+//! hash → bytes. [`NoUdf`] is the default executor for deployments with
 //! no UDF support wired: it refuses every stage, and since
 //! [`eval`](crate::ir::eval) consults the executor only when it reaches a
 //! `Udf` op, plans without UDF stages never touch it.
+//!
+//! The compile motion has its own seam, [`UdfRegistrar`] (#204): the
+//! process compiler hands it module bytes and gets back the content hash
+//! and the pinned output arity — registration (zero-import check, the
+//! four v1 exports, the ABI version probe, `swath_udf_output_planes`) is
+//! the adapter's, so the compiler validates modules without knowing
+//! wasmtime exists. [`UdfSource`] is the grammar of `run_udf`'s `udf`
+//! argument in the Swath profile: inline `data:application/wasm;base64`
+//! or an `http(s)` URL.
 
 use serde::{Deserialize, Serialize};
+use swath_core::udf::MODULE_MAX_BYTES;
 
 use crate::warp::WarpedBuffer;
 
@@ -135,6 +145,17 @@ pub enum UdfError {
     UnsupportedAbiVersion {
         /// The version the module claimed.
         got: i32,
+    },
+    /// Registration: `swath_udf_output_planes(input_planes)` answered
+    /// `<= 0` — the module refuses this input arity (`docs/udf-abi/v1.md`:
+    /// rejected at registration). Which *positive* arities render is the
+    /// IR's rule (1 or 3), checked by the compiler, not here.
+    #[error("module answers {output_planes} output planes for {input_planes} input planes")]
+    UnsupportedArity {
+        /// The input arity the module was asked about.
+        input_planes: u32,
+        /// Its answer.
+        output_planes: i32,
     },
     /// Tile path: the stage names a module hash the executor has not
     /// compiled. Compilation happens at the publish/preview motion, never
@@ -258,5 +279,201 @@ impl UdfExecutor for NoUdf {
         Err(UdfError::NotConfigured {
             code_hash: stage.code_hash.clone(),
         })
+    }
+}
+
+/// What registering a module pins (`docs/udf-abi/v1.md`): its content
+/// hash and its output arity for the input arity it was registered
+/// against — exactly the two facts a [`UdfStage`] carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct UdfRegistration {
+    /// Lowercase sha256 hex of the module bytes ([`swath_core::udf::code_hash`]).
+    pub code_hash: String,
+    /// The module's `swath_udf_output_planes` answer for the registered
+    /// input arity, `> 0` by contract.
+    pub output_planes: u32,
+}
+
+impl UdfRegistration {
+    /// A registration of the module hashing to `code_hash` that pins
+    /// `output_planes`.
+    #[must_use]
+    pub fn new(code_hash: impl Into<String>, output_planes: u32) -> Self {
+        Self {
+            code_hash: code_hash.into(),
+            output_planes,
+        }
+    }
+}
+
+/// The compile-motion port (#204): validates and registers module bytes
+/// so a [`UdfStage`] can be built. The process compiler
+/// ([`crate::process`]) calls it once per `run_udf` node; the tile path
+/// never does. Registration is the ADR 0018 gate — zero imports, the four
+/// v1 exports with the v1 signatures, an exported memory within the cap,
+/// `swath_udf_abi() == 1` — plus the output-arity probe for the graph's
+/// input band count. The wasmtime adapter (`swath-udf-wasmtime`)
+/// implements it over its module LRU, so a registered module is also
+/// runnable by the same executor.
+pub trait UdfRegistrar: Send + Sync {
+    /// Registers `bytes` for a plan feeding it `input_planes` planes.
+    ///
+    /// # Errors
+    ///
+    /// Any registration [`UdfError`] (`InvalidModule`, `ForbiddenImport`,
+    /// `MissingExport`, `MemoryLimit`, `UnsupportedAbiVersion`,
+    /// `UnsupportedArity`), or an execution error if the probe calls
+    /// themselves misbehave.
+    fn register(&self, bytes: &[u8], input_planes: u32) -> Result<UdfRegistration, UdfError>;
+}
+
+/// Where a graph's `run_udf` node says its module comes from — the Swath
+/// profile of the `udf` argument (openEO says "source code, URL, or
+/// workspace path"; the profile narrows to exactly these two forms).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UdfSource {
+    /// `data:application/wasm;base64,…` — the module bytes, decoded here.
+    Inline(Vec<u8>),
+    /// An absolute `http://` / `https://` URL, fetched once at the compile
+    /// motion by the caller ([`swath_core::udf::ModuleFetcher`]) — the
+    /// compiler itself never fetches.
+    Remote(String),
+}
+
+/// The `data:` URL prefix the profile accepts, verbatim.
+const DATA_PREFIX: &str = "data:application/wasm;base64,";
+
+impl UdfSource {
+    /// Parses a `udf` argument. The decoded inline payload is bounded by
+    /// [`MODULE_MAX_BYTES`], refused by *encoded* length before decoding.
+    ///
+    /// # Errors
+    ///
+    /// A human-readable reason: neither form, an inline payload that is
+    /// not base64 or is over the limit.
+    pub fn parse(udf: &str) -> Result<Self, String> {
+        use base64::Engine as _;
+        if let Some(encoded) = udf.strip_prefix(DATA_PREFIX) {
+            // Every 4 base64 chars decode to at most 3 bytes; anything
+            // longer than the limit's encoding cannot fit.
+            let max_encoded = MODULE_MAX_BYTES.div_ceil(3) * 4;
+            if encoded.len() > max_encoded {
+                return Err(format!(
+                    "inline module is over the {MODULE_MAX_BYTES}-byte limit \
+                     ({} base64 characters)",
+                    encoded.len()
+                ));
+            }
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .map_err(|err| format!("inline module is not valid base64: {err}"))?;
+            if bytes.len() > MODULE_MAX_BYTES {
+                return Err(format!(
+                    "inline module of {} bytes exceeds the {MODULE_MAX_BYTES}-byte limit",
+                    bytes.len()
+                ));
+            }
+            return Ok(Self::Inline(bytes));
+        }
+        if udf.starts_with("http://") || udf.starts_with("https://") {
+            return Ok(Self::Remote(udf.to_owned()));
+        }
+        Err(format!(
+            "expected `{DATA_PREFIX}…` or an absolute http(s) URL, got {}",
+            summary(udf)
+        ))
+    }
+}
+
+/// A short, quotable rendering of an argument for diagnostics (a `data:`
+/// URL can be megabytes; never echo it whole).
+fn summary(udf: &str) -> String {
+    const LIMIT: usize = 48;
+    if udf.chars().count() <= LIMIT {
+        format!("`{udf}`")
+    } else {
+        let head: String = udf.chars().take(LIMIT).collect();
+        format!("`{head}…` ({} characters)", udf.chars().count())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use base64::Engine as _;
+    use swath_core::udf::MODULE_MAX_BYTES;
+
+    use super::UdfSource;
+
+    fn data_url(bytes: &[u8]) -> String {
+        format!(
+            "data:application/wasm;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )
+    }
+
+    #[test]
+    fn inline_data_urls_decode() {
+        let magic = b"\0asm\x01\0\0\0";
+        assert_eq!(
+            UdfSource::parse(&data_url(magic)),
+            Ok(UdfSource::Inline(magic.to_vec()))
+        );
+    }
+
+    #[test]
+    fn remote_urls_are_named_not_fetched() {
+        for url in ["http://example.org/m.wasm", "https://example.org/m.wasm"] {
+            assert_eq!(UdfSource::parse(url), Ok(UdfSource::Remote(url.to_owned())));
+        }
+    }
+
+    #[test]
+    fn other_forms_are_refused_with_the_grammar() {
+        for bad in [
+            "udf.py",
+            "def apply(x):\n  return x",
+            "ftp://example.org/m.wasm",
+            "data:text/plain;base64,aGk=",
+            "data:application/wasm,raw",
+        ] {
+            let err = UdfSource::parse(bad).expect_err(bad);
+            assert!(err.contains("data:application/wasm;base64,"), "{err}");
+            assert!(err.contains("http(s)"), "{err}");
+        }
+    }
+
+    #[test]
+    fn long_arguments_are_summarized_in_diagnostics() {
+        let long = "x".repeat(10_000);
+        let err = UdfSource::parse(&long).expect_err("refused");
+        assert!(
+            err.len() < 200,
+            "diagnostic must not echo the argument: {err}"
+        );
+        assert!(err.contains("10000 characters"), "{err}");
+    }
+
+    #[test]
+    fn invalid_base64_is_refused() {
+        let err = UdfSource::parse("data:application/wasm;base64,***").expect_err("refused");
+        assert!(err.contains("not valid base64"), "{err}");
+    }
+
+    /// The limit is enforced on the encoded length, before decoding: an
+    /// oversized payload never allocates its decoded form.
+    #[test]
+    fn oversized_inline_modules_are_refused_by_encoded_length() {
+        let over = "A".repeat(MODULE_MAX_BYTES.div_ceil(3) * 4 + 4);
+        let err =
+            UdfSource::parse(&format!("data:application/wasm;base64,{over}")).expect_err("refused");
+        assert!(err.contains("over the"), "{err}");
+        // Exactly at the limit decodes (8 MiB of zeros).
+        let at_limit = data_url(&vec![0u8; MODULE_MAX_BYTES]);
+        assert!(matches!(
+            UdfSource::parse(&at_limit),
+            Ok(UdfSource::Inline(bytes)) if bytes.len() == MODULE_MAX_BYTES
+        ));
     }
 }

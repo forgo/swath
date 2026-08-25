@@ -141,6 +141,11 @@ pub(crate) struct ResolvedConfig {
     /// local directory or `s3://bucket[/prefix]`. `None` = no cache —
     /// serving is byte-for-byte the pre-cache behavior.
     pub(crate) cache: Option<String>,
+    /// `run_udf` module-store root (`--udf-store`/`SWATH_UDF_STORE`/
+    /// `udf-store`, ADR 0018 / #204): local directory or
+    /// `s3://bucket[/prefix]`, where published WASM modules persist by
+    /// content hash. `None` = `run_udf` is not offered.
+    pub(crate) udf_store: Option<String>,
     /// CORS origin allowlist (issue #103, ADR 0011): exact origins, or
     /// `*` for any. Empty (the default) = no CORS layer at all — the
     /// same-origin story (embedded UI / vite proxy) needs none.
@@ -189,6 +194,9 @@ pub(crate) struct ConfigFile {
     store_root: Option<String>,
     /// Tile-cache root: local directory or `s3://bucket[/prefix]`.
     cache: Option<String>,
+    /// `run_udf` module-store root: local directory or
+    /// `s3://bucket[/prefix]` (absent: `run_udf` not offered).
+    udf_store: Option<String>,
     /// Postgres URL of a pgstac database — presence selects catalog mode.
     catalog: Option<String>,
     /// Drop directory watched for granule manifests (catalog mode only).
@@ -400,6 +408,7 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
         .unwrap_or_else(|| format!("http://localhost:{}", bind.port()));
 
     let cache = args.cache.clone().or(file.cache);
+    let udf_store = args.udf_store.clone().or(file.udf_store);
     let catalog = args.catalog.clone().or(file.catalog);
     let watch_dir = args.watch_dir.clone().or(file.watch_dir);
     // Flag/env (a non-empty list) outranks the file, like every scalar;
@@ -465,6 +474,7 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
         base_url,
         store_root,
         cache,
+        udf_store,
         cors_allowed_origins,
         read_only: args.read_only,
         layers,
@@ -739,6 +749,7 @@ mod tests {
             catalog: None,
             watch_dir: None,
             cache: None,
+            udf_store: None,
             overview_oversample: None,
             max_estimated_live_bytes: None,
             cors_allowed_origins: Vec::new(),
@@ -809,6 +820,31 @@ mod tests {
         })
         .expect("resolves");
         assert_eq!(cfg.cache.as_deref(), Some("s3://tiles/cache"));
+    }
+
+    /// The `run_udf` module-store root (ADR 0018, #204) layers like the
+    /// cache and defaults to absent — `run_udf` is not offered until an
+    /// operator names where modules persist.
+    #[test]
+    fn udf_store_layers_like_the_cache_and_defaults_to_absent() {
+        let cfg = resolve(&ServeArgs {
+            fixtures: true,
+            ..args()
+        })
+        .expect("resolves");
+        assert!(cfg.udf_store.is_none(), "no module store unless configured");
+
+        let file: ConfigFile =
+            toml::from_str(r#"udf-store = "/var/lib/swath/udf""#).expect("parses");
+        assert_eq!(file.udf_store.as_deref(), Some("/var/lib/swath/udf"));
+
+        let cfg = resolve(&ServeArgs {
+            fixtures: true,
+            udf_store: Some("s3://tiles/udf".to_owned()),
+            ..args()
+        })
+        .expect("resolves");
+        assert_eq!(cfg.udf_store.as_deref(), Some("s3://tiles/udf"));
     }
 
     /// CORS (issue #103, ADR 0011) layers like the other scalars and —

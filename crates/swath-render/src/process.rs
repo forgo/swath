@@ -63,6 +63,25 @@
 //!   post-eval presentation, so it rides the save node). It is rejected
 //!   on a multi-band (composite) result: a LUT maps one gray value per
 //!   pixel. Absent, gray results default to `"grayscale"`.
+//! * **`run_udf`** (ADR 0018, the bounded profile's sandboxed-WASM
+//!   extension) — over a loaded, unscaled cube: every loaded band
+//!   (deduplicated, load order) becomes one request plane, in that order,
+//!   of a [`PixelOp::Udf`](crate::ir::PixelOp::Udf) stage. `runtime`
+//!   must be `"wasm"` and `version` omitted, `null`, or `"1"` (the spec's
+//!   `InvalidRuntime` / `InvalidVersion`); `context` passes through
+//!   verbatim as the stage's params (`null` when absent). `udf` is
+//!   [`UdfSource`]: inline `data:application/wasm;base64,…` (≤ 8 MiB) or
+//!   an absolute `http(s)` URL — remote modules are fetched **once** by
+//!   the caller at this compile motion and handed in through
+//!   [`CompileContext::with_udf_module`]; the compiler never fetches.
+//!   The module is validated at compile time through the
+//!   [`UdfRegistrar`] port (zero imports, the four v1 exports, the ABI
+//!   version, the output-arity probe): a rejected module is a typed error
+//!   naming the node and the `udf` argument, and the result cube is
+//!   typed by the pinned arity — 1 plane renders gray, 3 RGB, anything
+//!   else is rejected. **One `run_udf` per graph** in v1: its result is
+//!   a UDF cube no further process except `linear_scale_range` and
+//!   `save_result` (without a colormap) accepts.
 //!
 //! Anything else is [`CompileError::UnsupportedProcess`], whose message
 //! lists this set. Structural validation — exactly one `result: true` node
@@ -74,20 +93,25 @@
 //! `BandMath → [Rescale] → Colormap(...)` (the `save_result` colormap
 //! option, `Grayscale` when absent); a multi-band result must
 //! have exactly three bands and compiles to `Composite → [Rescale]` in
-//! loaded-band order. The compiled plan's inputs are only the bands the
-//! ops actually reference (first-reference order), so serving fetches
-//! nothing the product does not read.
+//! loaded-band order; a UDF result compiles to `Udf → [Rescale]` and
+//! carries its module bytes out in [`CompiledProduct::udf_module`] for
+//! the caller to persist by hash. The compiled plan's inputs are only the
+//! bands the ops actually reference (first-reference order), so serving
+//! fetches nothing the product does not read.
 //!
 //! [openEO API]: https://api.openeo.org/
 //! [openeo-processes 1.2.0]: https://github.com/Open-EO/openeo-processes/tree/1.2.0
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use serde_json::Value as Json;
 use swath_core::catalog::{Datetime, TimeRange};
+use swath_core::udf::MODULE_MAX_BYTES;
 
 use crate::ir::{BinaryOp, Colormap, Expr, RenderPlan};
 use crate::plan::{PlanSpec, ndvi_expr, plan_for};
+use crate::udf::{UdfError, UdfRegistrar, UdfSource, UdfStage};
 
 /// What a graph's `load_collection` bands may call one dataset band: the
 /// dataset band name itself plus any openEO names / common names bound to
@@ -101,22 +125,68 @@ struct BandBinding {
     aliases: Vec<String>,
 }
 
-/// The compilation context: which collection the graph may load and how
-/// openEO band names map onto dataset bands.
-#[derive(Debug, Clone)]
+/// The compilation context: which collection the graph may load, how
+/// openEO band names map onto dataset bands, and — for `run_udf` — the
+/// [`UdfRegistrar`] that validates modules plus any remote modules the
+/// caller already fetched for this graph.
+#[derive(Clone)]
 pub struct CompileContext {
     collection: String,
     bands: Vec<BandBinding>,
+    /// The registration seam; `None` = `run_udf` is unavailable here.
+    udf: Option<Arc<dyn UdfRegistrar>>,
+    /// Remote modules resolved for this compile motion, keyed by the
+    /// exact `udf` argument (URL) that names them.
+    modules: Vec<(String, Arc<[u8]>)>,
+}
+
+impl std::fmt::Debug for CompileContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let modules: Vec<(&str, usize)> = self
+            .modules
+            .iter()
+            .map(|(url, bytes)| (url.as_str(), bytes.len()))
+            .collect();
+        f.debug_struct("CompileContext")
+            .field("collection", &self.collection)
+            .field("bands", &self.bands)
+            .field("udf", &self.udf.is_some())
+            .field("modules", &modules)
+            .finish()
+    }
 }
 
 impl CompileContext {
-    /// A context for `collection` with no bands bound yet.
+    /// A context for `collection` with no bands bound yet and no
+    /// `run_udf` support.
     #[must_use]
     pub fn new(collection: impl Into<String>) -> Self {
         Self {
             collection: collection.into(),
             bands: Vec::new(),
+            udf: None,
+            modules: Vec::new(),
         }
+    }
+
+    /// Enables `run_udf`: modules register through `registrar` at compile
+    /// time (ADR 0018, #204). Without one, a graph using `run_udf` is
+    /// [`CompileError::UdfUnavailable`].
+    #[must_use]
+    pub fn with_udf_registrar(mut self, registrar: Arc<dyn UdfRegistrar>) -> Self {
+        self.udf = Some(registrar);
+        self
+    }
+
+    /// Hands the compiler the bytes of a remote module the caller fetched
+    /// for this graph's `run_udf` node whose `udf` argument is exactly
+    /// `url` — fetched once at the compile motion, or resolved from the
+    /// module store by hash on rehydration; the compiler itself never
+    /// fetches.
+    #[must_use]
+    pub fn with_udf_module(mut self, url: impl Into<String>, bytes: Vec<u8>) -> Self {
+        self.modules.push((url.into(), Arc::from(bytes)));
+        self
     }
 
     /// Binds dataset band `name`, resolvable in graphs by `name` itself or
@@ -174,11 +244,16 @@ pub struct CompiledProduct {
     /// *which frames the layer can show*, never how pixels combine).
     /// Open on both sides when the graph says nothing about time.
     pub window: TimeRange,
+    /// The `run_udf` module bytes the plan's UDF stage was registered
+    /// from — what the publish motion persists in the module store under
+    /// the stage's `code_hash` (ADR 0018, #204). `None` for graphs
+    /// without `run_udf`.
+    pub udf_module: Option<Vec<u8>>,
 }
 
 /// The supported process ids, for diagnostics.
 const SUPPORTED: &str = "load_collection, filter_temporal, reduce_dimension, array_element, \
-     add, subtract, multiply, divide, linear_scale_range, ndvi, save_result";
+     add, subtract, multiply, divide, linear_scale_range, ndvi, run_udf, save_result";
 
 /// Why a process graph could not be compiled. Every variant names the
 /// offending node; the Display strings are user-facing diagnostics and are
@@ -328,6 +403,46 @@ pub enum CompileError {
         /// Its process id.
         process: String,
     },
+    /// `run_udf` in a context with no [`UdfRegistrar`]: this deployment
+    /// wires no UDF executor / module store (ADR 0018), so the process is
+    /// not offered — the served process list omits it too.
+    #[error(
+        "node `{node}`: run_udf is not available — this deployment wires no UDF executor or \
+         module store (ADR 0018)"
+    )]
+    UdfUnavailable {
+        /// The `run_udf` node.
+        node: String,
+    },
+    /// The registrar rejected the `udf` module (`docs/udf-abi/v1.md`:
+    /// imports, missing exports, ABI version, memory cap, arity refusal,
+    /// or a misbehaving probe). The source is the port's typed reason.
+    #[error(
+        "node `{node}` (run_udf): invalid argument `udf`: module rejected at registration: \
+         {source}"
+    )]
+    UdfModule {
+        /// The `run_udf` node.
+        node: String,
+        /// The registrar's reason.
+        #[source]
+        source: UdfError,
+    },
+    /// The module's pinned output arity is one the IR cannot render:
+    /// 1 plane is gray, 3 is RGB, anything else has no image meaning
+    /// (ADR 0018; other arities are a v2 reopen condition).
+    #[error(
+        "node `{node}` (run_udf): invalid argument `udf`: module declares {output_planes} \
+         output planes for {input_planes} input bands; v1 renders 1 (gray) or 3 (RGB)"
+    )]
+    UdfOutputPlanes {
+        /// The `run_udf` node.
+        node: String,
+        /// The input arity the module was registered against.
+        input_planes: u32,
+        /// The arity it pinned.
+        output_planes: u32,
+    },
 }
 
 /// One loaded band: the openEO label the graph uses and the dataset band
@@ -358,6 +473,15 @@ struct Cube {
 enum CubeKind {
     Multi(Vec<LoadedBand>),
     Gray(Expr),
+    /// A `run_udf` result: the registered stage over the dataset bands it
+    /// receives, in request-plane order. The module bytes ride along
+    /// (shared, never copied per memo hit) so [`compile`] can hand them
+    /// out for persistence.
+    Udf {
+        bands: Vec<String>,
+        stage: UdfStage,
+        module: Arc<[u8]>,
+    },
 }
 
 /// What a node evaluates to.
@@ -375,6 +499,7 @@ impl Value {
             Self::Cube(cube) => match cube.kind {
                 CubeKind::Multi(_) => "a multi-band data cube",
                 CubeKind::Gray(_) => "a gray (reduced) data cube",
+                CubeKind::Udf { .. } => "a UDF result data cube",
             },
             Self::Scalar(_) => "a scalar value",
             Self::Bands(_) => "a band array",
@@ -450,7 +575,9 @@ impl<'a> Graph<'a> {
 /// marking for cycle detection.
 enum NodeState {
     InProgress,
-    Done(Value),
+    /// Boxed: a memoized value can carry a UDF stage plus its module
+    /// handle, and the map holds one per node.
+    Done(Box<Value>),
 }
 
 /// One evaluation scope: a graph plus the parameters its nodes may
@@ -472,12 +599,14 @@ impl<'a> Compiler<'a> {
             Some(NodeState::InProgress) => {
                 return Err(CompileError::Cycle { node: id.into() });
             }
-            Some(NodeState::Done(value)) => return Ok(value.clone()),
+            Some(NodeState::Done(value)) => return Ok((**value).clone()),
             None => {}
         }
         scope.states.insert(id, NodeState::InProgress);
         let value = self.eval_process(scope, id)?;
-        scope.states.insert(id, NodeState::Done(value.clone()));
+        scope
+            .states
+            .insert(id, NodeState::Done(Box::new(value.clone())));
         Ok(value)
     }
 
@@ -489,6 +618,7 @@ impl<'a> Compiler<'a> {
             "reduce_dimension" => self.reduce_dimension(scope, id),
             "ndvi" => self.ndvi(scope, id),
             "linear_scale_range" => self.linear_scale_range(scope, id),
+            "run_udf" => self.run_udf(scope, id),
             "save_result" => self.save_result(scope, id),
             "array_element" => self.array_element(scope, id),
             "add" | "subtract" | "multiply" | "divide" => self.arithmetic(scope, id, process),
@@ -1003,6 +1133,120 @@ impl<'a> Compiler<'a> {
         Ok(Value::Cube(cube))
     }
 
+    /// `run_udf` (ADR 0018): registers the module through the context's
+    /// [`UdfRegistrar`] and types the result cube by the pinned output
+    /// arity — the module docs carry the profile's narrowing.
+    fn run_udf(&self, scope: &mut Scope<'a>, node: &'a str) -> Result<Value, CompileError> {
+        let cube = self.cube_arg(scope, node, "data")?;
+        let window = cube.window.clone();
+        let loaded = Self::unscaled_multi(cube, node, "run_udf")?;
+        let n = &scope.graph.nodes[node];
+        let invalid = |argument: &str, detail: String| CompileError::InvalidArgument {
+            node: node.into(),
+            process: "run_udf".into(),
+            argument: argument.into(),
+            detail,
+        };
+
+        // Runtime "wasm", version "1", only (ADR 0018) — the spec's
+        // InvalidRuntime / InvalidVersion exceptions.
+        let runtime = Self::require(scope, node, "runtime")?;
+        if runtime.as_str() != Some("wasm") {
+            return Err(invalid(
+                "runtime",
+                format!("only the \"wasm\" runtime is supported (InvalidRuntime), got {runtime}"),
+            ));
+        }
+        if let Some(version) = Self::arg(n, "version")
+            && !version.is_null()
+            && version.as_str() != Some("1")
+        {
+            return Err(invalid(
+                "version",
+                format!(
+                    "the wasm runtime speaks version \"1\" only (InvalidVersion), got {version}"
+                ),
+            ));
+        }
+        // `context` rides through verbatim as the stage's params.
+        let params = match Self::arg(n, "context") {
+            None | Some(Json::Null) => Json::Null,
+            Some(context) => context.clone(),
+        };
+
+        let Some(registrar) = self.ctx.udf.as_ref() else {
+            return Err(CompileError::UdfUnavailable { node: node.into() });
+        };
+        let udf = Self::require(scope, node, "udf")?;
+        let udf = udf
+            .as_str()
+            .ok_or_else(|| invalid("udf", format!("expected a string, got {udf}")))?;
+        let module = match UdfSource::parse(udf).map_err(|detail| invalid("udf", detail))? {
+            UdfSource::Inline(bytes) => Arc::from(bytes),
+            UdfSource::Remote(url) => self
+                .ctx
+                .modules
+                .iter()
+                .find(|(key, _)| *key == url)
+                .map(|(_, bytes)| Arc::clone(bytes))
+                .ok_or_else(|| {
+                    invalid(
+                        "udf",
+                        format!("remote module `{url}` was not fetched for this compile motion"),
+                    )
+                })?,
+        };
+        if module.len() > MODULE_MAX_BYTES {
+            return Err(invalid(
+                "udf",
+                format!(
+                    "module of {} bytes exceeds the {MODULE_MAX_BYTES}-byte limit",
+                    module.len()
+                ),
+            ));
+        }
+
+        // One request plane per loaded dataset band, deduplicated in load
+        // order — exactly the plan inputs `plan_for` derives, so the arity
+        // the module is registered against is the arity it will see.
+        let mut bands: Vec<String> = Vec::with_capacity(loaded.len());
+        for band in &loaded {
+            if !bands.contains(&band.dataset) {
+                bands.push(band.dataset.clone());
+            }
+        }
+        let input_planes = u32::try_from(bands.len()).map_err(|_| {
+            invalid(
+                "data",
+                format!("{} input bands cannot form a request", bands.len()),
+            )
+        })?;
+        let registration = registrar
+            .register(&module, input_planes)
+            .map_err(|source| CompileError::UdfModule {
+                node: node.into(),
+                source,
+            })?;
+        if !matches!(registration.output_planes, 1 | 3) {
+            return Err(CompileError::UdfOutputPlanes {
+                node: node.into(),
+                input_planes,
+                output_planes: registration.output_planes,
+            });
+        }
+        let stage = UdfStage::new(registration.code_hash, registration.output_planes, params);
+        Ok(Value::Cube(Cube {
+            kind: CubeKind::Udf {
+                bands,
+                stage,
+                module,
+            },
+            rescale: None,
+            colormap: None,
+            window,
+        }))
+    }
+
     fn save_result(&self, scope: &mut Scope<'a>, node: &'a str) -> Result<Value, CompileError> {
         let cube = self.cube_arg(scope, node, "data")?;
         let format = Self::require(scope, node, "format")?;
@@ -1062,14 +1306,19 @@ impl<'a> Compiler<'a> {
                 )));
             }
         };
-        if matches!(cube.kind, CubeKind::Multi(_)) {
-            return Err(invalid(
+        match cube.kind {
+            CubeKind::Multi(_) => Err(invalid(
                 "a colormap maps one gray value per pixel; it cannot apply to a \
                  multi-band (composite) result — reduce to gray first"
                     .into(),
-            ));
+            )),
+            CubeKind::Udf { .. } => Err(invalid(
+                "a colormap cannot apply to a run_udf result in v1 — UDF output renders \
+                 directly (1 plane gray, 3 planes RGB)"
+                    .into(),
+            )),
+            CubeKind::Gray(_) => Ok(Some(colormap)),
         }
-        Ok(Some(colormap))
     }
 
     fn array_element(&self, scope: &mut Scope<'a>, node: &'a str) -> Result<Value, CompileError> {
@@ -1194,6 +1443,16 @@ impl<'a> Compiler<'a> {
                 expected: "a data cube with a bands dimension".into(),
                 got: "a gray (reduced) data cube".into(),
             }),
+            // One run_udf per graph in v1: its result feeds nothing but
+            // linear_scale_range and save_result.
+            CubeKind::Udf { .. } => Err(CompileError::TypeMismatch {
+                node: node.into(),
+                process: process.into(),
+                expected: "a loaded (multi-band) data cube — v1 runs one run_udf per graph, \
+                           after any reduction"
+                    .into(),
+                got: "a UDF result data cube".into(),
+            }),
         }
     }
 
@@ -1260,12 +1519,25 @@ pub fn compile(graph: &Json, ctx: &CompileContext) -> Result<CompiledProduct, Co
         });
     };
 
+    let mut udf_module = None;
     let spec = match cube.kind {
         CubeKind::Gray(expr) => PlanSpec::BandMath {
             expr,
             rescale: cube.rescale,
             colormap: cube.colormap.unwrap_or(Colormap::Grayscale),
         },
+        CubeKind::Udf {
+            bands,
+            stage,
+            module,
+        } => {
+            udf_module = Some(module.to_vec());
+            PlanSpec::Udf {
+                bands,
+                stage,
+                rescale: cube.rescale,
+            }
+        }
         CubeKind::Multi(loaded) => {
             let [r, g, b] = loaded.as_slice() else {
                 return Err(CompileError::TypeMismatch {
@@ -1293,5 +1565,6 @@ pub fn compile(graph: &Json, ctx: &CompileContext) -> Result<CompiledProduct, Co
         bands,
         spec,
         window: cube.window,
+        udf_module,
     })
 }

@@ -4293,6 +4293,7 @@ name = "swath-api"
 version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
+ "base64",
  "futures-core",
  "http-body-util",
  "image",
@@ -4304,10 +4305,12 @@ dependencies = [
  "sha2 0.10.9",
  "swath-cache-objectstore",
  "swath-core",
+ "swath-modulestore-objectstore",
  "swath-render",
  "swath-reproject-proj4rs",
  "swath-source-cog",
  "swath-testkit",
+ "swath-udf-wasmtime",
  "thiserror 2.0.20",
  "tokio",
  "tower",
@@ -4352,6 +4355,7 @@ dependencies = [
  "swath-core",
  "swath-events-filedrop",
  "swath-icechunk",
+ "swath-modulestore-objectstore",
  "swath-pyramid-objectstore",
  "swath-referencer",
  "swath-render",
@@ -4432,6 +4436,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "swath-modulestore-objectstore"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "axum",
+ "object_store",
+ "swath-core",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "swath-planner"
 version = "0.1.0-alpha.1"
 dependencies = [
@@ -4469,6 +4484,7 @@ dependencies = [
 name = "swath-render"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "base64",
  "criterion",
  "image",
  "insta",
@@ -4560,7 +4576,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "swath-core",
  "swath-render",
  "swath-udf-guest",
  "thiserror 2.0.20",

@@ -33,6 +33,8 @@
 //! - [`source`] — the `RasterSource` port: async windowed reads + provenance
 //! - [`reproject`] — the `Reproject` port: sync CRS-to-CRS point transforms
 //! - [`trace`] — the per-render x-ray record (REQUIREMENTS.md R4)
+//! - [`udf`] — the `ModuleStore` / `ModuleFetcher` ports and the content
+//!   hash naming a `run_udf` module (ADR 0018)
 //! - [`error`] — the crate's small invariant-violation taxonomy
 
 pub mod cache;
@@ -50,3 +52,4 @@ pub mod reproject;
 pub mod source;
 pub mod tile;
 pub mod trace;
+pub mod udf;

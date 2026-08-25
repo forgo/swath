@@ -521,3 +521,54 @@ fn the_module_lru_holds_32_and_evicts_the_least_recently_used() {
         Err(UdfError::GuestFailure { .. })
     ));
 }
+
+// --- registration motion (#204): the UdfRegistrar port -------------------
+
+/// The compiler's seam: one call registers the module and pins its
+/// output arity for the plan's input count — the hash is the core's
+/// `code_hash`, so the module store, the persisted layer, and the LRU
+/// name the same bytes the same way.
+#[test]
+fn register_pins_the_content_hash_and_the_output_arity() {
+    use swath_render::udf::{UdfRegistrar, UdfRegistration};
+    let executor = executor();
+    let registration = executor
+        .register(NDVI, 2)
+        .expect("ndvi registers over 2 planes");
+    assert_eq!(
+        registration,
+        UdfRegistration::new(swath_core::udf::code_hash(NDVI), 1)
+    );
+    // The registered module is runnable by the same executor: a
+    // registration is a promise the tile path keeps.
+    let stage = stage(&registration.code_hash, registration.output_planes);
+    let nir = one_plane().remove(0);
+    let red = one_plane().remove(0);
+    let out = executor.run(&stage, &[nir, red]).expect("runs");
+    assert_eq!(out.len(), 1);
+}
+
+/// `swath_udf_output_planes` answering `<= 0` is the module refusing the
+/// arity (`docs/udf-abi/v1.md`): rejected at registration, its own
+/// variant.
+#[test]
+fn a_refused_input_arity_is_unsupported_arity() {
+    use swath_render::udf::UdfRegistrar;
+    let executor = executor();
+    let err = executor
+        .register(NDVI, 3)
+        .expect_err("ndvi wants exactly 2");
+    assert_eq!(
+        err,
+        UdfError::UnsupportedArity {
+            input_planes: 3,
+            output_planes: 0,
+        }
+    );
+    // Registration failures leave the module compiled (content-addressed
+    // and valid); only the arity probe refused.
+    assert_eq!(
+        executor.output_planes(&swath_core::udf::code_hash(NDVI), 2),
+        Ok(1)
+    );
+}

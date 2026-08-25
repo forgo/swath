@@ -165,7 +165,10 @@ The supported subset of openeo-processes 1.2.0 — pinned official
 definitions with a **Swath profile** note where v0 narrows the spec:
 `add`, `array_element`, `divide`, `filter_temporal`,
 `linear_scale_range`, `load_collection`, `multiply`, `ndvi`,
-`reduce_dimension`, `save_result`, `subtract`. Temporal arguments are
+`reduce_dimension`, `save_result`, `subtract` — plus `run_udf` (ADR 0018)
+exactly where `--udf-store` wires a module store: the module (inline
+`data:` or an `http(s)` URL fetched once) is validated at publish time
+and persisted by content hash. Temporal arguments are
 real since ADR 0015: they compile into the layer's granule-resolution
 window (frame selection, never how pixels combine); a window excluding
 every granule 404s at `POST /result`, one that can never select

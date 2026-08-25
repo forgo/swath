@@ -163,7 +163,7 @@ async fn post_service_serves_tiles_byte_identical_to_the_builtin_ndvi() {
 
     // Rehydration parity: recompiling the persisted layer (what `swath
     // serve` does at startup) reproduces the built-in NDVI plan exactly.
-    let template = swath_api::compile_service_layer(&dataset, layer).expect("recompiles");
+    let template = swath_api::compile_service_layer(&dataset, layer, None).expect("recompiles");
     let registry = swath_api::LayerRegistry::hls_fixtures();
     assert_eq!(template.plan, registry.get("ndvi").expect("ndvi").plan);
 

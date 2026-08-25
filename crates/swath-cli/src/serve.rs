@@ -102,6 +102,13 @@ pub(crate) struct ServeArgs {
     #[arg(long, value_name = "ROOT", env = "SWATH_CACHE")]
     pub(crate) cache: Option<String>,
 
+    /// `run_udf` module-store root: a local directory or
+    /// `s3://bucket[/prefix]` (ADR 0018). Published WASM modules persist
+    /// here by content hash and are resolved from here on restart;
+    /// absent, `run_udf` is not offered on the openEO surface.
+    #[arg(long, value_name = "ROOT", env = "SWATH_UDF_STORE")]
+    pub(crate) udf_store: Option<String>,
+
     /// Global default for the planner's overview oversampling slack
     /// (issue #37): an overview factor is eligible when `factor <=
     /// desired ratio x this value`. Default 1.2 (GDAL's slack). Per-layer
@@ -180,6 +187,7 @@ where
         base_url,
         store_root,
         cache,
+        udf_store,
         cors_allowed_origins,
         read_only,
         layers,
@@ -189,24 +197,10 @@ where
         base_url,
         store_root,
         cache,
+        udf_store,
         cors_allowed_origins,
         read_only,
     };
-    // The udf runtime is built up front (ADR 0018, #200): fail-fast on a
-    // host the deterministic configuration cannot honor, state the runtime
-    // identity operators are trusting, and keep the size measurement
-    // honest (an unreferenced engine would be LTO-stripped). The engine is
-    // dropped again until #205 wires execution.
-    #[cfg(feature = "udf-wasm")]
-    match swath_udf_wasmtime::deterministic_engine() {
-        Ok(_engine) => tracing::info!(
-            "udf runtime ready: {version} (ADR 0018; execution arrives with #201-#205)",
-            version = swath_udf_wasmtime::runtime_version(),
-        ),
-        Err(err) => tracing::warn!(
-            "udf runtime unavailable on this host: {err} — run_udf will be              refused when execution lands (#203)",
-        ),
-    }
     match layers {
         LayerSource::Static(registry) => {
             let layer_count = registry.identities().len();
@@ -222,7 +216,11 @@ where
 /// (config datasets' services are carried over in the registration loop
 /// above; a graph that no longer compiles is dropped loudly, never
 /// served wrongly).
-fn restore_api_dataset_services(datasets: Vec<Dataset>, mode: &mut crate::config::CatalogMode) {
+async fn restore_api_dataset_services(
+    datasets: Vec<Dataset>,
+    mode: &mut crate::config::CatalogMode,
+    udf: Option<&swath_api::UdfPublish>,
+) {
     for dataset in datasets {
         if mode.datasets.iter().any(|d| d.id == dataset.id) {
             continue;
@@ -231,7 +229,7 @@ fn restore_api_dataset_services(datasets: Vec<Dataset>, mode: &mut crate::config
             if layer.process.is_none() {
                 continue; // API datasets author layers via services only
             }
-            match swath_api::compile_service_layer(&dataset, layer) {
+            match rehydrate_service(&dataset, layer, udf).await {
                 Ok(template) => {
                     tracing::info!(
                         "restored openEO service {id} on API-registered dataset {dataset}",
@@ -256,10 +254,71 @@ struct Shared {
     base_url: String,
     store_root: String,
     cache: Option<String>,
+    /// `run_udf` module-store root (ADR 0018, #204); `None` = not offered.
+    udf_store: Option<String>,
     /// CORS origin allowlist (issue #103, ADR 0011); empty = no CORS
     /// layer at all (the default).
     cors_allowed_origins: Vec<String>,
     read_only: bool,
+}
+
+/// The `run_udf` publish wiring (ADR 0018, #204): the wasmtime executor
+/// as the compile-time registrar, the content-addressed module store at
+/// `root`, and the once-per-publish http(s) fetcher — or `None`, saying
+/// why, when no store root is configured or this build carries no WASM
+/// runtime. Built up front so a host the deterministic engine
+/// configuration cannot honor is reported at startup, not at the first
+/// publish; the engine is referenced from here on, which also keeps the
+/// binary-size measurement honest (nothing to LTO-strip).
+fn udf_publish(root: Option<&str>) -> Result<Option<swath_api::UdfPublish>, ServeError> {
+    let Some(root) = root else {
+        tracing::info!("run_udf not offered: no udf-store configured (ADR 0018)");
+        return Ok(None);
+    };
+    #[cfg(feature = "udf-wasm")]
+    {
+        let executor = match swath_udf_wasmtime::WasmtimeUdf::new() {
+            Ok(executor) => Arc::new(executor),
+            Err(err) => {
+                tracing::warn!("run_udf not offered: udf runtime unavailable on this host: {err}");
+                return Ok(None);
+            }
+        };
+        let store = swath_modulestore_objectstore::ObjectStoreModuleStore::new(build_store(root)?);
+        tracing::info!(
+            "udf runtime ready: {version}; run_udf modules persist at {root} (ADR 0018)",
+            version = swath_udf_wasmtime::runtime_version(),
+        );
+        Ok(Some(swath_api::UdfPublish::new(
+            executor,
+            store,
+            swath_modulestore_objectstore::HttpModuleFetcher::new(),
+        )))
+    }
+    #[cfg(not(feature = "udf-wasm"))]
+    {
+        tracing::warn!(
+            "run_udf not offered: udf-store `{root}` is configured but this build carries no \
+             WASM runtime (feature `udf-wasm`)"
+        );
+        Ok(None)
+    }
+}
+
+/// Recompiles a persisted openEO service layer into its serving template
+/// — a `run_udf` module is resolved from the module store by its persisted
+/// hash, never fetched (ADR 0018, #204).
+async fn rehydrate_service(
+    dataset: &Dataset,
+    layer: &swath_core::catalog::Layer,
+    udf: Option<&swath_api::UdfPublish>,
+) -> Result<swath_api::CatalogLayer, String> {
+    let modules = match udf {
+        Some(udf) => Some(udf.rehydrate(layer).await.map_err(|err| err.to_string())?),
+        None => None,
+    };
+    swath_api::compile_service_layer(dataset, layer, modules.as_ref())
+        .map_err(|err| err.to_string())
 }
 
 /// Catalog mode: connect to pgstac, then hand over to the generic tail.
@@ -293,6 +352,7 @@ where
     // services surface (ADR 0010) live only in the catalog — carry them
     // over before the upsert and recompile them into serving templates,
     // so published products survive a restart.
+    let udf = udf_publish(cfg.udf_store.as_deref())?;
     for dataset in &mut mode.datasets {
         let mut preexisting = false;
         if let Some(existing) = catalog.get_dataset(&dataset.id).await? {
@@ -303,7 +363,7 @@ where
                 if !is_service || conflicts {
                     continue;
                 }
-                match swath_api::compile_service_layer(dataset, &layer) {
+                match rehydrate_service(dataset, &layer, udf.as_ref()).await {
                     Ok(template) => {
                         tracing::info!(
                             "restored openEO service {id} on dataset {dataset}",
@@ -347,7 +407,7 @@ where
             layers = dataset.layers.len(),
         );
     }
-    restore_api_dataset_services(catalog.list_datasets().await?, &mut mode);
+    restore_api_dataset_services(catalog.list_datasets().await?, &mut mode, udf.as_ref()).await;
     if let Some(dir) = &mode.watch_dir {
         tracing::info!("watching {} for granule manifests", dir.display());
         let mut events = FiledropEvents::new(dir.clone(), WATCH_POLL);
@@ -386,12 +446,18 @@ where
     // (pyramid overlay included, so previews benefit from materialized
     // overviews exactly as tiles do).
     let store = build_store(&cfg.store_root)?;
-    let openeo_state = Arc::new(swath_api::OpenEoState::new(
+    let mut openeo_state = swath_api::OpenEoState::new(
         provider.clone(),
         PyramidSource::new(CompositeSource::new(Arc::clone(&store)), Arc::clone(&store)),
         Proj4rsReproject,
         &cfg.base_url,
-    ));
+    );
+    // `run_udf` (ADR 0018, #204): offered exactly where the module store
+    // and the WASM runtime are wired.
+    if let Some(udf) = udf {
+        openeo_state = openeo_state.with_udf(udf);
+    }
+    let openeo_state = Arc::new(openeo_state);
     // Read-only serving (#198): the write routes are ABSENT, not 403'd —
     // the openEO read half only (POST /result stays: the ADR 0014 preview
     // is planner-budget-bounded by design), and no dataset-creation
@@ -861,6 +927,7 @@ mod tests {
             catalog: None,
             watch_dir: None,
             cache: None,
+            udf_store: None,
             overview_oversample: None,
             max_estimated_live_bytes: None,
             cors_allowed_origins: Vec::new(),
@@ -1182,6 +1249,7 @@ mod tests {
             base_url: cfg.base_url,
             store_root: cfg.store_root,
             cache: cfg.cache,
+            udf_store: cfg.udf_store,
             cors_allowed_origins: cfg.cors_allowed_origins,
             read_only: false,
         };
@@ -1236,6 +1304,7 @@ mod tests {
             base_url: cfg.base_url,
             store_root: cfg.store_root,
             cache: cfg.cache,
+            udf_store: cfg.udf_store,
             cors_allowed_origins: cfg.cors_allowed_origins,
             read_only: false,
         };

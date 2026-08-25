@@ -47,8 +47,8 @@ flowchart TB
   IN["swath-api (axum): OGC API - Tiles, openEO surface, control plane + Trace SSE, embedded UI"]
   RENDER["swath-render: tiler, warp/resample kernels (via swath-warp), process compiler, Render IR, encoder"]
   CORE["swath-core (no I/O): planner, catalog domain, ingest step, manifest v1 (re-exported from swath-manifest), tile/TMS math, Trace"]
-  PORTS[["Ports (swath-core traits): RasterSource, Reproject, Catalog, TileCache, EventSource, IngestReferencer"]]
-  ADS["Adapters: swath-source-cog, swath-source-virtual, swath-pyramid-objectstore, swath-reproject-proj4rs, swath-catalog-pgstac, swath-cache-objectstore, swath-events-filedrop, swath-icechunk, swath-referencer, swath-udf-wasmtime"]
+  PORTS[["Ports (swath-core traits): RasterSource, Reproject, Catalog, TileCache, EventSource, IngestReferencer, ModuleStore/ModuleFetcher"]]
+  ADS["Adapters: swath-source-cog, swath-source-virtual, swath-pyramid-objectstore, swath-reproject-proj4rs, swath-catalog-pgstac, swath-cache-objectstore, swath-events-filedrop, swath-icechunk, swath-referencer, swath-udf-wasmtime, swath-modulestore-objectstore"]
   EXT[("External: object storage, Postgres/pgstac, granule files")]
   CLI["swath-cli — wires adapters; serve + filedrop ingest loop"]
 
@@ -63,7 +63,7 @@ All nodes are implemented (per-module detail lives in each crate's rustdoc); the
 `VirtualiZarr` sidecar is deliberately absent — the conformance *reference* for
 `swath-referencer` (ADR 0006), not a runtime component.
 
-_Last verified against sources `c5306dd7a04d`._
+_Last verified against sources `7f5a11855aef`._
 
 ## 5. The Core (pure logic)
 
@@ -133,6 +133,16 @@ pub trait IngestReferencer: Send + Sync {
     fn handles(&self, granule: &Path) -> bool;
     fn generate(&self, granule: &Path) -> Result<VirtualManifest, ReferencerError>;
 }
+
+// crates/swath-core/src/udf.rs — run_udf module bytes by content hash
+// (ADR 0018); the fetch happens once, at publish, never at serve time
+pub trait ModuleStore: Send + Sync {
+    fn get(&self, code_hash: &str) -> …;
+    fn put(&self, bytes: &[u8]) -> …;
+}
+pub trait ModuleFetcher: Send + Sync {
+    fn fetch(&self, url: &str) -> …;
+}
 ```
 
 The core entry points (not ports — the logic itself; the stamp fingerprints these files too):
@@ -143,7 +153,7 @@ planner crate, ADR 0016 — re-exported at `swath_core::planner`; `PlanChoice` i
 `crates/swath-render/src/tiler.rs` — free functions generic over the ports; the cached variant
 owns the probe + write-through.
 
-_Last verified against sources `93e5b4d07b43`._
+_Last verified against sources `d2b1d04e80b0`._
 
 ## 7. Adapters and inbound APIs
 
@@ -157,6 +167,7 @@ _Last verified against sources `93e5b4d07b43`._
 | `TileCache` | `swath-cache-objectstore` (local/S3) | Redis hot-tile cache |
 | `EventSource` | `swath-events-filedrop` | S3 notifications, CMR polling |
 | `IngestReferencer` | `swath-referencer` (HDF-EOS, GRIB2; the Python sidecar as conformance reference, ADR 0006) | HDF5/NetCDF4 breadth |
+| `ModuleStore` / `ModuleFetcher` | `swath-modulestore-objectstore` (local/S3; http(s) fetch) | GC sweep (ROADMAP row 17) |
 | `EmbeddingModel`/`VectorIndex` | — (frontier; no port trait yet) | model + vector index |
 
 No `ProcessRegistry` port exists (§6): the openEO subset compiles in-core against a
@@ -178,7 +189,7 @@ seam.
 | OGC API - EDR | 3 | not started |
 | OGC API - Features | 3 | not started |
 
-_Last verified against sources `17e62b62753a`._
+_Last verified against sources `92e7d8acfeb0`._
 
 ## 8. Data flows
 
@@ -222,14 +233,14 @@ The Cargo workspace is exactly the §4 component model on disk: `crates/` holds 
 `swath-manifest` (the extracted manifest v1 schema, ADR 0016), `swath-render`, `swath-warp`
 (the extracted GDAL-exact kernel, ADR 0016), `swath-planner` (the extracted cost model, ADR
 0016), `swath-api`, `swath-cli`, `swath-referencer`, `swath-e2e`, and the never-shipped test
-crates plus `swath-udf-guest` (the UDF authoring kit, ADR 0018), with the seven adapter
+crates plus `swath-udf-guest` (the UDF authoring kit, ADR 0018), with the ten adapter
 crates under `crates/adapters/`; beside it, `web/`, `python/`, `tests/`, `examples/udf/`
 (the UDF example modules' standalone wasm32 workspace), `prototypes/` (dated experiments,
 immutable once concluded), and `docs/`. Phase-1 adapters are direct dependencies of the binary — Cargo features gate the
 embedded UI and HDF5 weight, not adapter selection (§14 covers extension beyond compile
 time).
 
-_Last verified against sources `c5306dd7a04d`._
+_Last verified against sources `7f5a11855aef`._
 
 ## 13. Frontend architecture
 
