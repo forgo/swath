@@ -20,6 +20,12 @@
 //! [`eval`](crate::ir::eval) consults the executor only when it reaches a
 //! `Udf` op, plans without UDF stages never touch it.
 //!
+//! Every call carries its [`UdfLimits`] — the per-tile fuel budget the
+//! layer's `Budget::max_udf_fuel_per_tile` sets (#205) — and answers a
+//! [`UdfOutput`]: the planes plus the fuel actually consumed, which the
+//! tiler records as `Trace::udf_fuel_used` so the cost is visible
+//! wherever the platform explains itself.
+//!
 //! The compile motion has its own seam, [`UdfRegistrar`] (#204): the
 //! process compiler hands it module bytes and gets back the content hash
 //! and the pinned output arity — registration (zero-import check, the
@@ -30,9 +36,71 @@
 //! or an `http(s)` URL.
 
 use serde::{Deserialize, Serialize};
+use swath_core::planner::DEFAULT_MAX_UDF_FUEL_PER_TILE;
 use swath_core::udf::MODULE_MAX_BYTES;
 
 use crate::warp::WarpedBuffer;
+
+/// The bounds one [`UdfExecutor::run`] call executes under — the
+/// per-tile half of ADR 0018's budgets, set per layer by
+/// `Budget::max_udf_fuel_per_tile` (#205). The epoch deadline and the
+/// memory cap are the adapter's fixed commitments, not per-call knobs.
+/// `#[non_exhaustive]`: a future per-call bound joins here without
+/// breaking executors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct UdfLimits {
+    /// The deterministic fuel the call may consume; exhausting it is
+    /// [`UdfError::FuelExhausted`].
+    pub max_fuel: u64,
+}
+
+impl UdfLimits {
+    /// Limits allowing `max_fuel` units of fuel.
+    #[must_use]
+    pub const fn new(max_fuel: u64) -> Self {
+        Self { max_fuel }
+    }
+}
+
+impl Default for UdfLimits {
+    /// The budget default ([`DEFAULT_MAX_UDF_FUEL_PER_TILE`]).
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_UDF_FUEL_PER_TILE)
+    }
+}
+
+/// What one [`UdfExecutor::run`] call answers: the module's output
+/// planes and the cost it was charged.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct UdfOutput {
+    /// The output planes, in order — exactly [`UdfStage::output_planes`]
+    /// tile-shaped buffers (the caller verifies).
+    pub planes: Vec<WarpedBuffer>,
+    /// Fuel consumed by the call, when the executor meters it: the
+    /// deterministic cost `Trace::udf_fuel_used` reports. `None` from an
+    /// executor with no fuel meter (a test double).
+    pub fuel_used: Option<u64>,
+}
+
+impl UdfOutput {
+    /// Unmetered output planes.
+    #[must_use]
+    pub fn new(planes: Vec<WarpedBuffer>) -> Self {
+        Self {
+            planes,
+            fuel_used: None,
+        }
+    }
+
+    /// Records the fuel the call consumed.
+    #[must_use]
+    pub fn with_fuel_used(mut self, fuel_used: u64) -> Self {
+        self.fuel_used = Some(fuel_used);
+        self
+    }
+}
 
 /// One `run_udf` stage of a [`RenderPlan`](crate::ir::RenderPlan): the
 /// sandboxed module (by content hash), its pinned output arity, and its
@@ -95,8 +163,9 @@ impl UdfStage {
 #[non_exhaustive]
 pub enum UdfError {
     /// No UDF executor is wired into this deployment ([`NoUdf`]): the
-    /// plan names a module, but nothing can run it. Serve wiring arrives
-    /// with #205; until then every UDF plan refuses loudly here.
+    /// plan names a module, but nothing can run it — a server started
+    /// without `--udf-store` serving a UDF plan it could not have
+    /// compiled itself.
     #[error("no UDF executor is configured: plan names module `{code_hash}` (ADR 0018)")]
     NotConfigured {
         /// The module the plan asked for.
@@ -249,19 +318,26 @@ pub enum UdfError {
 /// too, but the IR never trusts it to.
 ///
 /// Synchronous by design: render compute runs inline on the calling task
-/// (ADR 0012); the fuel/epoch budgets bounding a call are the adapter's
-/// job (#203).
-pub trait UdfExecutor {
+/// (ADR 0012); enforcing `limits` (fuel) and the fixed epoch/memory
+/// bounds is the adapter's job (#203). `Send + Sync` because the one
+/// process-wide executor is shared by every concurrent tile handler and
+/// borrowed across the render's awaits (#205).
+pub trait UdfExecutor: Send + Sync {
     /// Runs `stage`'s module over `inputs` (one request plane per buffer,
-    /// in plan-input order), returning its output planes in order.
+    /// in plan-input order) under `limits`, returning its output planes
+    /// in order plus the fuel consumed.
     ///
     /// # Errors
     ///
     /// Any [`UdfError`]: the executor could not run the module at all, or
     /// the module failed. Per-pixel data conditions are never errors —
     /// they belong in the returned buffers' validity masks.
-    fn run(&self, stage: &UdfStage, inputs: &[WarpedBuffer])
-    -> Result<Vec<WarpedBuffer>, UdfError>;
+    fn run(
+        &self,
+        stage: &UdfStage,
+        inputs: &[WarpedBuffer],
+        limits: &UdfLimits,
+    ) -> Result<UdfOutput, UdfError>;
 }
 
 /// The default executor: **no UDF support**. Every stage is refused with
@@ -275,7 +351,8 @@ impl UdfExecutor for NoUdf {
         &self,
         stage: &UdfStage,
         _inputs: &[WarpedBuffer],
-    ) -> Result<Vec<WarpedBuffer>, UdfError> {
+        _limits: &UdfLimits,
+    ) -> Result<UdfOutput, UdfError> {
         Err(UdfError::NotConfigured {
             code_hash: stage.code_hash.clone(),
         })

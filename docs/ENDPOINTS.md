@@ -94,7 +94,8 @@ x-swath-trace: {"decision":"live","bytes_read":546497,"total_ms":327,"ingest_to_
 
 The same request again (with a cache configured) is a hit
 (`"decision":"cache_hit","bytes_read":0`); `ingest_to_pixel_ms` (when
-the granule's arrival time is known) is the north-star number.
+the granule's arrival time is known) is the north-star number; a `run_udf`
+render adds its deterministic `udf_fuel_used` (ADR 0018).
 
 **`datetime=` — the time dimension (ADR 0015).** One optional query
 parameter selects **which granule backs the frame**, with exactly the
@@ -118,7 +119,8 @@ out-of-matrix row/col or tileMatrix); malformed ones are 400
 **`GET /traces`** — the x-ray SSE stream (`curl -N`): one `trace` event per
 render, with the full trace the header only summarizes — sources, byte-range
 provenance, stage timings, the planner's considered strategies with reasons,
-and (catalog-backed renders, ADR 0015) the `temporal` decision. Slow
+(catalog-backed renders, ADR 0015) the `temporal` decision, and (UDF renders,
+ADR 0018) `udf_ms` plus the deterministic `udf_fuel_used`. Slow
 subscribers lose events (`lagged`), never delaying a tile.
 
 **`GET /healthz`** — liveness only, `200 ok`; no registry, store, or catalog

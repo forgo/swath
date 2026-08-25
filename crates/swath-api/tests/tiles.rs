@@ -18,7 +18,7 @@ use axum::http::StatusCode;
 use object_store::local::LocalFileSystem;
 use swath_api::{LayerRegistry, TraceExtension};
 use swath_core::tile::TileCoord;
-use swath_render::render_tile;
+use swath_render::{NoUdf, render_tile};
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
 use swath_testkit::{DiffPolicy, RgbaImage, diff, load_png};
@@ -31,7 +31,7 @@ async fn direct_render(layer_id: &str, z: u8, x: u32, y: u32) -> Vec<u8> {
     let store = LocalFileSystem::new_with_prefix(common::fixtures_dir()).expect("fixture dir");
     let source = CogSource::new(Arc::new(store));
     let request = layer.tile_request(TileCoord::new(z, x, y).expect("valid tile"));
-    let (encoded, _) = render_tile(&source, &Proj4rsReproject, &request)
+    let (encoded, _) = render_tile(&source, &Proj4rsReproject, &NoUdf, &request)
         .await
         .expect("direct render succeeds");
     encoded.bytes

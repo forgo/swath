@@ -87,6 +87,9 @@ export interface TraceTimings {
   pixel_ops_ms: number;
   encode_ms: number;
   total_ms: number;
+  /** The `run_udf` stage's share of `pixel_ops_ms` (ADR 0018); omitted
+   * by the emitter when no UDF ran, so pre-UDF traces are unchanged. */
+  udf_ms?: number;
 }
 
 /** One byte range read from a source (`Provenance`, pinned). */
@@ -131,6 +134,9 @@ export interface TraceJson {
    * timeless frame). Optional for pre-#223 emitters and synthetic test
    * envelopes — both read as "no time dimension". */
   temporal?: TraceTemporal | null;
+  /** The deterministic fuel a `run_udf` stage consumed (ADR 0018, #205);
+   * omitted when no UDF ran. */
+  udf_fuel_used?: number | null;
 }
 
 /** The `data:` payload of one `event: trace` (envelope pinned in
@@ -1186,11 +1192,17 @@ export class XRayOverlay {
     fact("decision", decisionLabel(trace.decision));
     fact("bytes read", `${trace.bytes_read} (${formatKb(trace.bytes_read)} KB)`);
     const { timings } = trace;
+    // The UDF stage's share of pixel time, shown only when one ran.
+    const udf = timings.udf_ms === undefined ? "" : ` · udf ${timings.udf_ms}`;
     fact(
       "timings",
-      `read ${timings.read_ms} · warp ${timings.warp_ms} · pixel ${timings.pixel_ops_ms} · ` +
+      `read ${timings.read_ms} · warp ${timings.warp_ms} · pixel ${timings.pixel_ops_ms}${udf} · ` +
         `encode ${timings.encode_ms} · total ${timings.total_ms} ms`,
     );
+    if (typeof trace.udf_fuel_used === "number") {
+      // The deterministic cost the layer budget's fuel axis bounds (#205).
+      fact("udf fuel", `${trace.udf_fuel_used}`);
+    }
     fact("crs", `${trace.crs_from} → ${trace.crs_to}`);
     if (trace.temporal) {
       // The frame's provenance in time (#182): which granule backs it,

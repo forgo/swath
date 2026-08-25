@@ -38,6 +38,7 @@ by knob: defaults → `[budget]` → the global flags/env → per-layer
 | `--udf-store` | `SWATH_UDF_STORE` | `ROOT` | `run_udf` module-store root (same grammar): published WASM modules persist here by content hash (ADR 0018); absent: `run_udf` is not offered. |
 | `--overview-oversample` | `SWATH_OVERVIEW_OVERSAMPLE` | `RATIO` | Global overview eligibility slack (default 1.2, GDAL's rule). |
 | `--max-estimated-live-bytes` | `SWATH_MAX_ESTIMATED_LIVE_BYTES` | `BYTES` | Global live-render ceiling: refuse tiles estimated over this when nothing cheaper can serve; absent: never refuse. |
+| `--max-udf-fuel-per-tile` | `SWATH_MAX_UDF_FUEL_PER_TILE` | `FUEL` | Global per-tile fuel a `run_udf` stage may consume (ADR 0018); default 100000000 (100 M). |
 | `--cors-allowed-origins` | `SWATH_CORS_ALLOWED_ORIGINS` | `ORIGINS` | Comma-separated exact origins, or `*`; default empty — no CORS headers. |
 
 <!-- config-check:end flags swath serve -->
@@ -127,6 +128,7 @@ global default knob by knob (see Precedence).
 | `cache-enabled` | bool | `true` | Consult/fill the tile cache for this layer (needs a configured cache root). |
 | `overview-oversample` | float | `1.2` | Overview eligibility slack: an overview factor is eligible when `factor <= desired ratio × this value`. |
 | `max-estimated-live-bytes` | integer | none (never refuse) | Refuse live renders estimated over this; per-layer values can set or tighten the ceiling, not clear it. |
+| `max-udf-fuel-per-tile` | integer | `100000000` (100 M) | Deterministic fuel a `run_udf` stage may consume per tile (ADR 0018); exhausting it fails that tile loudly. Only UDF layers spend any. |
 
 <!-- config-check:end budget -->
 

@@ -59,9 +59,11 @@
 //! gray values. Alpha is untouched — validity alone decides transparency.
 //! Palette maps require gray planes (band math), never a composite.
 
+use std::time::{Duration, Instant};
+
 use serde::{Deserialize, Serialize};
 
-use crate::udf::{UdfError, UdfExecutor, UdfStage};
+use crate::udf::{UdfError, UdfExecutor, UdfLimits, UdfStage};
 use crate::warp::WarpedBuffer;
 
 /// One named input band of a [`RenderPlan`].
@@ -595,6 +597,29 @@ fn udf_planes(
     })
 }
 
+/// What a [`PixelOp::Udf`] stage cost (ADR 0018, #205): the executor's
+/// fuel meter and the stage's wall clock. The tiler records the former
+/// as `Trace::udf_fuel_used` and the latter as `Timings::udf_ms`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct UdfCost {
+    /// Fuel the executor charged (`None` from an unmetered executor).
+    pub fuel_used: Option<u64>,
+    /// Wall clock of the stage: instantiate, copy in, run, copy out.
+    pub elapsed: Duration,
+}
+
+/// The result of [`eval_with`]: the tile plus, when the plan ran a UDF
+/// stage, its cost.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Evaluation {
+    /// The quantized RGBA tile.
+    pub tile: RgbaTile,
+    /// The UDF stage's cost; `None` when the plan has no UDF stage.
+    pub udf: Option<UdfCost>,
+}
+
 /// Executes `plan`'s pixel ops over `inputs` (positionally matched to
 /// `plan.inputs`), returning the quantized RGBA tile. See the module docs
 /// for the pipeline model, validity semantics, and quantization.
@@ -602,7 +627,9 @@ fn udf_planes(
 /// `udf` is the [`UdfExecutor`] port a [`PixelOp::Udf`] stage runs
 /// through (ADR 0018); it is consulted only when a UDF op is reached, so
 /// plans without UDF stages evaluate identically under any executor —
-/// pass [`crate::udf::NoUdf`] where none is wired.
+/// pass [`crate::udf::NoUdf`] where none is wired. A UDF stage runs under
+/// the default [`UdfLimits`]; [`eval_with`] takes explicit limits and
+/// reports the stage's cost — the tiler's form.
 ///
 /// # Errors
 ///
@@ -610,15 +637,32 @@ fn udf_planes(
 /// undeclared bands, a transform op before any producing op (or no
 /// producing op at all), a degenerate rescale range, a palette
 /// colormap over non-gray planes, or a failed/unwired UDF stage.
-#[allow(
-    clippy::too_many_lines,
-    reason = "one match arm per PixelOp; splitting the loop would hide the pipeline"
-)]
 pub fn eval(
     plan: &RenderPlan,
     inputs: &[WarpedBuffer],
     udf: &dyn UdfExecutor,
 ) -> Result<RgbaTile, PlanError> {
+    eval_with(plan, inputs, udf, &UdfLimits::default()).map(|evaluated| evaluated.tile)
+}
+
+/// [`eval`] under explicit [`UdfLimits`], answering the UDF stage's
+/// [`UdfCost`] beside the tile — the form the tiler uses to bound a
+/// layer's module by its `Budget::max_udf_fuel_per_tile` and to put the
+/// cost on the Trace.
+///
+/// # Errors
+///
+/// Exactly [`eval`]'s.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one match arm per PixelOp; splitting the loop would hide the pipeline"
+)]
+pub fn eval_with(
+    plan: &RenderPlan,
+    inputs: &[WarpedBuffer],
+    udf: &dyn UdfExecutor,
+    limits: &UdfLimits,
+) -> Result<Evaluation, PlanError> {
     if plan.inputs.len() != inputs.len() {
         return Err(PlanError::InputCount {
             expected: plan.inputs.len(),
@@ -657,6 +701,7 @@ pub fn eval(
         .map(|i| inputs.iter().all(|b| b.valid[i]))
         .collect();
     let mut planes: Option<Planes> = None;
+    let mut udf_cost: Option<UdfCost> = None;
 
     for op in &plan.ops {
         match op {
@@ -709,8 +754,18 @@ pub fn eval(
                         declared: stage.output_planes,
                     });
                 }
-                let outputs = udf.run(stage, inputs)?;
-                planes = Some(udf_planes(stage, outputs, width, height, &mut valid)?);
+                // The stage's cost is measured around the executor
+                // alone (the ABI's whole round trip, not the host-side
+                // post-conditions below) — `Timings::udf_ms` is the UDF's
+                // share of `pixel_ops_ms`, and the fuel is the
+                // deterministic number the budget bounds.
+                let started = Instant::now();
+                let output = udf.run(stage, inputs, limits)?;
+                udf_cost = Some(UdfCost {
+                    fuel_used: output.fuel_used,
+                    elapsed: started.elapsed(),
+                });
+                planes = Some(udf_planes(stage, output.planes, width, height, &mut valid)?);
             }
             PixelOp::Colormap(map) => {
                 let planes = planes
@@ -742,15 +797,19 @@ pub fn eval(
     }
 
     let planes = planes.ok_or(PlanError::NothingToTransform { op: "end of plan" })?;
-    Ok(planes.quantize(width, height, &valid))
+    Ok(Evaluation {
+        tile: planes.quantize(width, height, &valid),
+        udf: udf_cost,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         BandInput, Colormap, Expr, OutputSpec, PixelOp, PlanError, RenderPlan, TileFormat, eval,
+        eval_with,
     };
-    use crate::udf::{NoUdf, UdfError, UdfExecutor, UdfStage};
+    use crate::udf::{NoUdf, UdfError, UdfExecutor, UdfLimits, UdfOutput, UdfStage};
     use crate::warp::WarpedBuffer;
 
     fn buffer(width: u32, height: u32, values: Vec<f64>) -> WarpedBuffer {
@@ -929,7 +988,8 @@ mod tests {
     }
 
     /// An executor handing back canned output planes — the port's test
-    /// double (the real adapter is #203's wasmtime crate).
+    /// double (the real adapter is #203's wasmtime crate). Charges the
+    /// whole fuel limit it was given, so the limit's plumbing is visible.
     struct FakeUdf(Vec<WarpedBuffer>);
 
     impl UdfExecutor for FakeUdf {
@@ -937,8 +997,9 @@ mod tests {
             &self,
             _stage: &UdfStage,
             _inputs: &[WarpedBuffer],
-        ) -> Result<Vec<WarpedBuffer>, UdfError> {
-            Ok(self.0.clone())
+            limits: &UdfLimits,
+        ) -> Result<UdfOutput, UdfError> {
+            Ok(UdfOutput::new(self.0.clone()).with_fuel_used(limits.max_fuel))
         }
     }
 
@@ -950,9 +1011,35 @@ mod tests {
             &self,
             _stage: &UdfStage,
             _inputs: &[WarpedBuffer],
-        ) -> Result<Vec<WarpedBuffer>, UdfError> {
+            _limits: &UdfLimits,
+        ) -> Result<UdfOutput, UdfError> {
             panic!("the executor was consulted by a path that must not reach it")
         }
+    }
+
+    /// `eval_with` hands the caller's limits to the executor and reports
+    /// the stage's cost beside the tile (#205); a plan without a UDF
+    /// stage reports no cost at all.
+    #[test]
+    fn eval_with_threads_limits_and_reports_the_udf_cost() {
+        let inputs = [buffer(1, 1, vec![1.0]), buffer(1, 1, vec![2.0])];
+        let executor = FakeUdf(vec![buffer(1, 1, vec![7.0])]);
+        let evaluated =
+            eval_with(&udf_plan(1), &inputs, &executor, &UdfLimits::new(4_321)).unwrap();
+        let cost = evaluated.udf.expect("a UDF stage ran");
+        assert_eq!(cost.fuel_used, Some(4_321));
+        assert_eq!(evaluated.tile.pixels, [7, 7, 7, 255]);
+        // The default limits are the budget default (100 M).
+        assert_eq!(
+            UdfLimits::default().max_fuel,
+            swath_core::planner::DEFAULT_MAX_UDF_FUEL_PER_TILE
+        );
+
+        let nir = buffer(1, 1, vec![3000.0]);
+        let red = buffer(1, 1, vec![1000.0]);
+        let evaluated = eval_with(&ndvi_plan(), &[nir, red], &PanicUdf, &UdfLimits::default())
+            .expect("plan evaluates without the executor");
+        assert_eq!(evaluated.udf, None);
     }
 
     /// A sha256-hex-shaped module identity for tests.

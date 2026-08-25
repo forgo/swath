@@ -81,12 +81,31 @@ pub struct Timings {
     pub read_ms: u64,
     /// Reprojection / warping.
     pub warp_ms: u64,
-    /// Band math, compositing, colormapping (the render IR).
+    /// Band math, compositing, colormapping (the render IR) — the UDF
+    /// stage's time ([`udf_ms`](Self::udf_ms)) included, since it is one
+    /// of the pixel ops.
     pub pixel_ops_ms: u64,
     /// Encoding the output tile (PNG/WebP).
     pub encode_ms: u64,
     /// End-to-end render duration.
     pub total_ms: u64,
+    /// The sandboxed `run_udf` stage alone (ADR 0018, #205): guest
+    /// instantiation, the plane copies in and out, and the module's own
+    /// execution. `0` — and omitted from the JSON, so traces of plans
+    /// without a UDF stage keep their exact pre-#205 bytes — when no UDF
+    /// ran. The deterministic cost is [`Trace::udf_fuel_used`]; this is
+    /// its wall-clock shadow.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub udf_ms: u64,
+}
+
+/// `skip_serializing_if` predicate for the additive zero-default fields.
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if hands the field by reference"
+)]
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 /// The planner's reasoning for one tile (issue #37,
@@ -231,6 +250,15 @@ pub struct Trace {
     /// contract change of #180) for static layers and older traces.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temporal: Option<TemporalTrace>,
+    /// The deterministic fuel the tile's `run_udf` stage consumed
+    /// (ADR 0018, #205) — the cost the budget's `max_udf_fuel_per_tile`
+    /// bounds, so the x-ray shows how close a layer's module runs to
+    /// its limit. Same inputs, same fuel: unlike the timings this number
+    /// reproduces and goldens may pin it. `None` (omitted from the JSON,
+    /// like [`temporal`](Self::temporal)) when no UDF stage ran — plans
+    /// without one, cache hits, and every pre-#205 trace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub udf_fuel_used: Option<u64>,
 }
 
 #[cfg(test)]
@@ -290,10 +318,12 @@ mod tests {
                 pixel_ops_ms: 1,
                 encode_ms: 2,
                 total_ms: 18,
+                udf_ms: 0,
             },
             ingest_to_pixel_ms: Some(950),
             plan: Some(sample_plan()),
             temporal: None,
+            udf_fuel_used: None,
         }
     }
 
@@ -400,6 +430,47 @@ mod tests {
         old.as_object_mut().unwrap().remove("temporal");
         let back: Trace = serde_json::from_value(old).unwrap();
         assert_eq!(back.temporal, None);
+    }
+
+    /// The UDF cost fields' wire shape (ADR 0018, #205), pinned like
+    /// `temporal`: `timings.udf_ms` is omitted when zero and
+    /// `udf_fuel_used` when `None`, so a trace without a UDF stage keeps
+    /// its exact pre-#205 bytes; a UDF render carries both as plain
+    /// numbers; older serialized traces still deserialize.
+    #[test]
+    fn udf_cost_wire_shape_is_pinned_and_absent_without_a_stage() {
+        let json = serde_json::to_value(sample()).unwrap();
+        assert!(
+            json["timings"].as_object().unwrap().get("udf_ms").is_none(),
+            "a zero udf_ms must be omitted, not serialized"
+        );
+        assert!(
+            json.as_object().unwrap().get("udf_fuel_used").is_none(),
+            "a None udf_fuel_used must be omitted, not null"
+        );
+
+        let mut trace = sample();
+        trace.timings.udf_ms = 4;
+        trace.udf_fuel_used = Some(3_276_800);
+        let json = serde_json::to_value(&trace).unwrap();
+        assert_eq!(
+            json["timings"],
+            serde_json::json!({
+                "read_ms": 12, "warp_ms": 3, "pixel_ops_ms": 1, "encode_ms": 2,
+                "total_ms": 18, "udf_ms": 4,
+            }),
+        );
+        assert_eq!(json["udf_fuel_used"], serde_json::json!(3_276_800));
+        let back: Trace = serde_json::from_value(json).unwrap();
+        assert_eq!(back, trace);
+
+        // Older serialized traces (neither key) still deserialize.
+        let mut old = serde_json::to_value(sample()).unwrap();
+        old.as_object_mut().unwrap().remove("udf_fuel_used");
+        old["timings"].as_object_mut().unwrap().remove("udf_ms");
+        let back: Trace = serde_json::from_value(old).unwrap();
+        assert_eq!(back.udf_fuel_used, None);
+        assert_eq!(back.timings.udf_ms, 0);
     }
 
     /// The extraction-surviving half of #37's contract (re-homed from the

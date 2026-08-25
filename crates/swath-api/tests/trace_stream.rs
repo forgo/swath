@@ -239,6 +239,7 @@ fn sample_trace() -> Trace {
         ingest_to_pixel_ms: None,
         plan: None,
         temporal: None,
+        udf_fuel_used: None,
     }
 }
 

@@ -15,6 +15,6 @@
 //! crate is IR- and Trace-free by the standalone rule.
 
 pub use swath_planner::{
-    Availability, BandWindow, Budget, CacheProbe, CandidateTrace, DEFAULT_OVERVIEW_OVERSAMPLE,
-    Plan, PlanChoice, PlannedStrategy, WARP_COST_WEIGHT, plan,
+    Availability, BandWindow, Budget, CacheProbe, CandidateTrace, DEFAULT_MAX_UDF_FUEL_PER_TILE,
+    DEFAULT_OVERVIEW_OVERSAMPLE, Plan, PlanChoice, PlannedStrategy, WARP_COST_WEIGHT, plan,
 };

@@ -9,7 +9,9 @@
 //! - **NaN canonicalization** — the one WASM-spec nondeterminism, off the
 //!   table platform-wide: identical inputs give byte-identical outputs;
 //! - **fuel metering** — the deterministic primary budget (same inputs,
-//!   same fuel consumed);
+//!   same fuel consumed): every tile-path call runs under the
+//!   [`UdfLimits`] the tiler derives from the layer budget's
+//!   `max_udf_fuel_per_tile` (#205) and answers the fuel it consumed;
 //! - **250 ms epoch deadline** — the wall-clock backstop that keeps ADR
 //!   0012's inline-render posture alive under a pathological module;
 //! - **pooling allocator, [`POOL_SLOTS`] slots** — per-request
@@ -39,7 +41,9 @@ use std::time::Duration;
 
 use swath_core::udf::code_hash;
 use swath_render::WarpedBuffer;
-use swath_render::udf::{UdfError, UdfExecutor, UdfRegistrar, UdfRegistration, UdfStage};
+use swath_render::udf::{
+    UdfError, UdfExecutor, UdfLimits, UdfOutput, UdfRegistrar, UdfRegistration, UdfStage,
+};
 use swath_udf_guest::{AbiError, Plane, decode_response, encode_request};
 use wasmtime::{
     Config, Engine, ExternType, Instance, InstanceAllocationStrategy, Memory, Module,
@@ -57,10 +61,12 @@ pub const POOL_SLOTS: u32 = 8;
 /// Compiled-module LRU capacity, keyed by content hash (issue #203).
 pub const MODULE_LRU_CAPACITY: usize = 32;
 
-/// The default per-call fuel budget — ADR 0018's deterministic primary
-/// bound. Generous for real per-pixel math over a 256×256 tile; #205's
-/// serve wiring makes it a configured budget axis.
-pub const DEFAULT_FUEL_BUDGET: u64 = 1_000_000_000;
+/// The fuel budget of the **registration** probes (`swath_udf_abi`,
+/// `swath_udf_output_planes` — two constant-time calls in a conforming
+/// module). Tile-path calls are bounded by the [`UdfLimits`] the caller
+/// passes (the layer budget's `max_udf_fuel_per_tile`, #205), never by
+/// this constant.
+pub const REGISTRATION_FUEL_BUDGET: u64 = 1_000_000;
 
 /// The wall-clock backstop deadline (ADR 0018): a call is interrupted at
 /// most this long after it starts.
@@ -176,7 +182,6 @@ pub struct WasmtimeUdf {
     /// Front = most recently used. `Module` is internally reference
     /// counted, so cloning out of the lock is cheap.
     modules: Mutex<Vec<(String, Module)>>,
-    fuel_budget: u64,
     _ticker: EpochTicker,
 }
 
@@ -196,17 +201,8 @@ impl WasmtimeUdf {
         Ok(Self {
             engine,
             modules: Mutex::new(Vec::new()),
-            fuel_budget: DEFAULT_FUEL_BUDGET,
             _ticker: ticker,
         })
-    }
-
-    /// Sets the per-call fuel budget (#205 wires this from serve
-    /// configuration; the default is [`DEFAULT_FUEL_BUDGET`]).
-    #[must_use]
-    pub fn with_fuel_budget(mut self, fuel: u64) -> Self {
-        self.fuel_budget = fuel;
-        self
     }
 
     /// The publish/preview compile motion: validates `bytes` against the
@@ -239,12 +235,12 @@ impl WasmtimeUdf {
         validate_shape(&module)?;
         // Probe the ABI version in a bounded store — the registration
         // motion may instantiate; the tile path never compiles.
-        let mut store = self.fresh_store();
-        let instance = instantiate(&mut store, &module)?;
+        let mut store = self.fresh_store(REGISTRATION_FUEL_BUDGET);
+        let instance = instantiate(&mut store, &module, REGISTRATION_FUEL_BUDGET)?;
         let abi: TypedFunc<(), i32> = typed_export(&instance, &mut store, "swath_udf_abi")?;
         let got = abi
             .call(&mut store, ())
-            .map_err(|err| self.map_call_error(&err))?;
+            .map_err(|err| map_call_error(&err, REGISTRATION_FUEL_BUDGET))?;
         if got != swath_udf_guest::ABI_VERSION {
             return Err(UdfError::UnsupportedAbiVersion { got });
         }
@@ -271,8 +267,8 @@ impl WasmtimeUdf {
             .ok_or_else(|| UdfError::UnknownModule {
                 code_hash: code_hash.to_owned(),
             })?;
-        let mut store = self.fresh_store();
-        let instance = instantiate(&mut store, &module)?;
+        let mut store = self.fresh_store(REGISTRATION_FUEL_BUDGET);
+        let instance = instantiate(&mut store, &module, REGISTRATION_FUEL_BUDGET)?;
         let probe: TypedFunc<i32, i32> =
             typed_export(&instance, &mut store, "swath_udf_output_planes")?;
         let inputs = i32::try_from(input_planes).map_err(|_| UdfError::InvalidRequest {
@@ -280,7 +276,7 @@ impl WasmtimeUdf {
         })?;
         let got = probe
             .call(&mut store, inputs)
-            .map_err(|err| self.map_call_error(&err))?;
+            .map_err(|err| map_call_error(&err, REGISTRATION_FUEL_BUDGET))?;
         u32::try_from(got)
             .ok()
             .filter(|planes| *planes > 0)
@@ -300,9 +296,9 @@ impl WasmtimeUdf {
         Some(module)
     }
 
-    /// A fresh per-invocation store: fuel budget, epoch deadline, and
-    /// the 64 MiB [`StoreLimits`] armed.
-    fn fresh_store(&self) -> Store<StoreLimits> {
+    /// A fresh per-invocation store: `fuel` units of fuel, the epoch
+    /// deadline, and the 64 MiB [`StoreLimits`] armed.
+    fn fresh_store(&self, fuel: u64) -> Store<StoreLimits> {
         let limits = StoreLimitsBuilder::new()
             .memory_size(MEMORY_CAP_BYTES)
             .memories(1)
@@ -311,31 +307,38 @@ impl WasmtimeUdf {
         let mut store = Store::new(&self.engine, limits);
         store.limiter(|limits| limits);
         store
-            .set_fuel(self.fuel_budget)
+            .set_fuel(fuel)
             .expect("consume_fuel is on in the deterministic engine");
         store.set_epoch_deadline(EPOCH_DEADLINE_MS.div_ceil(EPOCH_TICK_MS));
         store
     }
+}
 
-    /// Maps a guest-call failure onto the pinned taxonomy: fuel and
-    /// deadline traps get their own variants, everything else that
-    /// trapped is [`UdfError::Trap`].
-    fn map_call_error(&self, err: &wasmtime::Error) -> UdfError {
-        match err.downcast_ref::<Trap>() {
-            Some(Trap::OutOfFuel) => UdfError::FuelExhausted {
-                budget: self.fuel_budget,
-            },
-            Some(Trap::Interrupt) => UdfError::EpochDeadline {
-                deadline_ms: EPOCH_DEADLINE_MS,
-            },
-            Some(trap) => UdfError::Trap {
-                detail: trap.to_string(),
-            },
-            None => UdfError::Trap {
-                detail: format!("{err:#}"),
-            },
-        }
+/// Maps a guest-call failure onto the pinned taxonomy: fuel and deadline
+/// traps get their own variants (fuel naming the `budget` the call ran
+/// under), everything else that trapped is [`UdfError::Trap`].
+fn map_call_error(err: &wasmtime::Error, budget: u64) -> UdfError {
+    match err.downcast_ref::<Trap>() {
+        Some(Trap::OutOfFuel) => UdfError::FuelExhausted { budget },
+        Some(Trap::Interrupt) => UdfError::EpochDeadline {
+            deadline_ms: EPOCH_DEADLINE_MS,
+        },
+        Some(trap) => UdfError::Trap {
+            detail: trap.to_string(),
+        },
+        None => UdfError::Trap {
+            detail: format!("{err:#}"),
+        },
     }
+}
+
+/// Fuel the store has charged so far against `budget` — the deterministic
+/// per-tile cost (`Trace::udf_fuel_used`). Saturating: a store that
+/// somehow reports more than it was given still answers the budget.
+fn fuel_used(store: &Store<StoreLimits>, budget: u64) -> u64 {
+    store
+        .get_fuel()
+        .map_or(budget, |remaining| budget.saturating_sub(remaining))
 }
 
 /// The compile-motion port (#204): [`WasmtimeUdf::compile`] then the
@@ -350,11 +353,17 @@ impl UdfRegistrar for WasmtimeUdf {
 }
 
 impl UdfExecutor for WasmtimeUdf {
+    /// One tile: a fresh store fueled with `limits.max_fuel`, one guest
+    /// allocation and one bulk copy in, the run, one bulk copy out. Every
+    /// guest instruction of the call — allocation included — is charged
+    /// against the same budget, and the total is the answered
+    /// [`UdfOutput::fuel_used`].
     fn run(
         &self,
         stage: &UdfStage,
         inputs: &[WarpedBuffer],
-    ) -> Result<Vec<WarpedBuffer>, UdfError> {
+        limits: &UdfLimits,
+    ) -> Result<UdfOutput, UdfError> {
         let module = self
             .lookup(&stage.code_hash)
             .ok_or_else(|| UdfError::UnknownModule {
@@ -362,9 +371,10 @@ impl UdfExecutor for WasmtimeUdf {
             })?;
         let request = encode_inputs(inputs)?;
         let (width, height) = (inputs[0].width, inputs[0].height);
+        let budget = limits.max_fuel;
 
-        let mut store = self.fresh_store();
-        let instance = instantiate(&mut store, &module)?;
+        let mut store = self.fresh_store(budget);
+        let instance = instantiate(&mut store, &module, budget)?;
         let memory =
             instance
                 .get_memory(&mut store, "memory")
@@ -383,7 +393,7 @@ impl UdfExecutor for WasmtimeUdf {
         })?;
         let ptr = alloc
             .call(&mut store, len)
-            .map_err(|err| self.map_call_error(&err))?;
+            .map_err(|err| map_call_error(&err, budget))?;
         if ptr <= 0 {
             return Err(UdfError::MemoryLimit {
                 detail: format!("guest could not allocate the {len}-byte request buffer"),
@@ -395,7 +405,7 @@ impl UdfExecutor for WasmtimeUdf {
         let run: TypedFunc<(i32, i32), i64> = typed_export(&instance, &mut store, "swath_udf_run")?;
         let packed = run
             .call(&mut store, (ptr, len))
-            .map_err(|err| self.map_call_error(&err))?;
+            .map_err(|err| map_call_error(&err, budget))?;
         if packed == 0 {
             return Err(UdfError::GuestFailure {
                 code_hash: stage.code_hash.clone(),
@@ -404,7 +414,8 @@ impl UdfExecutor for WasmtimeUdf {
 
         // Transfer out: bounds-check the guest's claim before touching it.
         let response = read_guest(&store, &memory, packed)?;
-        decode_outputs(width, height, stage.output_planes, &response)
+        let planes = decode_outputs(width, height, stage.output_planes, &response)?;
+        Ok(UdfOutput::new(planes).with_fuel_used(fuel_used(&store, budget)))
     }
 }
 
@@ -425,11 +436,22 @@ fn encode_inputs(inputs: &[WarpedBuffer]) -> Result<Vec<u8>, UdfError> {
     })
 }
 
-/// Instantiates in the pooled allocator; failures are resource-bound
-/// failures (the 64 MiB cap, pool slots) by construction.
-fn instantiate(store: &mut Store<StoreLimits>, module: &Module) -> Result<Instance, UdfError> {
-    Instance::new(&mut *store, module, &[]).map_err(|err| UdfError::MemoryLimit {
-        detail: format!("instantiation failed: {err:#}"),
+/// Instantiates in the pooled allocator under the store's `budget`.
+/// Instantiation already runs guest code (data-segment initialization, a
+/// `start` function) and so already burns fuel: a fuel or deadline trap
+/// here is that variant (#205 pinned it — a starved budget trips before
+/// `swath_udf_run` is ever called); everything else is a resource-bound
+/// failure (the 64 MiB cap, pool slots) by construction.
+fn instantiate(
+    store: &mut Store<StoreLimits>,
+    module: &Module,
+    budget: u64,
+) -> Result<Instance, UdfError> {
+    Instance::new(&mut *store, module, &[]).map_err(|err| match err.downcast_ref::<Trap>() {
+        Some(Trap::OutOfFuel | Trap::Interrupt) => map_call_error(&err, budget),
+        _ => UdfError::MemoryLimit {
+            detail: format!("instantiation failed: {err:#}"),
+        },
     })
 }
 

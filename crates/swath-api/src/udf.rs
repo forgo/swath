@@ -22,6 +22,13 @@
 //! The ports are the core's native-AFIT traits; this module erases them
 //! behind boxed futures so the openEO state stays generic over its three
 //! render/catalog ports only.
+//!
+//! The registrar and the tile-path executor are **one object** (#205):
+//! [`UdfPublish::new`] takes something that is both, so a module the
+//! compile motion registered is runnable by exactly the executor
+//! [`UdfPublish::executor`] hands the tile handlers and the preview —
+//! the "a registration is a promise the tile path keeps" invariant is a
+//! type, not a convention.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -30,7 +37,11 @@ use std::sync::Arc;
 use serde_json::Value;
 use swath_core::catalog::{Layer as DomainLayer, PlanKind};
 use swath_core::udf::{ModuleFetchError, ModuleFetcher, ModuleStore, ModuleStoreError};
-use swath_render::{CompileContext, CompileError, UdfRegistrar, UdfSource};
+use swath_render::{CompileContext, CompileError, UdfExecutor, UdfRegistrar, UdfSource};
+
+/// The shared tile-path executor handle: what [`ApiState::with_udf_executor`](crate::ApiState::with_udf_executor)
+/// takes and [`UdfPublish::executor`] answers.
+pub type SharedUdfExecutor = Arc<dyn UdfExecutor>;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -67,18 +78,19 @@ impl<F: ModuleFetcher> DynModuleFetcher for F {
     }
 }
 
-/// The publish-motion wiring: registrar + module store + fetcher.
-/// Cloning shares the three.
+/// The `run_udf` wiring: registrar + tile-path executor (one object) +
+/// module store + fetcher. Cloning shares all of them.
 #[derive(Clone)]
 pub struct UdfPublish {
     registrar: Arc<dyn UdfRegistrar>,
+    executor: SharedUdfExecutor,
     store: Arc<dyn DynModuleStore>,
     fetcher: Arc<dyn DynModuleFetcher>,
 }
 
 impl std::fmt::Debug for UdfPublish {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("UdfPublish { registrar, store, fetcher }")
+        f.write_str("UdfPublish { registrar, executor, store, fetcher }")
     }
 }
 
@@ -151,17 +163,30 @@ fn udf_arguments(process: &Value) -> Vec<(&str, &str)> {
 }
 
 impl UdfPublish {
-    /// The wiring over concrete adapters.
-    pub fn new<M, F>(registrar: Arc<dyn UdfRegistrar>, store: M, fetcher: F) -> Self
+    /// The wiring over concrete adapters. `runtime` is both the
+    /// compile-motion registrar and the tile-path executor (the wasmtime
+    /// adapter is both over one module LRU), so what registers is what
+    /// runs.
+    pub fn new<U, M, F>(runtime: Arc<U>, store: M, fetcher: F) -> Self
     where
+        U: UdfRegistrar + UdfExecutor + 'static,
         M: ModuleStore + 'static,
         F: ModuleFetcher + 'static,
     {
         Self {
-            registrar,
+            registrar: Arc::clone(&runtime) as Arc<dyn UdfRegistrar>,
+            executor: runtime,
             store: Arc::new(store),
             fetcher: Arc::new(fetcher),
         }
+    }
+
+    /// The tile-path executor (#205): hand it to
+    /// [`ApiState::with_udf_executor`](crate::ApiState::with_udf_executor);
+    /// the preview (`POST /result`) renders through it too.
+    #[must_use]
+    pub fn executor(&self) -> SharedUdfExecutor {
+        Arc::clone(&self.executor)
     }
 
     /// Resolves `process`'s remote modules for a fresh compile: each
