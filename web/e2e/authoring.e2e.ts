@@ -14,9 +14,20 @@
 // rejects renders its diagnostic on the offending field (the safety
 // net); deleting a published service 404s its tile URL; the NDVI
 // template publishes a working layer from one click.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
 
 const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
+
+/** The guest kit's reference NDVI module (ADR 0020, `examples/udf/ndvi`
+ * — the committed fixture the wasmtime adapter's goldens pin): two
+ * input planes (nir, red in load order) to one gray plane. */
+const NDVI_WASM = readFileSync(
+  fileURLToPath(
+    new URL("../../crates/adapters/swath-udf-wasmtime/tests/fixtures/ndvi.wasm", import.meta.url),
+  ),
+);
 
 /** The proven-live fixture tile (z/y/x — OGC tileMatrix/tileRow/tileCol):
  * the granule tests/e2e/stack-up.sh drops, same tile the Rust
@@ -75,6 +86,127 @@ async function authorNdvi(page: Page, outputMax: string, colormap: string): Prom
     await page.locator('[data-step="s3"] .swath-authoring-advanced-toggle').click();
     await fieldById(page, "s3-outputMax").fill(outputMax);
   }
+}
+
+// --- A hand-assembled ABI v1 module, one failure mode (issue #208) ---
+// The same no-toolchain posture as crates/swath-api/tests/common/wasm.rs
+// (which this mirrors byte for byte): structurally conforming — the four
+// v1 exports plus memory — so it registers, with a `swath_udf_run` that
+// spins until the per-tile fuel budget (or the epoch backstop) stops it.
+
+function uleb(value: number): number[] {
+  const out: number[] = [];
+  let v = value;
+  for (;;) {
+    const byte = v & 0x7f;
+    v = Math.floor(v / 128);
+    if (v === 0) {
+      out.push(byte);
+      return out;
+    }
+    out.push(byte | 0x80);
+  }
+}
+
+function sleb(value: number): number[] {
+  const out: number[] = [];
+  let v = value;
+  for (;;) {
+    const byte = v & 0x7f;
+    v >>= 7;
+    const sign = (byte & 0x40) !== 0;
+    if ((v === 0 && !sign) || (v === -1 && sign)) {
+      out.push(byte);
+      return out;
+    }
+    out.push(byte | 0x80);
+  }
+}
+
+function section(id: number, payload: number[]): number[] {
+  return [id, ...uleb(payload.length), ...payload];
+}
+
+function counted(items: number[][]): number[] {
+  return [...uleb(items.length), ...items.flat()];
+}
+
+function name(text: string): number[] {
+  const bytes = [...new TextEncoder().encode(text)];
+  return [...uleb(bytes.length), ...bytes];
+}
+
+/** `i32.const k` then `end`. */
+function retI32(k: number): number[] {
+  return [0x41, ...sleb(k), 0x0b];
+}
+
+/** A structurally conforming ABI v1 module (abi = 1, one output plane,
+ * `swath_udf_alloc` answering 8 inside a 4 MiB memory) whose
+ * `swath_udf_run` body is `run`. */
+function abiModule(run: number[]): Buffer {
+  const exportEntry = (n: string, kind: number, index: number): number[] => [
+    ...name(n),
+    kind,
+    ...uleb(index),
+  ];
+  const body = (code: number[]): number[] => {
+    const entry = [0x00, ...code]; // zero locals
+    return [...uleb(entry.length), ...entry];
+  };
+  return Buffer.from([
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    // Types: 0 = () -> i32, 1 = (i32) -> i32, 2 = (i32, i32) -> i64.
+    ...section(
+      1,
+      counted([
+        [0x60, 0x00, 0x01, 0x7f],
+        [0x60, 0x01, 0x7f, 0x01, 0x7f],
+        [0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7e],
+      ]),
+    ),
+    // Functions: abi, output_planes, alloc, run.
+    ...section(3, counted([[0], [1], [1], [2]])),
+    // Memory: 64 pages (4 MiB), no max.
+    ...section(5, counted([[0x00, 0x40]])),
+    ...section(
+      7,
+      counted([
+        exportEntry("memory", 0x02, 0),
+        exportEntry("swath_udf_abi", 0x00, 0),
+        exportEntry("swath_udf_output_planes", 0x00, 1),
+        exportEntry("swath_udf_alloc", 0x00, 2),
+        exportEntry("swath_udf_run", 0x00, 3),
+      ]),
+    ),
+    ...section(10, counted([body(retI32(1)), body(retI32(1)), body(retI32(8)), body(run)])),
+  ]);
+}
+
+/** The fuel bomb: `swath_udf_run` is `(loop (br 0))`. */
+const FUEL_BOMB = abiModule([0x03, 0x40, 0x0c, 0x00, 0x0b, 0x42, 0x00, 0x0b]);
+
+/** Picks `buffer` as a `.wasm` through the UDF card's file input. */
+async function uploadModule(page: Page, id: string, fileName: string, buffer: Buffer) {
+  await fieldById(page, id).setInputFiles({ name: fileName, mimeType: "application/wasm", buffer });
+}
+
+/** The `X-Swath-Trace` debug summary of a tile/preview response. */
+function traceHeader(headers: Record<string, string>): {
+  decision?: string;
+  udf_fuel_used?: number;
+} {
+  return JSON.parse(headers["x-swath-trace"] ?? "{}") as {
+    decision?: string;
+    udf_fuel_used?: number;
+  };
 }
 
 /** Publishes the composed graph and returns the openEO service id from
@@ -347,4 +479,154 @@ test("deleting a published service 404s its tile URL and drops it from the brows
     .poll(async () => (await page.request.get(`/tilesets/${id}/tiles/${TILE}`)).status())
     .toBe(404);
   await expect(page.locator(`swath-layer-panel button[data-layer="${id}"]`)).toHaveCount(0);
+});
+
+// --- The UDF stage (issue #208, ADR 0018): the run_udf loop end to end ---
+// The compose stack is wired with `udf-store` (tests/e2e/swath-catalog.toml),
+// so GET /processes lists run_udf and the chip exists; the guest kit's
+// reference NDVI module goes upload → preview (with fuel on the trace
+// header) → publish → x-ray (fuel per tile from the SSE stream, in the
+// inspector facts and the analytics line) → delete → 404.
+
+test("UDF stage: upload → preview → publish → x-ray shows fuel → delete → 404", async ({
+  page,
+}) => {
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+  // X-ray on FIRST: the overlay subscribes to /traces on toggle, and
+  // the published layer's first renders (fuel-bearing, uncached) happen
+  // the moment publishing switches the map to it.
+  const toggle = page.getByRole("button", { name: "Toggle x-ray overlay" });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+  await fieldById(page, "s1-id").selectOption("hls-s30");
+  await tickBand(page, "b8a");
+  await tickBand(page, "b04");
+  // The chip exists only because the server serves run_udf (--udf-store).
+  await chip(page, 0, "run_udf").click();
+  // The module's context is part of the stage's cache identity (#265),
+  // so a per-run value keeps this run's tiles unseen by the write-through
+  // cache — `just e2e-web` runs both modes against ONE stack, and a
+  // cache hit never runs the module (no fuel to show). The reference
+  // module ignores it; the JSON field itself is exercised on the way.
+  await fieldById(page, "s2-context").fill(
+    JSON.stringify({ run: `${process.env.SWATH_E2E_MODE ?? "vite"}-${Date.now()}` }),
+  );
+  const preview = page.waitForResponse(
+    (response) => response.url().includes("/result") && response.request().method() === "POST",
+  );
+  await uploadModule(page, "s2-udf", "ndvi.wasm", NDVI_WASM);
+  await expect(page.locator("#swath-authoring-s2-udf-module")).toContainText("ndvi.wasm");
+  // The preview renders the module through POST /result — the ADR 0014
+  // loop as the UDF validation loop (#206) — and meters its fuel.
+  const previewed = await preview;
+  expect(previewed.status()).toBe(200);
+  expect(previewed.headers()["content-type"]).toBe("image/png");
+  expect(traceHeader(previewed.headers()).udf_fuel_used).toBeGreaterThan(0);
+  const image = page.locator("#swath-authoring-preview-image");
+  await expect(image).toBeVisible();
+  await expect(image).toHaveAttribute("src", /^blob:/);
+
+  // Stage-typed: only the stretch step fits, after the module; the
+  // colormap greys out with the UDF reason (its output renders directly).
+  await expect(page.locator('.swath-authoring-insert[data-gap="0"]')).toHaveCount(0);
+  await chip(page, 1, "linear_scale_range").click();
+  await fieldById(page, "s3-inputMin").fill("-1");
+  await fieldById(page, "s3-inputMax").fill("1");
+  await expect(fieldById(page, "s4-options")).toBeDisabled();
+  await expect(fieldById(page, "s4-composite-note")).toContainText("renders directly");
+  await expect(page.locator("#swath-authoring-narrative")).toContainText(
+    "run ndvi.wasm on the bands",
+  );
+  await fieldById(page, "title").fill("NDVI (module)");
+  const id = await publish(page);
+
+  // The published layer is the viewed layer, rendering live through
+  // the same executor: the x-ray's analytics line narrates the latest
+  // UDF tile's fuel and udf_ms from the trace stream…
+  const udfLine = page.locator(".swath-xray-analytics-udf");
+  await expect(udfLine).toBeVisible({ timeout: 60_000 });
+  // Exact values ride the card's data-* attributes (like p50/p95).
+  const card = page.locator(".swath-xray-analytics");
+  await expect(card).toHaveAttribute("data-udf-tile", new RegExp(`^${id}/`));
+  const fuel = Number(await card.getAttribute("data-udf-fuel"));
+  expect(fuel).toBeGreaterThan(0);
+  await expect(udfLine).toContainText(/fuel \d+/);
+  // …and a live badge's inspector carries the same facts per tile.
+  const badge = page.locator(`.swath-xray-badge[data-key^="${id}/"][data-decision="live"]`);
+  await expect(badge.first()).toBeAttached({ timeout: 60_000 });
+  await badge.first().click();
+  const inspector = page.locator(".swath-xray-inspector");
+  await expect(inspector).toBeVisible();
+  await expect(inspector).toContainText("udf fuel");
+  await expect(inspector).toContainText(/udf \d+/);
+  await page.keyboard.press("Escape");
+
+  // The served tile meters fuel on its trace header like the preview
+  // did — unless the map already rendered it and the write-through
+  // cache answers: a cache hit never runs the module, so it carries no
+  // fuel, honestly (the tiler's contract).
+  const tile = await page.request.get(`/tilesets/${id}/tiles/${TILE}`);
+  expect(tile.status()).toBe(200);
+  expect(tile.headers()["content-type"]).toBe("image/png");
+  const served = traceHeader(tile.headers());
+  if (served.decision === "cache_hit") {
+    expect(served.udf_fuel_used).toBeUndefined();
+  } else {
+    expect(served.udf_fuel_used).toBeGreaterThan(0);
+  }
+
+  // Delete from the panel: gone from serving (the honest 404).
+  const deleted = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/services/${id}`) && response.request().method() === "DELETE",
+  );
+  await page.getByRole("button", { name: `Delete ${id}` }).click();
+  expect((await deleted).status()).toBe(204);
+  await expect
+    .poll(async () => (await page.request.get(`/tilesets/${id}/tiles/${TILE}`)).status())
+    .toBe(404);
+});
+
+test("UDF stage: a fuel bomb's refusal reads in plain words on the module and never gates a different valid draft", async ({
+  page,
+}) => {
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+  await fieldById(page, "s1-id").selectOption("hls-s30");
+  await tickBand(page, "b8a");
+  await tickBand(page, "b04");
+  await chip(page, 0, "run_udf").click();
+  const preview = page.waitForResponse(
+    (response) => response.url().includes("/result") && response.request().method() === "POST",
+  );
+  await uploadModule(page, "s2-udf", "bomb.wasm", FUEL_BOMB);
+  // The server refuses under the same per-tile budget publishing would
+  // enforce: ProcessGraphComplexity (#206), mapped onto the module field
+  // in the user's words — the fuel meter, or its wall-clock backstop.
+  const refused = await preview;
+  expect(refused.status()).toBe(400);
+  expect(((await refused.json()) as { code: string }).code).toBe("ProcessGraphComplexity");
+  const note = page.locator("#swath-authoring-s2-udf-note");
+  await expect(note).toContainText("per-tile budget");
+  await expect(note).toContainText("Publishing is not blocked");
+  await expect(page.locator("#swath-authoring-preview-note")).toContainText(
+    "see the note on step s2",
+  );
+  await expect(page.locator("#swath-authoring-preview-image")).toBeHidden();
+  await expect(submitButton(page)).toBeEnabled();
+  await expect(page.locator("swath-authoring-panel .swath-authoring-error")).toHaveCount(0);
+
+  // A different, valid draft on the same canvas publishes and serves:
+  // drop the module, author NDVI in its place.
+  await page.getByRole("button", { name: "Remove step s2" }).click();
+  await chip(page, 0, "ndvi").click();
+  await chip(page, 1, "linear_scale_range").click();
+  await fieldById(page, "s3-inputMin").fill("-1");
+  await fieldById(page, "s3-inputMax").fill("1");
+  await fieldById(page, "title").fill("NDVI (after the bomb)");
+  const id = await publish(page);
+  const tile = await page.request.get(`/tilesets/${id}/tiles/${TILE}`);
+  expect(tile.status()).toBe(200);
 });

@@ -188,4 +188,38 @@ test("a viewed frame pins the per-frame line, whatever traced last (issue #211)"
   expect(element.dataset.frame).toBe(mine); // mine traced last
   panel.record("live", 5, theirs);
   expect(element.dataset.frame).toBe(theirs);
+  element.remove();
+});
+
+test("the per-tile UDF line (#208): latest fuel and udf_ms, hidden until a UDF trace arrives", () => {
+  const analytics = new TraceAnalytics();
+  const panel = new AnalyticsPanel(document, analytics);
+  const { element } = panel;
+  document.body.append(element);
+  const line = element.querySelector<HTMLElement>(".swath-xray-analytics-udf");
+  panel.record("live", 10);
+  expect(line?.hidden).toBe(true);
+  expect(analytics.latestUdf).toBeUndefined();
+  expect(analytics.udfTiles).toBe(0);
+
+  panel.record("live", 30, undefined, { tile: "udf/12/1561/848", fuel: 3_276_800, ms: 4 });
+  expect(line?.hidden).toBe(false);
+  expect(line?.textContent).toBe("udf udf/12/1561/848 · fuel 3276800 · 4 ms (1 udf tile)");
+  expect(element.dataset.udfTile).toBe("udf/12/1561/848");
+  expect(element.dataset.udfFuel).toBe("3276800");
+  expect(element.dataset.udfMs).toBe("4");
+  expect(element.dataset.udfTiles).toBe("1");
+
+  // Latest wins; a sample without fuel (udf_ms only) reads "—", never 0.
+  panel.record("live", 30, undefined, { tile: "udf/12/1561/849", fuel: undefined, ms: 2 });
+  expect(line?.textContent).toBe("udf udf/12/1561/849 · fuel — · 2 ms (2 udf tiles)");
+  expect(element.dataset.udfFuel).toBeUndefined();
+  expect(element.dataset.udfTiles).toBe("2");
+  // Copies out, never the internal record.
+  const latest = analytics.latestUdf;
+  if (latest) {
+    latest.ms = 999;
+  }
+  expect(analytics.latestUdf?.ms).toBe(2);
+  element.remove();
 });

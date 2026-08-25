@@ -68,6 +68,16 @@ export interface DecisionMix {
   cache_hit: number;
 }
 
+/** One tile's `run_udf` cost as the trace carries it (ADR 0018, #205 —
+ * surfaced by #208): the deterministic `udf_fuel_used` (absent on a
+ * cache hit, which never runs the module) and the stage's wall-clock
+ * `udf_ms`, keyed by the tile it belongs to. */
+export interface UdfSample {
+  tile: string;
+  fuel: number | undefined;
+  ms: number;
+}
+
 /** The pure aggregation core — no DOM, so unit tests drive it with
  * synthetic traces and assert hand-computed expectations exactly. */
 export class TraceAnalytics {
@@ -80,6 +90,10 @@ export class TraceAnalytics {
    * in practice (a handful of frames), so no eviction. */
   readonly #frames = new Map<string, DecisionMix>();
   #latestFrame: string | undefined;
+  /** The latest UDF-bearing trace's cost (#208) and how many traces
+   * carried one, all-time — the per-tile line's material. */
+  #latestUdf: UdfSample | undefined;
+  #udfTiles = 0;
 
   constructor(windowSize: number = ANALYTICS_WINDOW) {
     this.#window = windowSize;
@@ -88,8 +102,9 @@ export class TraceAnalytics {
   /** Folds one trace in: `total_ms` into the rolling window (oldest
    * sample out once full), its decision kind into the all-time mix —
    * and, when the trace carries a temporal decision, into that frame's
-   * own mix (`frame` is the trace's `temporal.granule_datetime`). */
-  record(decision: TraceDecision, totalMs: number, frame?: string): void {
+   * own mix (`frame` is the trace's `temporal.granule_datetime`); when
+   * it carries a `run_udf` cost, as the latest UDF tile. */
+  record(decision: TraceDecision, totalMs: number, frame?: string, udf?: UdfSample): void {
     this.#samples.push(totalMs);
     if (this.#samples.length > this.#window) {
       this.#samples.shift();
@@ -105,12 +120,27 @@ export class TraceAnalytics {
       mix[kind] += 1;
       this.#latestFrame = frame;
     }
+    if (udf !== undefined) {
+      this.#latestUdf = { ...udf };
+      this.#udfTiles += 1;
+    }
   }
 
   /** The most recently traced frame's `granule_datetime`; undefined
    * until a temporal trace arrives. */
   get latestFrame(): string | undefined {
     return this.#latestFrame;
+  }
+
+  /** The latest traced tile that ran a UDF (a copy); undefined until
+   * one arrives — a stream with no UDF layer keeps the old card. */
+  get latestUdf(): UdfSample | undefined {
+    return this.#latestUdf ? { ...this.#latestUdf } : undefined;
+  }
+
+  /** All-time traces that carried a `run_udf` cost. */
+  get udfTiles(): number {
+    return this.#udfTiles;
   }
 
   /** The decision mix of one frame (a copy); undefined for a frame
@@ -174,6 +204,7 @@ export class AnalyticsPanel {
   readonly #cache: HTMLSpanElement;
   readonly #hit: HTMLSpanElement;
   readonly #frame: HTMLDivElement;
+  readonly #udf: HTMLDivElement;
 
   constructor(doc: Document, analytics: TraceAnalytics = new TraceAnalytics()) {
     this.#analytics = analytics;
@@ -200,16 +231,23 @@ export class AnalyticsPanel {
     this.#frame = doc.createElement("div");
     this.#frame.className = "swath-xray-analytics-frame";
     this.#frame.hidden = true;
-    this.element.append(this.#percentiles, mixLine, this.#frame);
+    // The per-tile UDF cost line (#208): the latest traced tile that ran
+    // a `run_udf` stage — its deterministic fuel and wall-clock share
+    // (ADR 0018) — plus how many tiles have. Hidden until one arrives.
+    this.#udf = doc.createElement("div");
+    this.#udf.className = "swath-xray-analytics-udf";
+    this.#udf.hidden = true;
+    this.element.append(this.#percentiles, mixLine, this.#frame, this.#udf);
     this.#render();
   }
 
   /** Folds one trace in and refreshes the card (a handful of text
    * nodes — per-trace update is well within budget, as the feed's
    * per-trace line already is). `frame` is the trace's temporal
-   * `granule_datetime`, when it carries one. */
-  record(decision: TraceDecision, totalMs: number, frame?: string): void {
-    this.#analytics.record(decision, totalMs, frame);
+   * `granule_datetime`, when it carries one; `udf` its `run_udf` cost,
+   * when it ran one. */
+  record(decision: TraceDecision, totalMs: number, frame?: string, udf?: UdfSample): void {
+    this.#analytics.record(decision, totalMs, frame, udf);
     this.#render();
   }
 
@@ -277,6 +315,29 @@ export class AnalyticsPanel {
       dataset.frameLive = String(frameMix.live);
       dataset.frameOverview = String(frameMix.overview);
       dataset.frameCacheHit = String(frameMix.cache_hit);
+    }
+    const udf = this.#analytics.latestUdf;
+    if (udf === undefined) {
+      this.#udf.hidden = true;
+      delete dataset.udfTile;
+      delete dataset.udfFuel;
+      delete dataset.udfMs;
+      delete dataset.udfTiles;
+    } else {
+      this.#udf.hidden = false;
+      // A cache hit never runs the module: no fuel, honestly "—".
+      const fuel = udf.fuel === undefined ? "—" : String(udf.fuel);
+      this.#udf.textContent =
+        `udf ${udf.tile} · fuel ${fuel} · ${udf.ms} ms ` +
+        `(${this.#analytics.udfTiles} udf tile${this.#analytics.udfTiles === 1 ? "" : "s"})`;
+      dataset.udfTile = udf.tile;
+      if (udf.fuel === undefined) {
+        delete dataset.udfFuel;
+      } else {
+        dataset.udfFuel = String(udf.fuel);
+      }
+      dataset.udfMs = String(udf.ms);
+      dataset.udfTiles = String(this.#analytics.udfTiles);
     }
   }
 }

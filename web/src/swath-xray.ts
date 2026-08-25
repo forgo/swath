@@ -517,6 +517,8 @@ const OVERLAY_CSS = `
 }
 .swath-xray-analytics-frame { color: #94a3b8; }
 .swath-xray-analytics-frame[hidden] { display: none; }
+.swath-xray-analytics-udf { color: #c4b5fd; }
+.swath-xray-analytics-udf[hidden] { display: none; }
 .swath-xray-analytics-live { color: #4ade80; }
 .swath-xray-analytics-overview { color: #fbbf24; }
 .swath-xray-analytics-cache { color: #60a5fa; }
@@ -910,10 +912,20 @@ export class XRayOverlay {
     // carries a temporal decision, so an unscoped key would follow
     // whatever background layer traced last. The stream-wide counters
     // above stay layer-agnostic, like the feed.
+    // A `run_udf` cost rides the trace only when a UDF stage ran (ADR
+    // 0018, #205): the deterministic fuel and the stage's wall-clock
+    // share — the analytics card's per-tile UDF line (#208).
+    const fuel = envelope.trace.udf_fuel_used;
+    const udfMs = envelope.trace.timings.udf_ms;
+    const udf =
+      typeof fuel === "number" || udfMs !== undefined
+        ? { tile: key, fuel: typeof fuel === "number" ? fuel : undefined, ms: udfMs ?? 0 }
+        : undefined;
     this.#analytics.record(
       envelope.trace.decision,
       envelope.trace.timings.total_ms,
       envelope.layer === this.#layer ? envelope.trace.temporal?.granule_datetime : undefined,
+      udf,
     );
     this.#feedTrace(key, envelope);
     this.#schedule();
@@ -976,9 +988,12 @@ export class XRayOverlay {
     button.type = "button";
     button.dataset.key = key;
     button.dataset.decision = decisionKind(trace.decision);
+    // A UDF render's fuel rides the line (#208), so the feed narrates
+    // the deterministic cost the fuel axis bounds without a click.
+    const fuel = typeof trace.udf_fuel_used === "number" ? ` fuel ${trace.udf_fuel_used}` : "";
     button.textContent =
       `${feedTime(new Date())} ${envelope.layer} ${envelope.tile} ` +
-      `${decisionKind(trace.decision)} ${trace.timings.total_ms}ms ${formatKb(trace.bytes_read)}KB`;
+      `${decisionKind(trace.decision)} ${trace.timings.total_ms}ms ${formatKb(trace.bytes_read)}KB${fuel}`;
     button.setAttribute("aria-label", `Inspect trace for tile ${key}`);
     button.addEventListener("click", () => this.#revealTrace(key));
     line.append(button);

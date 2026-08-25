@@ -42,9 +42,16 @@ export interface ProcessDefinition {
  * gray, and `linear_scale_range` marks it scaled — after which nothing
  * may reduce it (the compiler's "apply linear_scale_range after
  * reducing") and nothing may scale it again.
+ *
+ * `udf` is a `run_udf` result (ADR 0018): the module maps the loaded
+ * planes to 1 (gray) or 3 (RGB) output planes, and WHICH is not known
+ * client-side — the server pins it when the draft compiles. Nothing on
+ * the canvas needs the arity: a UDF result accepts exactly
+ * `linear_scale_range` and a colormap-less `save_result` either way, so
+ * the stage stays valid without guessing, and the preview shows which.
  */
 export interface Stage {
-  kind: "multi" | "gray";
+  kind: "multi" | "gray" | "udf";
   scaled: boolean;
 }
 
@@ -58,7 +65,12 @@ export const LOAD_STAGE: Stage = { kind: "multi", scaled: false };
  * child graph (the compiler rejects it at top level), so the palette
  * never offers it there: the formula builder owns that context.
  */
-export const MIDDLE_PROCESSES = ["ndvi", "reduce_dimension", "linear_scale_range"] as const;
+export const MIDDLE_PROCESSES = [
+  "ndvi",
+  "reduce_dimension",
+  "run_udf",
+  "linear_scale_range",
+] as const;
 export type MiddleProcess = (typeof MIDDLE_PROCESSES)[number];
 
 /**
@@ -69,6 +81,7 @@ export type MiddleProcess = (typeof MIDDLE_PROCESSES)[number];
 export const CUBE_PARAM: Record<string, string> = {
   ndvi: "data",
   reduce_dimension: "data",
+  run_udf: "data",
   linear_scale_range: "x",
   save_result: "data",
 };
@@ -78,6 +91,9 @@ export const CUBE_PARAM: Record<string, string> = {
  *
  * - `ndvi` / `reduce_dimension` need a multi-band, UNSCALED cube
  *   (`unscaled_multi`) and produce gray;
+ * - `run_udf` needs the same loaded cube and produces a UDF result —
+ *   one `run_udf` per graph (a UDF result feeds nothing but scaling and
+ *   the output), so a second one never types;
  * - `linear_scale_range` needs any unscaled cube and marks it scaled
  *   (chained scaling is rejected server-side);
  *
@@ -91,6 +107,11 @@ export function transition(stage: Stage, processId: string): Stage | null {
         return null;
       }
       return { kind: "gray", scaled: false };
+    case "run_udf":
+      if (stage.kind !== "multi" || stage.scaled) {
+        return null;
+      }
+      return { kind: "udf", scaled: false };
     case "linear_scale_range":
       if (stage.scaled) {
         return null;
@@ -290,6 +311,97 @@ export function buildReducerGraph(
     graph[`r${index + 1}`] = node;
   });
   return graph;
+}
+
+// --- The UDF stage (run_udf, ADR 0018 / issue #208) ---------------------
+
+/** The server's inline-module bound (`MODULE_MAX_BYTES` in the
+ * compiler): a `data:` URL larger than this is refused at compile time,
+ * so the canvas refuses it before base64-encoding anything. */
+export const UDF_MAX_BYTES = 8 * 1024 * 1024;
+
+/** `bytes` as the `data:application/wasm;base64,…` the served `run_udf`
+ * definition's `udf` argument accepts inline. Chunked so an 8 MiB module
+ * never builds one giant `String.fromCharCode` call. */
+export function wasmDataUrl(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk));
+  }
+  return `data:application/wasm;base64,${btoa(binary)}`;
+}
+
+/** `bytes` in the user's units: "1.5 MiB" / "820 KiB". */
+export function formatMib(bytes: number): string {
+  const mib = bytes / (1024 * 1024);
+  if (mib >= 1) {
+    return `${Number.isInteger(mib) ? mib : mib.toFixed(1)} MiB`;
+  }
+  return `${Math.max(1, Math.round(bytes / 1024))} KiB`;
+}
+
+/** What blocks the module's `context` field, or `""`: it passes through
+ * to the module verbatim, so the only rule is "a JSON object". Empty is
+ * fine (omitted; the server default `{}` applies). */
+export function contextIssue(text: string): string {
+  if (text.trim() === "") {
+    return "";
+  }
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return "";
+    }
+  } catch {
+    // Not JSON at all — same message.
+  }
+  return 'must be a JSON object, like {"threshold": 0.3}';
+}
+
+/**
+ * The preview's `run_udf` runtime diagnostics (ADR 0018 / #206, the
+ * `POST /result` validation loop) in plain words, mapped onto the UDF
+ * stage's module field — `undefined` when the failure is not the
+ * module's. The registry codes are the server's vocabulary:
+ *
+ * - `ProcessGraphComplexity` naming the fuel budget or its wall-clock
+ *   backstop: the module is too expensive for one tile;
+ * - `ProcessParameterInvalid` naming `udf` in `run_udf`: the module
+ *   trapped or answered a malformed response — carried with the
+ *   executor's own diagnosis.
+ *
+ * Neither gates publishing (the preview never does); the note says so,
+ * and says what publishing would do.
+ */
+export function udfDiagnostic(code: string, message: string): string | undefined {
+  if (code === "ProcessGraphComplexity") {
+    const fuel = message.match(/UDF exceeded the per-tile fuel budget \((\d+) fuel\)/);
+    if (fuel) {
+      return (
+        `This module ran out of its per-tile budget (${fuel[1]} fuel) before finishing ` +
+        "one tile — make it cheaper (less work per pixel), or ask the operator for a " +
+        "larger budget. Publishing is not blocked, but every tile would fail the same way."
+      );
+    }
+    const backstop = message.match(/(\d+) ms wall-clock backstop/);
+    if (backstop) {
+      return (
+        `This module ran past its per-tile budget's ${backstop[1]} ms time limit on one ` +
+        "tile — make it faster, or ask the operator for a larger budget. Publishing is not " +
+        "blocked, but every tile would fail the same way."
+      );
+    }
+    return undefined;
+  }
+  if (
+    code === "ProcessParameterInvalid" &&
+    message.includes("parameter 'udf' in process 'run_udf'")
+  ) {
+    const detail = message.split("is invalid: ")[1] ?? message;
+    return `The module failed while running: ${detail}. Fix the module and upload it again.`;
+  }
+  return undefined;
 }
 
 // --- Shared vocabulary helpers ------------------------------------------

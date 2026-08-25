@@ -49,7 +49,10 @@ const BUDGETS: [(&str, usize); 17] = [
     ("docs/RECIPES.md", 545),
     ("docs/RELEASING.md", 600),
     ("docs/REQUIREMENTS.md", 1400),
-    ("docs/ROADMAP.md", 1375),
+    // Raised 1375 → 1420 with #208's deferral row 18 (the inventory
+    // grows one row per recorded deferral; the row itself was trimmed
+    // first).
+    ("docs/ROADMAP.md", 1420),
 ];
 
 /// The word count of `text` under the committed measurement method:
