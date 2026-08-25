@@ -23,7 +23,11 @@ store-root = "/data"
 # a tile is a cache_hit; the north-star ingest-to-pixel number is always
 # measured on the FIRST (uncached) fetch.
 cache = "/cache"
-catalog = "postgres://swath:swath-local-dev@pgstac:5432/swath"
+# `run_udf` module store (ADR 0018, #204): its own writable mount, like
+# the cache. With it wired, the stack offers `run_udf` — `just load-udf`
+# publishes the reference NDVI module through it.
+udf-store = "/udf"
+catalog ="postgres://swath:swath-local-dev@pgstac:5432/swath"
 watch-dir = "/data/drop"
 
 [[datasets]]

@@ -36,7 +36,11 @@ const BUDGETS: [(&str, usize); 17] = [
     ("docs/ENGINEERING.md", 1000),
     ("docs/EXTENDING.md", 1525),
     ("docs/OPERATIONS.md", 975),
-    ("docs/PERFORMANCE.md", 2050),
+    // Raised 2050 -> 2425 with #207's `run_udf` evidence: PERFORMANCE.md
+    // gained §9 (UDF bench + load evidence under the ADR 0012 guard) and
+    // its generated load table — an acceptance criterion, not prose
+    // regrowth — re-measured at 2372 + the usual headroom.
+    ("docs/PERFORMANCE.md", 2425),
     ("docs/PITCH.md", 225),
     ("docs/QUICKSTART.md", 850),
     // Raised 525 -> 545 with #194's evidence screenshot: the QGIS recipe

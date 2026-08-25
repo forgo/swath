@@ -28,10 +28,15 @@ thiserror = { workspace = true }
 wasmtime = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 insta = { workspace = true }
 proptest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[[bench]]
+name = "instantiate"
+harness = false
 
 [lints]
 workspace = true

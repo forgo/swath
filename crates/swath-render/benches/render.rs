@@ -35,16 +35,24 @@ use swath_core::reproject::{CoordTransform, Reproject as _};
 use swath_core::source::{BandSelection, RasterSource as _, ReadLevel, WindowData};
 use swath_core::tile::TileCoord;
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
+use swath_render::udf::UdfStage;
 use swath_render::{
     NoUdf, NodataPolicy, Resampling, RgbaTile, TargetGrid, TileRequest, WarpedBuffer, encode_png,
     eval, render_tile, source_window, warp,
 };
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
+use swath_udf_wasmtime::WasmtimeUdf;
 use tokio::runtime::Runtime;
 
 const B04: &str = "hlss30-t13sdd-2024158-b04.tif";
 const B8A: &str = "hlss30-t13sdd-2024158-b8a.tif";
+
+/// The reference NDVI UDF (`examples/udf/ndvi`, ADR 0018's
+/// dual-implementation oracle) — the CI-rebuilt fixture module the
+/// adapter's conformance suite proves.
+const NDVI_UDF: &[u8] =
+    include_bytes!("../../adapters/swath-udf-wasmtime/tests/fixtures/ndvi.wasm");
 
 /// The interior z12 golden tile — the north-star serve shape: a live
 /// full-resolution render of a 256 px tile.
@@ -196,6 +204,50 @@ fn bench_eval(c: &mut Criterion) {
     });
 }
 
+/// The same product through `run_udf` (ADR 0018): the reference NDVI
+/// module replaces the band-math op, then the identical rescale + LUT.
+fn udf_ndvi_plan(code_hash: &str) -> RenderPlan {
+    RenderPlan::new(
+        vec![BandInput::new("b8a"), BandInput::new("b04")],
+        vec![
+            PixelOp::Udf(UdfStage::new(code_hash, 1, serde_json::Value::Null)),
+            PixelOp::Rescale {
+                min: -1.0,
+                max: 1.0,
+            },
+            PixelOp::Colormap(Colormap::RdYlGn),
+        ],
+        OutputSpec::new(TileFormat::Png),
+    )
+}
+
+/// Stage 2b — the UDF pixel stage (issue #207): `eval` of the NDVI product
+/// with the reference `examples/udf/ndvi` module through the wasmtime
+/// executor — fresh pooled `Store`, instantiate, one bulk copy in, the
+/// guest loop under fuel, one bulk copy out — over the SAME warped planes
+/// as `eval_ndvi_rdylgn`, so the two medians are the price of user code
+/// versus built-in band math for one tile.
+fn bench_eval_udf(c: &mut Criterion) {
+    let rt = Runtime::new().expect("tokio runtime");
+    let p = prepare(&rt);
+    let inputs = ndvi_inputs(&p);
+    let executor = WasmtimeUdf::new().expect("deterministic engine builds on this host");
+    let code_hash = executor
+        .compile(NDVI_UDF)
+        .expect("reference module compiles");
+    let plan = udf_ndvi_plan(&code_hash);
+    // The UDF path must be the band-math path's bit-exact twin (ADR
+    // 0018's oracle) — asserted once so the bench measures the same tile.
+    assert_eq!(
+        eval(&plan, &inputs, &executor).expect("udf eval").pixels,
+        rendered_ndvi_tile(&p).pixels,
+        "UDF NDVI must match band-math NDVI byte for byte"
+    );
+    c.bench_function("eval_udf_ndvi", |b| {
+        b.iter(|| eval(black_box(&plan), black_box(&inputs), &executor));
+    });
+}
+
 /// Stage 3 — PNG encode (`encode.rs`) of the real rendered 256×256 NDVI
 /// tile: honest deflate timing over real spatial structure.
 fn bench_encode(c: &mut Criterion) {
@@ -271,6 +323,7 @@ criterion_group!(
     benches,
     bench_warp,
     bench_eval,
+    bench_eval_udf,
     bench_encode,
     bench_window,
     bench_composite

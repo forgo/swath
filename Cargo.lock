@@ -4498,6 +4498,7 @@ dependencies = [
  "swath-source-cog",
  "swath-testkit",
  "swath-testsupport",
+ "swath-udf-wasmtime",
  "swath-warp",
  "thiserror 2.0.20",
  "tokio",
@@ -4572,6 +4573,7 @@ version = "0.1.0-alpha.1"
 name = "swath-udf-wasmtime"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "criterion",
  "insta",
  "proptest",
  "serde",

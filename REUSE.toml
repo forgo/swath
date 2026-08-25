@@ -63,6 +63,7 @@ path = [
     "tests/fixtures/*.png",
     "tests/fixtures/SHA256SUMS",
     "tests/fixtures/manifest.json",
+    "tests/load/fuelbomb.wasm",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Elliott Richerson <elliott.richerson@gmail.com>"

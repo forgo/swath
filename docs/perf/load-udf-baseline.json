@@ -1,0 +1,102 @@
+{
+ "schema": "swath-load-udf-baseline/1",
+ "generated": "2026-08-25T17:41:27Z",
+ "git_sha": "df7aab1",
+ "oha_version": "1.15.0",
+ "machine": {
+  "cpu": "Apple M2 Max",
+  "cores": 12,
+  "os": "Darwin 25.5.0 arm64"
+ },
+ "duration_seconds": 400,
+ "scenarios": {
+  "udf_storm": {
+   "tool": "oha",
+   "params": "3 heavy NDVI-UDF tiles (z12 x2, z11 \u2014 full-footprint warps through the sandboxed module), c=16, 40s, cache cleared every 250 ms to stay on the Live+UDF path",
+   "requests": 4147,
+   "errors": 0,
+   "rps": 102.4,
+   "p50_ms": 5.45,
+   "p95_ms": 1230.98,
+   "p99_ms": 1357.67,
+   "max_ms": 1453.55,
+   "probe_decisions": {
+    "live": 8,
+    "cache_hit": 7
+   },
+   "reference_udf_fuel_used": 12260531
+  },
+  "healthz_under_udf_storm": {
+   "tool": "oha",
+   "params": "GET /healthz, c=4, 20s, started 5s into the UDF storm",
+   "requests": 188264,
+   "errors": 0,
+   "rps": 9411.9,
+   "p50_ms": 0.39,
+   "p95_ms": 0.66,
+   "p99_ms": 0.96,
+   "max_ms": 30.13
+  },
+  "sse_under_udf_storm": {
+   "window_seconds": 45,
+   "survived_window": true,
+   "curl_exit": 28,
+   "trace_events_received": 4162,
+   "keepalives_received": 0
+  },
+  "fuelbomb_storm": {
+   "tool": "oha",
+   "params": "3 runaway-UDF tiles (the fuelbomb module past its fuel budget), c=16, 40s",
+   "requests": 637,
+   "errors": 637,
+   "rps": 15.7,
+   "p50_ms": 886.7,
+   "p95_ms": 1340.67,
+   "p99_ms": 1370.81,
+   "max_ms": 1410.99,
+   "status_breakdown": {
+    "http_500": 637
+   }
+  },
+  "healthz_under_fuelbomb": {
+   "tool": "oha",
+   "params": "GET /healthz, c=4, 20s, started 5s into the fuel-bomb refusals",
+   "requests": 190614,
+   "errors": 0,
+   "rps": 9529.5,
+   "p50_ms": 0.39,
+   "p95_ms": 0.63,
+   "p99_ms": 0.92,
+   "max_ms": 20.7
+  },
+  "sse_under_fuelbomb": {
+   "window_seconds": 45,
+   "survived_window": true,
+   "curl_exit": 28,
+   "trace_events_received": 0,
+   "keepalives_received": 2
+  }
+ },
+ "adr_0012": {
+  "udf_storm": {
+   "healthz_p99_ms": 0.96,
+   "healthz_p99_trigger_ms": 50.0,
+   "sse_survived": true,
+   "adr_0012_trigger_tripped": false
+  },
+  "fuel_bomb": {
+   "healthz_p99_ms": 0.92,
+   "healthz_p99_trigger_ms": 50.0,
+   "sse_survived": true,
+   "adr_0012_trigger_tripped": false
+  }
+ },
+ "fuelbomb_preview": {
+  "status": 400,
+  "code": "ProcessGraphComplexity"
+ },
+ "fuelbomb_tile": {
+  "status": 500,
+  "detail": "tile render failed: UDF stage failed: UDF exhausted its fuel budget of 100000000 \u2014 raise the layer budget's max_udf_fuel_per_tile or cheapen the module"
+ }
+}
