@@ -22,13 +22,11 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::http::StatusCode;
-use base64::Engine as _;
 use object_store::local::LocalFileSystem;
 use serde_json::{Value, json};
 use swath_api::{ApiState, Layer, LayerRegistry, TraceExtension, router};
 use swath_core::planner::Budget;
 use swath_core::raster::AssetRef;
-use swath_core::udf::{ModuleFetchError, ModuleFetcher};
 use swath_render::ir::{BandInput, OutputSpec, PixelOp, RenderPlan, TileFormat};
 use swath_render::udf::UdfStage;
 use swath_render::{NodataPolicy, Resampling};
@@ -37,31 +35,10 @@ use swath_source_cog::CogSource;
 use swath_testkit::{DiffPolicy, diff, load_png};
 use swath_udf_wasmtime::WasmtimeUdf;
 
-/// The committed NDVI fixture module (`examples/udf/ndvi`): 2 planes in,
-/// 1 out.
-const NDVI: &[u8] = include_bytes!("../../adapters/swath-udf-wasmtime/tests/fixtures/ndvi.wasm");
+use common::{NDVI_WASM as NDVI, NoFetch, wasm_data_url as data_url};
 
 /// The golden-suite tile (z 12, col 848, row 1561) in OGC path order.
 const TILE: &str = "tiles/12/1561/848";
-
-/// A fetcher serving nothing: every module in this suite is inline.
-#[derive(Clone, Default)]
-struct NoFetch;
-
-impl ModuleFetcher for NoFetch {
-    async fn fetch(&self, url: &str) -> Result<Vec<u8>, ModuleFetchError> {
-        Err(ModuleFetchError::NotFound {
-            url: url.to_owned(),
-        })
-    }
-}
-
-fn data_url(bytes: &[u8]) -> String {
-    format!(
-        "data:application/wasm;base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    )
-}
 
 /// load(b8a, b04) → `pixel` → linear_scale_range(-1..1 → 0..255) → save.
 fn graph(pixel: &Value) -> Value {

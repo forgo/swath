@@ -53,7 +53,10 @@
 //!   — never a silent downgrade, never an unbounded read. Nothing is
 //!   persisted: no service, no `swath:layers` write, no trace-bus event.
 //!   The capabilities description states the narrowing; no sync-
-//!   processing conformance class is claimed.
+//!   processing conformance class is claimed. A `run_udf` graph previews
+//!   under the per-tile fuel budget publishing enforces, and a module's
+//!   runtime failure is a user-fixable 400 in the registry vocabulary
+//!   ([`preview_udf_error`]) — the ADR 0018 validation loop (#206).
 //! - Process definitions are served verbatim from the pinned
 //!   openeo-processes 1.2.0 documents, with Swath's parameter narrowing
 //!   appended to the `description` (see `data/openeo-processes/README.md`).
@@ -92,9 +95,10 @@ use swath_core::planner::Budget;
 use swath_core::reproject::Reproject;
 use swath_core::source::RasterSource;
 use swath_core::tile::TileCoord;
+use swath_render::ir::PlanError;
 use swath_render::{
-    CompileContext, CompileError, NoUdf, NodataPolicy, Resampling, TileError, UdfExecutor, compile,
-    plan_for, render_tile,
+    CompileContext, CompileError, NoUdf, NodataPolicy, Resampling, TileError, UdfError,
+    UdfExecutor, compile, plan_for, render_tile,
 };
 
 use crate::provider::{CatalogLayer, CatalogLayers};
@@ -586,8 +590,12 @@ const PROCESS_DEFINITIONS: &[(&str, &str)] = &[
          passes through to the module verbatim; the module must import nothing and export \
          the Swath UDF ABI v1 symbols (docs/udf-abi/v1.md); one `run_udf` per graph, over a \
          loaded (unreduced, unscaled) cube; its result accepts only `linear_scale_range` and \
-         a colormap-less `save_result`. Listed only where this deployment wires a UDF \
-         executor and module store.",
+         a colormap-less `save_result`. `POST /result` previews a `run_udf` graph under the \
+         same per-tile fuel budget publishing would enforce (the validation loop before \
+         publishing): a module that runs out of fuel or time answers ProcessGraphComplexity, \
+         one that traps or answers malformed output ProcessParameterInvalid with the \
+         executor's diagnosis. Listed only where this deployment wires a UDF executor and \
+         module store.",
     ),
     (
         include_str!("../data/openeo-processes/save_result.json"),
@@ -1211,10 +1219,24 @@ fn preview_resolution_error(err: crate::error::ApiError) -> OpenEoError {
     }
 }
 
-/// Preview render failures: the planner's refusal (the live estimate
-/// exceeds the preview budget and nothing cheaper can serve) is the
-/// spec's `ProcessGraphComplexity` — refusal over degradation, ADR 0014;
-/// every other failure is an honest `Internal`.
+/// Preview render failures in the spec's registry vocabulary — refusal
+/// over degradation (ADR 0014), and the preview as the `run_udf`
+/// validation loop (ADR 0018, #206): a module's failure is the author's
+/// to fix, so it answers a 400 that says what happened in plain words,
+/// never a 500.
+///
+/// - The planner's refusal (the live estimate exceeds the preview budget
+///   and nothing cheaper can serve) is `ProcessGraphComplexity`.
+/// - A UDF that runs out of its per-tile fuel, or trips the epoch
+///   backstop, is a graph too heavy for the bound — the same
+///   `ProcessGraphComplexity`, in fuel terms.
+/// - A UDF that traps, declares failure, answers malformed or
+///   mis-counted planes, or overruns its memory cap is a bad module: the
+///   `udf` argument is invalid, `ProcessParameterInvalid`, with the
+///   executor's own diagnosis as the detail.
+/// - Host-side UDF failures that a validated plan cannot reach (an
+///   unregistered hash, an unencodable request) and every non-UDF
+///   failure stay an honest `Internal`.
 fn preview_render_error(err: TileError) -> OpenEoError {
     match err {
         TileError::BudgetExceeded {
@@ -1229,7 +1251,41 @@ fn preview_render_error(err: TileError) -> OpenEoError {
                  {limit} bytes) and no overview can serve it. Narrow the spatial extent."
             ),
         ),
+        TileError::Plan(PlanError::Udf(udf)) => preview_udf_error(&udf),
         other => OpenEoError::internal(format!("preview render failed: {other}")),
+    }
+}
+
+/// The `run_udf` half of [`preview_render_error`].
+fn preview_udf_error(udf: &UdfError) -> OpenEoError {
+    match udf {
+        UdfError::FuelExhausted { budget } => OpenEoError::new(
+            StatusCode::BAD_REQUEST,
+            "ProcessGraphComplexity",
+            format!(
+                "The process is too complex for synchronous processing: the UDF exceeded the \
+                 per-tile fuel budget ({budget} fuel) — simplify or narrow it."
+            ),
+        ),
+        UdfError::EpochDeadline { deadline_ms } => OpenEoError::new(
+            StatusCode::BAD_REQUEST,
+            "ProcessGraphComplexity",
+            format!(
+                "The process is too complex for synchronous processing: the UDF exceeded the \
+                 per-tile fuel budget's {deadline_ms} ms wall-clock backstop — simplify or \
+                 narrow it."
+            ),
+        ),
+        UdfError::Trap { .. }
+        | UdfError::MalformedOutput { .. }
+        | UdfError::GuestFailure { .. }
+        | UdfError::OutputPlanes { .. }
+        | UdfError::MemoryLimit { .. } => OpenEoError::new(
+            StatusCode::BAD_REQUEST,
+            "ProcessParameterInvalid",
+            format!("The value passed for parameter 'udf' in process 'run_udf' is invalid: {udf}"),
+        ),
+        other => OpenEoError::internal(format!("preview render failed: UDF stage failed: {other}")),
     }
 }
 

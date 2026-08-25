@@ -11,6 +11,11 @@
 //! identical graphs on either route, the budget refusal as the spec's
 //! `ProcessGraphComplexity`, and error bodies schema-valid under the
 //! pinned openEO 1.2.0 spec (the #27 pattern).
+//!
+//! And the preview as the `run_udf` validation loop (ADR 0018, #206):
+//! upload a module, see it render — byte-identical to what publishing
+//! serves — or see the exact fuel/trap diagnostic as a 400 in the
+//! registry's vocabulary, before anything is published.
 
 #[allow(
     dead_code,
@@ -20,6 +25,8 @@ mod common;
 
 use axum::http::StatusCode;
 use serde_json::{Value, json};
+
+use common::{NDVI_WASM, NoFetch, wasm, wasm_data_url};
 
 /// The built-in NDVI graph, exactly as `openeo_services.rs` authors it —
 /// the same math as the built-in `ndvi` layer and the committed goldens.
@@ -50,6 +57,29 @@ fn ndvi_process_with_extent(spatial_extent: &Value) -> Value {
 
 fn result_request(process: &Value) -> Value {
     json!({ "process": process })
+}
+
+/// The `run_udf` shape of [`ndvi_process`]: the same load and scale,
+/// with the inline `module` in place of the built-in `ndvi` process.
+fn udf_process(module: &[u8]) -> Value {
+    json!({ "process_graph": {
+        "load": { "process_id": "load_collection", "arguments": {
+            "id": "hls-s30", "spatial_extent": null, "temporal_extent": null,
+            "bands": ["b8a", "b04"],
+        }},
+        "udf": { "process_id": "run_udf", "arguments": {
+            "data": { "from_node": "load" },
+            "udf": wasm_data_url(module),
+            "runtime": "wasm",
+        }},
+        "scale": { "process_id": "linear_scale_range", "arguments": {
+            "x": { "from_node": "udf" },
+            "inputMin": -1, "inputMax": 1, "outputMin": 0, "outputMax": 255,
+        }},
+        "save": { "process_id": "save_result", "arguments": {
+            "data": { "from_node": "scale" }, "format": "png",
+        }, "result": true },
+    }})
 }
 
 /// THE equivalence proof (ADR 0014: "same compiler path"): the preview
@@ -295,4 +325,136 @@ async fn error_taxonomy_matches_the_services_route_and_stays_schema_valid() {
     let error = common::body_json(response).await;
     common::assert_openeo_valid(&error_schema, "no granules", &error);
     assert_eq!(error["code"], "NotFound");
+}
+
+// --- The preview as the run_udf validation loop (ADR 0018, #206) ---
+
+/// THE equivalence, for user code: the preview of the reference NDVI
+/// module (`examples/udf/ndvi`, the #205 dual-implementation golden) is
+/// byte-identical to the tile its published service serves at the
+/// address the preview named — same compiler, same lowering, same
+/// executor the module was registered with, same fuel budget. The fuel
+/// is visible on the preview and reproduces on the published tile.
+#[tokio::test]
+async fn udf_preview_is_byte_identical_to_the_published_udf_service_tile() {
+    let udf_app = common::openeo_app_with_udf(NoFetch);
+    let app = &udf_app.app;
+    let process = udf_process(NDVI_WASM);
+
+    let response = common::request_on(app, "POST", "/result", Some(result_request(&process))).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "image/png");
+    assert_eq!(response.headers()["x-swath-preview-tile"], "7/48/26");
+    let header: Value =
+        serde_json::from_str(response.headers()["x-swath-trace"].to_str().expect("ASCII"))
+            .expect("JSON");
+    let fuel = header["udf_fuel_used"]
+        .as_u64()
+        .expect("the UDF preview meters fuel");
+    assert!(fuel > 0);
+    let preview = common::body_bytes(response).await;
+
+    // A preview persists nothing — no service, no module in the store.
+    let services = common::body_json(common::request_on(app, "GET", "/services", None).await).await;
+    assert_eq!(services["services"], json!([]));
+    let code_hash = swath_core::udf::code_hash(NDVI_WASM);
+    assert_eq!(
+        swath_core::udf::ModuleStore::get(&udf_app.store, &code_hash)
+            .await
+            .expect("store answers"),
+        None,
+        "preview must not persist the module"
+    );
+
+    let service = json!({ "type": "xyz", "process": process });
+    let response = common::request_on(app, "POST", "/services", Some(service)).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let id = response.headers()["openeo-identifier"]
+        .to_str()
+        .expect("identifier")
+        .to_owned();
+    let response =
+        common::request_on(app, "GET", &format!("/tilesets/{id}/tiles/7/48/26"), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let published_header: Value =
+        serde_json::from_str(response.headers()["x-swath-trace"].to_str().expect("ASCII"))
+            .expect("JSON");
+    assert_eq!(
+        published_header["udf_fuel_used"],
+        json!(fuel),
+        "fuel reproduces"
+    );
+    let published = common::body_bytes(response).await;
+    assert_eq!(
+        preview, published,
+        "the UDF preview must be byte-identical to the published-service tile"
+    );
+}
+
+/// A module's runtime failure on the preview is the author's to fix, in
+/// the registry's vocabulary, always a 400 and never a 500: running out
+/// of the per-tile fuel budget (or its wall-clock backstop) is a graph
+/// too heavy for the bound — `ProcessGraphComplexity`, in plain words;
+/// trapping or answering malformed output is a bad `udf` parameter —
+/// `ProcessParameterInvalid` carrying the executor's diagnosis. Every
+/// body is schema-valid, and nothing is published by the attempt.
+#[tokio::test]
+async fn udf_runtime_failures_preview_as_user_fixable_registry_errors() {
+    let udf_app = common::openeo_app_with_udf(NoFetch);
+    let app = &udf_app.app;
+    let error_schema = common::openeo_schema("/components/schemas/error");
+
+    let cases: [(&str, Vec<u8>, &str, &[&str]); 3] = [
+        (
+            "fuel bomb",
+            wasm::fuel_bomb(),
+            "ProcessGraphComplexity",
+            &[
+                "UDF exceeded the per-tile fuel budget",
+                "simplify or narrow",
+            ],
+        ),
+        (
+            "trap",
+            wasm::trapper(),
+            "ProcessParameterInvalid",
+            &["parameter 'udf' in process 'run_udf'", "UDF trapped"],
+        ),
+        (
+            "malformed output",
+            wasm::malformed_output(),
+            "ProcessParameterInvalid",
+            &[
+                "parameter 'udf' in process 'run_udf'",
+                "malformed UDF response",
+            ],
+        ),
+    ];
+    for (label, module, code, phrases) in cases {
+        let response = common::request_on(
+            app,
+            "POST",
+            "/result",
+            Some(result_request(&udf_process(&module))),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{label}");
+        let error = common::body_json(response).await;
+        common::assert_openeo_valid(&error_schema, label, &error);
+        assert_eq!(error["code"], code, "{label}: {error}");
+        let message = error["message"].as_str().expect("message");
+        for phrase in phrases {
+            assert!(
+                message.contains(phrase),
+                "{label}: the diagnosis must say `{phrase}`, got: {message}"
+            );
+        }
+    }
+
+    let services = common::body_json(common::request_on(app, "GET", "/services", None).await).await;
+    assert_eq!(
+        services["services"],
+        json!([]),
+        "failed previews publish nothing"
+    );
 }
