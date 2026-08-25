@@ -462,3 +462,172 @@ test("switching to the off-screen fire layer auto-frames it; deep links are hono
   await expect.poll(async () => (await mapView(page)).lng).toBeLessThan(-121);
   await expect.poll(() => new URL(page.url()).searchParams.get("center") ?? "").toMatch(/^-121\./);
 });
+
+// --- the compare swipe, date-vs-date (issue #210) ---
+//
+// These tests live HERE, not in compare.e2e.ts, deliberately: they
+// render Park Fire frames, and this file owns the fire layer's trace
+// traffic — the signature-loop test above asserts per-frame analytics
+// ("this frame: N live, 0 cached") that any cross-worker fire render
+// would race (Playwright parallelizes FILES; tests within one file are
+// serialized). They also run LAST, so their renders can never warm a
+// tile the earlier cold-cache premises depend on. Layer-vs-layer
+// coverage (Colorado fixtures only) stays in compare.e2e.ts.
+
+/** The compare tests' own style zoom: display tiles z12 (vite) / z13
+ * (binary) — never the signature loop's z14/z15. */
+const COMPARE_ZOOM = process.env.SWATH_E2E_MODE === "binary" ? "12" : "11";
+
+const compareHandle = (page: Page) => page.locator("swath-map .swath-map-compare-handle");
+
+test("date-vs-date: t and ct split one layer across the handle, byte-stably", async ({
+  page,
+  browser,
+}) => {
+  const frames = await granuleFrames(page);
+  const left = frames[0];
+  const right = frames[frames.length - 1];
+  if (left === undefined || right === undefined || left === right) {
+    throw new Error("fire series has fewer than two frames");
+  }
+
+  const deepLink =
+    `${DEMO_PATH}?layer=${LAYER}&center=${CENTER}&zoom=${COMPARE_ZOOM}` +
+    `&t=${left}&ct=${right}&swipe=0.5`;
+  // Both sides fetch their OWN frame: the primary map the left `t`, the
+  // clipped right map the compare `ct`.
+  const leftTile = page.waitForRequest(
+    (request) =>
+      request.url().includes(`/tilesets/${LAYER}/tiles/`) &&
+      request.url().includes(`datetime=${encodeURIComponent(left)}`),
+  );
+  const rightTile = page.waitForRequest(
+    (request) =>
+      request.url().includes(`/tilesets/${LAYER}/tiles/`) &&
+      request.url().includes(`datetime=${encodeURIComponent(right)}`),
+  );
+  await page.goto(deepLink);
+  await leftTile;
+  await rightTile;
+  await waitForFittedView(page);
+
+  // One handle, date mode, per-side chips naming the two frames.
+  await expect(compareHandle(page)).toBeVisible();
+  await expect(compareHandle(page)).toHaveAttribute("data-mode", "date");
+  await expect(page.locator('.swath-map-compare-label[data-side="left"]')).toHaveText(left);
+  await expect(page.locator('.swath-map-compare-label[data-side="right"]')).toHaveText(right);
+
+  // The pasted deep link was never rewritten (the issue #108 contract).
+  expect(page.url()).toBe(new URL(deepLink, page.url()).toString());
+
+  // Incognito: the link alone reproduces the comparison, byte-stably.
+  const incognito = await browser.newContext();
+  try {
+    const copy = await incognito.newPage();
+    const copyRight = copy.waitForRequest(
+      (request) =>
+        request.url().includes(`/tilesets/${LAYER}/tiles/`) &&
+        request.url().includes(`datetime=${encodeURIComponent(right)}`),
+    );
+    await copy.goto(page.url());
+    await copyRight;
+    await expect(copy.locator("swath-map .swath-map-compare-handle")).toBeVisible();
+    expect(copy.url()).toBe(page.url());
+  } finally {
+    await incognito.close();
+  }
+
+  // Moving the handle is a user interaction: `swipe` follows in the
+  // share link. Keyboard first (the handle is a real slider)…
+  await compareHandle(page).focus();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await expect(compareHandle(page)).toHaveAttribute("data-fraction", "0.54");
+  await expect(page).toHaveURL(/[?&]swipe=0\.54/);
+  // …then a real drag on the grip.
+  const grip = page.locator(".swath-map-compare-grip");
+  const box = await grip.boundingBox();
+  const map = await page.locator("swath-map").boundingBox();
+  if (!box || !map) {
+    throw new Error("no grip/map geometry");
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(map.x + map.width * 0.25, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const fraction = Number(await compareHandle(page).getAttribute("data-fraction"));
+  expect(fraction).toBeGreaterThan(0.2);
+  expect(fraction).toBeLessThan(0.3);
+  await expect(page).toHaveURL(/[?&]swipe=0\.2\d?/);
+});
+
+test("per-side x-ray badges: the trace stream's requested= splits the sides", async ({ page }) => {
+  // Live NDVI renders on a shared 2-core CI runner: generous budget.
+  test.setTimeout(240_000);
+  const frames = await granuleFrames(page);
+  const left = frames[0];
+  const right = frames[frames.length - 1];
+  if (left === undefined || right === undefined || left === right) {
+    throw new Error("fire series has fewer than two frames");
+  }
+
+  // Load WITHOUT the compare, then start it: the overlay's SSE stream
+  // opens at connect (before any fire tile is fetched), so every render
+  // both sides trigger below is provably published while it listens —
+  // the same fresh-renders-after-load convention as swath-xray.e2e.ts.
+  await page.goto(`${DEMO_PATH}?xray&layer=${LAYER}&center=${CENTER}&zoom=${COMPARE_ZOOM}`);
+  await waitForFittedView(page);
+  await page.evaluate(
+    ({ left, right }) => {
+      const el = document.querySelector("swath-map");
+      el?.setAttribute("datetime", left);
+      el?.setAttribute("compare-datetime", right);
+    },
+    { left, right },
+  );
+  await expect(compareHandle(page)).toBeVisible();
+
+  // Badges arrive per side as each side's renders trace in; every badge
+  // in a side layer carries that side's tag and the fire layer's key.
+  const leftBadges = page.locator('.swath-xray-side[data-side="left"] .swath-xray-badge');
+  const rightBadges = page.locator('.swath-xray-side[data-side="right"] .swath-xray-badge');
+  await expect(leftBadges.first()).toBeVisible({ timeout: 180_000 });
+  await expect(rightBadges.first()).toBeVisible({ timeout: 180_000 });
+  await expect(leftBadges.first()).toHaveAttribute("data-key", new RegExp(`^left:${LAYER}/`));
+  await expect(rightBadges.first()).toHaveAttribute("data-key", new RegExp(`^right:${LAYER}/`));
+});
+
+test("the compare control starts before-vs-after and dismisses it", async ({ page }) => {
+  const frames = await granuleFrames(page);
+  const oldest = frames[0];
+  const newest = frames[frames.length - 1];
+  if (oldest === undefined || newest === undefined) {
+    throw new Error("fire series has fewer than two frames");
+  }
+
+  await page.goto(`${DEMO_PATH}?layer=${LAYER}&center=${CENTER}&zoom=${COMPARE_ZOOM}`);
+  await waitForFittedView(page);
+  const button = page.getByRole("button", { name: "Toggle compare swipe" });
+  // The control appears once the layer's time series (>= 2 frames) is
+  // known — the same domain the slider shows.
+  await expect(button).toBeVisible();
+  await expect(button).toHaveAttribute("aria-pressed", "false");
+
+  // Viewing "latest": one click pins newest right, jumps left to oldest,
+  // and the share link carries the whole comparison.
+  await button.click();
+  await expect(compareHandle(page)).toBeVisible();
+  await expect(compareHandle(page)).toHaveAttribute("data-mode", "date");
+  await expect(page.locator('.swath-map-compare-label[data-side="left"]')).toHaveText(oldest);
+  await expect(page.locator('.swath-map-compare-label[data-side="right"]')).toHaveText(newest);
+  await expect(button).toHaveAttribute("aria-pressed", "true");
+  await expect(page).toHaveURL(new RegExp(`[?&]t=${oldest.replaceAll(":", "\\:")}`));
+  await expect(page).toHaveURL(new RegExp(`[?&]ct=${newest.replaceAll(":", "\\:")}`));
+
+  // A second click ends the compare and clears it from the share link.
+  await button.click();
+  await expect(compareHandle(page)).toHaveCount(0);
+  await expect(button).toHaveAttribute("aria-pressed", "false");
+  await expect(page).not.toHaveURL(/[?&]ct=/);
+  await expect(page).not.toHaveURL(/[?&]swipe=/);
+});

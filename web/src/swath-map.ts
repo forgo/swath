@@ -29,6 +29,15 @@
  *   comes from the granules listing the layer's tileset metadata links
  *   (`rel: granules`, catalog-backed layers only), and it stays hidden
  *   for layers with fewer than two acquisition dates.
+ * - `compare-datetime` / `compare-layer` — the compare swipe (issue
+ *   #210): a second, view-synced map clipped to the right of a drag
+ *   handle, comparing the viewed frame/layer against another `datetime=`
+ *   instant (date-vs-date) or another layer (layer-vs-layer). Mutually
+ *   exclusive; both at once (or comparing a layer with itself) degrades
+ *   to no compare. A `compare` toggle control offers the one-button
+ *   before-vs-after default on layers with a time series.
+ * - `swipe` — the handle position, fraction 0..1 (default 0.5); dragging
+ *   the handle reflects back into the attribute, the source of truth.
  *
  * When neither `center` nor `zoom` is given, the view fits the layer's
  * geographic bounds from `/tilesets/{id}` metadata — a bare
@@ -49,11 +58,19 @@
 
 import { type IControl, Map as MapLibreMap, type RasterTileSource } from "maplibre-gl";
 import maplibreCss from "maplibre-gl/dist/maplibre-gl.css?inline";
+import {
+  type CompareSides,
+  clampSwipe,
+  compareSides,
+  resolveCompare,
+  sideLabels,
+} from "./compare-model.js";
 import { type GranuleBbox, parseBbox, unionBbox } from "./granule-footprints.js";
+import { CompareView } from "./swath-compare.js";
 import { type EventSourceFactory, XRayOverlay } from "./swath-xray.js";
 import { parseGranuleDatetimes, TimeSlider } from "./time-slider.js";
 import { centerTile } from "./tms.js";
-import { parseCenter, parseNumber } from "./view-state.js";
+import { formatSwipe, parseCenter, parseNumber, parseSwipe, parseTime } from "./view-state.js";
 
 /** One entry of the server's tilesets list, as `layers()` returns it. */
 export interface SwathLayer {
@@ -204,6 +221,86 @@ swath-map .swath-map-time input[type="range"] {
   accent-color: #4ade80;
 }
 swath-map .swath-map-time-label { white-space: nowrap; }
+/* The compare swipe (issue #210): the right-side map stacks by DOM
+ * ORDER, not z-index — CompareView inserts it immediately after the
+ * primary map container, so at z auto it paints over the primary canvas
+ * and under everything appended later (the x-ray overlay root), while
+ * MapLibre's control corners (z 2), the time slider (z 2), and the
+ * x-ray inspector (z 3) rise above it. A positive z-index here would
+ * force the overlay root to one too, which would lift badges over the
+ * control buttons and swallow their clicks (the CI-found regression). */
+swath-map .swath-map-compare {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+swath-map .swath-map-compare-map { position: absolute; inset: 0; }
+/* A real 12px hit area centered on the divider (the negative margin
+ * re-centers it on the left percentage) — draggable and focusable. */
+swath-map .swath-map-compare-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  margin-left: -6px;
+  z-index: 3;
+  pointer-events: auto;
+  cursor: ew-resize;
+  touch-action: none;
+}
+swath-map .swath-map-compare-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 2px;
+  background: #fff;
+  box-shadow: 0 0 4px rgb(0 0 0 / 50%);
+}
+swath-map .swath-map-compare-handle:focus-visible {
+  outline: 2px solid #4ade80;
+  outline-offset: 2px;
+}
+swath-map .swath-map-compare-grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #fff;
+  color: #0f172a;
+  font: 700 13px/1 ui-monospace, monospace;
+  box-shadow: 0 0 6px rgb(0 0 0 / 40%);
+}
+swath-map .swath-map-compare-label {
+  position: absolute;
+  top: 8px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 75%);
+  color: #e2e8f0;
+  font: 11px/1.5 ui-monospace, monospace;
+  white-space: nowrap;
+}
+swath-map .swath-map-compare-label[data-side="left"] { right: 10px; }
+swath-map .swath-map-compare-label[data-side="right"] { left: 10px; }
+swath-map .swath-map-compare-toggle button {
+  width: auto;
+  padding: 0 8px;
+  font: 12px/29px system-ui, sans-serif;
+}
+swath-map .swath-map-compare-toggle button[aria-pressed="true"] {
+  font-weight: 700;
+  background: rgb(37 99 235 / 15%);
+}
+swath-map .swath-map-compare-toggle[hidden] { display: none; }
 `;
 
 /** Injects MapLibre's CSS + the component chrome once per document. */
@@ -314,6 +411,60 @@ class XRayToggleControl implements IControl {
   }
 }
 
+/** The compare toggle (issue #210): one button that starts/ends the
+ * before-vs-after gesture on the current layer's time series. Hidden
+ * while the layer has fewer than two frames AND no compare is active (a
+ * dead button would promise what it cannot do — but an active
+ * layer-vs-layer compare must always be dismissable). The host's
+ * attributes are the single source of truth; the button just asks. */
+class CompareToggleControl implements IControl {
+  readonly #host: SwathMap;
+  #container: HTMLElement | undefined;
+  #button: HTMLButtonElement | undefined;
+  #active = false;
+  #available = false;
+
+  constructor(host: SwathMap) {
+    this.#host = host;
+  }
+
+  onAdd(): HTMLElement {
+    const container = document.createElement("div");
+    container.className = "maplibregl-ctrl maplibregl-ctrl-group swath-map-compare-toggle";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "compare";
+    button.setAttribute("aria-label", "Toggle compare swipe");
+    button.addEventListener("click", () => {
+      this.#host.toggleCompare();
+    });
+    container.append(button);
+    this.#container = container;
+    this.#button = button;
+    this.#render();
+    return container;
+  }
+
+  onRemove(): void {
+    this.#container?.remove();
+    this.#container = undefined;
+    this.#button = undefined;
+  }
+
+  update(active: boolean, available: boolean): void {
+    this.#active = active;
+    this.#available = available;
+    this.#render();
+  }
+
+  #render(): void {
+    if (this.#container) {
+      this.#container.hidden = !this.#active && !this.#available;
+    }
+    this.#button?.setAttribute("aria-pressed", String(this.#active));
+  }
+}
+
 /** The "zoom to data" control (issue #182 follow-up): one button that
  * frames the current layer's data footprint — the recovery affordance
  * for "I picked a layer and see nothing; where on Earth is it?". Hidden
@@ -362,7 +513,18 @@ export class SwathMap extends HTMLElement {
   static readonly tagName = "swath-map";
 
   static get observedAttributes(): readonly string[] {
-    return ["server", "layer", "center", "zoom", "datetime", "xray", "basemap"];
+    return [
+      "server",
+      "layer",
+      "center",
+      "zoom",
+      "datetime",
+      "xray",
+      "basemap",
+      "compare-datetime",
+      "compare-layer",
+      "swipe",
+    ];
   }
 
   #map: MapLibreMap | undefined;
@@ -379,6 +541,23 @@ export class SwathMap extends HTMLElement {
   #xray: XRayOverlay | undefined;
   #time: TimeSlider | undefined;
   #zoomData: ZoomToDataControl | undefined;
+  /** The compare swipe (issue #210): present exactly while a coherent
+   * compare is asked for via `compare-datetime` / `compare-layer`. */
+  #compare: CompareView | undefined;
+  #compareToggle: CompareToggleControl | undefined;
+  /** The sides of the active compare — what the x-ray overlay matches
+   * traces against, and the guard that keeps swipe-only updates from
+   * touching the right map's source. */
+  #compareSides: CompareSides | undefined;
+  /** The right side's last-applied tile template (skip identical
+   * re-points: `setTiles` refetches even for an identical template). */
+  #compareTemplate = "";
+  /** The basemap style object the last apply merged under the imagery —
+   * reused for the compare map so both sides share one world. */
+  #appliedBasemap: Record<string, unknown> | undefined;
+  /** The active layer's temporal domain (ascending) — feeds the compare
+   * toggle's availability and its before-vs-after default. */
+  #frames: readonly string[] = [];
   /** Where the active layer's data IS (issue #182 follow-up): the union
    * of its granule footprints (catalog-backed), else the tileset
    * metadata bounds (static layers), else unknown. What `zoomToData`
@@ -445,6 +624,8 @@ export class SwathMap extends HTMLElement {
     }
     this.#xrayToggle = new XRayToggleControl(this);
     this.#map.addControl(this.#xrayToggle, "top-right");
+    this.#compareToggle = new CompareToggleControl(this);
+    this.#map.addControl(this.#compareToggle, "top-right");
     this.#zoomData = new ZoomToDataControl(this);
     this.#map.addControl(this.#zoomData, "top-right");
     this.#time = new TimeSlider(this.ownerDocument, {
@@ -474,12 +655,17 @@ export class SwathMap extends HTMLElement {
       this.#retryTimer = undefined;
     }
     this.#disableXRay();
+    this.#compare?.dispose();
+    this.#compare = undefined;
+    this.#compareSides = undefined;
+    this.#compareTemplate = "";
     this.#time?.dispose();
     this.#time = undefined;
     this.#map?.remove();
     this.#map = undefined;
     this.#switcher = undefined;
     this.#xrayToggle = undefined;
+    this.#compareToggle = undefined;
     this.#zoomData = undefined;
     this.replaceChildren();
   }
@@ -511,6 +697,23 @@ export class SwathMap extends HTMLElement {
       case "datetime":
         this.#repointTime(newValue);
         break;
+      case "compare-datetime":
+      case "compare-layer":
+        this.#applyCompare();
+        this.#dispatchCompareChange();
+        break;
+      case "swipe": {
+        // The drag fast path: re-clip only. Never re-point the right
+        // source here — `setTiles` refetches even an identical template,
+        // and a drag emits many of these per second.
+        const fraction = clampSwipe(parseSwipe(newValue));
+        this.#compare?.setFraction(fraction);
+        if (this.#compareSides) {
+          this.#xray?.setCompare({ fraction, sides: this.#compareSides });
+        }
+        this.#dispatchCompareChange();
+        break;
+      }
       case "xray":
         if (newValue === null) {
           this.#disableXRay();
@@ -556,6 +759,48 @@ export class SwathMap extends HTMLElement {
     this.#pendingAutoFrame = true;
     this.setAttribute("layer", id);
     await this.#ready;
+  }
+
+  /**
+   * The compare toggle's action (issue #210). Active → clears every
+   * compare attribute (whatever the mode). Inactive → starts the
+   * before-vs-after gesture on the current layer's time series: the
+   * right side pins the NEWEST frame, and the left side keeps the
+   * currently viewed frame unless that IS the newest (or "latest"), in
+   * which case it jumps to the oldest — two sides showing one frame
+   * would compare nothing. No-op on layers without at least two frames
+   * (the control is hidden then); layer-vs-layer has no one-button
+   * default and is entered via the `compare-layer` attribute (deep
+   * links, host pages).
+   */
+  toggleCompare(): void {
+    if (
+      this.getAttribute("compare-datetime") !== null ||
+      this.getAttribute("compare-layer") !== null
+    ) {
+      this.removeAttribute("compare-datetime");
+      this.removeAttribute("compare-layer");
+      this.removeAttribute("swipe");
+      return;
+    }
+    const oldest = this.#frames[0];
+    const newest = this.#frames[this.#frames.length - 1];
+    if (oldest === undefined || newest === undefined || oldest === newest) {
+      return;
+    }
+    const viewed = this.getAttribute("datetime");
+    if (viewed === null || viewed === newest) {
+      this.setAttribute("datetime", oldest);
+    }
+    this.setAttribute("compare-datetime", newest);
+  }
+
+  /**
+   * The compare swipe's right-side MapLibre map (undefined while no
+   * compare is active). Same UNSTABLE escape hatch as [`map`].
+   */
+  get compareMap(): MapLibreMap | undefined {
+    return this.#compare?.map;
   }
 
   /** Frames the active layer's data footprint (the `zoom to data`
@@ -617,6 +862,13 @@ export class SwathMap extends HTMLElement {
     this.#xray = new XRayOverlay(this, map, { createEventSource: this.xrayEventSource });
     this.#xray.connect(`${this.server}/traces`);
     this.#xray.setLayer(this.#activeLayer);
+    // X-ray toggled on mid-compare: hand the fresh overlay the sides.
+    if (this.#compareSides) {
+      this.#xray.setCompare({
+        fraction: clampSwipe(parseSwipe(this.getAttribute("swipe"))),
+        sides: this.#compareSides,
+      });
+    }
   }
 
   /** Tears the x-ray overlay down (idempotent): closes its EventSource
@@ -629,22 +881,30 @@ export class SwathMap extends HTMLElement {
   /** OGC `{tileMatrix}/{tileRow}/{tileCol}` is z/y/x, so MapLibre's
    * XYZ-named template must carry `{y}` (row) in the middle segment. */
   #tileTemplate(layerId: string): string {
-    return `${this.server}/tilesets/${layerId}/tiles/{z}/{y}/{x}${this.#tileQuery()}`;
+    return this.#tileTemplateFor(layerId, this.#viewedDatetime());
   }
 
-  /** The tile template's query string: the viewed frame (`datetime=`,
-   * ADR 0015) and the liveness-probe recovery version (`v=`, which must
-   * make the source template genuinely different — see `#retrySeq`). */
-  #tileQuery(): string {
+  /** The tile template for an arbitrary layer/frame pair — what the
+   * compare swipe's right side is built from (issue #210). The query
+   * carries the frame (`datetime=`, ADR 0015) and the liveness-probe
+   * recovery version (`v=`, which must make the source template
+   * genuinely different — see `#retrySeq`). */
+  #tileTemplateFor(layerId: string, datetime: string | null): string {
     const parts: string[] = [];
-    const datetime = this.getAttribute("datetime");
     if (datetime !== null && datetime !== "") {
       parts.push(`datetime=${encodeURIComponent(datetime)}`);
     }
     if (this.#retrySeq > 0) {
       parts.push(`v=${this.#retrySeq}`);
     }
-    return parts.length === 0 ? "" : `?${parts.join("&")}`;
+    const query = parts.length === 0 ? "" : `?${parts.join("&")}`;
+    return `${this.server}/tilesets/${layerId}/tiles/{z}/{y}/{x}${query}`;
+  }
+
+  /** The `datetime` attribute as the tile query sees it (empty = absent). */
+  #viewedDatetime(): string | null {
+    const datetime = this.getAttribute("datetime");
+    return datetime === "" ? null : datetime;
   }
 
   /**
@@ -676,6 +936,11 @@ export class SwathMap extends HTMLElement {
       }
     }
     this.#time?.setActive(datetime);
+    // A scrub moves the compare's LEFT side (and, in layer mode, the
+    // right side's frame too): refresh sides/labels/template. Date-mode
+    // right templates are unchanged and the identical-template guard
+    // keeps the right source untouched then.
+    this.#applyCompare();
     this.dispatchEvent(
       new CustomEvent("swath-timechange", { detail: { datetime }, bubbles: true }),
     );
@@ -770,31 +1035,11 @@ export class SwathMap extends HTMLElement {
       return;
     }
 
-    const swathSource = {
-      type: "raster",
-      tiles: [this.#tileTemplate(layerId)],
-      tileSize: 256,
-    };
-    const swathLayer = { id: RASTER_LAYER_ID, type: "raster", source: SOURCE_ID };
+    this.#appliedBasemap = basemap;
     const applied = new Promise<void>((resolve) => {
       map.once("styledata", () => resolve());
     });
-    map.setStyle(
-      basemap
-        ? ({
-            ...basemap,
-            sources: {
-              ...(basemap["sources"] as Record<string, unknown>),
-              [SOURCE_ID]: swathSource,
-            },
-            layers: [...(basemap["layers"] as unknown[]), swathLayer],
-          } as never)
-        : {
-            version: 8,
-            sources: { [SOURCE_ID]: swathSource as never },
-            layers: [swathLayer as never],
-          },
-    );
+    map.setStyle(this.#buildStyle(this.#tileTemplate(layerId), basemap) as never);
     await applied;
     if (epoch !== this.#epoch) {
       return;
@@ -834,6 +1079,9 @@ export class SwathMap extends HTMLElement {
     if (epoch !== this.#epoch) {
       return;
     }
+    // The compare swipe (issue #210) follows the applied layer/server/
+    // basemap — a full restyle, since any of those may have changed.
+    this.#applyCompare({ restyle: true });
     // Auto-frame (issue #182 follow-up): a USER-initiated switch to a
     // layer whose data is nowhere in view jumps to the data — consumed
     // exactly once per `setLayer`, and skipped entirely when the data
@@ -965,7 +1213,97 @@ export class SwathMap extends HTMLElement {
       ? { west: union[0], south: union[1], east: union[2], north: union[3] }
       : metadata?.bounds;
     this.#zoomData?.update(this.#dataBounds !== undefined);
+    this.#frames = frames;
     this.#time?.setDomain(frames, this.getAttribute("datetime"));
+  }
+
+  /** The map style for one side: the swath raster (from `template`) on
+   * top of the shared basemap, or bare when there is none. */
+  #buildStyle(template: string, basemap: Record<string, unknown> | undefined): object {
+    const swathSource = { type: "raster", tiles: [template], tileSize: 256 };
+    const swathLayer = { id: RASTER_LAYER_ID, type: "raster", source: SOURCE_ID };
+    return basemap
+      ? {
+          ...basemap,
+          sources: {
+            ...(basemap["sources"] as Record<string, unknown>),
+            [SOURCE_ID]: swathSource,
+          },
+          layers: [...(basemap["layers"] as unknown[]), swathLayer],
+        }
+      : {
+          version: 8,
+          sources: { [SOURCE_ID]: swathSource },
+          layers: [swathLayer],
+        };
+  }
+
+  /**
+   * The compare swipe's reconciler (issue #210): reads the compare
+   * attributes, and either tears the swipe down (nothing coherent asked
+   * for) or brings the right side in line — creating the clipped second
+   * map on first activation, re-styling it after a layer/server/basemap
+   * apply (`restyle`), or just re-pointing its source when only the
+   * right frame/layer changed. Also keeps the toggle control and the
+   * x-ray overlay's per-side matching in sync.
+   */
+  #applyCompare(options: { restyle?: boolean } = {}): void {
+    const map = this.#map;
+    const spec =
+      map && this.#activeLayer !== ""
+        ? resolveCompare(
+            this.#activeLayer,
+            parseTime(this.getAttribute("compare-datetime")),
+            this.getAttribute("compare-layer") ?? undefined,
+          )
+        : undefined;
+    this.#compareToggle?.update(spec !== undefined, this.#frames.length >= 2);
+    if (!spec || !map) {
+      this.#compare?.dispose();
+      this.#compare = undefined;
+      this.#compareSides = undefined;
+      this.#compareTemplate = "";
+      this.#xray?.setCompare(undefined);
+      return;
+    }
+    const sides = compareSides(spec, this.#activeLayer, this.#viewedDatetime());
+    const fraction = clampSwipe(parseSwipe(this.getAttribute("swipe")));
+    const template = this.#tileTemplateFor(sides.right.layer, sides.right.requested);
+    let view = this.#compare;
+    let restyle = options.restyle === true;
+    if (!view) {
+      view = new CompareView(this, map, {
+        onSwipe: (moved) => {
+          this.setAttribute("swipe", formatSwipe(moved));
+        },
+      });
+      this.#compare = view;
+      restyle = true;
+    }
+    if (restyle || view.map === undefined) {
+      view.setStyle(this.#buildStyle(template, this.#appliedBasemap));
+    } else if (template !== this.#compareTemplate) {
+      view.repoint(SOURCE_ID, template);
+    }
+    this.#compareTemplate = template;
+    const labels = sideLabels(sides);
+    view.setLabels(sides.mode, labels.left, labels.right);
+    view.setFraction(fraction);
+    this.#compareSides = sides;
+    this.#xray?.setCompare({ fraction, sides });
+  }
+
+  #dispatchCompareChange(): void {
+    this.dispatchEvent(
+      new CustomEvent("swath-comparechange", {
+        detail: {
+          compareTime: this.getAttribute("compare-datetime"),
+          compareLayer: this.getAttribute("compare-layer"),
+          swipe: this.getAttribute("swipe"),
+        },
+        bubbles: true,
+      }),
+    );
   }
 }
 

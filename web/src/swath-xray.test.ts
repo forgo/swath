@@ -356,6 +356,120 @@ beforeAll(() => {
   defineSwathMap();
 });
 
+// --- per-side badges under the compare swipe (issue #210) ---
+
+/** Synthetic temporal payload: the side identity rides `requested`. */
+function temporal(requested: string | null, granule = "g0"): Partial<TraceJson> {
+  return {
+    temporal: {
+      granule_id: granule,
+      granule_datetime: requested ?? "2024-09-05T19:03:00Z",
+      requested,
+      rule: requested === null ? "latest" : "latest_at_or_before",
+    },
+  };
+}
+
+const T0 = "2024-06-07T19:03:00Z";
+const T1 = "2024-09-05T19:03:00Z";
+
+/** A date-vs-date compare state over the fake map's `fire` layer. */
+function dateCompare(fraction = 0.5) {
+  return {
+    fraction,
+    sides: {
+      mode: "date" as const,
+      left: { layer: "fire", requested: T0 },
+      right: { layer: "fire", requested: T1 },
+    },
+  };
+}
+
+test("compare, date mode: traces split into side-clipped badge layers by requested=", () => {
+  const host = mountHost();
+  const factory = fakeFactory();
+  const overlay = new XRayOverlay(host, fakeMap(), { createEventSource: factory.create });
+  overlay.connect(`${SERVER}/traces`);
+  overlay.setLayer("fire");
+  overlay.setCompare(dateCompare(0.25));
+  const source = factory.opened[0];
+
+  source?.emit("trace", envelope("fire", "2/1/1", temporal(T0)));
+  source?.emit("trace", envelope("fire", "2/1/1", { decision: "cache_hit", ...temporal(T1) }));
+  // Neither side: another layer, and a frame no side shows — dropped.
+  source?.emit("trace", envelope("other", "2/1/1", temporal(T0)));
+  source?.emit("trace", envelope("fire", "2/1/1", temporal("2024-07-22T19:03:00Z")));
+  overlay.refresh();
+
+  // Both sides of ONE tile coexist (side rides the store key).
+  const left = host.querySelectorAll<HTMLElement>(
+    '.swath-xray-side[data-side="left"] .swath-xray-badge',
+  );
+  const right = host.querySelectorAll<HTMLElement>(
+    '.swath-xray-side[data-side="right"] .swath-xray-badge',
+  );
+  expect(left.length).toBe(1);
+  expect(right.length).toBe(1);
+  expect(left[0]?.dataset.side).toBe("left");
+  expect(left[0]?.dataset.key).toBe("left:fire/2/1/1");
+  expect(left[0]?.dataset.decision).toBe("live");
+  expect(right[0]?.dataset.key).toBe("right:fire/2/1/1");
+  expect(right[0]?.dataset.decision).toBe("cache_hit");
+  // Every painted badge lives in a side layer while comparing — the
+  // plain layer (and the neither-side traces) paint nothing.
+  expect(badges(host).length).toBe(2);
+
+  // The clips split at the handle fraction.
+  const leftLayer = host.querySelector<HTMLElement>('.swath-xray-side[data-side="left"]');
+  const rightLayer = host.querySelector<HTMLElement>('.swath-xray-side[data-side="right"]');
+  expect(leftLayer?.style.clipPath).toBe("inset(0px 75% 0px 0px)");
+  expect(rightLayer?.style.clipPath).toBe("inset(0px 0px 0px 25%)");
+
+  // A fraction-only move re-clips WITHOUT dropping the side entries.
+  overlay.setCompare(dateCompare(0.6));
+  expect(leftLayer?.style.clipPath).toBe("inset(0px 40% 0px 0px)");
+  expect(overlay.traceFor("left:fire/2/1/1")).toBeDefined();
+
+  // Ending the compare purges side entries and restores normal painting.
+  overlay.setCompare(undefined);
+  source?.emit("trace", envelope("fire", "2/1/1", temporal(T0)));
+  overlay.refresh();
+  expect(overlay.traceFor("left:fire/2/1/1")).toBeUndefined();
+  expect(badges(host).length).toBe(1);
+  expect(badges(host)[0]?.dataset.key).toBe("fire/2/1/1");
+  overlay.dispose();
+});
+
+test("compare, layer mode: the envelope's layer picks the side", () => {
+  const host = mountHost();
+  const factory = fakeFactory();
+  const overlay = new XRayOverlay(host, fakeMap(), { createEventSource: factory.create });
+  overlay.connect(`${SERVER}/traces`);
+  overlay.setLayer("ndvi");
+  overlay.setCompare({
+    fraction: 0.5,
+    sides: {
+      mode: "layer",
+      left: { layer: "ndvi", requested: null },
+      right: { layer: "truecolor", requested: null },
+    },
+  });
+  const source = factory.opened[0];
+  source?.emit("trace", envelope("ndvi", "2/1/1"));
+  source?.emit("trace", envelope("truecolor", "2/2/1"));
+  source?.emit("trace", envelope("park-fire-ndvi", "2/3/1"));
+  overlay.refresh();
+  const left = host.querySelectorAll<HTMLElement>(
+    '.swath-xray-side[data-side="left"] .swath-xray-badge',
+  );
+  const right = host.querySelectorAll<HTMLElement>(
+    '.swath-xray-side[data-side="right"] .swath-xray-badge',
+  );
+  expect([...left].map((badge) => badge.dataset.key)).toEqual(["left:ndvi/2/1/1"]);
+  expect([...right].map((badge) => badge.dataset.key)).toEqual(["right:truecolor/2/2/1"]);
+  overlay.dispose();
+});
+
 test("the xray attribute opens the stream; removing it closes and cleans up", async () => {
   const factory = fakeFactory();
   const el = mountMap(factory.create, false);
@@ -413,6 +527,94 @@ test("the toggle control mirrors and flips the xray attribute", async () => {
   expect(el.querySelector(".swath-xray")).toBeNull();
   expect(factory.opened[0]?.closed).toBe(true);
 });
+
+/** Two animation frames: the overlay's rAF-throttled paint has landed. */
+async function painted(): Promise<void> {
+  for (let i = 0; i < 2; i += 1) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+}
+
+/** The topmost element at the center of `target`'s box — the real
+ * hit-test a click performs, unlike `element.click()`. */
+function hitAt(target: Element): Element | null {
+  const box = target.getBoundingClientRect();
+  return document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+}
+
+// The stacking contract between the overlay, MapLibre's control corners,
+// and the compare swipe's right map (issue #210) — pinned by hit-testing
+// because CI found the regression: an overlay root with a z-index equal
+// to the control corners lifted badges OVER the x-ray toggle, and a badge
+// under the button swallowed its click (`subtree intercepts pointer
+// events`). Both enable orders, since the compare container and the
+// overlay root are inserted at different times.
+for (const order of ["compare first", "x-ray first"] as const) {
+  test(`controls stay clickable over badges, badges over the compare map (${order})`, async () => {
+    const factory = fakeFactory();
+    const el = mountMap(factory.create, order === "x-ray first");
+    if (order === "compare first") {
+      el.setAttribute("compare-layer", "ndvi");
+    }
+    await el.ready;
+    if (order === "compare first") {
+      el.setAttribute("xray", "");
+    } else {
+      el.setAttribute("compare-layer", "ndvi");
+    }
+
+    // DOM order IS the stacking order at z auto: primary container, then
+    // the compare clip right after it, then the overlay root.
+    const container = el.querySelector(".swath-map-container");
+    const compare = el.querySelector(".swath-map-compare");
+    const overlay = el.querySelector(".swath-xray");
+    expect(container?.nextElementSibling).toBe(compare);
+    expect(compare && overlay ? compare.compareDocumentPosition(overlay) : 0).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+
+    // Paint a badge over the control corner: at style zoom 2 (a 2048px
+    // world) the 320x240 view on 0,0 shows 256px z3 tiles, and tile
+    // 3/4/3 spans container x 160..320, y 0..120 — the top-right corner
+    // the controls live in. Tile 3/4/4 is the right half's lower
+    // quadrant: over the compare map, clear of every control. Both as
+    // RIGHT-side (ndvi) traces: the right badge layer is the one clipped
+    // to x >= 160, i.e. the one actually painted under the corner.
+    factory.opened[0]?.emit("trace", envelope("ndvi", "3/4/3"));
+    factory.opened[0]?.emit("trace", envelope("ndvi", "3/4/4"));
+    await painted();
+    const toggle = el.querySelector<HTMLButtonElement>(".swath-map-xray-toggle button");
+    if (!toggle) {
+      throw new Error("no x-ray toggle");
+    }
+    const badge = el.querySelector<HTMLElement>('.swath-xray-badge[data-key="right:ndvi/3/4/3"]');
+    expect(badge).not.toBeNull();
+    // A badge really does underlie the toggle...
+    const toggleBox = toggle.getBoundingClientRect();
+    const badgeBox = badge?.getBoundingClientRect();
+    expect(badgeBox && toggleBox.left < badgeBox.right && toggleBox.right > badgeBox.left).toBe(
+      true,
+    );
+    // ...and still the toggle wins the hit-test (the click lands).
+    const hit = hitAt(toggle);
+    expect(hit).toBe(toggle);
+    // A badge clear of the controls is hit over the compare map — the
+    // overlay paints above the right side, not under it.
+    const clear = el.querySelector<HTMLElement>('.swath-xray-badge[data-key="right:ndvi/3/4/4"]');
+    // (The tile box overhangs the 320x240 host, which the overlay clips —
+    // so probe the visible part: the badge's intersection with the host.)
+    const host = el.getBoundingClientRect();
+    const clearBox = clear?.getBoundingClientRect();
+    if (!clear || !clearBox) {
+      throw new Error("no clear badge");
+    }
+    const clearHit = document.elementFromPoint(
+      (Math.max(clearBox.left, host.left) + Math.min(clearBox.right, host.right)) / 2,
+      (Math.max(clearBox.top, host.top) + Math.min(clearBox.bottom, host.bottom)) / 2,
+    );
+    expect(clearHit?.closest(".swath-xray-badge")).toBe(clear);
+  });
+}
 
 // --- x-ray v1 (issue #42): why-view, bytes heatmap, live trace feed ---
 

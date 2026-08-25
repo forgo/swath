@@ -52,6 +52,7 @@ export type TraceDecision =
   | { overview: { level: number } }
   | { cache_hit: { key: string } };
 
+import { type CompareSides, traceSide } from "./compare-model.js";
 import { tileNorthWest } from "./tms.js";
 import { AnalyticsPanel } from "./xray-analytics.js";
 
@@ -183,13 +184,25 @@ export interface XRayMapLike {
   off(type: string, listener: () => void): unknown;
 }
 
-/** One stored trace: parsed tile address + the envelope payload. */
+/** One stored trace: parsed tile address + the envelope payload. The
+ * `side` tag exists only on entries received while a compare was active
+ * (issue #210): those paint into the side-clipped badge layers, and the
+ * side rides the store key so both sides of one tile coexist. */
 interface XRayEntry {
   layer: string;
   z: number;
   x: number;
   y: number;
   trace: TraceJson;
+  side?: "left" | "right";
+}
+
+/** The compare state the overlay paints per-side badges for (issue
+ * #210): the handle fraction (the clip) plus the side identities the
+ * received traces are matched against (compare-model `traceSide`). */
+export interface XRayCompare {
+  fraction: number;
+  sides: CompareSides;
 }
 
 /** Store bound: per-tile latest-wins entries kept, least recently
@@ -272,7 +285,16 @@ const DECISION_COLORS: Record<"live" | "overview" | "cache_hit", { border: strin
   };
 
 const OVERLAY_CSS = `
+/* No z-index, deliberately: the root must NOT form a stacking context.
+ * MapLibre's control corners sit at z-index 2, so badges (z auto) stay
+ * beneath the toggles — a badge under the x-ray button must never
+ * intercept its click — while the inspector (z 3) and feed (z 2) still
+ * compete at the host level and rise above them. The compare swipe's
+ * right map (issue #210) is kept underneath by DOM order instead. */
 .swath-xray { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+/* Per-side badge layers (issue #210): clipped to their side of the
+ * compare handle; empty and unclipped while no compare is active. */
+.swath-xray-side { position: absolute; inset: 0; pointer-events: none; }
 .swath-xray * { box-sizing: border-box; }
 .swath-xray-badge {
   position: absolute;
@@ -571,6 +593,8 @@ export class XRayOverlay {
   readonly #map: XRayMapLike;
   readonly #root: HTMLDivElement;
   readonly #badges: HTMLDivElement;
+  readonly #badgesLeft: HTMLDivElement;
+  readonly #badgesRight: HTMLDivElement;
   readonly #ingest: HTMLDivElement;
   readonly #lagged: HTMLDivElement;
   readonly #createEventSource: EventSourceFactory;
@@ -600,6 +624,7 @@ export class XRayOverlay {
   #frame: number | undefined;
   #inspector: HTMLElement | undefined;
   #disposed = false;
+  #compare: XRayCompare | undefined;
   #mode: XRayDisplayMode = "decision";
   #feedPaused = false;
   #feedDropped = 0;
@@ -620,6 +645,12 @@ export class XRayOverlay {
     this.#root = document.createElement("div");
     this.#root.className = "swath-xray";
     this.#badges = document.createElement("div");
+    this.#badgesLeft = document.createElement("div");
+    this.#badgesLeft.className = "swath-xray-side";
+    this.#badgesLeft.dataset.side = "left";
+    this.#badgesRight = document.createElement("div");
+    this.#badgesRight.className = "swath-xray-side";
+    this.#badgesRight.dataset.side = "right";
     const readouts = document.createElement("div");
     readouts.className = "swath-xray-readouts";
     this.#lagged = document.createElement("div");
@@ -695,7 +726,14 @@ export class XRayOverlay {
     this.#feedLines.hidden = true;
     this.#feed.append(feedHeader, this.#feedLines);
 
-    this.#root.append(this.#badges, readouts, this.#modes, this.#feed);
+    this.#root.append(
+      this.#badges,
+      this.#badgesLeft,
+      this.#badgesRight,
+      readouts,
+      this.#modes,
+      this.#feed,
+    );
     host.append(this.#root);
 
     this.#onMove = () => this.#schedule();
@@ -732,6 +770,38 @@ export class XRayOverlay {
   setLayer(layer: string): void {
     if (layer !== this.#layer) {
       this.#layer = layer;
+      this.#schedule();
+    }
+  }
+
+  /**
+   * (De)activates per-side badge painting (issue #210). A fraction-only
+   * move (handle drag) just re-clips the side layers; a change of SIDES
+   * purges the side-tagged entries — a badge matched against the old
+   * comparison must never survive into the new one wearing the wrong
+   * side. Plain entries (received outside any compare) are untouched, so
+   * ending a compare repaints the normal view instantly.
+   */
+  setCompare(compare: XRayCompare | undefined): void {
+    const previous = this.#compare;
+    this.#compare = compare;
+    const sidesChanged = JSON.stringify(previous?.sides) !== JSON.stringify(compare?.sides);
+    if (sidesChanged) {
+      for (const [key, entry] of this.#store) {
+        if (entry.side !== undefined) {
+          this.#store.delete(key);
+        }
+      }
+    }
+    if (compare) {
+      const right = compare.fraction * 100;
+      this.#badgesLeft.style.clipPath = `inset(0 ${100 - right}% 0 0)`;
+      this.#badgesRight.style.clipPath = `inset(0 0 0 ${right}%)`;
+    } else {
+      this.#badgesLeft.style.clipPath = "";
+      this.#badgesRight.style.clipPath = "";
+    }
+    if (sidesChanged) {
       this.#schedule();
     }
   }
@@ -785,9 +855,24 @@ export class XRayOverlay {
       return; // malformed data is dropped, not fatal — the stream goes on
     }
     const { z, x, y } = envelope;
-    const key = `${envelope.layer}/${envelope.tile}`;
+    // While comparing (issue #210), a trace that belongs to a side is
+    // keyed BY that side, so both sides of one tile coexist in the store
+    // (latest-wins would otherwise flicker between them). Everything
+    // else — including compare-time traces that match neither side —
+    // keeps the plain key and stays out of the per-side layers.
+    const side = this.#compare
+      ? traceSide(this.#compare.sides, envelope.layer, envelope.trace.temporal?.requested)
+      : undefined;
+    const key =
+      side === undefined
+        ? `${envelope.layer}/${envelope.tile}`
+        : `${side}:${envelope.layer}/${envelope.tile}`;
     this.#store.delete(key); // latest wins, and re-insertion refreshes LRU order
-    this.#store.set(key, { layer: envelope.layer, z, x, y, trace: envelope.trace });
+    const entry: XRayEntry = { layer: envelope.layer, z, x, y, trace: envelope.trace };
+    if (side !== undefined) {
+      entry.side = side;
+    }
+    this.#store.set(key, entry);
     while (this.#store.size > this.#capacity) {
       const oldest = this.#store.keys().next().value;
       if (oldest === undefined) {
@@ -933,7 +1018,7 @@ export class XRayOverlay {
     }
     const nw = this.#map.project(tileNorthWest(entry.z, entry.x, entry.y));
     this.#openInspector(key, entry, nw);
-    const badge = this.#badges.querySelector(`[data-key="${CSS.escape(key)}"]`);
+    const badge = this.#root.querySelector(`.swath-xray-badge[data-key="${CSS.escape(key)}"]`);
     if (badge instanceof HTMLElement) {
       badge.classList.add("swath-xray-badge-flash");
       window.setTimeout(() => badge.classList.remove("swath-xray-badge-flash"), 1500);
@@ -979,6 +1064,8 @@ export class XRayOverlay {
       return;
     }
     this.#badges.replaceChildren();
+    this.#badgesLeft.replaceChildren();
+    this.#badgesRight.replaceChildren();
     const bytes = this.#mode === "bytes" ? this.#bytesRange() : undefined;
     this.#scale.hidden = bytes === undefined;
     if (bytes) {
@@ -998,8 +1085,16 @@ export class XRayOverlay {
     const zTile = this.#displayZoom();
     const width = this.#root.clientWidth;
     const height = this.#root.clientHeight;
+    const comparing = this.#compare !== undefined;
     for (const [key, entry] of this.#store) {
-      if (entry.layer !== this.#layer || entry.z !== zTile) {
+      // Comparing: only side-tagged entries paint, each into its clipped
+      // layer (the side already pins the entry's layer — the sides ARE
+      // layer filters in layer mode, and the one shown layer in date
+      // mode). Not comparing: only plain entries of the active layer.
+      if (comparing ? entry.side === undefined : entry.side !== undefined) {
+        continue;
+      }
+      if ((!comparing && entry.layer !== this.#layer) || entry.z !== zTile) {
         continue;
       }
       const nw = this.#map.project(tileNorthWest(entry.z, entry.x, entry.y));
@@ -1007,7 +1102,13 @@ export class XRayOverlay {
       if (width > 0 && height > 0 && (se.x < 0 || se.y < 0 || nw.x > width || nw.y > height)) {
         continue; // off-viewport
       }
-      this.#badges.append(this.#badge(key, entry, nw, se, bytes));
+      const badge = this.#badge(key, entry, nw, se, bytes);
+      if (entry.side === undefined) {
+        this.#badges.append(badge);
+      } else {
+        badge.dataset.side = entry.side;
+        (entry.side === "left" ? this.#badgesLeft : this.#badgesRight).append(badge);
+      }
     }
   }
 
