@@ -61,17 +61,18 @@ light background so it renders identically on GitHub light and dark.
   <text x="840" y="474" text-anchor="end" font-size="10.5" fill="#57606a">&#9679; batch-first: arbitrary graphs + UDFs as jobs</text>
 
   <!-- ============ Swath, beyond the frontier ============ -->
-  <path d="M 730 138 L 742 150 L 730 162 L 718 150 Z" fill="#0969da"/>
-  <text x="730" y="128" text-anchor="middle" font-size="14" font-weight="600" fill="#0969da">Swath</text>
+  <path d="M 858 138 L 870 150 L 858 162 L 846 150 Z" fill="#0969da"/>
+  <text x="858" y="128" text-anchor="middle" font-size="14" font-weight="600" fill="#0969da">Swath</text>
 
   <g font-size="11" fill="#1f2328">
     <text x="565" y="185">&#8226; openEO graph in &#8594; live XYZ out, byte-identical to the built-in NDVI</text>
-    <text x="565" y="202">&#8226; hot-tile p50 23.5 ms at 1,278 req/s; every tile&#8217;s decision traced</text>
-    <text x="565" y="219">&#8226; north-star metric: ingest-to-pixel latency, measured end to end</text>
+    <text x="565" y="202">&#8226; run_udf: user WASM on the live tile path, fuel-metered, refused safely</text>
+    <text x="565" y="219">&#8226; hot-tile p50 23.5 ms at 1,278 req/s; every tile&#8217;s decision traced</text>
+    <text x="565" y="236">&#8226; north-star metric: ingest-to-pixel latency, measured end to end</text>
   </g>
 
   <!-- ============ footnotes ============ -->
   <text x="120" y="586" font-size="11" fill="#57606a">Axes are ordinal &#8212; positions map from the capability ladders in docs/media/wedge.notes.md (coordinated with the COMPARISON matrix definitions); no</text>
   <text x="120" y="602" font-size="11" fill="#57606a">metric scale is implied. Competitors are placed at the highest capability their own documentation claims; Swath&#8217;s receipts are committed artifacts.</text>
-  <text x="120" y="618" font-size="11" fill="#57606a">Honesty note: openEO&#8217;s authoring breadth (incl. UDFs) exceeds Swath&#8217;s bounded openEO profile (ADR 0010) &#8212; the claim is the fused live loop, not breadth.</text>
+  <text x="120" y="618" font-size="11" fill="#57606a">Honesty note: openEO&#8217;s UDF story (Python, jobs, user-defined processes) exceeds Swath&#8217;s pixel-stage WASM run_udf &#8212; the claim is the fused live loop, not breadth.</text>
 </svg>

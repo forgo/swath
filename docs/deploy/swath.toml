@@ -1,0 +1,70 @@
+# SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+# Serve config for the read-only demo (docs/deploy/compose.yml): catalog
+# mode over the fire-season fixtures the image carries, the reference
+# layers of tests/e2e/swath-catalog.toml, a module store so `run_udf` is
+# offered (ADR 0018), and conservative budgets. `catalog` (with the
+# password) and `base-url` (the public https origin) arrive from the
+# environment — compose sets SWATH_CATALOG and SWATH_BASE_URL.
+
+bind = "0.0.0.0:8080"
+store-root = "/data"
+cache = "/cache"
+udf-store = "/udf"
+watch-dir = "/data/drop"
+
+[budget]
+# Refuse a live render estimated over ~50 MB of source reads — a public
+# instance never pays for a pathological request; the planner answers
+# with a problem, not a stall (docs/CONFIG.md). Honesty note from the
+# #212 rehearsal (README.md, findings): this table governs the DECLARED
+# layers below; a published openEO service and the preview run under the
+# binary's built-in budget (100 M fuel per tile, the 250 ms epoch
+# backstop, the preview's own byte ceiling) until the follow-up lands.
+max-estimated-live-bytes = 50000000
+
+[[datasets]]
+id = "hls-s30"
+title = "HLS Sentinel-2 (S30)"
+description = "Harmonized Landsat Sentinel-2, S30 product."
+license = "CC0-1.0"
+
+[[datasets.layers]]
+id = "truecolor"
+title = "HLS true color"
+description = "B04/B03/B02 composite, reflectance rescaled 0..3000."
+kind = "truecolor"
+rescale = [0.0, 3000.0]
+[datasets.layers.bands]
+r = "b04"
+g = "b03"
+b = "b02"
+
+[[datasets.layers]]
+id = "ndvi"
+title = "HLS NDVI"
+description = "(B8A - B04) / (B8A + B04), rescaled -1..1, RdYlGn colormap."
+kind = "ndvi"
+[datasets.layers.bands]
+nir = "b8a"
+red = "b04"
+
+# The six-date Park Fire series (tests/fixtures/README.md): the playable
+# time series the landing opens on, and the collection the seeded UDF
+# service (seed.sh) runs over — the animated user-defined index.
+[[datasets]]
+id = "hls-s30-fire"
+title = "HLS Sentinel-2 (S30), 2024 Park Fire"
+description = "Six-date T10TFK time series across the 2024 Park Fire."
+license = "CC0-1.0"
+
+[[datasets.layers]]
+id = "park-fire-ndvi"
+title = "Park Fire NDVI"
+description = "(B8A - B04) / (B8A + B04), rescaled -1..1, RdYlGn colormap."
+kind = "ndvi"
+colormap = "rdylgn"
+[datasets.layers.bands]
+nir = "b8a"
+red = "b04"

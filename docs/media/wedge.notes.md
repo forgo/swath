@@ -40,8 +40,10 @@ publish, without forking or redeploying it):
 ## Candidate A — `wedge-a-quadrants.svg` ("capability ladders")
 
 Discrete grid; each project sits at a rung intersection. Rhetoric: the top-right region
-(runtime products × measured live serving) is the wedge, and the top-right *corner* (UDFs at
-live latency) is honestly marked out of scope (ADR 0010).
+(runtime products × measured live serving) is the wedge. Through M8 the top-right *corner*
+(UDFs at live latency) was honestly marked out of scope (ADR 0010); M9 shipped it
+(ADR 0018), so the diamond now sits in the corner with a hollow diamond and an arrow recording
+the move from its graphs-only position (issue #212).
 
 ### Placements and defenses
 
@@ -88,15 +90,28 @@ Y1 records that delivery is batch-first, which their own docs present first and 
 Y3 would overstate them (no openEO doc claims dynamic tiling as the design center). Source:
 <https://openeo.org/documentation/1.0/glossary.html>.
 
-**Swath — X4 (standard process graphs at runtime), Y4 (dynamic tiles, measured + traced).**
-X4, not X5: ADR 0010 implements the openEO API 1.2.0 at a *bounded profile* — `POST /services`
-takes a standard openEO process graph, validates it through the process compiler, and answers
-201 with a live XYZ tile URL, while UDFs, jobs, and user-defined processes are explicitly out
-of scope — so Swath is honestly placed one rung *left* of full openEO on authoring breadth.
-The rung is proven, not claimed: the CI-gated test
-`post_service_serves_tiles_byte_identical_to_the_builtin_ndvi`
-(`crates/swath-api/tests/openeo_services.rs`) POSTs an NDVI graph and asserts the served
-tiles are byte-identical to the built-in NDVI layer. Y4: committed load evidence
+**Swath — X5 (runtime graphs + arbitrary code (UDFs)), Y4 (dynamic tiles, measured + traced).**
+X5 since M9 (through M8: X4). ADR 0010 implements the openEO API 1.2.0 at a *bounded profile* —
+`POST /services` takes a standard openEO process graph, validates it through the process
+compiler, and answers 201 with a live XYZ tile URL — and ADR 0018 admits user code into that
+graph: `run_udf` (runtime `wasm`, version `1`) executes user-uploaded WASM, sandboxed
+(zero-import, NaN-canonicalized, fuel-metered, memory-capped) in the live tile path, pixel
+stage only. The rung is proven by committed artifacts, one per M9 step: the executor is
+deterministic and fuel-reproducible (#262 — `crates/adapters/swath-udf-wasmtime/tests/determinism.rs`,
+`engine_gate.rs`); the compiler persists modules by content hash (#263); the tile path serves a
+`run_udf` NDVI byte-identical to the built-in band math with its fuel in the trace and refuses
+fuel exhaustion as a pinned RFC 7807 problem (#265 — `crates/swath-api/tests/udf_tiles.rs`);
+`POST /result` previews a UDF graph byte-identical to its published service (#267 —
+`crates/swath-api/tests/openeo_result.rs`); and under a UDF storm `/healthz` p99 held at
+<!-- number:udf-storm-healthz-p99 -->0.96 ms<!-- /number:udf-storm-healthz-p99 --> while a
+fuel-bomb module was refused at
+<!-- number:udf-fuelbomb-healthz-p99 -->0.92 ms<!-- /number:udf-fuelbomb-healthz-p99 -->
+(#268 — `docs/perf/load-udf-baseline.md`, `PERFORMANCE.md` §9). *Spot-check:* X5's
+definition is "user-uploaded custom code executed server-side" — met by WASM modules through
+the public `POST /services`; openEO's own UDF story (Python runtimes, batch jobs, user-defined
+processes) is broader, which is why Swath shares the rung and is never placed above openEO.
+The graphs-only proof still stands beneath it: `post_service_serves_tiles_byte_identical_to_the_builtin_ndvi`
+(`crates/swath-api/tests/openeo_services.rs`). Y4: committed load evidence
 (`docs/perf/load-2cpu-16.7-evidence.md`) records hot-cache tile storm p50 <!-- number:2cpu-hot-p50 -->23.46 ms<!-- /number:2cpu-hot-p50 --> / p95
 <!-- number:2cpu-hot-p95 -->37.68 ms<!-- /number:2cpu-hot-p95 --> at <!-- number:2cpu-hot-rps -->1,277.6 req/s<!-- /number:2cpu-hot-rps -->, cold live-render p50 <!-- number:2cpu-cold-p50 -->965.57 ms<!-- /number:2cpu-cold-p50 -->, and control-plane p99 <!-- number:2cpu-healthz-p99 -->1.44 ms<!-- /number:2cpu-healthz-p99 --> under
 concurrent warps; per-tile decision provenance (live vs. cache) streams over SSE `/traces`
@@ -116,8 +131,10 @@ beyond the frontier with three receipts. Rhetoric: the gap is the product.
 Positions are the *same rungs as Candidate A* mapped ordinally onto continuous axes (the
 footnote in the SVG says so): xpublish-tiles (X1,Y3), TiTiler (X3,Y3), openEO backends as two
 points — filled batch-first (X5,Y1) and hollow secondary-services (X5,Y2) — and Swath
-(X4,Y4). All defenses and spot-checks above apply unchanged. The three Swath receipt bullets
-map to: `openeo_services.rs` byte-identical test + ADR 0010 (graph in → live XYZ out);
+(X5,Y4; X4 through M8). All defenses and spot-checks above apply unchanged. The four Swath
+receipt bullets map to: `openeo_services.rs` byte-identical test + ADR 0010 (graph in → live
+XYZ out); `udf_tiles.rs` + `docs/perf/load-udf-baseline.md` + ADR 0018 (run_udf on the live
+path, fuel-metered, refused with zero collateral);
 `docs/perf/load-2cpu-16.7-evidence.md` (23.5 ms p50 hot at 1,278 req/s) + `trace_stream.rs`
 (decision traced); REQUIREMENTS.md §3 (ingest-to-pixel north star). The frontier curve passes
 through the competitor placements by construction — it asserts nothing about them beyond
@@ -126,8 +143,9 @@ Swath's claim about the field, clearly attributed to Swath's own requirements do
 
 ## What neither candidate claims
 
-- Not that Swath out-processes openEO (it doesn't; openEO is top of the X ladder, Swath's
-  profile is bounded — stated in both SVGs' footnotes).
+- Not that Swath out-processes openEO (it doesn't; both sit at the top X rung since M9, and
+  openEO's UDF story — Python runtimes, jobs, user-defined processes — is broader than Swath's
+  WASM pixel-stage `run_udf` — stated in both SVGs' footnotes).
 - Not that TiTiler or xpublish-tiles are slow — both sit at "dynamic tiles by design"; the
   Y4 rung Swath occupies is about *committed evidence and per-tile provenance*, hence
   "measured + traced", not "faster".

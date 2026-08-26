@@ -109,3 +109,8 @@ beyond the host; set `base-url` to the externally reachable URL; mount the
 store root read-only with a separate writable cache root; point the
 healthcheck at `/healthz`. Startup fails loudly on config errors (unknown
 TOML keys included) — [`CONFIG.md`](CONFIG.md).
+
+**Public read-only demo** — the exercised, provider-agnostic recipe in
+[`deploy/README.md`](deploy/README.md): compose + Traefik (ACME TLS, per-IP
+rate limits, a preview body cap), `swath serve --read-only` with the `run_udf`
+module store, seeded from the fixtures the image already carries.

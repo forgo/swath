@@ -49,10 +49,12 @@ const BUDGETS: [(&str, usize); 17] = [
     ("docs/RECIPES.md", 545),
     ("docs/RELEASING.md", 600),
     ("docs/REQUIREMENTS.md", 1400),
-    // Raised 1375 → 1420 with #208's deferral row 18 (the inventory
-    // grows one row per recorded deferral; the row itself was trimmed
-    // first).
-    ("docs/ROADMAP.md", 1420),
+    // Raised 1375 -> 1420 with #208's deferral row 18, then -> 1775 with
+    // #212's era evidence: §1 gained the M9 entry (exit criteria, each
+    // linking its committed evidence) and §3 item 8 its recorded
+    // amendment — acceptance criteria, not prose regrowth; re-measured
+    // at 1619 + the usual headroom.
+    ("docs/ROADMAP.md", 1775),
 ];
 
 /// The word count of `text` under the committed measurement method:
