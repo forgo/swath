@@ -111,6 +111,12 @@ fn udf_process(udf: &str, bands: &[&str]) -> Value {
     }})
 }
 
+/// The operator budget rehydration compiles under (#272): the default,
+/// as the test app publishes with.
+fn budget() -> swath_core::planner::Budget {
+    swath_core::planner::Budget::default()
+}
+
 fn service_request(process: &Value) -> Value {
     json!({ "type": "xyz", "title": "NDVI (UDF)", "process": process })
 }
@@ -179,8 +185,8 @@ async fn inline_module_publishes_persists_by_hash_and_rehydrates() {
     // Rehydration (what a restart does): the persisted layer recompiles
     // through the store-backed resolution to the same plan.
     let modules = udf_app.publish.rehydrate(layer).await.expect("rehydrates");
-    let template =
-        swath_api::compile_service_layer(&dataset, layer, Some(&modules)).expect("recompiles");
+    let template = swath_api::compile_service_layer(&dataset, layer, Some(&modules), &budget())
+        .expect("recompiles");
     assert_eq!(template.plan.ops, expected_ops());
     let inputs: Vec<&str> = template
         .plan
@@ -190,7 +196,8 @@ async fn inline_module_publishes_persists_by_hash_and_rehydrates() {
         .collect();
     assert_eq!(inputs, ["b8a", "b04"]);
     // The unwired path cannot serve it — loudly.
-    let err = swath_api::compile_service_layer(&dataset, layer, None).expect_err("unwired");
+    let err =
+        swath_api::compile_service_layer(&dataset, layer, None, &budget()).expect_err("unwired");
     assert!(matches!(
         err,
         swath_render::CompileError::UdfUnavailable { .. }
@@ -230,8 +237,8 @@ async fn remote_module_is_fetched_once_and_a_mutated_remote_cannot_change_the_se
     // Rehydration resolves the persisted hash from the store: the same
     // module, the same plan, and no fetch.
     let modules = udf_app.publish.rehydrate(layer).await.expect("rehydrates");
-    let template =
-        swath_api::compile_service_layer(&dataset, layer, Some(&modules)).expect("recompiles");
+    let template = swath_api::compile_service_layer(&dataset, layer, Some(&modules), &budget())
+        .expect("recompiles");
     assert_eq!(template.plan.ops, expected_ops());
     assert_eq!(fetcher.calls(), 1, "rehydration never fetches");
 

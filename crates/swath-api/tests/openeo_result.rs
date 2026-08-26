@@ -458,3 +458,42 @@ async fn udf_runtime_failures_preview_as_user_fixable_registry_errors() {
         "failed previews publish nothing"
     );
 }
+
+/// The operator's byte ceiling layers UNDER the preview's own (#272,
+/// ADR 0014): a `[budget] max-estimated-live-bytes` tighter than the
+/// preview ceiling refuses the preview; a looser one cannot widen it.
+#[tokio::test]
+async fn operator_byte_ceiling_narrows_previews_and_never_widens_them() {
+    use swath_core::planner::Budget;
+
+    let extent = json!({ "west": -105.45, "south": 39.26, "east": -105.44, "north": 39.27 });
+    let refused = |app: axum::Router, label: &'static str| {
+        let request = result_request(&ndvi_process_with_extent(&extent));
+        async move {
+            let response = common::request_on(&app, "POST", "/result", Some(request)).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{label}");
+            let error = common::body_json(response).await;
+            assert_eq!(error["code"], "ProcessGraphComplexity", "{label}");
+        }
+    };
+
+    // Tighter than the (default) preview ceiling: the operator's cap binds.
+    let (app, _) = common::openeo_app_with_budget(
+        None,
+        Budget {
+            max_estimated_live_bytes: Some(1),
+            ..Budget::default()
+        },
+    );
+    refused(app, "operator cap under the preview ceiling").await;
+
+    // Looser than a 1-byte preview ceiling: the preview's own bound holds.
+    let (app, _) = common::openeo_app_with_budget(
+        Some(1),
+        Budget {
+            max_estimated_live_bytes: Some(u64::MAX),
+            ..Budget::default()
+        },
+    );
+    refused(app, "operator cap above the preview ceiling").await;
+}

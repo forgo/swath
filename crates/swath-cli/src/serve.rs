@@ -26,6 +26,7 @@ use swath_cache_objectstore::ObjectStoreTileCache;
 use swath_catalog_pgstac::PgstacCatalog;
 use swath_core::catalog::{Catalog, CatalogError, Dataset};
 use swath_core::events::EventSource;
+use swath_core::planner::Budget;
 use swath_events_filedrop::FiledropEvents;
 use swath_pyramid_objectstore::PyramidSource;
 use swath_reproject_proj4rs::Proj4rsReproject;
@@ -197,6 +198,7 @@ where
         udf_store,
         cors_allowed_origins,
         read_only,
+        budget,
         layers,
     } = cfg;
     let shared = Shared {
@@ -207,6 +209,7 @@ where
         udf_store,
         cors_allowed_origins,
         read_only,
+        budget,
     };
     match layers {
         LayerSource::Static(registry) => {
@@ -229,6 +232,7 @@ async fn restore_api_dataset_services(
     datasets: Vec<Dataset>,
     mode: &mut crate::config::CatalogMode,
     udf: Option<&swath_api::UdfPublish>,
+    budget: &Budget,
 ) {
     for dataset in datasets {
         if mode.datasets.iter().any(|d| d.id == dataset.id) {
@@ -238,7 +242,7 @@ async fn restore_api_dataset_services(
             if layer.process.is_none() {
                 continue; // API datasets author layers via services only
             }
-            match rehydrate_service(&dataset, layer, udf).await {
+            match rehydrate_service(&dataset, layer, udf, budget).await {
                 Ok(template) => {
                     tracing::info!(
                         "restored openEO service {id} on API-registered dataset {dataset}",
@@ -269,6 +273,9 @@ struct Shared {
     /// layer at all (the default).
     cors_allowed_origins: Vec<String>,
     read_only: bool,
+    /// The resolved global budget (#37) — what published openEO services
+    /// and previews serve under (#272), rehydrated services included.
+    budget: Budget,
 }
 
 /// The `run_udf` publish wiring (ADR 0018, #204): the wasmtime executor
@@ -316,17 +323,21 @@ fn udf_publish(root: Option<&str>) -> Result<Option<swath_api::UdfPublish>, Serv
 
 /// Recompiles a persisted openEO service layer into its serving template
 /// — a `run_udf` module is resolved from the module store by its persisted
-/// hash, never fetched (ADR 0018, #204).
+/// hash, never fetched (ADR 0018, #204) — under the CURRENT config's
+/// global budget (#272): nothing budget-shaped is persisted with a
+/// service, so a restart after tightening `[budget]` tightens every
+/// published service.
 async fn rehydrate_service(
     dataset: &Dataset,
     layer: &swath_core::catalog::Layer,
     udf: Option<&swath_api::UdfPublish>,
+    budget: &Budget,
 ) -> Result<swath_api::CatalogLayer, String> {
     let modules = match udf {
         Some(udf) => Some(udf.rehydrate(layer).await.map_err(|err| err.to_string())?),
         None => None,
     };
-    swath_api::compile_service_layer(dataset, layer, modules.as_ref())
+    swath_api::compile_service_layer(dataset, layer, modules.as_ref(), budget)
         .map_err(|err| err.to_string())
 }
 
@@ -376,7 +387,7 @@ where
                 if !is_service || conflicts {
                     continue;
                 }
-                match rehydrate_service(dataset, &layer, udf.as_ref()).await {
+                match rehydrate_service(dataset, &layer, udf.as_ref(), &cfg.budget).await {
                     Ok(template) => {
                         tracing::info!(
                             "restored openEO service {id} on dataset {dataset}",
@@ -420,7 +431,13 @@ where
             layers = dataset.layers.len(),
         );
     }
-    restore_api_dataset_services(catalog.list_datasets().await?, &mut mode, udf.as_ref()).await;
+    restore_api_dataset_services(
+        catalog.list_datasets().await?,
+        &mut mode,
+        udf.as_ref(),
+        &cfg.budget,
+    )
+    .await;
     if let Some(dir) = &mode.watch_dir {
         tracing::info!("watching {} for granule manifests", dir.display());
         let mut events = FiledropEvents::new(dir.clone(), WATCH_POLL);
@@ -459,12 +476,15 @@ where
     // (pyramid overlay included, so previews benefit from materialized
     // overviews exactly as tiles do).
     let store = build_store(&cfg.store_root)?;
+    // Published services and previews serve under the operator's
+    // resolved global budget (#272), exactly as declared layers do.
     let mut openeo_state = swath_api::OpenEoState::new(
         provider.clone(),
         PyramidSource::new(CompositeSource::new(Arc::clone(&store)), Arc::clone(&store)),
         Proj4rsReproject,
         &cfg.base_url,
-    );
+    )
+    .with_budget(cfg.budget.clone());
     // `run_udf` (ADR 0018, #204): offered exactly where the module store
     // and the WASM runtime are wired — and then served by the tile
     // handlers through the same executor (#205).
@@ -828,8 +848,8 @@ mod tests {
     use swath_testsupport::TempDir;
 
     use super::{
-        ServeArgs, ServeError, Shared, build_store, ingest_loop, now_unix_millis, run, serve,
-        serve_catalog_on,
+        ServeArgs, ServeError, Shared, build_store, ingest_loop, now_unix_millis,
+        rehydrate_service, run, serve, serve_catalog_on,
     };
     use crate::config::{self, ConfigError, LayerSource};
 
@@ -1222,6 +1242,46 @@ mod tests {
         }})
     }
 
+    /// Rehydration serves under the CURRENT config's global budget (#272):
+    /// a restart after tightening `[budget]` / the global flags tightens
+    /// every restored service — nothing budget-shaped is persisted with it.
+    #[tokio::test]
+    async fn rehydrated_services_take_the_current_config_budget() {
+        let store = TempDir::new("cli-rehydrate-budget-store");
+        let drop_dir = TempDir::new("cli-rehydrate-budget-drop");
+        let config_dir = TempDir::new("cli-rehydrate-budget-config");
+        let config_path = config_dir.join("swath.toml");
+        let toml = format!(
+            "{}\n[budget]\nmax-udf-fuel-per-tile = 10000000\n",
+            catalog_toml(store.path(), drop_dir.path())
+        );
+        std::fs::write(&config_path, toml).expect("config writes");
+        let cfg = config::resolve(&ServeArgs {
+            config: Some(config_path),
+            max_estimated_live_bytes: Some(4096),
+            ..args()
+        })
+        .expect("catalog config resolves");
+        assert_eq!(cfg.budget.max_udf_fuel_per_tile, 10_000_000);
+        assert_eq!(cfg.budget.max_estimated_live_bytes, Some(4096));
+        let LayerSource::Catalog(mode) = cfg.layers else {
+            panic!("catalog config resolves to catalog mode");
+        };
+        let template = rehydrate_service(
+            &mode.datasets[0],
+            &service_layer("xyz-restored", ndvi_graph()),
+            None,
+            &cfg.budget,
+        )
+        .await
+        .expect("the persisted service recompiles");
+        assert_eq!(template.budget, cfg.budget);
+        assert_eq!(
+            template.budget, mode.layers[0].budget,
+            "a restored service and a declared layer serve under the same resolved budget"
+        );
+    }
+
     #[tokio::test]
     async fn serve_catalog_mode_registers_datasets_and_restores_services() {
         let store = TempDir::new("cli-catalog-store");
@@ -1288,6 +1348,7 @@ mod tests {
             udf_store: cfg.udf_store,
             cors_allowed_origins: cfg.cors_allowed_origins,
             read_only: false,
+            budget: cfg.budget,
         };
         serve_catalog_on(&shared, mode, catalog.clone(), ready(()))
             .await
@@ -1343,6 +1404,7 @@ mod tests {
             udf_store: cfg.udf_store,
             cors_allowed_origins: cfg.cors_allowed_origins,
             read_only: false,
+            budget: cfg.budget,
         };
         let err = serve_catalog_on(&shared, mode, MemoryCatalog::default(), ready(()))
             .await
