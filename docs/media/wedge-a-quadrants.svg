@@ -69,23 +69,26 @@ on GitHub light and dark.
   <!-- xpublish-tiles: rendering/styling only x dynamic by design -->
   <circle cx="226" cy="246" r="7" fill="#6e7781"/>
   <text x="226" y="230" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1f2328">xpublish-tiles</text>
-  <text x="226" y="268" text-anchor="middle" font-size="10.5" fill="#57606a">OGC Tiles &amp; WMS straight from</text>
-  <text x="226" y="281" text-anchor="middle" font-size="10.5" fill="#57606a">Xarray, no pre-rendering step</text>
+  <text x="226" y="267" text-anchor="middle" font-size="10.5" fill="#57606a">OGC Tiles &amp; WMS</text>
+  <text x="226" y="279" text-anchor="middle" font-size="10.5" fill="#57606a">straight from Xarray,</text>
+  <text x="226" y="291" text-anchor="middle" font-size="10.5" fill="#57606a">no pre-rendering step</text>
 
   <!-- TiTiler: operator-registered code x dynamic by design -->
   <circle cx="530" cy="246" r="7" fill="#6e7781"/>
   <text x="530" y="230" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1f2328">TiTiler</text>
-  <text x="530" y="268" text-anchor="middle" font-size="10.5" fill="#57606a">numexpr expressions +</text>
-  <text x="530" y="281" text-anchor="middle" font-size="10.5" fill="#57606a">algorithms registered at deploy time</text>
+  <text x="530" y="267" text-anchor="middle" font-size="10.5" fill="#57606a">numexpr expressions +</text>
+  <text x="530" y="279" text-anchor="middle" font-size="10.5" fill="#57606a">algorithms registered</text>
+  <text x="530" y="291" text-anchor="middle" font-size="10.5" fill="#57606a">at deploy time</text>
 
   <!-- openEO backends: UDFs x on-demand services; dashed whisker to batch row -->
-  <line x1="834" y1="358" x2="834" y2="449" stroke="#6e7781" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <line x1="834" y1="399" x2="834" y2="449" stroke="#6e7781" stroke-width="1.5" stroke-dasharray="4 4"/>
   <circle cx="834" cy="456" r="5" fill="#ffffff" stroke="#6e7781" stroke-width="1.5"/>
   <circle cx="834" cy="351" r="7" fill="#6e7781"/>
-  <text x="818" y="341" text-anchor="end" font-size="12.5" font-weight="600" fill="#1f2328">openEO backends</text>
-  <text x="818" y="356" text-anchor="end" font-size="10.5" fill="#57606a">process graphs + UDFs; XYZ/WMS</text>
-  <text x="818" y="369" text-anchor="end" font-size="10.5" fill="#57606a">secondary services where implemented</text>
-  <text x="818" y="460" text-anchor="end" font-size="10.5" fill="#57606a">batch-first delivery</text>
+  <text x="834" y="335" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1f2328">openEO backends</text>
+  <text x="834" y="370" text-anchor="middle" font-size="10.5" fill="#57606a">process graphs + UDFs;</text>
+  <text x="834" y="382" text-anchor="middle" font-size="10.5" fill="#57606a">XYZ/WMS secondary</text>
+  <text x="834" y="394" text-anchor="middle" font-size="10.5" fill="#57606a">services where implemented</text>
+  <text x="834" y="476" text-anchor="middle" font-size="10.5" fill="#57606a">batch-first delivery</text>
 
   <!-- Swath through M8: runtime graphs x measured+traced (the position the
        diamond moved from — hollow, so the move itself is legible) -->
@@ -100,7 +103,7 @@ on GitHub light and dark.
     </marker>
   </defs>
   <line x1="699" y1="141" x2="817" y2="141" stroke="#0969da" stroke-width="1.5" marker-end="url(#moveArrow)"/>
-  <text x="758" y="136" text-anchor="middle" font-size="10.5" fill="#0969da">M9: run_udf (ADR 0018)</text>
+  <text x="750" y="119" text-anchor="end" font-size="10.5" fill="#0969da">M9: run_udf (ADR 0018)</text>
 
   <!-- Swath now: runtime graphs + sandboxed user code x measured+traced -->
   <path d="M 834 130 L 845 141 L 834 152 L 823 141 Z" fill="#0969da"/>

@@ -26,7 +26,8 @@ light background so it renders identically on GitHub light and dark.
   <!-- ============ the gap beyond the frontier ============ -->
   <path d="M 150 140 C 400 195, 660 275, 890 405 L 890 88 L 150 88 Z" fill="#ddf4ff" opacity="0.6"/>
   <path d="M 150 140 C 400 195, 660 275, 890 405" fill="none" stroke="#57606a" stroke-width="1.5" stroke-dasharray="6 5"/>
-  <text x="484" y="254" font-size="11" fill="#57606a">the single-system frontier today</text>
+  <text x="688" y="325" text-anchor="end" font-size="11" fill="#57606a">the single-system</text>
+  <text x="688" y="338" text-anchor="end" font-size="11" fill="#57606a">frontier today</text>
 
   <text x="470" y="108" text-anchor="middle" font-size="12" font-style="italic" fill="#0969da">reachable today only by hand-wiring</text>
   <text x="470" y="124" text-anchor="middle" font-size="12" font-style="italic" fill="#0969da">several projects per deployment</text>
@@ -42,8 +43,9 @@ light background so it renders identically on GitHub light and dark.
   <!-- xpublish-tiles -->
   <circle cx="205" cy="152" r="7" fill="#6e7781"/>
   <text x="205" y="180" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1f2328">xpublish-tiles</text>
-  <text x="205" y="196" text-anchor="middle" font-size="10.5" fill="#57606a">dynamic OGC Tiles &amp; WMS from Xarray;</text>
-  <text x="205" y="209" text-anchor="middle" font-size="10.5" fill="#57606a">renders &amp; styles existing variables</text>
+  <text x="205" y="196" text-anchor="middle" font-size="10.5" fill="#57606a">dynamic OGC Tiles &amp; WMS</text>
+  <text x="205" y="209" text-anchor="middle" font-size="10.5" fill="#57606a">from Xarray; renders &amp;</text>
+  <text x="205" y="222" text-anchor="middle" font-size="10.5" fill="#57606a">styles existing variables</text>
 
   <!-- TiTiler -->
   <circle cx="350" cy="190" r="7" fill="#6e7781"/>
@@ -55,9 +57,9 @@ light background so it renders identically on GitHub light and dark.
   <line x1="858" y1="397" x2="858" y2="463" stroke="#6e7781" stroke-width="1.5" stroke-dasharray="4 4"/>
   <circle cx="858" cy="390" r="7" fill="#ffffff" stroke="#6e7781" stroke-width="2"/>
   <circle cx="858" cy="470" r="7" fill="#6e7781"/>
-  <text x="840" y="380" text-anchor="end" font-size="12.5" font-weight="600" fill="#1f2328">openEO backends</text>
-  <text x="840" y="396" text-anchor="end" font-size="10.5" fill="#57606a">&#9675; XYZ/WMS secondary services, on demand,</text>
-  <text x="840" y="409" text-anchor="end" font-size="10.5" fill="#57606a">where a backend implements them</text>
+  <text x="840" y="394" text-anchor="end" font-size="12.5" font-weight="600" fill="#1f2328">openEO backends</text>
+  <text x="840" y="410" text-anchor="end" font-size="10.5" fill="#57606a">&#9675; XYZ/WMS secondary services, on demand,</text>
+  <text x="840" y="423" text-anchor="end" font-size="10.5" fill="#57606a">where a backend implements them</text>
   <text x="840" y="474" text-anchor="end" font-size="10.5" fill="#57606a">&#9679; batch-first: arbitrary graphs + UDFs as jobs</text>
 
   <!-- ============ Swath, beyond the frontier ============ -->
