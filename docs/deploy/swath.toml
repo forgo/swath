@@ -17,12 +17,13 @@ watch-dir = "/data/drop"
 [budget]
 # Refuse a live render estimated over ~50 MB of source reads — a public
 # instance never pays for a pathological request; the planner answers
-# with a problem, not a stall (docs/CONFIG.md). Honesty note from the
-# #212 rehearsal (README.md, findings): this table governs the DECLARED
-# layers below; a published openEO service and the preview run under the
-# binary's built-in budget (100 M fuel per tile, the 250 ms epoch
-# backstop, the preview's own byte ceiling) until the follow-up lands.
+# with a problem, not a stall (docs/CONFIG.md). Since PR #275 this table
+# governs published openEO services and previews too, so the fuel cap
+# below is what user code actually gets on a public instance (the 250 ms
+# epoch backstop and 64 MiB memory cap are the binary's fixed floor; the
+# preview keeps its own tighter byte ceiling, ADR 0014).
 max-estimated-live-bytes = 50000000
+max-udf-fuel-per-tile = 50000000
 
 [[datasets]]
 id = "hls-s30"

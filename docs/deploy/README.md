@@ -114,9 +114,10 @@ Torn down with `docker compose --profile seed down -v`.
    `--max-udf-fuel-per-tile` / `--max-estimated-live-bytes` govern *declared* layers only.
    Reproduced: with `[budget] max-udf-fuel-per-tile = 10000000` the reference module (~12.3 M
    fuel) still rendered a never-seen frame through the service and the preview answered 200.
-   Consequence for this recipe: the fuel cap on user code is the binary's built-in 100 M (+ the
-   250 ms epoch backstop, 64 MiB), stated honestly in `swath.toml`; the reverse proxy's
-   per-IP and body limits carry the rest until #272 lands.
+   Resolved by PR #275 before this recipe merged: published services and previews now resolve
+   their budget like declared layers (defaults → `[budget]` → global flags), so the
+   `max-udf-fuel-per-tile` in `swath.toml` genuinely caps user code on a public instance; the
+   reverse proxy's per-IP and body limits remain the outer layer.
 2. **Absent write routes answer 405 where a read route shares the path** (`/services`,
    `/datasets/{id}/granules`), 404 where nothing does (`POST /datasets`). Both are "absent, not
    403'd" per [`ENDPOINTS.md`](../ENDPOINTS.md); the capabilities document lists neither.
