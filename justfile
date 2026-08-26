@@ -447,6 +447,27 @@ lint-web:
 test-web:
     cd web && pnpm run test
 
+# The web half of `just check` (issue #271): exactly what CI's `web` job
+# runs — biome lint, tsc typecheck, vitest unit tests — so a broken `.ts`
+# can't pass the local gate and redden CI. Needs `just setup-web` (deps +
+# chromium). The web toolchain is optional for Rust-only work, so no pnpm
+# on PATH is a loud SKIP (exit 0, the test-referencer pattern — never a
+# silent pass); pnpm present but deps not installed is a FAIL that names
+# the fix, because CI will run these regardless.
+check-web:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v pnpm >/dev/null; then
+        echo "SKIP check-web: pnpm not on PATH — CI's web job (lint, typecheck,"
+        echo "  vitest) will still run. Install node 24 + pnpm, then \`just setup-web\`."
+        exit 0
+    fi
+    if [ ! -d web/node_modules ]; then
+        echo "FAIL check-web: web/node_modules missing — run \`just setup-web\`." >&2
+        exit 1
+    fi
+    just lint-web test-web
+
 # The full production build (issue #103): the web bundle (vite, into
 # web/dist), then the release binary embedding it (swath-cli's build
 # script stages web/dist; feature `embedded-ui` is default-on). The result
@@ -1217,5 +1238,9 @@ docs-words:
 publish-dry:
     cargo publish --dry-run --allow-dirty         -p swath-manifest -p swath-planner -p swath-referencer -p swath-warp -p swath-udf-guest
 
-# The one-command gate: everything CI enforces.
-check: fmt-check lint machete test deny zizmor reuse udf-fixtures-verify publish-dry
+# The one-command gate: everything CI enforces, web included (check-web
+# mirrors CI's `web` job; issue #271). check-fast/test-fast stay Rust-only
+# by design — they are the libhdf5 opt-out for the Rust dev loop, not a
+# gate (see the fast-profile note above); the web half lives here and in
+# `just check-web` alone.
+check: fmt-check lint machete test check-web deny zizmor reuse udf-fixtures-verify publish-dry
