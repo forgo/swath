@@ -1,0 +1,64 @@
+# Traefik dynamic configuration for the read-only demo (docs/deploy/compose.yml).
+# Go-templated by the file provider: SWATH_DOMAIN comes from the traefik
+# service's environment. Two routers over one upstream — the preview
+# route (`POST /result`, ADR 0014's bounded synchronous render, the one
+# compute-shaped POST a read-only instance still answers) gets its own,
+# tighter limits; everything else (tiles, metadata, the viewer, the
+# /traces SSE stream) gets the per-IP viewer budget.
+#
+# Rate limits are per source IP (Traefik's default: the peer address). Behind
+# a cloud load balancer that rewrites the peer, set
+# `sourceCriterion.ipStrategy.depth` to the number of trusted proxies so
+# X-Forwarded-For is honored — otherwise every visitor shares one bucket.
+
+http:
+  routers:
+    swath-preview:
+      rule: Host(`{{ env "SWATH_DOMAIN" }}`) && Path(`/result`)
+      entryPoints: [websecure]
+      service: swath
+      middlewares: [preview-limit, preview-body, security-headers]
+      tls:
+        certResolver: le
+    swath:
+      rule: Host(`{{ env "SWATH_DOMAIN" }}`)
+      entryPoints: [websecure]
+      service: swath
+      middlewares: [viewer-limit, security-headers]
+      tls:
+        certResolver: le
+
+  middlewares:
+    # A map viewport fetches a few dozen tiles in one burst; sustained 60/s
+    # from one address is not a browser. Excess answers 429.
+    viewer-limit:
+      rateLimit:
+        average: 60
+        burst: 120
+        period: 1s
+    # Previews are whole renders through user graphs (and, with run_udf,
+    # user code under the fuel budget): two per second, a burst of four.
+    preview-limit:
+      rateLimit:
+        average: 2
+        burst: 4
+        period: 1s
+    # A preview body is a process graph — kilobytes; an inline UDF module
+    # (data: URL) is a few KiB more. 256 KiB caps it well above both.
+    preview-body:
+      buffering:
+        maxRequestBodyBytes: 262144
+        memRequestBodyBytes: 262144
+    security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: strict-origin-when-cross-origin
+
+  services:
+    swath:
+      loadBalancer:
+        servers:
+          - url: http://swath:8080

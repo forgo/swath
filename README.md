@@ -5,12 +5,17 @@
 **Satellite data comes in, and is immediately live on a map — and a data scientist can
 derive a new product from that live flow and publish it the same way.**
 
-![Capability-ladder diagram: derived products through the public API (X) versus dynamic tile serving (Y). TiTiler and xpublish-tiles sit at "dynamic tiles by design" on serving but at deploy-time or rendering-only rungs on derived products; openEO backends reach runtime graphs plus UDFs on derived products but deliver batch-first. Swath sits at "standard process graphs at runtime" served as measured, traced dynamic tiles — with the open frontier, UDFs at live latency, marked beyond it.](docs/media/wedge-a-quadrants.svg)
+![Capability-ladder diagram: derived products through the public API (X) versus dynamic tile serving (Y). TiTiler and xpublish-tiles sit at "dynamic tiles by design" on serving but at deploy-time or rendering-only rungs on derived products; openEO backends reach runtime graphs plus UDFs on derived products but deliver batch-first. Swath sits in the top-right corner — runtime graphs plus user code (run_udf) served as measured, traced dynamic tiles — the corner marked as the open frontier through M8, with an arrow from its earlier graphs-only position.](docs/media/wedge-a-quadrants.svg)
 
 That upper-right quadrant is the wedge: openEO backends accept a user's process graph at
 runtime but deliver batch-first; TiTiler and xpublish-tiles serve dynamic tiles by design but
 neither accepts a user's process graph at runtime. Swath does both — a standard openEO graph in, live
-measured tiles out. Every placement in the diagram is graded against each project's own
+measured tiles out. Since M9 the graph may carry user code: openEO `run_udf` runs as
+sandboxed, fuel-metered WASM in the live tile path (ADR 0018), the corner the diagram marked as
+an open frontier through M8. Under a UDF storm the control plane held at p99
+<!-- number:udf-storm-healthz-p99 -->0.96 ms<!-- /number:udf-storm-healthz-p99 -->, and a
+runaway module was refused with zero collateral ([`docs/PERFORMANCE.md`](docs/PERFORMANCE.md)
+§9). Every placement in the diagram is graded against each project's own
 documentation, with rung definitions and pinned citations in
 [`docs/media/wedge.notes.md`](docs/media/wedge.notes.md) and the full cited capability matrix
 in [`docs/COMPARISON.md`](docs/COMPARISON.md).
@@ -28,7 +33,7 @@ published image passed this exact command in CI before pushing
 ![Swath viewer after publishing an authored layer: the openEO authoring panel open in the left rail with NDVI process steps and a plain-language narrative of the graph, and the newly published service selected in the layer rail, rendering a colormapped NDVI map live.](docs/media/screenshots/10-authoring-published.png)
 
 *An authored openEO NDVI graph, published through the UI and serving on the map immediately —
-no reload, nothing pre-baked. Twelve captured, perceptual-diff-verified screenshots in
+no reload, nothing pre-baked. Fourteen captured, perceptual-diff-verified screenshots in
 [`docs/media/screenshots/`](docs/media/screenshots/index.md).*
 
 More ways in — the full ingest-to-pixel demo from a checkout, and authoring your first layer

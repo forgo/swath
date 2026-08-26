@@ -224,7 +224,8 @@ is a maintainer lane-decision on committed evidence (the pooled-lane executor be
 
 Bounded honesty: **fixture scale** (~1.4 MB of fixtures, one 8 MB granule — nothing about
 multi-terabyte catalogs or granules that dwarf RAM); **single node, loopback** (no
-TLS/CDN/scaling claims); **local storage**; **tested concurrency only** (up to c=32,
+TLS/CDN/scaling claims — the read-only recipe in `deploy/README.md` is exercised, not
+measured); **local storage**; **tested concurrency only** (up to c=32,
 seconds-to-minutes windows); **microbenches are isolated stages** (§6 samples interference);
 **one machine, uncontrolled** (diff same-machine baselines only); **the
 <!-- number:ref-ratio-approx -->~40×<!-- /number:ref-ratio-approx --> ratio is per-invocation,

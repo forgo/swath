@@ -25,7 +25,20 @@ diagrams, `PERFORMANCE.md`, the `v0.1.0-alpha.1` prerelease. (M0-M5 complete.)
 self-description around the now-existing evidence and killing every audit-flagged drift
 (#117-#126: README, QUICKSTART, operator guide, COMPARISON, the TiTiler head-to-head,
 ARCHITECTURE/EXTENDING/CHARTER/ENGINEERING/REQUIREMENTS reconciliation, the screenshot suite,
-this roadmap).
+this roadmap). **M7–M8**: the time dimension, overview generation, the dataset API, and the
+Icechunk interop — each carries its evidence on its §3 item below. **M9 — `run_udf`: user
+code at live latency** ([ADR 0018](decisions/0018-run-udf-sandboxed-wasm.md); complete, the
+public deploy deferred by maintainer decision 2026-08-25 — item 8). Exit criteria, each with
+its committed evidence: *determinism* — byte-identical, fuel-reproducible execution
+(`crates/adapters/swath-udf-wasmtime/tests/determinism.rs`, `engine_gate.rs`, the #259
+golden set); *the tile path under a fuel budget* — a `run_udf` NDVI byte-identical to band
+math with its cost in the trace (`crates/swath-api/tests/udf_tiles.rs`, #265); *fuel-bomb
+refusal* — `fuel_exhaustion_is_a_pinned_rfc7807_problem` (same file) and `POST /result`'s
+`ProcessGraphComplexity` (#267, `crates/swath-api/tests/openeo_result.rs`); *load under the
+ADR 0012 guard* — the UDF storm and the fuel bomb with `/healthz` + SSE probes
+([`PERFORMANCE.md`](PERFORMANCE.md) §9, [`perf/load-udf-baseline.md`](perf/load-udf-baseline.md),
+#268); *deployability* — the read-only recipe exercised end to end
+([`deploy/README.md`](deploy/README.md), #212).
 
 ## 2. Deferral inventory (canonical)
 
@@ -89,8 +102,14 @@ it** (the PR that introduced this file carries the approval checkbox).
 7. **Auth (OIDC/RBAC)** — Charter Phase 3; gates multi-tenancy, *writable* demos (maintainer
    decision 2026-08-12), the openEO conformance class.
 8. **Hosted public demo** — read-only ships auth-less on `--read-only` (#198); a writable
-   demo needs auth (7) and the ops learnings (9).
-9. **Performance beyond the laptop** — the gaps `PERFORMANCE.md` §9 declines to claim.
+   demo needs auth (7) and the ops learnings (9). *Amendment (maintainer, 2026-08-25, #212):
+   a read-only demo is not gated on auth — its recipe (`--read-only`, the UDF module store,
+   TLS, per-IP rate limits, preview behind conservative limits) shipped and was exercised end
+   to end in [`deploy/README.md`](deploy/README.md); the hosted URL itself is re-parked to
+   the auth era — the maintainer picks a host when (7) lands, and the CI-tested one-liner
+   stays the demo until then.*
+9. **Performance beyond the laptop** — the gaps `PERFORMANCE.md` §10 declines to claim. The
+   #212 recipe run's ops learnings (`deploy/README.md`, findings) are the first input.
 10. **Cache operations bundle** (rows 2, 3, 5) — real together, with mosaics and storage
     pressure.
 11. **OGC API - EDR** — rides on the time dimension (3).
