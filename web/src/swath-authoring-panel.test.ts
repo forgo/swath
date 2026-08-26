@@ -742,6 +742,35 @@ test("publishing posts the composed graph and announces the created service", as
   });
 });
 
+test("publishing keeps the draft and its preview on the canvas (issue #270)", async () => {
+  const stub = fetchStub({
+    post: { status: 201, headers: { "openeo-identifier": "xyz-abc123def456" } },
+  });
+  const panel = await mount(stub);
+  authorNdvi(panel);
+  await expect.poll(() => previewImage(panel)?.getAttribute("src") ?? "").toMatch(/^blob:/);
+  const previewed = previewImage(panel)?.getAttribute("src");
+
+  submitButton(panel).click();
+  await expect
+    .poll(() =>
+      stub.requests.some((request) => request.method === "POST" && request.url === "/services"),
+    )
+    .toBe(true);
+  // The post-publish re-render (and the services refresh after it)
+  // re-attach the SAME preview: the draft is unchanged, so the frame is
+  // shown with its image, not an empty one, and no re-preview is posted.
+  await expect
+    .poll(() => stub.requests.filter((request) => request.url === "/services").length)
+    .toBeGreaterThan(2);
+  expect(panel.querySelector<HTMLElement>("#swath-authoring-preview")?.hidden).toBe(false);
+  expect(previewImage(panel)?.hidden).toBe(false);
+  expect(previewImage(panel)?.getAttribute("src")).toBe(previewed);
+  expect(previewNote(panel)).toContain("Preview");
+  expect(previewPosts(stub)).toHaveLength(1);
+  expect(panel.buildGraph()).toEqual(NDVI_GRAPH);
+});
+
 test("the NDVI template composes a valid, submittable pipeline", async () => {
   const panel = await mount(fetchStub({}));
   const template = panel.querySelector<HTMLButtonElement>(".swath-authoring-template");

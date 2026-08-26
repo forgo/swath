@@ -45,8 +45,10 @@
 //!   path as `POST /services` (identical diagnostics — same codes for
 //!   the same graph on either route) and answers **one** small
 //!   overview-backed `image/png` render covering the graph's
-//!   `spatial_extent` (the collection extent when null/absent) — not the
-//!   spec's full extent at native resolution. The render is admitted
+//!   `spatial_extent` (when null/absent: the footprint of the granule the
+//!   preview renders — the collection's real coverage, not a
+//!   config-declared placeholder box) — not the spec's full extent at
+//!   native resolution. The render is admitted
 //!   through the planner's `max_estimated_live_bytes` cost model; when
 //!   the estimate exceeds the preview budget and nothing cheaper can
 //!   serve, the server refuses with the spec's `ProcessGraphComplexity`
@@ -1166,7 +1168,12 @@ async fn delete_service<S, R, C: Catalog>(
 /// through [`lower_graph`], the exact `POST /services` path — same
 /// narrowing, same typed diagnostics — and answers **one** small
 /// overview-backed `image/png` render of [`preview_tile`] over the
-/// graph's `spatial_extent` (collection extent when null), under a
+/// graph's `spatial_extent` — or, when that is null, over what the
+/// collection actually covers: the footprint of the granule the preview
+/// resolves to (a config-declared dataset advertises a whole-world
+/// placeholder box until a registration derives its extent, ROADMAP
+/// row 15, and a preview of the placeholder is one blank root tile with
+/// the granule sub-pixel inside it). Rendered under a
 /// budget whose `max_estimated_live_bytes` ceiling refuses over-budget
 /// live reads with the spec's `ProcessGraphComplexity`. Nothing is
 /// persisted and nothing is published to the trace bus: a preview has no
@@ -1225,8 +1232,9 @@ where
         ..template.budget
     };
 
-    let bbox = preview_bbox(&process, &dataset)?;
-    let coord = preview_tile(&bbox);
+    // A malformed extent refuses before the catalog is asked (the
+    // argument's own diagnostic, not a resolution error).
+    let extent = preview_extent(&process)?;
     let resolved = app
         .provider
         // Previews render the latest granule (fully open window): the
@@ -1235,6 +1243,15 @@ where
         .resolve_template(&template, None)
         .await
         .map_err(preview_resolution_error)?;
+    // A named extent is shown whole; with none named, the frame fits the
+    // granule this preview renders — the collection's real coverage at
+    // preview time — and the advertised extent stands in only for a
+    // resolution that carries no footprint.
+    let coord = match (extent, resolved.granule_bbox) {
+        (Some(bbox), _) => preview_tile(&bbox),
+        (None, Some(footprint)) => preview_footprint_tile(&footprint),
+        (None, None) => preview_tile(&dataset.extent.bbox),
+    };
     let request = resolved.tile_request(coord);
     // The same executor the graph's module was just registered with
     // (#205); a deployment without UDF wiring could not have compiled a
@@ -1347,11 +1364,12 @@ fn preview_udf_error(udf: &UdfError) -> OpenEoError {
 
 /// The preview window (ADR 0014): the graph's `spatial_extent` — read
 /// from its (first) `load_collection` node, the same node
-/// [`loaded_collection`] reads — when present and non-null, else the
-/// referenced collection's extent. A malformed extent is refused with
-/// the standardized `ProcessParameterInvalid` (the tile path ignores the
-/// argument, so only the preview validates it).
-fn preview_bbox(process: &Value, dataset: &Dataset) -> Result<Bbox, OpenEoError> {
+/// [`loaded_collection`] reads — validated: `Ok(Some)` for a well-formed
+/// box, `Ok(None)` when the node names none (null or absent — the caller
+/// then frames the resolved granule), and the standardized
+/// `ProcessParameterInvalid` for a malformed one (the tile path ignores
+/// the argument, so only the preview validates it).
+fn preview_extent(process: &Value) -> Result<Option<Bbox>, OpenEoError> {
     let nodes = process.get("process_graph").unwrap_or(process).as_object();
     let extent = nodes.and_then(|nodes| {
         nodes.values().find_map(|node| {
@@ -1361,7 +1379,7 @@ fn preview_bbox(process: &Value, dataset: &Dataset) -> Result<Bbox, OpenEoError>
         })
     });
     let Some(extent) = extent.filter(|extent| !extent.is_null()) else {
-        return Ok(dataset.extent.bbox);
+        return Ok(None);
     };
     let invalid = |detail: String| {
         OpenEoError::new(StatusCode::BAD_REQUEST, "ProcessParameterInvalid", detail)
@@ -1387,39 +1405,44 @@ fn preview_bbox(process: &Value, dataset: &Dataset) -> Result<Bbox, OpenEoError>
              got west..east {west}..{east}, south..north {south}..{north}",
         )));
     }
-    Ok(Bbox {
+    Ok(Some(Bbox {
         west,
         south,
         east,
         north,
-    })
+    }))
 }
 
-/// The preview's target: the **deepest** `WebMercatorQuad` tile that
-/// fully contains the (Web-Mercator-clamped) bbox — one small render,
-/// never a mosaic. An extent straddling a tile boundary is served by the
+/// Web Mercator unit-square fractions of a lon/lat point, clamped into
+/// the projection's domain.
+fn mercator_fraction(lon: f64, lat: f64) -> (f64, f64) {
+    let lon = lon.clamp(-180.0, 180.0);
+    let lat = lat.clamp(-WEB_MERCATOR_MAX_LAT, WEB_MERCATOR_MAX_LAT);
+    let x = (lon + 180.0) / 360.0;
+    let y = (1.0 - lat.to_radians().tan().asinh() / std::f64::consts::PI) / 2.0;
+    (x.clamp(0.0, 1.0), y.clamp(0.0, 1.0))
+}
+
+/// The `WebMercatorQuad` matrix index of a unit-square fraction at `z`.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the fraction is clamped into [0, 1] and z ≤ 24, so \
+              fraction × 2^z is a non-negative integer ≤ 2^24"
+)]
+fn matrix_index(fraction: f64, z: u8) -> u32 {
+    let scale = f64::from(1_u32 << z);
+    ((fraction * scale) as u32).min((1_u32 << z) - 1)
+}
+
+/// The preview's target for a *named* `spatial_extent`: the **deepest**
+/// `WebMercatorQuad` tile that fully contains the (Web-Mercator-clamped)
+/// bbox — one small render, never a mosaic, and the whole box the author
+/// asked for. An extent straddling a tile boundary is served by the
 /// parent tile that contains it whole; descent stops at
 /// [`PREVIEW_MAX_ZOOM`], the tiling scheme's deepest matrix.
 fn preview_tile(bbox: &Bbox) -> TileCoord {
-    /// Web Mercator unit-square fractions of a lon/lat point, clamped
-    /// into the projection's domain.
-    fn fraction(lon: f64, lat: f64) -> (f64, f64) {
-        let lon = lon.clamp(-180.0, 180.0);
-        let lat = lat.clamp(-WEB_MERCATOR_MAX_LAT, WEB_MERCATOR_MAX_LAT);
-        let x = (lon + 180.0) / 360.0;
-        let y = (1.0 - lat.to_radians().tan().asinh() / std::f64::consts::PI) / 2.0;
-        (x.clamp(0.0, 1.0), y.clamp(0.0, 1.0))
-    }
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "the fraction is clamped into [0, 1] and z ≤ 24, so \
-                  fraction × 2^z is a non-negative integer ≤ 2^24"
-    )]
-    fn index(fraction: f64, z: u8) -> u32 {
-        let scale = f64::from(1_u32 << z);
-        ((fraction * scale) as u32).min((1_u32 << z) - 1)
-    }
+    let (fraction, index) = (mercator_fraction, matrix_index);
     let (min_x, min_y) = fraction(bbox.west, bbox.north); // NW corner
     let (max_x, max_y) = fraction(bbox.east, bbox.south); // SE corner
     let mut chosen = TileCoord::new(0, 0, 0).expect("the z0 root tile is addressable");
@@ -1429,6 +1452,32 @@ fn preview_tile(bbox: &Bbox) -> TileCoord {
             break;
         }
         chosen = TileCoord::new(z, x, y).expect("indices are within the matrix by construction");
+    }
+    chosen
+}
+
+/// The preview's target when the graph names *no* `spatial_extent`: the
+/// footprint of the granule the preview renders, at its own scale — the
+/// **deepest** `WebMercatorQuad` tile at least as large as the footprint
+/// (side for side, in Mercator fractions), the one containing the
+/// footprint's center. The containing-tile rule of [`preview_tile`]
+/// serves a named box whole, but a footprint straddling a boundary at
+/// every deep zoom would climb to a tile where it is a few pixels
+/// (issue #270: the fixture granule is a sliver of z7, invisible at
+/// thumbnail size); with nothing named, the author asked to see the
+/// data, so the frame fits the data and a straddling edge is cropped.
+fn preview_footprint_tile(bbox: &Bbox) -> TileCoord {
+    let (min_x, min_y) = mercator_fraction(bbox.west, bbox.north); // NW corner
+    let (max_x, max_y) = mercator_fraction(bbox.east, bbox.south); // SE corner
+    let side = (max_x - min_x).max(max_y - min_y);
+    let (center_x, center_y) = (f64::midpoint(min_x, max_x), f64::midpoint(min_y, max_y));
+    let mut chosen = TileCoord::new(0, 0, 0).expect("the z0 root tile is addressable");
+    for z in 1..=PREVIEW_MAX_ZOOM {
+        if 1.0 / f64::from(1_u32 << z) < side {
+            break;
+        }
+        chosen = TileCoord::new(z, matrix_index(center_x, z), matrix_index(center_y, z))
+            .expect("indices are within the matrix by construction");
     }
     chosen
 }
@@ -1446,8 +1495,8 @@ mod tests {
     use swath_core::catalog::Bbox as DomainBbox;
 
     use super::{
-        DomainLayer, compile_context, compile_service_layer, loaded_collection, preview_bbox,
-        preview_tile, service_id,
+        DomainLayer, compile_context, compile_service_layer, loaded_collection, preview_extent,
+        preview_footprint_tile, preview_tile, service_id,
     };
 
     #[test]
@@ -1491,12 +1540,37 @@ mod tests {
         assert_eq!(coord.z, super::PREVIEW_MAX_ZOOM);
     }
 
-    /// `spatial_extent` selects the preview window; null/absent falls
-    /// back to the collection extent; malformed extents refuse with the
-    /// standardized code.
+    /// With no extent named, the frame fits the granule: the deepest tile
+    /// at least as large as the footprint, around its center — the
+    /// fixture granule fills about half of z10 (391 px at z10 ≈ 0.35°),
+    /// where the containing-tile rule left it a sliver of z7.
     #[test]
-    fn preview_bbox_reads_the_spatial_extent_or_the_collection() {
-        let dataset = hls_dataset();
+    fn preview_footprint_tile_fits_the_granule_at_its_own_scale() {
+        let bbox = |west, south, east, north| DomainBbox {
+            west,
+            south,
+            east,
+            north,
+        };
+        let coord = preview_footprint_tile(&bbox(-105.537, 39.1954, -105.3581, 39.3345));
+        assert_eq!((coord.z, coord.x, coord.y), (10, 212, 390));
+        // The whole world still only fits the root…
+        let coord = preview_footprint_tile(&bbox(-180.0, -90.0, 180.0, 90.0));
+        assert_eq!((coord.z, coord.x, coord.y), (0, 0, 0));
+        // …while a box straddling the prime meridian no longer climbs to
+        // it: z7 tiles are 2.8° wide, the last at least as large as 2°.
+        let coord = preview_footprint_tile(&bbox(-1.0, 10.0, 1.0, 12.0));
+        assert_eq!(coord.z, 7);
+        // A degenerate point descends to the deepest matrix served.
+        let coord = preview_footprint_tile(&bbox(-105.4, 39.3, -105.4, 39.3));
+        assert_eq!(coord.z, super::PREVIEW_MAX_ZOOM);
+    }
+
+    /// `spatial_extent` selects the preview window; null/absent names
+    /// none (the handler then frames the resolved granule); malformed
+    /// extents refuse with the standardized code.
+    #[test]
+    fn preview_extent_reads_the_spatial_extent_or_names_none() {
         let graph = |extent: Value| {
             json!({ "process_graph": {
                 "load": { "process_id": "load_collection", "arguments": {
@@ -1505,13 +1579,13 @@ mod tests {
             }})
         };
         // Explicit extent wins.
-        let explicit = preview_bbox(
-            &graph(json!({ "west": -105.5, "south": 39.2, "east": -105.4, "north": 39.3 })),
-            &dataset,
-        )
-        .expect("explicit extent parses");
+        let explicit = preview_extent(&graph(
+            json!({ "west": -105.5, "south": 39.2, "east": -105.4, "north": 39.3 }),
+        ))
+        .expect("explicit extent parses")
+        .expect("explicit extent is named");
         assert_eq!((explicit.west, explicit.north), (-105.5, 39.3));
-        // Null and absent fall back to the collection extent.
+        // Null and absent name no extent.
         for process in [
             graph(Value::Null),
             json!({ "process_graph": { "load": {
@@ -1519,8 +1593,7 @@ mod tests {
                 "arguments": { "id": "hls-s30", "bands": ["b8a"] },
             }}}),
         ] {
-            let fallback = preview_bbox(&process, &dataset).expect("fallback parses");
-            assert_eq!(fallback, dataset.extent.bbox);
+            assert_eq!(preview_extent(&process).expect("no extent parses"), None);
         }
         // Malformed: a missing side, a non-numeric side, an inverted box.
         for extent in [
@@ -1528,7 +1601,7 @@ mod tests {
             json!({ "west": "far", "south": 39.2, "east": -105.4, "north": 39.3 }),
             json!({ "west": -105.4, "south": 39.2, "east": -105.5, "north": 39.3 }),
         ] {
-            let err = preview_bbox(&graph(extent), &dataset).expect_err("malformed refuses");
+            let err = preview_extent(&graph(extent)).expect_err("malformed refuses");
             assert_eq!(err.code, "ProcessParameterInvalid");
         }
     }

@@ -1,7 +1,7 @@
 {
   "schema": "swath-screenshots/1",
-  "git_sha": "d31e01f1e1fae8c6e9ef78a89cd3f5f651ba4cc2",
-  "captured": "2026-08-26T03:46:46.073Z",
+  "git_sha": "cd6c403045c3966e51a57673b8a9147c6ff280f8",
+  "captured": "2026-08-26T05:57:02.963Z",
   "viewport": {
     "width": 1528,
     "height": 860,
@@ -35,49 +35,49 @@
       "caption": "X-ray decision overlay: every tile badged with its render decision and timing; ingest→pixel readout top-left.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "641c77c3ecea7f660fac1bafec6ea6366059bf83408f59b973fca2456c1a2abd"
+      "sha256": "44c4a6841a3ec3ded895e4db18f63f555b391e40334313682b452286c5d234a0"
     },
     {
       "file": "05-xray-why-view.png",
       "caption": "Why-view for one tile: the planner's candidate table — chosen plan, rejected candidates, and the reason for each.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "22264b51a8e39048336c1e2db2f6270cfa69f96807f967f2646111bff96f8c75"
+      "sha256": "7fcacc1e81f1bcd9d9fe247e026505fd2e4f9166b0b1a66a6dd5205cf5224fdb"
     },
     {
       "file": "06-xray-heatmap.png",
       "caption": "Bytes-read heatmap mode: badges bucketed on a log scale, with the legend the overlay itself publishes.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "ec2788b9f57770737c7a90f11c071b463d7d5b8a1299567b8b42770f2ecda0d7"
+      "sha256": "5d1ea7b4afe0c5c49e2b6304adcc80118bc0cc15fc75694ffb7b5effb56396dc"
     },
     {
       "file": "07-xray-trace-feed.png",
       "caption": "Trace feed: the /traces SSE stream as scrollback — every line a render decision, clickable back to its tile.",
       "tolerance": 2,
       "maxBadFrac": 0.06,
-      "sha256": "d8493b1c8d04f0ea7bafd30e67590205558241909bbf1e16a4033ac98851dc51"
+      "sha256": "1e344a0269f4246d145382e485024e2f442bb05785876ea0afef0cc447034636"
     },
     {
       "file": "08-authoring-form.png",
       "caption": "openEO authoring canvas (Model B): cards generated from the server's own GET /processes, bands from the vocabulary, plain-language field help.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "098f60e8c8136d50618a2d56f4bcc84b5304db43c4025aae197bb149ae8a39db"
+      "sha256": "bf07723c64a07c3149cd9b15c59063b0a7f1ee633c7eaa405d63df9bed6289a9"
     },
     {
       "file": "09-authoring-narrative-advanced.png",
       "caption": "NDVI template loaded: the plain-words narrative of the graph, with a step's advanced (defaulted) fields opened.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "3855cf62bec4b26e0869609779ee04dfd8be984459066dc337538c270b4dcef0"
+      "sha256": "dfe6dc366f536509168cd4c76a1e208a9ab96c55f422a9641c330cb78ab808ad"
     },
     {
       "file": "10-authoring-published.png",
       "caption": "Publish flow result: the authored NDVI service appears in the layer rail and serves on the map immediately — no reload.",
       "tolerance": 2,
       "maxBadFrac": 0.02,
-      "sha256": "e3ce4d31d1f41b3a4575593db9bedde71a148f91cd81a8f468dbcf1e8ae6a537"
+      "sha256": "e6ef88e77f7726fe3f4c427a45b53944d961d238a58009aa88f7e6d0ee4cc23d"
     },
     {
       "file": "11-dataset-footprints.png",
@@ -91,21 +91,21 @@
       "caption": "Trace analytics under load: rolling p50/p95 render latency, plan mix, and cache hit rate over the session's tiles.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "cd28633982a336e81464d3a3a536e6d44259e79f5425eebde384c14f1128b3f2"
+      "sha256": "58a67ba534468a55bbb0b6b34f73bf18522a9e16fc7550e11b2b39b198a9300f"
     },
     {
       "file": "13-time-slider-live.png",
       "caption": "Time slider over the Park Fire season, first pass: the scrubbed frame is rendered live — every badge says so, and the analytics card narrates the frame's own plan mix.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "7331d95660565bf9b52b90a3cafe5144fa5a5ecf4abd63548574fc10654499f1"
+      "sha256": "f11abc7d00d4cd58d0936dedf6633f33ac254cd4ebcee7562e758401b64a2cbf"
     },
     {
       "file": "14-time-slider-cached.png",
       "caption": "The same frame revisited: every tile is a cache hit (same granule, same cache entry — ADR 0015 frame identity), which is why the loop replays smoothly.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "c4a5c642e98a9ec05447b2ebca2c9ec8d9f279bf3b728b57af8af466d87f762f"
+      "sha256": "08875bcea4aab22f3c627211e3d4d63ba25181895d3548e3435de5b8639b5e66"
     }
   ]
 }

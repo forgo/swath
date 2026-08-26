@@ -36,7 +36,7 @@
 use core::future::Future;
 
 use swath_core::catalog::{
-    Catalog, CatalogError, DatasetId, Datetime, Granule, GranuleQuery, TimeRange,
+    Bbox, Catalog, CatalogError, DatasetId, Datetime, Granule, GranuleQuery, TimeRange,
 };
 use swath_core::tile::TileCoord;
 use swath_render::TileRequest;
@@ -83,6 +83,13 @@ pub struct ResolvedLayer {
     /// The resolved granule's acquisition datetime (`None` for static
     /// layers) — what the Trace's temporal decision reports (ADR 0015).
     pub granule_datetime: Option<Datetime>,
+    /// The resolved granule's WGS84 footprint (`None` for static layers)
+    /// — where this resolution's pixels actually are, which is what the
+    /// openEO preview (ADR 0014) frames when the graph names no
+    /// `spatial_extent`: a config-declared dataset advertises a
+    /// whole-world placeholder box (ROADMAP row 15), and a preview tile
+    /// of the placeholder is one blank root tile, never the granule.
+    pub granule_bbox: Option<Bbox>,
 }
 
 impl ResolvedLayer {
@@ -162,6 +169,7 @@ impl LayerProvider for LayerRegistry {
             ingested_at: None,
             granule_id: None,
             granule_datetime: None,
+            granule_bbox: None,
         })
     }
 }
@@ -433,6 +441,7 @@ impl<C: Catalog> CatalogLayers<C> {
             ingested_at: granule.ingested_at.clone(),
             granule_id: Some(granule.id.to_string()),
             granule_datetime: Some(granule.datetime.clone()),
+            granule_bbox: Some(granule.bbox),
         })
     }
 }

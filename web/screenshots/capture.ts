@@ -389,6 +389,11 @@ test("authoring publish: the authored layer serves immediately", async ({ page }
       el.scrollTo({ top: 0 });
     });
     await expect(layerButton).toBeVisible();
+    // Publishing leaves the draft (and its preview) on the canvas: the
+    // post-publish re-render re-attaches the preview to a fresh <img>,
+    // so wait for it to decode exactly as shots 08/09 do (issue #270 —
+    // freezing before it lands framed an empty preview).
+    await waitForAuthoringPreview(page);
     await capture(
       page,
       "10-authoring-published.png",

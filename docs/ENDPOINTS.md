@@ -183,7 +183,7 @@ The preview: the openEO synchronous-execute endpoint as a
 #170). The spec-shaped body compiles through the exact `POST /services`
 path — same narrowing, same diagnostics — and answers **one** small
 overview-backed `image/png` render covering the graph's
-`spatial_extent` (the collection's extent when null); nothing is
+`spatial_extent` (null: the rendered granule's footprint); nothing is
 persisted. Debug headers: `x-swath-trace`, and `x-swath-preview-tile`
 naming the tile a published service serves the identical bytes under.
 Compile failures answer the same registry codes as `POST /services`; a
