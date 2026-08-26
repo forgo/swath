@@ -13,7 +13,9 @@ operating summary plus the as-shipped status of every practice._
 Cargo workspace (`crates/`) + `web/` (pnpm) + `python/` (uv workspace) + `prototypes/` (dated,
 immutable) + `docs/`; SHA-pinned workflows and a composite `setup-rust` action. No Bazel-class
 tooling. **Tasks are the contract**: CI never invokes raw tool commands a developer can't run
-identically via `just <recipe>`.
+identically via `just <recipe>`. `just check` is the one-command gate run before every push —
+everything CI enforces, including the web job (`check-web`: biome lint, tsc typecheck, vitest;
+a loud SKIP when pnpm is absent, never a silent pass).
 
 ## 2. Rust standards
 
