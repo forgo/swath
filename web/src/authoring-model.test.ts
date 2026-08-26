@@ -11,8 +11,10 @@ import { expect, test } from "vitest";
 import {
   buildReducerGraph,
   canInsertAt,
+  contextIssue,
   type FormulaRow,
   finalStage,
+  formatMib,
   formulaIssues,
   formulaPhrase,
   insertableAt,
@@ -20,6 +22,9 @@ import {
   locateServerError,
   pickBand,
   transition,
+  UDF_MAX_BYTES,
+  udfDiagnostic,
+  wasmDataUrl,
 } from "./authoring-model.js";
 
 const ALL = new Set([
@@ -148,6 +153,113 @@ test("B2/B3: the formula lowers to the reducer child graph — arithmetic and ar
     arguments: { x: { from_node: "b1" }, y: 2 },
     result: true,
   });
+});
+
+// --- The UDF stage (issue #208, ADR 0018) ---
+
+const WITH_UDF = new Set([...ALL, "run_udf"]);
+
+test("UDF stage: run_udf types like a reduce (loaded cube in, UDF result out), once per graph", () => {
+  // Over the loaded cube: a UDF result, arity unknown to the client and
+  // not needed — the compiler's CubeKind::Udf.
+  expect(transition(LOAD_STAGE, "run_udf")).toEqual({ kind: "udf", scaled: false });
+  // Not over a reduced or scaled cube (the compiler's unscaled_multi).
+  expect(transition({ kind: "gray", scaled: false }, "run_udf")).toBeNull();
+  expect(transition({ kind: "multi", scaled: true }, "run_udf")).toBeNull();
+  // A UDF result feeds nothing but scaling and the output: no second
+  // run_udf (v1's one-per-graph), no NDVI, no formula after it…
+  expect(transition({ kind: "udf", scaled: false }, "run_udf")).toBeNull();
+  expect(transition({ kind: "udf", scaled: false }, "ndvi")).toBeNull();
+  expect(transition({ kind: "udf", scaled: false }, "reduce_dimension")).toBeNull();
+  // …while scaling it is exactly the profile's "its result accepts
+  // only linear_scale_range and a colormap-less save_result".
+  expect(transition({ kind: "udf", scaled: false }, "linear_scale_range")).toEqual({
+    kind: "udf",
+    scaled: true,
+  });
+  expect(transition({ kind: "udf", scaled: true }, "linear_scale_range")).toBeNull();
+});
+
+test("UDF stage: insertable only where the whole pipeline stays valid, and only when served", () => {
+  // A stack without --udf-store serves no run_udf: no chip, anywhere
+  // (the capabilities-driven rule — the table only orders what exists).
+  expect(insertableAt([], 0, ALL)).not.toContain("run_udf");
+  expect(insertableAt([], 0, WITH_UDF)).toEqual([
+    "ndvi",
+    "reduce_dimension",
+    "run_udf",
+    "linear_scale_range",
+  ]);
+  // After NDVI or a formula the cube is gray: no UDF fits after it, and
+  // none before it either (the UDF result cannot feed NDVI).
+  expect(canInsertAt(["ndvi"], 1, "run_udf")).toBe(false);
+  expect(canInsertAt(["ndvi"], 0, "run_udf")).toBe(false);
+  // The UDF pipeline offers exactly the stretch step after the module,
+  // nothing before it (scale-before-UDF is B4 for UDFs), and a second
+  // module nowhere.
+  expect(insertableAt(["run_udf"], 0, WITH_UDF)).toEqual([]);
+  expect(insertableAt(["run_udf"], 1, WITH_UDF)).toEqual(["linear_scale_range"]);
+  expect(finalStage(["run_udf", "linear_scale_range"])).toEqual({ kind: "udf", scaled: true });
+  for (const gap of [0, 1, 2]) {
+    expect(insertableAt(["run_udf", "linear_scale_range"], gap, WITH_UDF)).toEqual([]);
+  }
+});
+
+test("UDF stage: the module rides the udf argument as a data: URL, bounded at 8 MiB", () => {
+  expect(UDF_MAX_BYTES).toBe(8 * 1024 * 1024);
+  expect(wasmDataUrl(Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]))).toBe(
+    "data:application/wasm;base64,AGFzbQEAAAA=",
+  );
+  // Sizes in the user's units.
+  expect(formatMib(8 * 1024 * 1024)).toBe("8 MiB");
+  expect(formatMib(9 * 1024 * 1024 + 512 * 1024)).toBe("9.5 MiB");
+  expect(formatMib(6833)).toBe("7 KiB");
+  // The module's settings: a JSON object or nothing.
+  expect(contextIssue("")).toBe("");
+  expect(contextIssue('{"threshold": 0.3}')).toBe("");
+  expect(contextIssue("[1, 2]")).toContain("must be a JSON object");
+  expect(contextIssue("not json")).toContain("must be a JSON object");
+});
+
+test("UDF stage: the preview's fuel/trap diagnostics (#206) map to plain words on the module field", () => {
+  // Fuel exhausted → the module is too expensive per tile.
+  const fuel = udfDiagnostic(
+    "ProcessGraphComplexity",
+    "The process is too complex for synchronous processing: the UDF exceeded the per-tile " +
+      "fuel budget (100000000 fuel) — simplify or narrow it.",
+  );
+  expect(fuel).toContain("ran out of its per-tile budget (100000000 fuel)");
+  expect(fuel).toContain("Publishing is not blocked");
+  // The wall-clock backstop → the module is too slow per tile.
+  const backstop = udfDiagnostic(
+    "ProcessGraphComplexity",
+    "The process is too complex for synchronous processing: the UDF exceeded the per-tile " +
+      "fuel budget's 250 ms wall-clock backstop — simplify or narrow it.",
+  );
+  expect(backstop).toContain("per-tile budget's 250 ms time limit");
+  // A trap or malformed output → the module itself is broken.
+  expect(
+    udfDiagnostic(
+      "ProcessParameterInvalid",
+      "The value passed for parameter 'udf' in process 'run_udf' is invalid: UDF trapped: " +
+        "wasm trap: wasm `unreachable` instruction executed",
+    ),
+  ).toBe(
+    "The module failed while running: UDF trapped: wasm trap: wasm `unreachable` instruction " +
+      "executed. Fix the module and upload it again.",
+  );
+  // Not the module's fault: the area budget (ADR 0014) and other codes
+  // keep their own notes.
+  expect(
+    udfDiagnostic(
+      "ProcessGraphComplexity",
+      "The process is too complex for synchronous processing: the preview would read an " +
+        "estimated 9 bytes at full resolution (budget: 1 bytes). Narrow the spatial extent.",
+    ),
+  ).toBeUndefined();
+  expect(udfDiagnostic("ProcessParameterInvalid", "parameter 'nir' in process 'ndvi'")).toBe(
+    undefined,
+  );
 });
 
 test("band heuristics and server-error location carry over from #148", () => {

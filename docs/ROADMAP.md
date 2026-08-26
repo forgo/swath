@@ -52,6 +52,7 @@ with a named revisit condition* — not forgotten.
 | 15 | **Dataset *spatial* extents derived from granules** — *shipped with #196 for API-registered datasets and granule registration (union over granules; temporal half was #180 per [ADR 0015](decisions/0015-time-dimension-frame-selection.md))* | `crates/swath-api/src/datasets.rs` | Config-declared datasets keep their declared boxes until a registration touches them | Discovery (Records) reads them ready-made |
 | 16 | **Header/metadata fetch-provenance port extension** | `crates/swath-render/src/tiler.rs` | `RasterSource` reports provenance for pixel reads; header accounting would widen the port for a number nobody reads yet | Header I/O accounting is actually wanted in the Trace |
 | 17 | **UDF module-store GC** (ADR 0018 §v2) | `crates/swath-core/src/udf.rs`, `crates/adapters/swath-modulestore-objectstore/src/lib.rs` | Content-addressed modules never go stale; a deleted service's module costs bytes, nothing else | Measured module-store growth |
+| 18 | **In-browser UDF authoring (Rust playground)** | `web/src/swath-authoring-panel.ts` (#208) | The canvas uploads compiled `.wasm`; the guest kit (ADR 0020) already closes the edit loop locally, and a browser toolchain is a product of its own | Authors ask for it in numbers |
 
 **ADR-governed deferrals** carry their reopen conditions in the ADR, listed only for
 completeness: WASM plug-ins and sidecar-RPC adapters (ADR 0013); openEO

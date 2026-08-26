@@ -76,6 +76,26 @@
  * (`ProcessGraphComplexity`) explains itself in plain words and never
  * blocks publishing — the budget bounds the preview, not the layer.
  *
+ * # The UDF stage (issue #208, ADR 0018)
+ *
+ * `run_udf` joins the canvas as one more stage-typed step — offered
+ * exactly where the server serves it (a stack without `--udf-store`
+ * lists no `run_udf` in `GET /processes`, so no chip exists: the same
+ * capabilities-driven rule as every other card) and only where the
+ * stage table admits it (over the loaded cube, once per graph; its
+ * result accepts scaling and a colormap-less output). The module is a
+ * `.wasm` picked or dropped onto the card, base64-encoded client-side
+ * into the node's `udf` argument as a `data:` URL (refused past the
+ * server's 8 MiB bound, in plain words, before encoding); runtime
+ * `"wasm"` / version `"1"` are vocabulary selects, `context` is a small
+ * JSON field. The output arity (gray or RGB) is the module's answer,
+ * pinned server-side at compile time — the canvas says so rather than
+ * guessing, and the preview shows which. The preview's fuel/trap
+ * diagnostics (#206's `ProcessGraphComplexity` / `ProcessParameterInvalid`)
+ * land on the module field in plain words, and never gate publishing.
+ * Writing the module IN the browser (a Rust playground) is a recorded
+ * deferral — `docs/ROADMAP.md` §2 row 18.
+ *
  * `POST /services` publishes; success announces a bubbling
  * `swath-service-created` (detail: `{id}`). Published services list
  * from `GET /services` with per-item delete announcing
@@ -85,11 +105,13 @@
 import {
   buildReducerGraph,
   CUBE_PARAM,
+  contextIssue,
   EMPTY_OPERAND,
   FORMULA_OPS,
   type FormulaOp,
   type FormulaRow,
   finalStage,
+  formatMib,
   formulaIssues,
   formulaPhrase,
   insertableAt,
@@ -99,6 +121,9 @@ import {
   type ProcessParameter,
   pickBand,
   type Stage,
+  UDF_MAX_BYTES,
+  udfDiagnostic,
+  wasmDataUrl,
 } from "./authoring-model.js";
 
 export type { ProcessDefinition, ProcessParameter } from "./authoring-model.js";
@@ -132,6 +157,7 @@ const STEP_TITLES: Record<string, string> = {
   load_collection: "Load imagery",
   ndvi: "NDVI (vegetation health)",
   reduce_dimension: "Combine bands with a formula",
+  run_udf: "Run your own code (WASM module)",
   linear_scale_range: "Stretch values for display",
   save_result: "Output",
 };
@@ -140,8 +166,15 @@ const STEP_TITLES: Record<string, string> = {
 const INSERT_LABELS: Record<string, string> = {
   ndvi: "NDVI (vegetation health)",
   reduce_dimension: "combine bands with a formula",
+  run_udf: "run your own code (.wasm)",
   linear_scale_range: "stretch values for display",
 };
+
+/** The `run_udf` runtime vocabulary the profile admits (ADR 0018:
+ * runtime "wasm", version "1", only) — selects, never free text, like
+ * the format select (B9). */
+const UDF_RUNTIMES = ["wasm"] as const;
+const UDF_VERSIONS = ["1"] as const;
 
 /**
  * Plain-language one-liners, visible under every field (not tooltips):
@@ -171,6 +204,14 @@ const FIELD_HELP: Record<string, string> = {
   "linear_scale_range.outputMax": "Keep at 255 — screen pixels run 0..255.",
   "save_result.format": "The image format tiles are served in — png.",
   "save_result.options": "How numbers become colors on the map.",
+  "run_udf.udf":
+    "A compiled .wasm module (up to 8 MiB) that turns the loaded bands into 1 value per " +
+    "pixel (gray) or 3 (red, green, blue) — the module decides which; the preview shows it.",
+  "run_udf.context":
+    'Settings handed to the module as-is, as a JSON object like {"threshold": 0.3} — ' +
+    "leave empty if it needs none.",
+  "run_udf.runtime": "Leave as is: modules run as sandboxed WebAssembly.",
+  "run_udf.version": "Leave as is: the module speaks Swath UDF ABI version 1.",
 };
 
 function fieldHelp(processId: string, name: string): string {
@@ -187,6 +228,8 @@ function fieldHelp(processId: string, name: string): string {
 const PROFILE_DEFAULTS: Record<string, string> = {
   "linear_scale_range.outputMax": "255",
   "save_result.format": "png",
+  "run_udf.runtime": "wasm",
+  "run_udf.version": "1",
 };
 
 /** Is this field tucked under the step's "advanced" toggle? Everything
@@ -201,6 +244,9 @@ function isAdvancedParam(processId: string, param: ProcessParameter): boolean {
     // The load card's plain-words "when" control (ADR 0015): time is a
     // newcomer's choice now that windows select which granule serves.
     (processId === "load_collection" && hasSubtype(param.schema, "temporal-interval")) ||
+    // The UDF card's module settings (#208): optional, but the one thing
+    // a module author actually tunes — a newcomer's choice, on the card.
+    (processId === "run_udf" && param.name === "context") ||
     isBandName(param.schema)
   ) {
     return false;
@@ -252,6 +298,12 @@ function narrativePhrase(
       return formula === ""
         ? "combine the bands with a formula"
         : `combine the bands with a formula (${formula})`;
+    case "run_udf": {
+      // `udf` reads as the module's file name here (the narrative never
+      // retells 8 MiB of base64); the arity is the module's answer.
+      const module = value("udf");
+      return `run ${module === "" ? "your module" : module} on the bands (1 or 3 channels — the module decides)`;
+    }
     default:
       return processId.replaceAll("_", " ");
   }
@@ -451,6 +503,7 @@ swath-authoring-panel .swath-authoring-preview img {
     repeating-conic-gradient(rgb(148 163 184 / 12%) 0% 25%, rgb(15 23 42 / 60%) 0% 50%)
     0 0 / 16px 16px;
 }
+swath-authoring-panel .swath-authoring-preview img[hidden] { display: none; }
 swath-authoring-panel .swath-authoring-preview figcaption {
   margin: 2px 0 0;
   font: 11px/1.5 system-ui, sans-serif;
@@ -486,6 +539,47 @@ swath-authoring-panel .swath-authoring-step-error {
   overflow-wrap: anywhere;
 }
 swath-authoring-panel .swath-authoring-step-error:empty { display: none; }
+swath-authoring-panel .swath-authoring-udf-drop {
+  display: block;
+  margin: 2px 0 0;
+  padding: 8px;
+  border: 1px dashed rgb(148 163 184 / 40%);
+  border-radius: 6px;
+  font: 11px/1.5 system-ui, sans-serif;
+  color: rgb(148 163 184 / 85%);
+}
+swath-authoring-panel .swath-authoring-udf-drop[data-active] {
+  border-color: #4ade80;
+  background: rgb(74 222 128 / 8%);
+}
+swath-authoring-panel .swath-authoring-udf-drop input[type="file"] {
+  margin-top: 4px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+}
+swath-authoring-panel .swath-authoring-udf-module {
+  display: block;
+  margin: 2px 0 0;
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #4ade80;
+  overflow-wrap: anywhere;
+}
+swath-authoring-panel .swath-authoring-udf-module:empty { display: none; }
+swath-authoring-panel textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 3em;
+  margin-top: 1px;
+  padding: 3px 6px;
+  border: 1px solid rgb(148 163 184 / 30%);
+  border-radius: 4px;
+  background: rgb(15 23 42 / 60%);
+  color: inherit;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  resize: vertical;
+}
 swath-authoring-panel .swath-authoring-formula-row {
   display: flex;
   align-items: center;
@@ -653,6 +747,10 @@ interface Card {
   rows: FormulaRow[];
   /** Whether the card's advanced (defaulted/nullable) fields are shown. */
   advanced: boolean;
+  /** The UDF card's picked module (#208): its name and size for the
+   * card and the narrative (the `udf` value itself is the data URL),
+   * `refused` when it was over the server's bound and never encoded. */
+  udf?: { name: string; size: number; refused: boolean };
 }
 
 /** A schema (or one-of list of schemas) as its list of alternatives. */
@@ -871,6 +969,10 @@ export class SwathAuthoringPanel extends HTMLElement {
   #previewNote = "";
   #previewedBody = "";
   #previewTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Field/step notes the PREVIEW filed (the UDF stage's fuel/trap
+   * diagnostics, #208; a located compile diagnostic): cleared whenever
+   * the next preview answers, so a fixed draft loses its stale note. */
+  #previewNoteKeys = new Set<string>();
 
   /** Test seam: the fetch this panel uses for every request. Assign a
    * stub BEFORE the element connects; leave unset for the real fetch. */
@@ -1090,12 +1192,14 @@ export class SwathAuthoringPanel extends HTMLElement {
     }
     this.#middle.splice(gap, 0, card);
     this.#serverNotes.clear(); // keys shift; stale notes would mislead
+    this.#previewNoteKeys.clear();
     this.#render();
   }
 
   #removeMiddle(card: Card): void {
     this.#middle = this.#middle.filter((c) => c !== card);
     this.#serverNotes.clear();
+    this.#previewNoteKeys.clear();
     this.#render();
   }
 
@@ -1154,6 +1258,23 @@ export class SwathAuthoringPanel extends HTMLElement {
       return ""; // the bands checkboxes; counted as a pipeline issue
     }
     const raw = (card.values.get(param.name) ?? "").trim();
+    if (card.process.id === "run_udf") {
+      // The UDF card (#208): the module is picked, never typed — and a
+      // module over the server's bound was refused before encoding, so
+      // the field stays empty and says why.
+      if (param.name === "udf") {
+        if (card.udf?.refused) {
+          return (
+            `${card.udf.name} is ${formatMib(card.udf.size)} — the server accepts modules ` +
+            `up to ${formatMib(UDF_MAX_BYTES)}; pick a smaller one`
+          );
+        }
+        return raw === "" ? "upload a .wasm module" : "";
+      }
+      if (param.name === "context") {
+        return contextIssue(raw);
+      }
+    }
     if (isBandName(param.schema)) {
       // Band selects: a value is always needed (the schema's "nir"/
       // "red" defaults are common names the loaded bands may not
@@ -1285,6 +1406,7 @@ export class SwathAuthoringPanel extends HTMLElement {
       clearTimeout(this.#previewTimer);
       this.#previewTimer = undefined;
       this.#clearPreview();
+      this.#clearPreviewNotes();
       this.#reflectPreview();
       return;
     }
@@ -1316,6 +1438,7 @@ export class SwathAuthoringPanel extends HTMLElement {
     this.#previewedBody = body;
     let url = "";
     let note = "";
+    let failure: { code: string; message: string } | undefined;
     try {
       const response = await this.#fetch("/result", {
         method: "POST",
@@ -1325,7 +1448,8 @@ export class SwathAuthoringPanel extends HTMLElement {
       if (response.ok) {
         url = URL.createObjectURL(await response.blob());
       } else {
-        note = await previewFailureNote(response);
+        failure = await readOpenEoBody(response);
+        note = previewFailureNote(failure);
       }
     } catch {
       note = "The preview is unavailable right now — publishing still works.";
@@ -1341,8 +1465,72 @@ export class SwathAuthoringPanel extends HTMLElement {
       URL.revokeObjectURL(this.#previewUrl);
     }
     this.#previewUrl = url;
-    this.#previewNote = note;
+    if (failure === undefined) {
+      this.#previewNote = note;
+      this.#clearPreviewNotes(); // a fixed draft loses its stale diagnostic
+    } else {
+      this.#previewNote = this.#notePreviewFailure(failure, note);
+    }
     this.#reflectPreview();
+  }
+
+  /** Files a preview failure where the user can act on it (#208): the
+   * UDF stage's fuel/trap diagnostics (#206's registry codes) on the
+   * module field in plain words; a compile diagnostic naming a node and
+   * argument on that field (the same safety net publishing uses); the
+   * rest stays on the preview caption. Preview-filed notes are replaced
+   * wholesale on every answer, and NEVER gate publishing — the caption
+   * always says where to look. */
+  #notePreviewFailure(failure: { code: string; message: string }, caption: string): string {
+    for (const key of this.#previewNoteKeys) {
+      this.#serverNotes.delete(key);
+    }
+    this.#previewNoteKeys.clear();
+    const cards = this.#cards();
+    const udfCard = cards.find((card) => card.process.id === "run_udf");
+    const diagnostic = udfDiagnostic(failure.code, failure.message);
+    let noteKey: string | undefined;
+    let text = "";
+    if (udfCard && diagnostic !== undefined) {
+      noteKey = `${this.#keyOf(udfCard)}-udf`;
+      text = diagnostic;
+    } else {
+      const { node, argument } = locateServerError(failure.message);
+      const index = node === undefined ? -1 : cards.findIndex((_, i) => `s${i + 1}` === node);
+      const card = cards[index];
+      if (card !== undefined) {
+        const param = (card.process.parameters ?? []).find((p) => p.name === argument);
+        noteKey = param ? `s${index + 1}-${param.name}` : `s${index + 1}`;
+        text = `${failure.code}: ${failure.message}`;
+        if (param && isAdvancedParam(card.process.id, param)) {
+          card.advanced = true;
+        }
+      }
+    }
+    if (noteKey === undefined) {
+      this.#updateValidity();
+      return caption;
+    }
+    this.#serverNotes.set(noteKey, text);
+    this.#previewNoteKeys.add(noteKey);
+    const step = noteKey.split("-")[0] ?? noteKey;
+    // A re-render, not just a validity pass: an advanced field forced
+    // open needs its note element to exist before it can show anything.
+    this.#render();
+    return `The preview could not run this draft — see the note on step ${step}. Publishing is not blocked.`;
+  }
+
+  /** Drops every preview-filed note (a preview landed, or the draft is
+   * no longer previewable) and refreshes the inline notes. */
+  #clearPreviewNotes(): void {
+    if (this.#previewNoteKeys.size === 0) {
+      return;
+    }
+    for (const key of this.#previewNoteKeys) {
+      this.#serverNotes.delete(key);
+    }
+    this.#previewNoteKeys.clear();
+    this.#updateValidity();
   }
 
   /** Applies the preview state to the DOM in place (the elements are
@@ -1377,7 +1565,11 @@ export class SwathAuthoringPanel extends HTMLElement {
         (name) =>
           name === "bands" && card === this.#loadCard
             ? this.#loadBands.join(",")
-            : (card.values.get(name) ?? "").trim(),
+            : name === "udf" && card.process.id === "run_udf"
+              ? card.udf?.refused === false
+                ? card.udf.name
+                : ""
+              : (card.values.get(name) ?? "").trim(),
         card.process.id === "reduce_dimension" ? formulaPhrase(card.rows, this.#loadBands) : "",
       ),
     );
@@ -1416,9 +1608,10 @@ export class SwathAuthoringPanel extends HTMLElement {
           if (
             card === this.#saveCard &&
             hasSubtype(param.schema, "output-format-options") &&
-            stage.kind === "multi"
+            stage.kind !== "gray"
           ) {
-            // B6 made structural: a colormap never rides a composite.
+            // B6 made structural: a colormap never rides a composite —
+            // nor a UDF result, which renders directly (ADR 0018).
             continue;
           }
           const raw = (card.values.get(param.name) ?? "").trim();
@@ -1477,6 +1670,7 @@ export class SwathAuthoringPanel extends HTMLElement {
       return; // the disabled submit already says why
     }
     this.#serverNotes.clear();
+    this.#previewNoteKeys.clear();
     const body: Record<string, unknown> = {
       type: "xyz",
       process: { process_graph: this.buildGraph() },
@@ -1803,19 +1997,24 @@ export class SwathAuthoringPanel extends HTMLElement {
       } · Time: ${temporalPhrase(card.values.get("temporal_extent") ?? "")}`;
       item.append(plain);
     }
-    if (card === this.#saveCard && this.#resultStage().kind === "multi") {
+    const resultKind = this.#resultStage().kind;
+    if (card === this.#saveCard && resultKind !== "gray") {
       // B6, explained before it can even be attempted: while the result
-      // is multi-band the colormap is greyed out and this line says why
-      // in the user's words (buildGraph also never sends it).
+      // is multi-band (or a UDF result, which renders directly) the
+      // colormap is greyed out and this line says why in the user's
+      // words (buildGraph also never sends it).
       const plain = document.createElement("small");
       plain.className = "swath-authoring-plain";
       plain.id = `swath-authoring-${key}-composite-note`;
       plain.textContent =
-        this.#loadBands.length === 3
-          ? "The three loaded bands become the picture's red, green, and blue. " +
-            "A colormap maps one gray value per pixel, so it does not apply here."
-          : "A colormap maps one gray value per pixel — add NDVI or a formula to " +
-            "combine the bands into one value first.";
+        resultKind === "udf"
+          ? "Your module's output renders directly — 1 value per pixel as gray, 3 as red, " +
+            "green, and blue — so a colormap does not apply here."
+          : this.#loadBands.length === 3
+            ? "The three loaded bands become the picture's red, green, and blue. " +
+              "A colormap maps one gray value per pixel, so it does not apply here."
+            : "A colormap maps one gray value per pixel — add NDVI or a formula to " +
+              "combine the bands into one value first.";
       item.append(plain);
     }
     if (advanced.length > 0) {
@@ -1972,13 +2171,80 @@ export class SwathAuthoringPanel extends HTMLElement {
     return group;
   }
 
+  /** The UDF card's module control (#208): a file picker plus a drop
+   * zone over `.wasm` files. The picked module is base64-encoded
+   * client-side into the `udf` value as a `data:` URL — after the size
+   * check, so an over-bound module is refused in plain words (via
+   * `#fieldIssue`) without ever encoding 8+ MiB. */
+  #renderUdfUpload(card: Card, fieldId: string, touch: () => void): HTMLElement {
+    const zone = document.createElement("span");
+    zone.className = "swath-authoring-udf-drop";
+    zone.id = `${fieldId}-drop`;
+    zone.textContent = "Drop a .wasm module here, or pick one:";
+    const picker = document.createElement("input");
+    picker.type = "file";
+    picker.id = fieldId;
+    picker.accept = ".wasm,application/wasm";
+    picker.setAttribute("aria-label", "Upload a .wasm module");
+    const status = document.createElement("small");
+    status.className = "swath-authoring-udf-module";
+    status.id = `${fieldId}-module`;
+    if (card.udf && !card.udf.refused) {
+      status.textContent = `${card.udf.name} · ${formatMib(card.udf.size)}`;
+    }
+    const pick = (file: File): void => {
+      void this.#pickUdfModule(card, file, touch);
+    };
+    picker.addEventListener("change", () => {
+      const file = picker.files?.[0];
+      if (file) {
+        pick(file);
+      }
+    });
+    zone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      zone.setAttribute("data-active", "");
+    });
+    zone.addEventListener("dragleave", () => {
+      zone.removeAttribute("data-active");
+    });
+    zone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      zone.removeAttribute("data-active");
+      const file = event.dataTransfer?.files[0];
+      if (file) {
+        pick(file);
+      }
+    });
+    zone.append(picker, status);
+    return zone;
+  }
+
+  /** Reads the picked module into the card: refused (never encoded)
+   * over the server's bound, else encoded into the `udf` value. The
+   * card re-renders so the module line and the narrative follow. */
+  async #pickUdfModule(card: Card, file: File, touch: () => void): Promise<void> {
+    if (file.size > UDF_MAX_BYTES) {
+      card.udf = { name: file.name, size: file.size, refused: true };
+      card.values.delete("udf");
+    } else {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      card.udf = { name: file.name, size: file.size, refused: false };
+      card.values.set("udf", wasmDataUrl(bytes));
+    }
+    touch();
+    if (this.isConnected) {
+      this.#render();
+    }
+  }
+
   #renderValueInput(
     card: Card,
     key: string,
     param: ProcessParameter,
     fieldId: string,
     touch: () => void,
-  ): HTMLInputElement | HTMLSelectElement {
+  ): HTMLElement {
     const stored = card.values.get(param.name) ?? "";
     const dropdown = (
       values: readonly string[],
@@ -2049,17 +2315,46 @@ export class SwathAuthoringPanel extends HTMLElement {
       // note (B6) — and buildGraph omits it, so the server rejection is
       // unconstructible, not merely explained.
       const select = dropdown(COLORMAPS, "(default colormap)", false);
-      if (this.#resultStage().kind === "multi") {
+      const kind = this.#resultStage().kind;
+      if (kind !== "gray") {
         select.disabled = true;
         select.title =
-          "A colormap maps one gray value per pixel — add NDVI or a formula to reduce " +
-          "the bands to one value first.";
+          kind === "udf"
+            ? "A UDF's output renders directly (1 plane gray, 3 planes RGB) — a colormap " +
+              "does not apply."
+            : "A colormap maps one gray value per pixel — add NDVI or a formula to reduce " +
+              "the bands to one value first.";
       }
       return select;
     }
     if (hasSubtype(param.schema, "output-format")) {
       // The profile's format vocabulary (B9): a select, no free text.
       return dropdown(FORMATS, undefined, false);
+    }
+    if (hasSubtype(param.schema, "udf-runtime")) {
+      // ADR 0018: runtime "wasm", version "1", only — vocabulary selects,
+      // so InvalidRuntime / InvalidVersion are unconstructible.
+      return dropdown(UDF_RUNTIMES, undefined, false);
+    }
+    if (hasSubtype(param.schema, "udf-runtime-version")) {
+      return dropdown(UDF_VERSIONS, undefined, false);
+    }
+    if (card.process.id === "run_udf" && param.name === "udf") {
+      return this.#renderUdfUpload(card, fieldId, touch);
+    }
+    if (card.process.id === "run_udf" && param.name === "context") {
+      // The module's settings: a small JSON field (validated as an
+      // object by `contextIssue`; passed through verbatim).
+      const area = document.createElement("textarea");
+      area.id = fieldId;
+      area.rows = 2;
+      area.placeholder = "{}";
+      area.value = stored;
+      area.addEventListener("input", () => {
+        card.values.set(param.name, area.value);
+        touch();
+      });
+      return area;
     }
     if (isBandName(param.schema)) {
       // Band parameters are selects over the LOADED bands (B7): the
@@ -2344,34 +2639,40 @@ export class SwathAuthoringPanel extends HTMLElement {
 /** A preview failure in the user's words: the server's budget refusal
  * (`ProcessGraphComplexity`, ADR 0014) says what to do about it — and
  * that publishing is unaffected; anything else falls back to the
- * standardized error line. */
-async function previewFailureNote(response: Response): Promise<string> {
-  try {
-    const body = (await response.clone().json()) as { code?: unknown };
-    if (body.code === "ProcessGraphComplexity") {
-      return (
-        "This draft covers too much data to preview at once — narrow the area " +
-        "(Load imagery → advanced), or publish and look at the map itself."
-      );
-    }
-  } catch {
-    // Fall through to the standardized line.
+ * standardized error line. (A UDF's own budget refusal is the module's
+ * fault, not the area's — `udfDiagnostic` claims it first, on the
+ * module field.) */
+function previewFailureNote(failure: { code: string; message: string }): string {
+  if (
+    failure.code === "ProcessGraphComplexity" &&
+    udfDiagnostic(failure.code, failure.message) === undefined
+  ) {
+    return (
+      "This draft covers too much data to preview at once — narrow the area " +
+      "(Load imagery → advanced), or publish and look at the map itself."
+    );
   }
-  return `The preview failed: ${await readOpenEoError(response)}`;
+  return `The preview failed: ${failure.code}: ${failure.message}`;
 }
 
-/** The standardized openEO error body (`{code, message}`), rendered as
- * one line; falls back to the HTTP status for non-openEO bodies. */
-async function readOpenEoError(response: Response): Promise<string> {
+/** The standardized openEO error body (`{code, message}`); a non-openEO
+ * body reads as an `HttpError` carrying the status line. */
+async function readOpenEoBody(response: Response): Promise<{ code: string; message: string }> {
   try {
     const body = (await response.json()) as { code?: unknown; message?: unknown };
     if (typeof body.code === "string" && typeof body.message === "string") {
-      return `${body.code}: ${body.message}`;
+      return { code: body.code, message: body.message };
     }
   } catch {
     // Fall through to the status line.
   }
-  return `request failed with HTTP ${response.status}`;
+  return { code: "HttpError", message: `request failed with HTTP ${response.status}` };
+}
+
+/** [`readOpenEoBody`] rendered as one line. */
+async function readOpenEoError(response: Response): Promise<string> {
+  const { code, message } = await readOpenEoBody(response);
+  return code === "HttpError" ? message : `${code}: ${message}`;
 }
 
 /** Registers `<swath-authoring-panel>`; safe to call more than once. */

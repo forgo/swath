@@ -1085,3 +1085,277 @@ test("#255: a transient /processes failure retries on re-open instead of brickin
   await expect.poll(() => panel.querySelector('[data-step="s1"]')).not.toBeNull();
   expect(calls).toBe(2);
 });
+
+// --- The UDF stage (issue #208, ADR 0018) --------------------------------
+// run_udf joins the always-valid canvas: served-only (a stack without
+// --udf-store lists no run_udf, so no chip), stage-typed (over the loaded
+// cube, once per graph, scale-then-output after it), the module picked
+// as a .wasm and base64-encoded into the node's `udf` data: URL (refused
+// past 8 MiB before encoding), runtime/version as vocabulary selects,
+// and the preview's fuel/trap diagnostics (#206) on the module field in
+// plain words — never gating publish.
+
+/** The served `run_udf` definition's structural slice (the pinned
+ * openeo-processes document: `udf` as uri/file-path/udf-code, the
+ * runtime subtypes, `context` an object). */
+const RUN_UDF: ProcessDefinition = {
+  id: "run_udf",
+  summary: "Run a UDF",
+  parameters: [
+    { name: "data", schema: [{ type: "array", items: {} }, { title: "Single Value" }] },
+    {
+      name: "udf",
+      schema: [
+        { type: "string", format: "uri", subtype: "uri", pattern: "^https?://" },
+        { type: "string", subtype: "file-path" },
+        { type: "string", subtype: "udf-code" },
+      ],
+    },
+    { name: "runtime", schema: { type: "string", subtype: "udf-runtime" } },
+    {
+      name: "version",
+      optional: true,
+      default: null,
+      schema: [{ type: "string", subtype: "udf-runtime-version" }, { type: "null" }],
+    },
+    { name: "context", optional: true, default: {}, schema: { type: "object" } },
+  ],
+};
+
+/** The 8-byte WASM preamble — enough "module" for the client, which
+ * never inspects bytes (the server registers and rejects). */
+const WASM_MAGIC = Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+const WASM_MAGIC_DATA_URL = "data:application/wasm;base64,AGFzbQEAAAA=";
+
+function udfStub(options: Parameters<typeof fetchStub>[0] = {}) {
+  return fetchStub({ processes: [...DEFINITIONS, RUN_UDF], ...options });
+}
+
+/** Picks `file` through the UDF card's file input (the drop zone shares
+ * the same handler). */
+function pickModule(panel: SwathAuthoringPanel, id: string, file: File): void {
+  const picker = field<HTMLInputElement>(panel, id);
+  const transfer = new DataTransfer();
+  transfer.items.add(file);
+  picker.files = transfer.files;
+  picker.dispatchEvent(new Event("change"));
+}
+
+/** Loads two bands, inserts the UDF stage at gap 0 (so it is s2), and
+ * picks a module — a complete, submittable UDF draft. */
+async function authorUdf(panel: SwathAuthoringPanel, name = "ndvi.wasm"): Promise<void> {
+  choose(panel, "s1-id", "hls-s30");
+  tickBand(panel, "b8a");
+  tickBand(panel, "b04");
+  insertAt(panel, 0, "run_udf");
+  pickModule(panel, "s2-udf", new File([WASM_MAGIC], name, { type: "application/wasm" }));
+  await expect.poll(() => field(panel, "s2-udf-module").textContent ?? "").toContain(name);
+}
+
+function fieldNote(panel: SwathAuthoringPanel, id: string): string {
+  return panel.querySelector(`#swath-authoring-${id}-note`)?.textContent ?? "";
+}
+
+test("UDF stage: shown only when the server serves run_udf (no --udf-store, no chip)", async () => {
+  const panel = await mount(fetchStub({}));
+  choose(panel, "s1-id", "hls-s30");
+  tickBand(panel, "b8a");
+  expect(allChips(panel)).not.toContain("run_udf");
+  const udf = await mount(udfStub());
+  choose(udf, "s1-id", "hls-s30");
+  expect(chipsAt(udf, 0)).toContain("run_udf");
+});
+
+test("UDF stage: upload → base64 data: URL in the run_udf node, runtime/version pinned, context passed through, typed insertion", async () => {
+  const stub = udfStub();
+  const panel = await mount(stub);
+  await authorUdf(panel);
+
+  // The composed node: the module inline as the data: URL, the ADR 0018
+  // runtime pair, no context while the field is empty.
+  const graph = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
+  expect(graph["s2"]).toEqual({
+    process_id: "run_udf",
+    arguments: {
+      data: { from_node: "s1" },
+      udf: WASM_MAGIC_DATA_URL,
+      runtime: "wasm",
+      version: "1",
+    },
+  });
+  fill(panel, "s2-context", '{"threshold": 0.3}');
+  expect(
+    (panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>)["s2"]?.arguments[
+      "context"
+    ],
+  ).toEqual({ threshold: 0.3 });
+  // A non-object context flags inline (the module reads it verbatim).
+  fill(panel, "s2-context", "[1]");
+  expect(fieldNote(panel, "s2-context")).toContain("must be a JSON object");
+  expect(submitButton(panel).disabled).toBe(true);
+  fill(panel, "s2-context", "");
+
+  // Runtime and version are vocabulary selects under advanced — one
+  // option each, never free text (InvalidRuntime unconstructible).
+  openAdvanced(panel, "s2");
+  const runtime = field<HTMLSelectElement>(panel, "s2-runtime");
+  expect(runtime.tagName).toBe("SELECT");
+  expect([...runtime.options].map((option) => option.value)).toEqual(["wasm"]);
+  expect(field<HTMLSelectElement>(panel, "s2-version").value).toBe("1");
+
+  // Stage-typed: nothing fits before the module, only the stretch step
+  // after it, and no second module anywhere (one run_udf per graph).
+  expect(chipsAt(panel, 0)).toEqual([]);
+  expect(chipsAt(panel, 1)).toEqual(["linear_scale_range"]);
+  // Two loaded bands and no reduce is fine HERE: the module decides the
+  // arity (B5 is a multi-band rule) — and the narrative says so honestly.
+  expect(submitButton(panel).disabled).toBe(false);
+  expect(panel.querySelector("#swath-authoring-narrative")?.textContent).toContain(
+    "run ndvi.wasm on the bands (1 or 3 channels — the module decides)",
+  );
+  // B6 for UDF results: the colormap greys out with the plain-words
+  // reason and never rides the graph (the compiler rejects it).
+  expect(field<HTMLSelectElement>(panel, "s3-options").disabled).toBe(true);
+  expect(field(panel, "s3-composite-note").textContent).toContain("renders directly");
+  expect(
+    (panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>)["s3"]?.arguments[
+      "options"
+    ],
+  ).toBeUndefined();
+  // The preview posts exactly that graph.
+  await expect.poll(() => previewPosts(stub).length).toBe(1);
+  const posted = previewPosts(stub)[0]?.body as {
+    process: { process_graph: Record<string, { arguments: Record<string, unknown> }> };
+  };
+  expect(posted.process.process_graph["s2"]?.arguments["udf"]).toBe(WASM_MAGIC_DATA_URL);
+});
+
+test("UDF stage: a module over 8 MiB is refused client-side in plain words, never encoded", async () => {
+  const stub = udfStub();
+  const panel = await mount(stub);
+  choose(panel, "s1-id", "hls-s30");
+  tickBand(panel, "b8a");
+  tickBand(panel, "b04");
+  insertAt(panel, 0, "run_udf");
+  const huge = new File([new Uint8Array(8 * 1024 * 1024 + 1)], "huge.wasm");
+  pickModule(panel, "s2-udf", huge);
+  await expect.poll(() => fieldNote(panel, "s2-udf")).toContain("up to 8 MiB");
+  expect(fieldNote(panel, "s2-udf")).toContain("huge.wasm is 8.0 MiB");
+  // Nothing encoded, nothing previewed, submit gated with the reason.
+  const graph = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
+  expect(graph["s2"]?.arguments["udf"]).toBeUndefined();
+  expect(submitButton(panel).disabled).toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  expect(previewPosts(stub)).toHaveLength(0);
+  // A module within the bound replaces the refusal.
+  pickModule(panel, "s2-udf", new File([WASM_MAGIC], "small.wasm"));
+  await expect.poll(() => fieldNote(panel, "s2-udf")).toBe("");
+  expect(submitButton(panel).disabled).toBe(false);
+});
+
+test("UDF stage: the preview's fuel refusal lands on the module field in plain words and never gates publish — not even of a different valid draft", async () => {
+  const stub = udfStub({
+    result: {
+      status: 400,
+      body: {
+        code: "ProcessGraphComplexity",
+        message:
+          "The process is too complex for synchronous processing: the UDF exceeded the " +
+          "per-tile fuel budget (100000000 fuel) — simplify or narrow it.",
+      },
+    },
+    post: { status: 201, headers: { "openeo-identifier": "xyz-ndvi" } },
+  });
+  const panel = await mount(stub);
+  await authorUdf(panel, "bomb.wasm");
+  await expect
+    .poll(() => fieldNote(panel, "s2-udf"))
+    .toContain("ran out of its per-tile budget (100000000 fuel)");
+  expect(previewNote(panel)).toContain("see the note on step s2");
+  expect(previewImage(panel)?.hidden).toBe(true);
+  // The refusal bounds the preview, not the layer: publish stays
+  // enabled, no general inline error.
+  expect(submitButton(panel).disabled).toBe(false);
+  expect(panel.querySelector(".swath-authoring-error")).toBeNull();
+
+  // A different, valid draft on the same canvas publishes: drop the
+  // module, author NDVI instead — the stale note is gone with its card.
+  panel.querySelector<HTMLButtonElement>('[aria-label="Remove step s2"]')?.click();
+  insertAt(panel, 0, "ndvi");
+  insertAt(panel, 1, "linear_scale_range");
+  fill(panel, "s3-inputMin", "-1");
+  fill(panel, "s3-inputMax", "1");
+  expect(submitButton(panel).disabled).toBe(false);
+  const created = new Promise<string>((resolve) => {
+    panel.addEventListener(
+      "swath-service-created",
+      (event) => resolve((event as CustomEvent<{ id: string }>).detail.id),
+      { once: true },
+    );
+  });
+  submitButton(panel).click();
+  expect(await created).toBe("xyz-ndvi");
+  const published = stub.requests.find(
+    (request) => request.method === "POST" && request.url === "/services",
+  );
+  const body = published?.body as
+    | { process: { process_graph: Record<string, unknown> } }
+    | undefined;
+  const graph = body?.process.process_graph ?? {};
+  expect(Object.values(graph).map((node) => (node as { process_id: string }).process_id)).toEqual([
+    "load_collection",
+    "ndvi",
+    "linear_scale_range",
+    "save_result",
+  ]);
+});
+
+test("UDF stage: a trap diagnostic names the module's failure; a later good preview clears it", async () => {
+  let failing = true;
+  const base = udfStub();
+  const impl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (failing && init?.method === "POST" && String(input).endsWith("/result")) {
+      return new Response(
+        JSON.stringify({
+          code: "ProcessParameterInvalid",
+          message:
+            "The value passed for parameter 'udf' in process 'run_udf' is invalid: UDF " +
+            "trapped: wasm trap: wasm `unreachable` instruction executed",
+        }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      );
+    }
+    return base.impl(input, init);
+  }) as typeof fetch;
+  const panel = await mount({ impl });
+  await authorUdf(panel, "trap.wasm");
+  await expect
+    .poll(() => fieldNote(panel, "s2-udf"))
+    .toContain("The module failed while running: UDF trapped");
+  expect(fieldNote(panel, "s2-udf")).toContain("upload it again");
+  expect(submitButton(panel).disabled).toBe(false);
+  // The fixed module previews fine: the note goes with the failure.
+  failing = false;
+  pickModule(panel, "s2-udf", new File([WASM_MAGIC, "\0"], "fixed.wasm"));
+  await expect.poll(() => previewImage(panel)?.getAttribute("src") ?? "").toMatch(/^blob:/);
+  expect(fieldNote(panel, "s2-udf")).toBe("");
+  expect(previewNote(panel)).toContain("Preview");
+});
+
+test("UDF stage: a registration diagnostic from the preview lands on the module field (the safety net)", async () => {
+  const stub = udfStub({
+    result: {
+      status: 400,
+      body: {
+        code: "ProcessParameterInvalid",
+        message:
+          "node `s2` (run_udf): invalid argument `udf`: module rejected at registration: " +
+          "the module imports `env.abort`; UDF modules must import nothing",
+      },
+    },
+  });
+  const panel = await mount(stub);
+  await authorUdf(panel, "imports.wasm");
+  await expect.poll(() => fieldNote(panel, "s2-udf")).toContain("module rejected at registration");
+  expect(submitButton(panel).disabled).toBe(false);
+});

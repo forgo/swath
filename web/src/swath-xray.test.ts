@@ -986,3 +986,48 @@ test("temporal traces reach the per-frame analytics line and the inspector (issu
   expect(panel?.dataset.frame).toBe(temporal.granule_datetime);
   expect(panel?.dataset.total).toBe("4");
 });
+
+test("UDF traces (#208): inspector facts, feed line, and the analytics per-tile line carry fuel and udf_ms", () => {
+  const host = mountHost();
+  const factory = fakeFactory();
+  const overlay = new XRayOverlay(host, fakeMap(), { createEventSource: factory.create });
+  overlay.connect(`${SERVER}/traces`);
+  overlay.setLayer("udf-layer");
+  const source = factory.opened[0];
+  const panel = host.querySelector<HTMLElement>(".swath-xray-analytics");
+  const line = host.querySelector<HTMLElement>(".swath-xray-analytics-udf");
+  expect(line?.hidden).toBe(true);
+
+  // A live UDF render: deterministic fuel plus the stage's wall clock
+  // (ADR 0018, #205 — the trace omits both when no UDF ran).
+  source?.emit(
+    "trace",
+    envelope("udf-layer", "2/1/1", {
+      udf_fuel_used: 3_276_800,
+      timings: { read_ms: 12, warp_ms: 3, pixel_ops_ms: 6, encode_ms: 2, total_ms: 23, udf_ms: 4 },
+    }),
+  );
+  overlay.refresh();
+  badges(host)[0]?.click();
+  const inspector = host.querySelector<HTMLElement>(".swath-xray-inspector")?.textContent ?? "";
+  expect(inspector).toContain("udf fuel");
+  expect(inspector).toContain("3276800");
+  expect(inspector).toContain("pixel 6 · udf 4");
+  expect(host.querySelector(".swath-xray-feed-lines")?.textContent).toContain("fuel 3276800");
+  expect(line?.hidden).toBe(false);
+  expect(line?.textContent).toBe("udf udf-layer/2/1/1 · fuel 3276800 · 4 ms (1 udf tile)");
+  expect(panel?.dataset.udfTile).toBe("udf-layer/2/1/1");
+  expect(panel?.dataset.udfFuel).toBe("3276800");
+  expect(panel?.dataset.udfMs).toBe("4");
+  expect(panel?.dataset.udfTiles).toBe("1");
+
+  // A non-UDF trace leaves the line as it was.
+  source?.emit("trace", envelope("truecolor", "2/2/1"));
+  expect(panel?.dataset.udfTiles).toBe("1");
+  expect(panel?.dataset.udfTile).toBe("udf-layer/2/1/1");
+
+  // A cache hit of a UDF tile never runs the module: the emitter omits
+  // the fuel and zeroes udf_ms — no UDF sample, honestly.
+  source?.emit("trace", envelope("udf-layer", "2/1/1", { decision: "cache_hit" }));
+  expect(panel?.dataset.udfTiles).toBe("1");
+});
