@@ -37,11 +37,52 @@ or bring the stack up yourself and `pnpm exec vite dev`.
         overflow-y: auto;
         border-right: 1px solid rgb(148 163 184 / 15%);
       }
+      .swath-rail-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
       .swath-rail header h1 {
         margin: 0;
         font: 700 15px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         letter-spacing: 0.22em;
         text-transform: uppercase;
+      }
+      /* Share (issue #211): the copy-link action, in the rail's own
+       * monospace label voice; the copied state borrows the x-ray green. */
+      .swath-share {
+        margin: 0;
+        padding: 3px 9px;
+        border: 1px solid rgb(148 163 184 / 35%);
+        border-radius: 4px;
+        background: none;
+        color: rgb(148 163 184 / 90%);
+        font: 700 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+      .swath-share:hover:enabled {
+        background: rgb(148 163 184 / 12%);
+        color: #e2e8f0;
+      }
+      .swath-share:focus-visible {
+        outline: 2px solid #4ade80;
+        outline-offset: 1px;
+      }
+      .swath-share:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .swath-share[data-state="copied"] {
+        border-color: rgb(74 222 128 / 45%);
+        background: rgb(74 222 128 / 10%);
+        color: #4ade80;
+      }
+      .swath-share[data-state="failed"] {
+        border-color: rgb(248 113 113 / 45%);
+        color: #f87171;
       }
       .swath-rail header p {
         margin: 4px 0 0;
@@ -75,8 +116,24 @@ or bring the stack up yourself and `pnpm exec vite dev`.
   <body>
     <aside class="swath-rail">
       <header>
-        <h1>Swath</h1>
-        <p>Live tiles from freshly ingested granules. Pick a layer; the URL is the share link.</p>
+        <div class="swath-rail-title">
+          <h1>Swath</h1>
+          <!-- Enabled once the first layer has applied (main.ts): it copies
+               the deep link of the CURRENT view — layer, center, zoom,
+               frame, x-ray — the same URL the address bar shows after an
+               interaction. -->
+          <button
+            type="button"
+            id="swath-share"
+            class="swath-share"
+            title="Copy a link to this exact view"
+            aria-label="Copy a link to this exact view"
+            disabled
+          >
+            share
+          </button>
+        </div>
+        <p>Live tiles from freshly ingested granules. Pick a layer; share copies the link to this exact view.</p>
       </header>
       <swath-layer-panel></swath-layer-panel>
 <!-- Collapsed by default; fetches nothing until opened (issue #110). -->

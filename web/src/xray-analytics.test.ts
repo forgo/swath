@@ -164,3 +164,28 @@ test("panel renders exact values in data attributes, formatted text on top", () 
   expect(element.textContent).toContain("hit 33.3%");
   element.remove();
 });
+
+test("a viewed frame pins the per-frame line, whatever traced last (issue #211)", () => {
+  const panel = new AnalyticsPanel(document);
+  document.body.append(panel.element);
+  const { element } = panel;
+  const mine = "2024-08-16T19:03:00Z";
+  const theirs = "2024-06-07T19:03:00Z";
+
+  // Pinned before any trace: an honest all-zero line for that frame.
+  panel.setViewedFrame(mine);
+  expect(element.dataset.frame).toBe(mine);
+  expect(element.dataset.frameLive).toBe("0");
+  // Another page's loop traces a different frame: the line holds.
+  panel.record("live", 20, theirs);
+  panel.record({ cache_hit: { key: "feedbeef" } }, 2, theirs);
+  expect(element.dataset.frame).toBe(mine);
+  panel.record("live", 30, mine);
+  expect(element.dataset.frameLive).toBe("1");
+  expect(element.dataset.frameCacheHit).toBe("0");
+  // Unpinned: back to the last traced frame.
+  panel.setViewedFrame(null);
+  expect(element.dataset.frame).toBe(mine); // mine traced last
+  panel.record("live", 5, theirs);
+  expect(element.dataset.frame).toBe(theirs);
+});

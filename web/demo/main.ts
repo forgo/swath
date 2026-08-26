@@ -9,12 +9,22 @@
 //   so the elements upgrade with them; a bare URL with an empty storage
 //   stays exactly the zero-config demo it always was.
 // - The URL is the share link: user interactions (layer selection, map
-//   movement, the x-ray toggle) rewrite the query via replaceState. Loads
-//   and programmatic moves never do — deep links stay byte-stable, and a
-//   pasted URL is never rewritten (`viewStatesEqual` guards even the
-//   interaction path against no-op writes).
-// - localStorage tracks every state change as "the last session", so a
-//   later paramless visit resumes where this one ended.
+//   movement, the x-ray toggle, a scrub) rewrite the query via
+//   replaceState. Loads and programmatic moves never do — deep links stay
+//   byte-stable, and a pasted URL is never rewritten (`viewStatesEqual`
+//   guards even the interaction path against no-op writes). The Share
+//   button (issue #211) copies that same canonical URL — written in full,
+//   so it works from a bare landing too.
+// - localStorage tracks every state change FROM THE FIRST INTERACTION ON
+//   as "the last session", so a later paramless visit resumes where this
+//   one ended. Before the first interaction there is no session to
+//   remember: a visit that only watched the landing loop leaves nothing
+//   behind, so the next paramless visit is the landing again.
+// - The cinematic landing (issue #211): only the zero-config default
+//   (no URL params, no stored session) gets the `cinematic` attribute —
+//   the fire-season loop auto-plays there and nowhere else. Its own
+//   frame advances are not interactions (`swath-timechange` flags them
+//   `cinematic`): the bare URL stays bare until the user takes over.
 import { type GranuleBbox, GranuleFootprints } from "../src/granule-footprints.js";
 import { defineSwathAddDataPanel, SwathAddDataPanel } from "../src/swath-add-data-panel.js";
 import { defineSwathAuthoringPanel, SwathAuthoringPanel } from "../src/swath-authoring-panel.js";
@@ -35,6 +45,7 @@ import {
   resolveInitialState,
   safeLocalStorage,
   saveViewState,
+  shareUrl,
   type ViewState,
   viewStatesEqual,
   withViewState,
@@ -45,10 +56,17 @@ const panelElement = document.querySelector("swath-layer-panel");
 const datasetElement = document.querySelector("swath-dataset-panel");
 const addDataElement = document.querySelector("swath-add-data-panel");
 const authoringElement = document.querySelector("swath-authoring-panel");
+const shareElement = document.querySelector<HTMLButtonElement>("#swath-share");
 
 const storage = safeLocalStorage();
-const { state: initial } = resolveInitialState(location.search, storage);
+const { state: initial, source } = resolveInitialState(location.search, storage);
 
+// Nobody asked for a view: open on the season loop (when the server has
+// one). A deep link or a restored session is explicit state — honored
+// exactly, never animated over (the issue #108/#227 precedence).
+if (source === "default") {
+  mapElement?.setAttribute("cinematic", "");
+}
 if (initial.layer !== undefined) {
   mapElement?.setAttribute("layer", initial.layer);
 }
@@ -149,6 +167,11 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
    * first `layerchange`) — distinguishes a layer CHANGE, which updates
    * the URL, from the initial apply, which must not touch it. */
   let appliedLayer: string | undefined;
+  /** Has the user done anything yet? Until then nothing is written —
+   * not the URL (byte-stable loads) and not storage (no session to
+   * remember): the cinematic landing's own frame advances and the
+   * programmatic fits around them are nobody's doing. */
+  let interacted = false;
 
   const snapshot = (): ViewState => {
     const state: ViewState = { xray: map.hasAttribute("xray") };
@@ -193,12 +216,15 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
   };
 
   const persist = (): void => {
-    if (storage) {
+    if (storage && interacted) {
       saveViewState(storage, snapshot());
     }
   };
 
   const syncUrl = (): void => {
+    if (!interacted) {
+      return;
+    }
     const state = snapshot();
     if (viewStatesEqual(parseViewState(location.search), state)) {
       return; // the URL already says this — leave its bytes alone
@@ -210,14 +236,27 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
     );
   };
 
+  /** A user act: from here on the URL and storage follow the view. */
+  const interact = (): void => {
+    interacted = true;
+  };
+
   map.addEventListener("layerchange", (event) => {
     const detail = (event as CustomEvent<{ layer: string; layers: SwathLayer[] }>).detail;
     panel.update(detail.layers, detail.layer);
+    // A layer change after the initial apply is always user-driven on
+    // this page (the rail, an authored or added layer, a deletion).
     const changed = appliedLayer !== undefined && appliedLayer !== detail.layer;
     appliedLayer = detail.layer;
+    if (changed) {
+      interact();
+    }
     persist();
     if (changed) {
       syncUrl();
+    }
+    if (shareElement) {
+      shareElement.disabled = false;
     }
   });
 
@@ -231,6 +270,9 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
   // with `originalEvent`) updates the share link; programmatic moves
   // (bounds fits, attribute jumps) only update the remembered session.
   map.map?.on("moveend", (event) => {
+    if ((event as { originalEvent?: Event }).originalEvent) {
+      interact();
+    }
     persist();
     if ((event as { originalEvent?: Event }).originalEvent) {
       syncUrl();
@@ -239,8 +281,10 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
 
   // The x-ray toggle flips the host attribute; mirror it into URL and
   // storage. The observer attaches after the initial attributes landed,
-  // so a deep-linked `?xray` does not count as an interaction.
+  // so a deep-linked `?xray` does not count as an interaction — the
+  // control, and the landing card's invitation, do.
   new MutationObserver(() => {
+    interact();
     persist();
     syncUrl();
   }).observe(map, { attributes: true, attributeFilter: ["xray"] });
@@ -252,8 +296,12 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
   // attribute callbacks run before the map exists (the component
   // ignores them) — no event fires on load, so pasted links stay
   // byte-stable; `syncUrl` additionally skips the write whenever the
-  // URL already encodes the same state.
-  map.addEventListener("swath-timechange", () => {
+  // URL already encodes the same state. Frames the cinematic landing
+  // advanced on its own (issue #211) are not the user's: no write.
+  map.addEventListener("swath-timechange", (event) => {
+    if (!(event as CustomEvent<{ cinematic: boolean }>).detail.cinematic) {
+      interact();
+    }
     persist();
     syncUrl();
   });
@@ -262,8 +310,10 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
   // change (toggle, handle drag, or a programmatic attribute set) — the
   // same mirror-into-URL-and-storage seam as time. Deep-linked compare
   // attributes are applied BEFORE define(), so no event fires on load
-  // and pasted links stay byte-stable.
+  // and pasted links stay byte-stable. Every announced change is the
+  // user's (the toggle, the handle) — the share link carries compare too.
   map.addEventListener("swath-comparechange", () => {
+    interact();
     persist();
     syncUrl();
   });
@@ -273,8 +323,46 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
   // their move — user-driven view changes, so the share link follows
   // (programmatic moves otherwise deliberately never rewrite the URL).
   map.addEventListener("swath-framedata", () => {
+    interact();
     persist();
     syncUrl();
+  });
+
+  if (shareElement) {
+    wireShare(shareElement, snapshot);
+  }
+}
+
+/** How long the Share button reads "copied" before reverting. */
+const SHARE_FEEDBACK_MS = 1600;
+
+/** The Share button (issue #211): copies the canonical deep link of the
+ * current view — the same URL the address bar shows after an
+ * interaction, written in full even on a bare landing. Clipboard
+ * failure (no secure context, permission denied) falls back to a
+ * prompt holding the link, so the URL is never unreachable. */
+function wireShare(button: HTMLButtonElement, snapshot: () => ViewState): void {
+  const idle = (button.textContent ?? "").trim();
+  let revert: number | undefined;
+  const feedback = (state: "copied" | "failed"): void => {
+    button.dataset["state"] = state;
+    button.textContent = state === "copied" ? "copied" : "copy failed";
+    window.clearTimeout(revert);
+    revert = window.setTimeout(() => {
+      delete button.dataset["state"];
+      button.textContent = idle;
+    }, SHARE_FEEDBACK_MS);
+  };
+  button.addEventListener("click", () => {
+    const url = shareUrl(location.href, snapshot());
+    button.dataset["url"] = url; // what was copied, inspectable (tests, tooling)
+    navigator.clipboard
+      .writeText(url)
+      .then(() => feedback("copied"))
+      .catch(() => {
+        feedback("failed");
+        window.prompt("Copy this link", url);
+      });
   });
 }
 

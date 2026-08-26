@@ -773,6 +773,12 @@ export class XRayOverlay {
 
   /** Which layer's traces to paint (badges filter on it; the store keeps
    * every layer so switching back repaints instantly). */
+  /** The frame the host is viewing (its `datetime` attribute; null =
+   * latest/unpinned): the analytics card's per-frame line follows it. */
+  setFrame(datetime: string | null): void {
+    this.#analytics.setViewedFrame(datetime);
+  }
+
   setLayer(layer: string): void {
     if (layer !== this.#layer) {
       this.#layer = layer;

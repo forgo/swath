@@ -3,10 +3,12 @@
 Vanilla Web Components + MapLibre GL (ADR 0005), no framework. `<swath-map>` is the viewer;
 `demo/index.html` *is* the app: the entry page (issue #108) pairs the map with
 `<swath-layer-panel>` (the layer browser) and `demo/main.ts` wires the view-state semantics
-from `src/view-state.ts` — the URL is the shareable representation of layer/center/zoom/x-ray,
-localStorage restores the last session on a paramless visit, URL params beat storage, and
-deep-link URLs are never rewritten on load. The production bundle ships inside the `swath`
-binary (ADR 0011).
+from `src/view-state.ts` — the URL is the shareable representation of layer/center/zoom/frame/x-ray
+(the rail's Share button copies it), localStorage restores the last session on a paramless visit,
+URL params beat storage, and deep-link URLs are never rewritten on load. A visit nobody
+configured is the cinematic landing (issue #211): the first playable time series auto-framed and
+looping, reduced-motion aware, handed over on the first interaction. The production bundle ships
+inside the `swath` binary (ADR 0011).
 
 ## Dev workflow (vite dev + proxy) — unchanged
 

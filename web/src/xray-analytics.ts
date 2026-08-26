@@ -213,6 +213,18 @@ export class AnalyticsPanel {
     this.#render();
   }
 
+  /** The frame on screen (the host's `datetime`; null = none pinned).
+   * While pinned, the per-frame line narrates THIS frame — not the
+   * last one traced, which on a shared server (issue #211: other
+   * pages looping the same series) is whoever rendered last. A frame
+   * just selected and not yet traced reads as an honest all-zero mix. */
+  setViewedFrame(frame: string | null): void {
+    this.#viewedFrame = frame ?? undefined;
+    this.#render();
+  }
+
+  #viewedFrame: string | undefined;
+
   #render(): void {
     const p50 = this.#analytics.quantile(0.5);
     const p95 = this.#analytics.quantile(0.95);
@@ -244,8 +256,12 @@ export class AnalyticsPanel {
       this.#hit.textContent = `hit ${(hitRate * 100).toFixed(1)}%`;
       dataset.hitRate = String(hitRate);
     }
-    const frame = this.#analytics.latestFrame;
-    const frameMix = frame === undefined ? undefined : this.#analytics.frameMix(frame);
+    const frame = this.#viewedFrame ?? this.#analytics.latestFrame;
+    const frameMix =
+      frame === undefined
+        ? undefined
+        : (this.#analytics.frameMix(frame) ??
+          (this.#viewedFrame === undefined ? undefined : { live: 0, overview: 0, cache_hit: 0 }));
     if (frame === undefined || frameMix === undefined) {
       this.#frame.hidden = true;
       delete dataset.frame;

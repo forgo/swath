@@ -17,6 +17,7 @@ import {
   resolveInitialState,
   STORAGE_KEY,
   saveViewState,
+  shareUrl,
   type ViewState,
   viewStatesEqual,
   withViewState,
@@ -101,6 +102,32 @@ test("precedence: empty storage falls through to the zero-config default", () =>
   expect(state).toEqual({ xray: false });
   // And with no storage at all (disabled), same default.
   expect(resolveInitialState("", undefined).source).toBe("default");
+});
+
+test("shareUrl writes the full explicit view onto the page URL (issue #211)", () => {
+  const state: ViewState = {
+    layer: "park-fire-ndvi",
+    center: [-121.6932, 40.0208],
+    zoom: 12.4,
+    time: "2024-08-16T19:03:00Z",
+    xray: true,
+  };
+  // A bare landing: the copied link carries what the viewer resolved to.
+  expect(shareUrl("http://localhost:5173/demo/", state)).toBe(
+    "http://localhost:5173/demo/?layer=park-fire-ndvi&center=-121.6932,40.0208&zoom=12.4&t=2024-08-16T19:03:00Z&xray",
+  );
+  // Foreign params ride along, the hash survives, and a URL that already
+  // says this comes back byte-identical (the address-bar agreement).
+  const deepLink =
+    "http://localhost:5173/demo/?layer=park-fire-ndvi&center=-121.6932,40.0208&zoom=12.4&t=2024-08-16T19:03:00Z&xray&basemap=demo#top";
+  expect(shareUrl(deepLink, state)).toBe(deepLink);
+  expect(shareUrl(deepLink, parseViewState(new URL(deepLink).search))).toBe(deepLink);
+  // Compare state (issue #210) rides the same writer: `ct`/`cl` + `swipe`.
+  const compared: ViewState = { ...state, compareTime: "2024-06-07T19:03:00Z", swipe: 0.35 };
+  const comparedLink =
+    "http://localhost:5173/demo/?layer=park-fire-ndvi&center=-121.6932,40.0208&zoom=12.4&t=2024-08-16T19:03:00Z&ct=2024-06-07T19:03:00Z&swipe=0.35&xray";
+  expect(shareUrl("http://localhost:5173/demo/", compared)).toBe(comparedLink);
+  expect(shareUrl(comparedLink, parseViewState(new URL(comparedLink).search))).toBe(comparedLink);
 });
 
 test("hasViewParams triggers on exactly the owned params", () => {

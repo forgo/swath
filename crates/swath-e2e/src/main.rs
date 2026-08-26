@@ -65,8 +65,10 @@ const FIRE_PRE_INSTANT: &str = "2024-08-01T00:00:00Z";
 const FIRE_POST_INSTANT: &str = "2024-08-20T00:00:00Z";
 const FIRE_PRE_GRANULE: &str = "hlss30-t10tfk-2024204";
 const FIRE_POST_GRANULE: &str = "hlss30-t10tfk-2024229";
-const FIRE_PRE_GOLDEN: &str = "crates/swath-render/tests/data/fire-ndvi-13-1326-3100-2024204.png";
-const FIRE_POST_GOLDEN: &str = "crates/swath-render/tests/data/fire-ndvi-13-1326-3100-2024229.png";
+const FIRE_PRE_GOLDEN: &str =
+    "crates/swath-render/tests/data/fire-ndvi-rdylgn-13-1326-3100-2024204.png";
+const FIRE_POST_GOLDEN: &str =
+    "crates/swath-render/tests/data/fire-ndvi-rdylgn-13-1326-3100-2024229.png";
 /// The derived temporal extent of the six dropped dates
 /// (drop-fire-granules.sh) — what `/collections/hls-s30-fire` must serve.
 const FIRE_EXTENT: [&str; 2] = ["2024-06-07T19:03:00Z", "2024-10-15T19:03:00Z"];
@@ -203,7 +205,7 @@ fn run() -> Result<(), Failure> {
 
 /// The whole temporal story against the live stack: honest 404 before
 /// the fire drop, the six-granule drop, `datetime=` frame selection with
-/// oracle-pinned pixels per date, granule-scoped cache identity, the
+/// self-golden-pinned pixels per date (values oracle-pinned in process), granule-scoped cache identity, the
 /// temporal decision on the SSE trace, the RFC 7807 / refusal taxonomy,
 /// and the derived temporal extent on the collection document.
 fn fire_time_dimension_checks() -> Result<(), Failure> {
@@ -221,13 +223,13 @@ fn fire_time_dimension_checks() -> Result<(), Failure> {
     })?;
     let latest = fire_absent_datetime_is_latest_and_cache_shared()?;
     let pre = fire_frame_matches_golden(
-        "fire_pre_frame_matches_oracle_golden",
+        "fire_pre_frame_matches_self_golden",
         FIRE_PRE_INSTANT,
         FIRE_PRE_GOLDEN,
         "fire-pre.png",
     )?;
     let post = fire_frame_matches_golden(
-        "fire_post_frame_matches_oracle_golden",
+        "fire_post_frame_matches_self_golden",
         FIRE_POST_INSTANT,
         FIRE_POST_GOLDEN,
         "fire-post.png",
@@ -535,8 +537,13 @@ fn fire_absent_datetime_is_latest_and_cache_shared() -> Result<Vec<u8>, Failure>
     Ok(absent.body)
 }
 
-/// Fetches one dated frame, writes it as an artifact, and pins it against
-/// the committed rio-tiler oracle golden. Returns the served bytes.
+/// Fetches one dated frame, writes it as an artifact, and pins it
+/// byte-for-byte against the committed `RdYlGn` self-golden — level 2 of
+/// the #94 scheme, exactly as `ndvi_matches_colormapped_self_golden`:
+/// the frame's VALUES are pinned to the grayscale rio-tiler oracle in
+/// process (`swath-render`'s `golden_ir`, `swath-api`'s `tiles_datetime`),
+/// the colors proven `lut[q(gray)]` there, and this freezes the served bytes.
+/// Returns the served bytes.
 fn fire_frame_matches_golden(
     check: &'static str,
     instant: &str,
@@ -556,10 +563,25 @@ fn fire_frame_matches_golden(
     let served = format!("{ARTIFACT_DIR}/{artifact}");
     fs::write(&served, &resp.body)
         .map_err(|e| Failure::new(check, &path, "artifact written", e.to_string()))?;
-    pdiff_check(check, &path, Path::new(&served), golden)?;
+    let committed = fs::read(golden).map_err(|e| {
+        Failure::new(
+            check,
+            &path,
+            "committed self-golden readable",
+            e.to_string(),
+        )
+    })?;
+    if resp.body != committed {
+        return Err(Failure::new(
+            check,
+            &path,
+            format!("bytes identical to {golden} ({} bytes)", committed.len()),
+            format!("{} bytes, differing payload", resp.body.len()),
+        ));
+    }
     pass(
         check,
-        format_args!("datetime={instant} matches the oracle golden {golden}"),
+        format_args!("datetime={instant} is byte-identical to the RdYlGn self-golden {golden}"),
     );
     Ok(resp.body)
 }
