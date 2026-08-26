@@ -248,7 +248,9 @@ _Last verified against sources `7f5a11855aef`._
 
 Vanilla Web Components, TypeScript, no framework (ADR 0005); **MapLibre GL** is the single
 necessary dependency; the x-ray overlay is fed by the Trace SSE stream. Deck.gl stays out until
-a genuine GPU-scale need lands (ADR 0005's revisit condition).
+a genuine GPU-scale need lands (ADR 0005's revisit condition). Structure per ADR 0021: one shell
+(the map always present, modes in the URL), shadow-DOM primitives on design tokens —
+[`design/ui-system.md`](design/ui-system.md).
 
 ## 14. Extension model (decided — ADR 0013)
 

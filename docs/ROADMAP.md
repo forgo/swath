@@ -128,3 +128,12 @@ it** (the PR that introduced this file carries the approval checkbox).
 
 Inventory rows without a numbered entry (11–16) are demand-triggered maintenance: scheduled
 when their revisit trigger fires, not by milestone.
+
+**M10–M12 (maintainer, 2026-08-26 — the UX round, ahead of items 7–8):** **M10 — UX product
+structure** (ADR 0021, `design/ui-system.md`): one shell with the map always present, shadow-DOM
+primitives on design tokens, rail modes, status bar, HUD dock, command palette, catalog with
+engine-rendered thumbnails, DAG canvas primitives, touch parity. **M11 — Earn the DAG**: a typed
+two-cube join (`merge_cubes`, narrowed) in the compiler so the authoring canvas becomes a
+constrained DAG and change detection is its first product; design note + ADR first (#294).
+**M12 — UX design language**: theme values, typography, motion, light/high-contrast — mechanically
+a token-value swap. Item 5 (#151) is consumed by M10/M11; deck.gl stays out (ADR 0005).
