@@ -208,7 +208,8 @@ publishing. Feasibility against the bounded profile:
   the server compiles via the #32 compiler (same diagnostics, standardized error format) and
   answers `image/png` — not the spec's "full extent at native resolution" (unbounded work,
   and Swath's engine is a tiler), but **one small overview-backed tile** covering the graph's
-  `spatial_extent` (or the collection extent when null), sized so the planner's byte ceiling
+  `spatial_extent` (or, when null, the footprint of the granule the preview renders — a
+  config-declared collection advertises a placeholder box), sized so the planner's byte ceiling
   (`max_estimated_live_bytes`, materialization-planner design §1) admits it from overviews —
   a preview is exactly the workload overviews exist for. Real openEO clients gain a lawful,
   clearly-narrowed sync endpoint; the UI gains its preview with no bespoke vocabulary.

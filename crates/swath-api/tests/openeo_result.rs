@@ -92,15 +92,18 @@ fn udf_process(module: &[u8]) -> Value {
 async fn preview_is_byte_identical_to_the_published_service_tile() {
     let (app, catalog) = common::openeo_app();
 
-    // Preview the draft. The collection extent (spatial_extent: null)
-    // selects the deepest containing WebMercatorQuad tile — z7 (26, 48)
-    // for the committed fixture extent — served from an overview: a
-    // preview is exactly the workload overviews exist for.
+    // Preview the draft over the committed fixture extent, named: a
+    // named extent selects the deepest WebMercatorQuad tile containing
+    // it whole — z7 (26, 48) — served from an overview: a preview is
+    // exactly the workload overviews exist for.
+    let fixture_extent =
+        json!({ "west": -105.537, "south": 39.1954, "east": -105.3581, "north": 39.3345 });
+    let ndvi_over_fixture = || ndvi_process_with_extent(&fixture_extent);
     let response = common::request_on(
         &app,
         "POST",
         "/result",
-        Some(result_request(&ndvi_process())),
+        Some(result_request(&ndvi_over_fixture())),
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -138,7 +141,7 @@ async fn preview_is_byte_identical_to_the_published_service_tile() {
     // Publish the same graph; fetch the published service's tile at the
     // address the preview named. Byte-identical: same compiler, same
     // lowering, same render path, same pixels.
-    let service = json!({ "type": "xyz", "process": ndvi_process() });
+    let service = json!({ "type": "xyz", "process": ndvi_over_fixture() });
     let response = common::request_on(&app, "POST", "/services", Some(service)).await;
     assert_eq!(response.status(), StatusCode::CREATED);
     let id = response.headers()["openeo-identifier"]
@@ -159,7 +162,7 @@ async fn preview_is_byte_identical_to_the_published_service_tile() {
         &app,
         "POST",
         "/result",
-        Some(result_request(&ndvi_process())),
+        Some(result_request(&ndvi_over_fixture())),
     )
     .await;
     assert_eq!(common::body_bytes(response).await, published);
@@ -201,6 +204,81 @@ async fn spatial_extent_selects_a_deeper_tile_and_small_live_previews_are_admitt
         trace.contains("\"decision\":\"live\""),
         "no overview is eligible this deep; the small live read serves: {trace}"
     );
+}
+
+/// No `spatial_extent` frames the granule the preview renders, not the
+/// collection's advertised box: a config-declared dataset carries the
+/// whole-world placeholder extent until a registration derives its real
+/// one (ROADMAP row 15), and a preview tile of that box is the root tile
+/// with the granule sub-pixel inside — a decoded, fully transparent PNG
+/// (issue #270: the authoring canvas showed it as an empty
+/// checkerboard). The preview names the granule's own tile instead.
+#[tokio::test]
+async fn null_extent_previews_the_resolved_granule_not_a_placeholder_extent() {
+    let mut placeholder = common::hls_catalog_dataset();
+    placeholder.extent.bbox = swath_core::catalog::Bbox {
+        west: -180.0,
+        south: -90.0,
+        east: 180.0,
+        north: 90.0,
+    };
+    placeholder.layers.clear();
+    let (app, _) = common::openeo_app_seeded(placeholder, vec![common::hls_catalog_granule()]);
+
+    // The collection still advertises the placeholder (deriving extents
+    // is registration's job, not the preview's)…
+    let collection =
+        common::body_json(common::request_on(&app, "GET", "/collections/hls-s30", None).await)
+            .await;
+    assert_eq!(
+        collection["extent"]["spatial"]["bbox"],
+        json!([[-180.0, -90.0, 180.0, 90.0]])
+    );
+
+    // …but the preview frames the granule at its own scale: the z10 tile
+    // around its center (the granule spans about half of it), with real
+    // pixels — not the z7 tile that contains it whole as a sliver.
+    let response = common::request_on(
+        &app,
+        "POST",
+        "/result",
+        Some(result_request(&ndvi_process())),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["x-swath-preview-tile"], "10/390/212");
+    let preview = common::body_bytes(response).await;
+    let decoded = image::load_from_memory(&preview)
+        .expect("the preview decodes")
+        .to_rgba8();
+    let opaque = decoded.pixels().filter(|pixel| pixel[3] > 0).count();
+    let total = decoded.pixels().count();
+    // The fixture is a diagonal clip of its bbox (about a sixth of the
+    // z10 tile paints); the z7 root-of-the-box tile painted ~1%, the
+    // placeholder's z0 tile nothing at all.
+    assert!(
+        opaque * 8 >= total,
+        "the granule-framed preview must be substantially painted: {opaque} of {total} px opaque"
+    );
+
+    // The granule-scale tile is exactly what publishing serves there —
+    // the ADR 0014 equivalence holds for the footprint-framed preview too.
+    let service = json!({ "type": "xyz", "process": ndvi_process() });
+    let response = common::request_on(&app, "POST", "/services", Some(service)).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let id = response.headers()["openeo-identifier"]
+        .to_str()
+        .expect("identifier")
+        .to_owned();
+    let response = common::request_on(
+        &app,
+        "GET",
+        &format!("/tilesets/{id}/tiles/10/390/212"),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(common::body_bytes(response).await, preview);
 }
 
 /// The budget refusal (ADR 0014: refusal over degradation): when the
@@ -344,7 +422,8 @@ async fn udf_preview_is_byte_identical_to_the_published_udf_service_tile() {
     let response = common::request_on(app, "POST", "/result", Some(result_request(&process))).await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["content-type"], "image/png");
-    assert_eq!(response.headers()["x-swath-preview-tile"], "7/48/26");
+    // No extent named: the preview frames the granule at its own scale.
+    assert_eq!(response.headers()["x-swath-preview-tile"], "10/390/212");
     let header: Value =
         serde_json::from_str(response.headers()["x-swath-trace"].to_str().expect("ASCII"))
             .expect("JSON");
@@ -373,8 +452,13 @@ async fn udf_preview_is_byte_identical_to_the_published_udf_service_tile() {
         .to_str()
         .expect("identifier")
         .to_owned();
-    let response =
-        common::request_on(app, "GET", &format!("/tilesets/{id}/tiles/7/48/26"), None).await;
+    let response = common::request_on(
+        app,
+        "GET",
+        &format!("/tilesets/{id}/tiles/10/390/212"),
+        None,
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     let published_header: Value =
         serde_json::from_str(response.headers()["x-swath-trace"].to_str().expect("ASCII"))
