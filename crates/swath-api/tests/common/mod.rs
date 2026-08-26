@@ -519,6 +519,17 @@ pub(crate) fn openeo_app_seeded(
 /// ceiling overridden — the refusal-path tests force the planner over
 /// budget with a tiny ceiling (the default admits every fixture render).
 pub(crate) fn openeo_app_with_preview_ceiling(ceiling: Option<u64>) -> (Router, MemoryCatalog) {
+    openeo_app_with_budget(ceiling, swath_core::planner::Budget::default())
+}
+
+/// [`openeo_app_with_preview_ceiling`] under an operator budget (#272):
+/// what `swath serve` hands the openEO surface from its resolved
+/// `[budget]` → flags/env layering, so published services and previews
+/// serve under it exactly as declared layers do.
+pub(crate) fn openeo_app_with_budget(
+    ceiling: Option<u64>,
+    budget: swath_core::planner::Budget,
+) -> (Router, MemoryCatalog) {
     use swath_api::{CatalogLayer, CatalogLayers, OpenEoState, openeo_router};
 
     let catalog = MemoryCatalog::default();
@@ -557,7 +568,8 @@ pub(crate) fn openeo_app_with_preview_ceiling(ceiling: Option<u64>) -> (Router, 
     // The openEO surface renders previews (ADR 0014) through its own
     // clone of the same adapters — exactly the binary's wiring.
     let mut openeo_state =
-        OpenEoState::new(provider, CogSource::new(store), Proj4rsReproject, BASE_URL);
+        OpenEoState::new(provider, CogSource::new(store), Proj4rsReproject, BASE_URL)
+            .with_budget(budget);
     if let Some(ceiling) = ceiling {
         openeo_state = openeo_state.with_preview_ceiling(ceiling);
     }
@@ -570,6 +582,19 @@ pub(crate) fn openeo_app_with_preview_ceiling(ceiling: Option<u64>) -> (Router, 
 /// caller's fetcher (a counting double in the UDF suite). Returns the
 /// publish wiring and the store so tests can rehydrate and inspect.
 pub(crate) fn openeo_app_with_udf<F>(fetcher: F) -> UdfApp
+where
+    F: swath_core::udf::ModuleFetcher + 'static,
+{
+    openeo_app_with_udf_budget(fetcher, swath_core::planner::Budget::default())
+}
+
+/// [`openeo_app_with_udf`] under an operator budget (#272) — the fuel
+/// axis's regression harness: `[budget] max-udf-fuel-per-tile` must
+/// bind a published `run_udf` service and its preview.
+pub(crate) fn openeo_app_with_udf_budget<F>(
+    fetcher: F,
+    budget: swath_core::planner::Budget,
+) -> UdfApp
 where
     F: swath_core::udf::ModuleFetcher + 'static,
 {
@@ -597,7 +622,8 @@ where
     .with_udf_executor(publish.executor());
     let openeo_state =
         OpenEoState::new(provider, CogSource::new(store), Proj4rsReproject, BASE_URL)
-            .with_udf(publish.clone());
+            .with_udf(publish.clone())
+            .with_budget(budget);
     let app = router(Arc::new(state)).merge(openeo_router(Arc::new(openeo_state)));
     UdfApp {
         app,

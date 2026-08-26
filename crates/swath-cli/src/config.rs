@@ -153,6 +153,11 @@ pub(crate) struct ResolvedConfig {
     pub(crate) cors_allowed_origins: Vec<String>,
     /// Read-only serving (#198): write routes unmounted.
     pub(crate) read_only: bool,
+    /// The resolved global default budget (#37: defaults → `[budget]` →
+    /// flags/env). Already overlaid into every declared layer; carried
+    /// here so published openEO services and previews serve under it
+    /// too (#272).
+    pub(crate) budget: Budget,
     /// Where the layers come from.
     pub(crate) layers: LayerSource,
 }
@@ -488,6 +493,7 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
         udf_store,
         cors_allowed_origins,
         read_only: args.read_only,
+        budget: default_budget,
         layers,
     })
 }

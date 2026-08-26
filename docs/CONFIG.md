@@ -5,8 +5,8 @@ variables, and the `--config` TOML file. The in-binary help remains the
 source of truth; **this file is kept synchronized mechanically** — the
 tables between `config-check` markers are diffed against the clap tree
 and serde schema by the docs-drift tests
-(`crates/swath-cli/src/docs_check.rs`): a key added, renamed, or removed
-without updating this file fails the build, and so does a phantom key.
+(`crates/swath-cli/src/docs_check.rs`): drift in either direction fails
+the build.
 Companions: [`OPERATIONS.md`](OPERATIONS.md), [`ENDPOINTS.md`](ENDPOINTS.md).
 
 ## Precedence
@@ -119,7 +119,10 @@ space), dataset ids unique.
 ### `[budget]` — and `[layers.budget]` / `[datasets.layers.budget]`
 
 Every knob is optional at every level; per-layer values outrank the
-global default knob by knob (see Precedence).
+global default knob by knob (see Precedence). The resolved global
+default also governs openEO published services and `POST /result`
+previews, whose own ADR 0014 byte ceiling a `[budget]` cap can tighten,
+never widen.
 
 <!-- config-check:begin budget -->
 
@@ -211,8 +214,8 @@ ingest and require their dataset to pre-exist.
 ## Example — catalog mode with filedrop ingest, cache, and budgets
 
 The compose stack's config ([`tests/e2e/swath-catalog.toml`](../tests/e2e/swath-catalog.toml))
-is the living example; in miniature (a static-layers file is the same minus
-`catalog`/`watch-dir`/`[[datasets]]`, with `[[layers]]` whose `bands` are asset
+is the living example; in miniature (a static-layers file drops
+`catalog`/`watch-dir`/`[[datasets]]` for `[[layers]]` whose `bands` are asset
 URIs under the store root):
 
 ```toml

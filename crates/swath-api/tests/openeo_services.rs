@@ -162,10 +162,20 @@ async fn post_service_serves_tiles_byte_identical_to_the_builtin_ndvi() {
     );
 
     // Rehydration parity: recompiling the persisted layer (what `swath
-    // serve` does at startup) reproduces the built-in NDVI plan exactly.
-    let template = swath_api::compile_service_layer(&dataset, layer, None).expect("recompiles");
+    // serve` does at startup) reproduces the built-in NDVI plan exactly
+    // — under whatever budget the CURRENT config resolves (#272): nothing
+    // budget-shaped is persisted with the service, so a restart after
+    // tightening `[budget]` tightens the service.
+    let tightened = swath_core::planner::Budget {
+        max_estimated_live_bytes: Some(1),
+        max_udf_fuel_per_tile: 10_000_000,
+        ..swath_core::planner::Budget::default()
+    };
+    let template =
+        swath_api::compile_service_layer(&dataset, layer, None, &tightened).expect("recompiles");
     let registry = swath_api::LayerRegistry::hls_fixtures();
     assert_eq!(template.plan, registry.get("ndvi").expect("ndvi").plan);
+    assert_eq!(template.budget, tightened);
 
     // Idempotent creation: the same definition maps to the same service.
     let response = common::request_on(&app, "POST", "/services", Some(ndvi_request())).await;
@@ -358,4 +368,42 @@ async fn unknown_service_is_service_not_found() {
         let error = common::body_json(response).await;
         assert_eq!(error["code"], "ServiceNotFound");
     }
+}
+
+/// A published service serves under the operator's `[budget]` (#272): a
+/// global `max-estimated-live-bytes` ceiling refuses its tile exactly as
+/// it would a declared layer's — the same graph serves under the
+/// default, so the ceiling is the only difference.
+#[tokio::test]
+async fn published_service_inherits_the_operator_byte_ceiling() {
+    let tile = |id: &str| format!("/tilesets/{id}/tiles/12/1561/848");
+
+    let (capped, _) = common::openeo_app_with_budget(
+        None,
+        swath_core::planner::Budget {
+            max_estimated_live_bytes: Some(1),
+            ..swath_core::planner::Budget::default()
+        },
+    );
+    let response = common::request_on(&capped, "POST", "/services", Some(ndvi_request())).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let id = response.headers()["openeo-identifier"]
+        .to_str()
+        .expect("ascii id")
+        .to_owned();
+    let response = common::request_on(&capped, "GET", &tile(&id), None).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.headers()["content-type"], "application/json");
+    let body = common::body_json(response).await;
+    common::assert_valid("common/exception.json", &body);
+    let detail = body["detail"].as_str().expect("detail");
+    assert!(
+        detail.contains("materialization budget exceeded") && detail.contains("1-byte ceiling"),
+        "the refusal names the operator's ceiling: {detail}"
+    );
+
+    let (permissive, _) = common::openeo_app();
+    let response = common::request_on(&permissive, "POST", "/services", Some(ndvi_request())).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    tile_bytes(&permissive, &tile(&id)).await;
 }

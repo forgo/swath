@@ -257,6 +257,11 @@ pub struct OpenEoState<S, R, C> {
     /// The preview budget's `max_estimated_live_bytes` ceiling
     /// ([`PREVIEW_MAX_ESTIMATED_LIVE_BYTES`] unless overridden).
     preview_ceiling: u64,
+    /// The operator's resolved global budget (#272): every published
+    /// service serves under it, and a preview runs under it narrowed by
+    /// [`Self::preview_ceiling`]. `Budget::default()` unless the binary
+    /// hands over its resolved `[budget]` → flags/env layering.
+    budget: Budget,
     /// The `run_udf` publish wiring (ADR 0018, #204); `None` = the
     /// process is not offered here.
     udf: Option<UdfPublish>,
@@ -282,8 +287,24 @@ impl<S, R, C> OpenEoState<S, R, C> {
             reproject,
             base_url,
             preview_ceiling: PREVIEW_MAX_ESTIMATED_LIVE_BYTES,
+            budget: Budget::default(),
             udf: None,
         }
+    }
+
+    /// Sets the operator's global budget (#272): the resolved `[budget]`
+    /// → `--max-udf-fuel-per-tile` / `--max-estimated-live-bytes` layering
+    /// the binary already applies to config-declared layers. Published
+    /// services (`POST /services`, and every restart's rehydration through
+    /// [`compile_service_layer`] with the same value) serve under it;
+    /// `POST /result` runs under it with the byte ceiling narrowed to
+    /// [`Self::with_preview_ceiling`]'s bound — an operator can cap user
+    /// code below the built-in default on a public instance, never widen
+    /// the preview above ADR 0014's ceiling.
+    #[must_use]
+    pub fn with_budget(mut self, budget: Budget) -> Self {
+        self.budget = budget;
+        self
     }
 
     /// Enables `run_udf` on this surface (ADR 0018, #204): graphs compile
@@ -804,7 +825,13 @@ fn compile_context(dataset: &Dataset) -> CompileContext {
 /// graph's `run_udf` inputs ([`UdfPublish::rehydrate`] at startup —
 /// resolved from the module store by hash, never fetched; `None` where
 /// no UDF support is wired, which makes a `run_udf` graph
-/// [`CompileError::UdfUnavailable`]).
+/// [`CompileError::UdfUnavailable`]). `budget` is the operator's resolved
+/// global budget (#272) — the same value config-declared layers get, so
+/// a published service serves under the `[budget]` table and the global
+/// flags/env exactly as a declared layer does. Nothing about the budget
+/// is persisted with the service: rehydration passes the *current*
+/// config's value, so an operator tightening `[budget]` and restarting
+/// tightens every published service too.
 ///
 /// # Errors
 ///
@@ -815,6 +842,7 @@ pub fn compile_service_layer(
     dataset: &Dataset,
     layer: &DomainLayer,
     udf: Option<&UdfModules>,
+    budget: &Budget,
 ) -> Result<CatalogLayer, CompileError> {
     let graph = layer
         .process
@@ -843,7 +871,7 @@ pub fn compile_service_layer(
             _ => Resampling::Bilinear(NodataPolicy::ExcludeRenormalize),
         },
         tile_size: layer.tile_size,
-        budget: Budget::default(),
+        budget: budget.clone(),
         window: product.window,
     })
 }
@@ -971,6 +999,26 @@ async fn graph_dataset<S, R, C: Catalog>(
     fetch_dataset(app, collection).await
 }
 
+/// What a graph lowering reads from the surface's state beyond the
+/// request itself: the `run_udf` wiring (`None` = not offered) and the
+/// operator's global budget (#272). [`OpenEoState::lowering`] hands it
+/// out so `POST /services` and `POST /result` cannot lower differently.
+#[derive(Clone, Copy)]
+struct Lowering<'a> {
+    udf: Option<&'a UdfPublish>,
+    budget: &'a Budget,
+}
+
+impl<S, R, C> OpenEoState<S, R, C> {
+    /// The lowering inputs of this surface.
+    fn lowering(&self) -> Lowering<'_> {
+        Lowering {
+            udf: self.udf.as_ref(),
+            budget: &self.budget,
+        }
+    }
+}
+
 /// **The** graph lowering (single construction site): compiles `process`
 /// through the whole #32 compiler against the dataset's bands, lowers
 /// the compiled product to the persisted layer vocabulary via the #95
@@ -979,9 +1027,10 @@ async fn graph_dataset<S, R, C: Catalog>(
 /// `POST /result` so a preview renders precisely what publishing the
 /// same graph would serve. A `run_udf` graph resolves its remote module
 /// **once**, here (ADR 0018, #204); the module bytes come back for the
-/// publish path to persist (a preview persists nothing).
+/// publish path to persist (a preview persists nothing). The template
+/// carries the operator's global budget (#272), from `lowering`.
 async fn lower_graph(
-    udf: Option<&UdfPublish>,
+    lowering: Lowering<'_>,
     dataset: &Dataset,
     process: &Value,
     id: String,
@@ -989,6 +1038,7 @@ async fn lower_graph(
     description: Option<String>,
     tile_size: u32,
 ) -> Result<(DomainLayer, CatalogLayer, Option<Vec<u8>>), OpenEoError> {
+    let Lowering { udf, budget } = lowering;
     // The compile motion's UDF inputs: remote modules fetched now, once.
     let modules = match udf {
         Some(udf) => Some(udf.resolve(process).await?),
@@ -1018,7 +1068,7 @@ async fn lower_graph(
     };
     // One lowering for the live insert, every future rehydration, and
     // the preview render.
-    let template = compile_service_layer(dataset, &layer, modules.as_ref())
+    let template = compile_service_layer(dataset, &layer, modules.as_ref(), budget)
         .map_err(|err| OpenEoError::internal(format!("service template compile failed: {err}")))?;
     Ok((layer, template, product.udf_module))
 }
@@ -1037,7 +1087,7 @@ async fn create_service<S, R, C: Catalog>(
 
     let id = service_id(&request.process);
     let (layer, template, module) = lower_graph(
-        app.udf.as_ref(),
+        app.lowering(),
         &dataset,
         &request.process,
         id.clone(),
@@ -1151,7 +1201,7 @@ where
     // publishing this graph would serve. The template stays ephemeral —
     // never persisted, never inserted into the provider.
     let (_, mut template, _) = lower_graph(
-        app.udf.as_ref(),
+        app.lowering(),
         &dataset,
         &process,
         "preview".to_owned(),
@@ -1160,13 +1210,19 @@ where
         PREVIEW_TILE_SIZE,
     )
     .await?;
-    // The preview budget: the byte ceiling is the preview's own; the
-    // `run_udf` fuel axis rides along at the budget default
-    // (`max_udf_fuel_per_tile`, #205) — a preview of a UDF graph runs
-    // the module under exactly the budget its published service would.
+    // The preview budget (#272): the operator's global budget — so a
+    // preview of a UDF graph runs the module under exactly the fuel its
+    // published service would — with the byte ceiling the tighter of
+    // the preview's own (ADR 0014) and the operator's. The operator's
+    // cap layers UNDER the preview ceiling, never above it: a generous
+    // `max-estimated-live-bytes` cannot widen what a preview may read.
     template.budget = Budget {
-        max_estimated_live_bytes: Some(app.preview_ceiling),
-        ..Budget::default()
+        max_estimated_live_bytes: Some(
+            app.budget
+                .max_estimated_live_bytes
+                .map_or(app.preview_ceiling, |cap| cap.min(app.preview_ceiling)),
+        ),
+        ..template.budget
     };
 
     let bbox = preview_bbox(&process, &dataset)?;
@@ -1577,8 +1633,8 @@ mod tests {
                 tile_size: 256,
                 process: Some(graph),
             };
-            let template =
-                compile_service_layer(&dataset, &layer, None).expect("persisted layer recompiles");
+            let template = compile_service_layer(&dataset, &layer, None, &super::Budget::default())
+                .expect("persisted layer recompiles");
             assert_eq!(
                 template.plan, product.plan,
                 "{name}: rehydrated plan must equal the originally compiled plan"

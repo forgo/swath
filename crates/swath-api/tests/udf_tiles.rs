@@ -269,3 +269,86 @@ async fn fuel_exhaustion_is_a_pinned_rfc7807_problem() {
         })
     );
 }
+
+/// The issue #272 reproduction: `[budget] max-udf-fuel-per-tile =
+/// 10_000_000` must bind a published `run_udf` service and its preview
+/// exactly as it binds a declared layer. The reference NDVI module runs
+/// at ~12 M fuel per tile — inside the 100 M default, over the operator's
+/// cap — so it rendered where it should have refused. Now: the pinned
+/// RFC 7807 fuel problem through the service, `ProcessGraphComplexity`
+/// on preview; the same graph still serves under the default.
+#[tokio::test]
+async fn operator_fuel_cap_binds_published_services_and_previews() {
+    const OPERATOR_CAP: u64 = 10_000_000;
+    // Non-vacuous: under the default, the module serves and genuinely
+    // spends more than the operator's cap.
+    let permissive = common::openeo_app_with_udf(NoFetch);
+    let id = publish(&permissive.app, udf_graph()).await;
+    let (_, header, _) = get_tile(&permissive.app, &id).await;
+    let fuel = header["udf_fuel_used"].as_u64().expect("fuel");
+    assert!(
+        fuel > OPERATOR_CAP,
+        "the reference module must exceed the operator's cap for this test to bind: {fuel}"
+    );
+
+    let capped = common::openeo_app_with_udf_budget(
+        NoFetch,
+        Budget {
+            max_udf_fuel_per_tile: OPERATOR_CAP,
+            ..Budget::default()
+        },
+    );
+    // Through the published service: the fuel-exhaustion problem, in the
+    // operator's terms.
+    let id = publish(&capped.app, udf_graph()).await;
+    let response =
+        common::request_on(&capped.app, "GET", &format!("/tilesets/{id}/{TILE}"), None).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.headers()["content-type"], "application/json");
+    let body = common::body_json(response).await;
+    common::assert_valid("common/exception.json", &body);
+    let detail = body["detail"].as_str().expect("detail");
+    assert!(
+        detail.contains(&format!("fuel budget of {OPERATOR_CAP}")),
+        "the refusal names the operator's cap: {detail}"
+    );
+
+    // On preview: the spec's `ProcessGraphComplexity`, same cap. The
+    // preview renders over the graph's `spatial_extent` — a small extent
+    // deep inside the granule, so the tile is all data (fuel is spent
+    // per data pixel; the collection-extent preview tile is mostly nodata
+    // and runs under the cap honestly).
+    let mut graph = udf_graph();
+    graph["process_graph"]["load"]["arguments"]["spatial_extent"] =
+        json!({ "west": -105.45, "south": 39.26, "east": -105.44, "north": 39.27 });
+    let preview = |app: Router| {
+        let graph = graph.clone();
+        async move {
+            common::request_on(&app, "POST", "/result", Some(json!({ "process": graph }))).await
+        }
+    };
+    let response = preview(permissive.app.clone()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let header: Value =
+        serde_json::from_str(response.headers()["x-swath-trace"].to_str().expect("ASCII"))
+            .expect("JSON");
+    let fuel = header["udf_fuel_used"].as_u64().expect("fuel");
+    assert!(
+        fuel > OPERATOR_CAP,
+        "the preview over this extent must exceed the operator's cap to bind: {fuel}"
+    );
+    let response = preview(capped.app.clone()).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let error = common::body_json(response).await;
+    common::assert_openeo_valid(
+        &common::openeo_schema("/components/schemas/error"),
+        "fuel refusal",
+        &error,
+    );
+    assert_eq!(error["code"], "ProcessGraphComplexity");
+    let message = error["message"].as_str().expect("message");
+    assert!(
+        message.contains(&format!("{OPERATOR_CAP} fuel")),
+        "the preview refusal names the operator's cap: {message}"
+    );
+}
