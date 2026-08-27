@@ -17,7 +17,7 @@
  * - `zoom`   — initial zoom.
  * - `switcher` — `"off"` omits the built-in layer-switcher control
  *   (read at connect time only): for hosts that provide their own layer
- *   UI, like the entry page's `<swath-layer-panel>` (issue #108).
+ *   UI, like the entry page's `<swath-layer-list>` (issues #108, #282).
  * - `xray`   — presence toggles the x-ray overlay (issue #34): per-tile
  *   decisions/timings from the `/traces` SSE stream, painted by the
  *   built-in [`XRayOverlay`] module (see swath-xray.ts for the design
@@ -756,6 +756,11 @@ export class SwathMap extends HTMLElement {
   /** The compare swipe (issue #210): present exactly while a coherent
    * compare is asked for via `compare-datetime` / `compare-layer`. */
   #compare: CompareView | undefined;
+  /** How the viewed layer is shown (issue #282): the eye and the opacity
+   * slider. Viewer state, not view state — never in the URL; reset on a
+   * layer switch so a hidden layer cannot make the next one blank. */
+  #layerVisible = true;
+  #layerOpacity = 1;
   #compareToggle: CompareToggleControl | undefined;
   /** The sides of the active compare — what the x-ray overlay matches
    * traces against, and the guard that keeps swipe-only updates from
@@ -1128,6 +1133,52 @@ export class SwathMap extends HTMLElement {
    * default and is entered via the `compare-layer` attribute (deep
    * links, host pages).
    */
+  /** Show or hide the viewed layer's raster (both compare sides). */
+  setLayerVisibility(visible: boolean): void {
+    this.#layerVisible = visible;
+    this.#applyPaint();
+  }
+
+  /** Opacity of the viewed layer's raster, 0–1 (both compare sides). */
+  setLayerOpacity(opacity: number): void {
+    this.#layerOpacity = Math.min(1, Math.max(0, opacity));
+    this.#applyPaint();
+  }
+
+  get layerVisible(): boolean {
+    return this.#layerVisible;
+  }
+
+  get layerOpacity(): number {
+    return this.#layerOpacity;
+  }
+
+  /** Raster paint/layout onto every map that carries the swath layer; a
+   * map whose style is still loading gets it on `styledata`. */
+  #applyPaint(): void {
+    for (const map of [this.#map, this.#compare?.map]) {
+      if (!map) {
+        continue;
+      }
+      const paint = (): void => {
+        if (!map.getLayer(RASTER_LAYER_ID)) {
+          return;
+        }
+        map.setLayoutProperty(
+          RASTER_LAYER_ID,
+          "visibility",
+          this.#layerVisible ? "visible" : "none",
+        );
+        map.setPaintProperty(RASTER_LAYER_ID, "raster-opacity", this.#layerOpacity);
+      };
+      if (map.getLayer(RASTER_LAYER_ID)) {
+        paint();
+      } else {
+        map.once("styledata", paint);
+      }
+    }
+  }
+
   toggleCompare(): void {
     if (
       this.getAttribute("compare-datetime") !== null ||
@@ -1411,11 +1462,16 @@ export class SwathMap extends HTMLElement {
     const applied = new Promise<void>((resolve) => {
       map.once("styledata", () => resolve());
     });
+    if (layerId !== this.#activeLayer) {
+      this.#layerVisible = true;
+      this.#layerOpacity = 1;
+    }
     map.setStyle(this.#buildStyle(this.#tileTemplate(layerId), basemap) as never);
     await applied;
     if (epoch !== this.#epoch) {
       return;
     }
+    this.#applyPaint();
     if (bounds) {
       map.fitBounds(
         [
@@ -1436,7 +1492,12 @@ export class SwathMap extends HTMLElement {
     // fetch that could disagree with the one this apply used.
     // Both names for one milestone (ui-system.md §4.3): hosts move to
     // `swath-layer-change`; `layerchange` is the M5 name.
-    const detail = { layer: layerId, layers: available };
+    const detail = {
+      layer: layerId,
+      layers: available,
+      visible: this.#layerVisible,
+      opacity: this.#layerOpacity,
+    };
     this.dispatchEvent(createSwathEvent("swath-layer-change", detail));
     this.dispatchEvent(createSwathEvent("layerchange", detail));
     this.#startLivenessProbe(layerId, epoch);
@@ -1699,6 +1760,7 @@ export class SwathMap extends HTMLElement {
     }
     if (restyle || view.map === undefined) {
       view.setStyle(this.#buildStyle(template, this.#appliedBasemap));
+      this.#applyPaint();
     } else if (template !== this.#compareTemplate) {
       view.repoint(SOURCE_ID, template);
     }

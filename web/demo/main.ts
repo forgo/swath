@@ -29,7 +29,7 @@ import { GranuleFootprints } from "../src/granule-footprints.js";
 import { defineSwathAddDataPanel, SwathAddDataPanel } from "../src/swath-add-data-panel.js";
 import { defineSwathAuthoringPanel, SwathAuthoringPanel } from "../src/swath-authoring-panel.js";
 import { defineSwathDatasetPanel, SwathDatasetPanel } from "../src/swath-dataset-panel.js";
-import { defineSwathLayerPanel, SwathLayerPanel } from "../src/swath-layer-panel.js";
+import { defineSwathLayerList, SwathLayerList } from "../src/swath-layer-list.js";
 import { defineSwathMap, SwathMap } from "../src/swath-map.js";
 import { SwathButton } from "../src/ui/button.js";
 import {
@@ -49,7 +49,7 @@ import {
 } from "../src/view-state.js";
 
 const mapElement = document.querySelector("swath-map");
-const panelElement = document.querySelector("swath-layer-panel");
+const panelElement = document.querySelector("swath-layer-list");
 const datasetElement = document.querySelector("swath-dataset-panel");
 const addDataElement = document.querySelector("swath-add-data-panel");
 const authoringElement = document.querySelector("swath-authoring-panel");
@@ -107,12 +107,12 @@ if (stac !== null && stac !== "") {
 }
 
 defineSwathMap();
-defineSwathLayerPanel();
+defineSwathLayerList();
 defineSwathDatasetPanel();
 defineSwathAddDataPanel();
 defineSwathAuthoringPanel();
 
-if (mapElement instanceof SwathMap && panelElement instanceof SwathLayerPanel) {
+if (mapElement instanceof SwathMap && panelElement instanceof SwathLayerList) {
   wire(mapElement, panelElement);
 }
 if (mapElement instanceof SwathMap && authoringElement instanceof SwathAuthoringPanel) {
@@ -160,7 +160,7 @@ function wireDatasetBrowser(map: SwathMap, panel: SwathDatasetPanel): void {
   });
 }
 
-function wire(map: SwathMap, panel: SwathLayerPanel): void {
+function wire(map: SwathMap, panel: SwathLayerList): void {
   /** The layer the last successful apply painted (undefined until the
    * first `layerchange`) — distinguishes a layer CHANGE, which updates
    * the URL, from the initial apply, which must not touch it. */
@@ -241,7 +241,16 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
 
   map.addEventListener("swath-layer-change", (event) => {
     const detail = event.detail;
-    panel.update(detail.layers, detail.layer);
+    panel.update(detail.layers, detail.layer, { visible: detail.visible, opacity: detail.opacity });
+    // Authored services get a delete action (#282); the list is best-effort.
+    map.api
+      .json<{ services?: { id?: unknown }[] }>("/services")
+      .then((body) => {
+        panel.services = (body.services ?? []).flatMap((s) =>
+          typeof s.id === "string" ? [s.id] : [],
+        );
+      })
+      .catch(() => undefined);
     // A layer change after the initial apply is always user-driven on
     // this page (the rail, an authored or added layer, a deletion).
     const changed = appliedLayer !== undefined && appliedLayer !== detail.layer;
@@ -262,6 +271,51 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
     const layer = event.detail.layer;
     // Failures surface via the map's own `swath-error` + retry loop.
     map.setLayer(layer).catch(() => undefined);
+  });
+  // Eye and opacity act on the viewed layer only (the #282 scope fence).
+  panel.addEventListener("swath-layer-visibility", (event) => {
+    if (event.detail.layer === appliedLayer) {
+      map.setLayerVisibility(event.detail.visible);
+    }
+  });
+  panel.addEventListener("swath-layer-opacity", (event) => {
+    if (event.detail.layer === appliedLayer) {
+      map.setLayerOpacity(event.detail.opacity);
+    }
+  });
+  panel.addEventListener("swath-layer-action", (event) => {
+    const { layer, action } = event.detail;
+    switch (action) {
+      case "zoom":
+        if (layer === appliedLayer) {
+          map.zoomToData();
+        } else {
+          map
+            .setLayer(layer)
+            .then(() => map.zoomToData())
+            .catch(() => undefined);
+        }
+        break;
+      case "compare":
+        if (layer === appliedLayer) {
+          map.toggleCompare();
+        } else {
+          map.setAttribute("compare-layer", layer);
+        }
+        break;
+      case "delete":
+        map.api
+          .fetch(`/services/${encodeURIComponent(layer)}`, { method: "DELETE" })
+          .then((response) => {
+            if (response.ok) {
+              onServiceDeleted(map, layer);
+            }
+          })
+          .catch(() => undefined);
+        break;
+      default:
+        break; // "info" expands inside the row
+    }
   });
 
   // User-driven movement (drag, wheel, keyboard — MapLibre stamps those
@@ -376,11 +430,17 @@ function wireAuthoring(map: SwathMap, authoring: SwathAuthoringPanel): void {
     map.setLayer(id).catch(() => undefined);
   });
   authoring.addEventListener("swath-service-deleted", (event) => {
-    const id = event.detail.id;
-    if (map.getAttribute("layer") === id) {
-      map.removeAttribute("layer"); // re-applies with the server default
-    } else {
-      map.refresh();
-    }
+    onServiceDeleted(map, event.detail.id);
   });
+}
+
+/** A service is gone (deleted from the authoring panel or a layer row's
+ * kebab): the viewed layer falls back to the server default, any other
+ * just refreshes the list. */
+function onServiceDeleted(map: SwathMap, id: string): void {
+  if (map.getAttribute("layer") === id) {
+    map.removeAttribute("layer"); // re-applies with the server default
+  } else {
+    map.refresh();
+  }
 }

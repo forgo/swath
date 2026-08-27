@@ -104,7 +104,7 @@ async function mapView(page: Page): Promise<{ lng: number; lat: number; zoom: nu
 }
 
 function panelButton(page: Page, layerId: string) {
-  return page.locator(`swath-layer-panel button[data-layer="${layerId}"]`);
+  return page.locator(`swath-layer-item[data-layer="${layerId}"] [part="row"]`);
 }
 
 test("paramless / is the cinematic landing: the fire season loops, URL untouched", async ({
