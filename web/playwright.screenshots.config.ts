@@ -29,7 +29,7 @@ export default defineConfig({
   use: {
     baseURL: "http://localhost:5173",
     // Pinned shot geometry: rail (248px) + a 1280px-wide canvas, DPR 1.
-    viewport: { width: 1528, height: 860 },
+    viewport: { width: 1528, height: 928 }, // shell: 44 top bar + 860 canvas + 24 status bar (#284)
     deviceScaleFactor: 1,
   },
   webServer: {
