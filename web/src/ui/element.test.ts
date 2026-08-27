@@ -95,6 +95,10 @@ test("attribute → property, coerced per type", () => {
   expect(probe.count).toBe(42);
   expect(probe.active).toBe(true);
   expect(probe.dataKey).toBe("k1");
+  probe.setAttribute("active", "false"); // aria-style: the one falsy spelling
+  expect(probe.active).toBe(false);
+  probe.setAttribute("active", "true");
+  expect(probe.active).toBe(true);
   probe.removeAttribute("active");
   probe.removeAttribute("count");
   expect(probe.active).toBe(false);

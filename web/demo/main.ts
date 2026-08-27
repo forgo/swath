@@ -31,6 +31,7 @@ import { defineSwathAuthoringPanel, SwathAuthoringPanel } from "../src/swath-aut
 import { defineSwathDatasetPanel, SwathDatasetPanel } from "../src/swath-dataset-panel.js";
 import { defineSwathLayerPanel, SwathLayerPanel } from "../src/swath-layer-panel.js";
 import { defineSwathMap, SwathMap } from "../src/swath-map.js";
+import { SwathButton } from "../src/ui/button.js";
 import {
   formatCenter,
   formatSwipe,
@@ -52,7 +53,8 @@ const panelElement = document.querySelector("swath-layer-panel");
 const datasetElement = document.querySelector("swath-dataset-panel");
 const addDataElement = document.querySelector("swath-add-data-panel");
 const authoringElement = document.querySelector("swath-authoring-panel");
-const shareElement = document.querySelector<HTMLButtonElement>("#swath-share");
+SwathButton.define();
+const shareElement = document.querySelector<SwathButton>("#swath-share");
 
 const storage = safeLocalStorage();
 const { state: initial, source } = resolveInitialState(location.search, storage);
@@ -337,7 +339,7 @@ const SHARE_FEEDBACK_MS = 1600;
  * interaction, written in full even on a bare landing. Clipboard
  * failure (no secure context, permission denied) falls back to a
  * prompt holding the link, so the URL is never unreachable. */
-function wireShare(button: HTMLButtonElement, snapshot: () => ViewState): void {
+function wireShare(button: SwathButton, snapshot: () => ViewState): void {
   const idle = (button.textContent ?? "").trim();
   let revert: number | undefined;
   const feedback = (state: "copied" | "failed"): void => {
