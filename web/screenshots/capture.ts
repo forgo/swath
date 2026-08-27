@@ -531,7 +531,7 @@ test("time slider: first pass live, second pass cached (issue #182)", async ({ p
     page,
     "13-time-slider-live.png",
     "Time slider over the Park Fire season, first pass: the scrubbed frame is rendered live — every badge says so, and the analytics card narrates the frame's own plan mix.",
-    { maxBadFrac: 0.03 }, // per-tile ms text differs between runs
+    { maxBadFrac: 0.04 }, // per-tile ms text differs between runs; the analytics summary now sits in the rail with longer lines (#286)
   );
 
   // Step forward, then revisit the same frame: the season's second pass
