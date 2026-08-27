@@ -54,6 +54,7 @@ export type TraceDecision =
 
 import { type CompareSides, traceSide } from "./compare-model.js";
 import { tileNorthWest } from "./tms.js";
+import { adoptSheet, css, readToken } from "./ui/styles.js";
 import { AnalyticsPanel } from "./xray-analytics.js";
 
 /** A candidate strategy as the plan payload names it (`PlannedStrategy`,
@@ -179,6 +180,18 @@ export interface EventSourceLike {
  * `EventSource` (which owns reconnection). */
 export type EventSourceFactory = (url: string) => EventSourceLike;
 
+/** Where a host puts the overlay's chrome (#286): containers for the
+ * readouts, the display-mode group, the trace feed, the why-view
+ * inspector, and (optionally) the analytics summary. Absent parts float
+ * in the map as before. */
+export interface XRayChrome {
+  readonly readouts?: HTMLElement | undefined;
+  readonly modes?: HTMLElement | undefined;
+  readonly feed?: HTMLElement | undefined;
+  readonly inspector?: HTMLElement | undefined;
+  readonly analytics?: HTMLElement | undefined;
+}
+
 /** The slice of a MapLibre `Map` the overlay uses. Narrow on purpose:
  * unit tests supply a fake with a known `project()`, and nothing here
  * couples the overlay to MapLibre's full API. */
@@ -221,8 +234,6 @@ const DEFAULT_CAPACITY = 500;
  * of demo panning — enough scrollback to be useful, small enough that
  * the DOM never grows without bound. */
 const FEED_CAPACITY = 200;
-
-const STYLE_ELEMENT_ID = "swath-xray-styles";
 
 /** What the overlay paints on badges: `decision` (v0 colors), `bytes`
  * (bytes_read intensity heatmap), or `off` (no badges — readouts and
@@ -267,30 +278,46 @@ export function bytesBucket(bytes: number, min: number, max: number): number {
  * deepens with the bucket so intensity reads at a glance over imagery.
  * Badge text (ms/KB) stays white-on-dark ink — the secondary encoding
  * that keeps adjacent buckets tellable apart without color. */
-const BYTES_RAMP: readonly { border: string; tint: string }[] = [
-  { border: "#ffedd5", tint: "rgb(255 237 213 / 16%)" },
-  { border: "#fdba74", tint: "rgb(253 186 116 / 20%)" },
-  { border: "#f97316", tint: "rgb(249 115 22 / 25%)" },
-  { border: "#c2410c", tint: "rgb(194 65 12 / 30%)" },
-  { border: "#7c2d12", tint: "rgb(124 45 18 / 36%)" },
-];
+/** A badge colour: the token's value (MapLibre-pixel chrome in the light
+ * DOM cannot inherit custom properties from a card) and a translucent
+ * tint mixed from it. Resolved at overlay construction (#286). */
+function shade(token: string, tintPct: number): { border: string; tint: string } {
+  const border = readToken(token);
+  return { border, tint: `color-mix(in srgb, ${border} ${tintPct}%, transparent)` };
+}
 
-/** The zero bucket: dashed blue — the cache family's hue (see
- * `DECISION_COLORS`) plus a border-style change, so "read nothing" is
- * distinct from the orange intensity ramp even in grayscale. */
-const BYTES_ZERO = { border: "#2563eb", tint: "rgb(37 99 235 / 8%)" };
+/** Bytes-read intensity ramp, coolest → hottest: the heat tokens. */
+function bytesRamp(): readonly { border: string; tint: string }[] {
+  return [
+    shade("--swath-color-heat-1", 16),
+    shade("--swath-color-heat-2", 20),
+    shade("--swath-color-heat-3", 25),
+    shade("--swath-color-heat-4", 30),
+    shade("--swath-color-heat-5", 36),
+  ];
+}
 
-/** Decision palette: live = green (the "rendered fresh for you" color).
- * Overview (amber) and cache_hit (blue) are reserved here so the colors
- * are contractual before #36+ (overviews, cache) can produce them. */
-const DECISION_COLORS: Record<"live" | "overview" | "cache_hit", { border: string; tint: string }> =
-  {
-    live: { border: "#16a34a", tint: "rgb(22 163 74 / 12%)" },
-    overview: { border: "#d97706", tint: "rgb(217 119 6 / 12%)" },
-    cache_hit: { border: "#2563eb", tint: "rgb(37 99 235 / 12%)" },
+/** The zero bucket: dashed, the cache family's hue plus a border-style
+ * change, so "read nothing" is distinct from the ramp even in grayscale. */
+function bytesZero(): { border: string; tint: string } {
+  return shade("--swath-color-decision-cache", 8);
+}
+
+/** Decision colours: live (green), overview (amber), cache_hit (blue) —
+ * the `decision-*` tokens, contractual before overviews/cache can produce
+ * them. */
+function decisionColors(): Record<
+  "live" | "overview" | "cache_hit",
+  { border: string; tint: string }
+> {
+  return {
+    live: shade("--swath-color-decision-live", 12),
+    overview: shade("--swath-color-decision-overview", 12),
+    cache_hit: shade("--swath-color-decision-cache", 12),
   };
+}
 
-const OVERLAY_CSS = `
+const OVERLAY_SHEET = css`
 /* No z-index, deliberately: the root must NOT form a stacking context.
  * MapLibre's control corners sit at z-index 2, so badges (z auto) stay
  * beneath the toggles — a badge under the x-ray button must never
@@ -311,14 +338,14 @@ const OVERLAY_CSS = `
   padding: 0;
   border: 2px solid;
   background: none;
-  font: 11px/1.4 ui-monospace, monospace;
-  color: #fff;
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.4;
+  color: var(--swath-color-fg);
   cursor: pointer;
   text-align: left;
 }
 .swath-xray-badge > span {
   padding: 1px 4px;
-  background: rgb(0 0 0 / 65%);
+  background: color-mix(in srgb, var(--swath-color-bg) 65%, transparent);
   border-radius: 0 0 4px 0;
   white-space: nowrap;
 }
@@ -335,16 +362,16 @@ const OVERLAY_CSS = `
 .swath-xray-ingest {
   padding: 4px 10px;
   border-radius: 4px;
-  background: rgb(0 0 0 / 75%);
-  color: #4ade80;
-  font: 700 14px/1.5 ui-monospace, monospace;
+  background: var(--swath-color-bg-hud);
+  color: var(--swath-color-accent);
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-lg); font-weight: 700; line-height: var(--swath-leading-normal);
 }
 .swath-xray-lagged {
   padding: 2px 8px;
   border-radius: 4px;
-  background: rgb(153 27 27 / 90%);
-  color: #fff;
-  font: 12px/1.5 ui-monospace, monospace;
+  background: color-mix(in srgb, var(--swath-color-danger) 60%, var(--swath-color-bg));
+  color: var(--swath-color-fg);
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-sm); line-height: var(--swath-leading-normal);
 }
 .swath-xray-lagged[hidden] { display: none; }
 .swath-xray-inspector {
@@ -356,11 +383,11 @@ const OVERLAY_CSS = `
   overflow: auto;
   padding: 8px 10px;
   border-radius: 6px;
-  background: rgb(15 23 42 / 95%);
-  color: #e2e8f0;
-  font: 12px/1.5 ui-monospace, monospace;
+  background: var(--swath-color-bg-hud);
+  color: var(--swath-color-fg);
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-sm); line-height: var(--swath-leading-normal);
 }
-.swath-xray-inspector:focus { outline: 2px solid #4ade80; }
+.swath-xray-inspector:focus { outline: var(--swath-border-focus); }
 .swath-xray-inspector header {
   display: flex;
   justify-content: space-between;
@@ -377,7 +404,7 @@ const OVERLAY_CSS = `
   padding: 0 4px;
 }
 .swath-xray-inspector dl { margin: 6px 0; }
-.swath-xray-inspector dt { color: #94a3b8; margin-top: 4px; }
+.swath-xray-inspector dt { color: var(--swath-color-fg-muted); margin-top: 4px; }
 .swath-xray-inspector dd { margin: 0; }
 .swath-xray-inspector .swath-xray-provenance {
   max-height: 9em;
@@ -389,7 +416,7 @@ const OVERLAY_CSS = `
 .swath-xray-plan-title {
   margin: 8px 0 2px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--swath-color-fg-muted);
 }
 .swath-xray-plan {
   width: 100%;
@@ -402,9 +429,9 @@ const OVERLAY_CSS = `
   padding: 1px 8px 1px 0;
   font-weight: 400;
 }
-.swath-xray-plan th { color: #94a3b8; }
-.swath-xray-plan tr[data-chosen="true"] td { color: #4ade80; font-weight: 700; }
-.swath-xray-plan tr[data-admissible="false"] td { color: #94a3b8; }
+.swath-xray-plan th { color: var(--swath-color-fg-muted); }
+.swath-xray-plan tr[data-chosen="true"] td { color: var(--swath-color-accent); font-weight: 700; }
+.swath-xray-plan tr[data-admissible="false"] td { color: var(--swath-color-fg-muted); }
 .swath-xray-modes {
   position: absolute;
   top: 8px;
@@ -418,14 +445,14 @@ const OVERLAY_CSS = `
   border: 0;
   margin: 0;
   padding: 3px 8px;
-  background: rgb(0 0 0 / 65%);
-  color: #cbd5e1;
-  font: 11px/1.4 ui-monospace, monospace;
+  background: color-mix(in srgb, var(--swath-color-bg) 65%, transparent);
+  color: var(--swath-color-fg);
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.4;
   cursor: pointer;
 }
 .swath-xray-modes button[aria-pressed="true"] {
-  background: rgb(0 0 0 / 85%);
-  color: #fff;
+  background: var(--swath-color-bg-hud);
+  color: var(--swath-color-fg);
   font-weight: 700;
 }
 .swath-xray-scale {
@@ -434,9 +461,9 @@ const OVERLAY_CSS = `
   gap: 6px;
   padding: 3px 8px;
   border-radius: 4px;
-  background: rgb(0 0 0 / 75%);
-  color: #e2e8f0;
-  font: 11px/1.5 ui-monospace, monospace;
+  background: var(--swath-color-bg-hud);
+  color: var(--swath-color-fg);
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: var(--swath-leading-normal);
 }
 .swath-xray-scale[hidden] { display: none; }
 .swath-xray-scale-swatch {
@@ -445,7 +472,7 @@ const OVERLAY_CSS = `
   height: 10px;
 }
 .swath-xray-scale-zero {
-  border: 2px dashed ${BYTES_ZERO.border};
+  border: 2px dashed var(--swath-color-decision-cache);
   background: none;
 }
 .swath-xray-feed {
@@ -458,8 +485,8 @@ const OVERLAY_CSS = `
   flex-direction: column;
   align-items: flex-end;
   pointer-events: none;
-  color: #e2e8f0;
-  font: 11px/1.5 ui-monospace, monospace;
+  color: var(--swath-color-fg);
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: var(--swath-leading-normal);
 }
 .swath-xray-feed header {
   display: flex;
@@ -467,7 +494,7 @@ const OVERLAY_CSS = `
   gap: 8px;
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgb(15 23 42 / 92%);
+  background: var(--swath-color-bg-hud);
   pointer-events: auto;
 }
 .swath-xray-feed header button {
@@ -478,9 +505,9 @@ const OVERLAY_CSS = `
   cursor: pointer;
   padding: 1px 4px;
 }
-.swath-xray-feed-toggle[aria-expanded="true"] { color: #4ade80; font-weight: 700; }
-.swath-xray-feed-pause[aria-pressed="true"] { color: #fbbf24; font-weight: 700; }
-.swath-xray-feed-dropped { color: #fbbf24; }
+.swath-xray-feed-toggle[aria-expanded="true"] { color: var(--swath-color-accent); font-weight: 700; }
+.swath-xray-feed-pause[aria-pressed="true"] { color: var(--swath-color-warn); font-weight: 700; }
+.swath-xray-feed-dropped { color: var(--swath-color-warn); }
 .swath-xray-feed-lines {
   align-self: stretch;
   margin: 2px 0 0;
@@ -488,7 +515,7 @@ const OVERLAY_CSS = `
   list-style: none;
   max-height: 180px;
   overflow: auto;
-  background: rgb(15 23 42 / 92%);
+  background: var(--swath-color-bg-hud);
   border-radius: 4px;
   pointer-events: auto;
 }
@@ -503,37 +530,31 @@ const OVERLAY_CSS = `
   padding: 0;
 }
 .swath-xray-feed-lines li > button:hover,
-.swath-xray-feed-lines li > button:focus { color: #4ade80; }
-.swath-xray-feed-line-lagged { color: #f87171; }
-.swath-xray-badge-flash { outline: 3px solid #4ade80; outline-offset: 2px; }
+.swath-xray-feed-lines li > button:focus { color: var(--swath-color-accent); }
+.swath-xray-feed-line-lagged { color: var(--swath-color-danger); }
+.swath-xray-badge-flash { outline: var(--swath-border-focus); outline-offset: 2px; }
 .swath-xray-analytics {
   display: flex;
   flex-direction: column;
   padding: 4px 10px;
   border-radius: 4px;
-  background: rgb(0 0 0 / 75%);
-  color: #e2e8f0;
-  font: 11px/1.5 ui-monospace, monospace;
+  background: var(--swath-color-bg-hud);
+  color: var(--swath-color-fg);
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: var(--swath-leading-normal);
 }
-.swath-xray-analytics-frame { color: #94a3b8; }
+.swath-xray-analytics-frame { color: var(--swath-color-fg-muted); }
 .swath-xray-analytics-frame[hidden] { display: none; }
-.swath-xray-analytics-udf { color: #c4b5fd; }
+.swath-xray-analytics-udf { color: var(--swath-color-udf); }
 .swath-xray-analytics-udf[hidden] { display: none; }
-.swath-xray-analytics-live { color: #4ade80; }
-.swath-xray-analytics-overview { color: #fbbf24; }
-.swath-xray-analytics-cache { color: #60a5fa; }
+.swath-xray-analytics-live { color: var(--swath-color-accent); }
+.swath-xray-analytics-overview { color: var(--swath-color-warn); }
+.swath-xray-analytics-cache { color: var(--swath-color-info); }
 .swath-xray-analytics-hit { font-weight: 700; }
+/* Hosted by a shell (a HUD card or the rail) instead of floating in the
+ * map: the same chrome, flow layout (#286). */
+.swath-xray-docked { position: static; inset: auto; max-width: none; max-height: none; margin: 0; }
+.swath-xray-inspector.swath-xray-docked { width: auto; }
 `;
-
-function injectStyles(doc: Document): void {
-  if (doc.getElementById(STYLE_ELEMENT_ID)) {
-    return;
-  }
-  const style = doc.createElement("style");
-  style.id = STYLE_ELEMENT_ID;
-  style.textContent = OVERLAY_CSS;
-  doc.head.append(style);
-}
 
 /** The decision's flat kind — what the badge color and `data-decision`
  * carry (`{"overview":{...}}` collapses to `"overview"`,
@@ -606,6 +627,11 @@ export class XRayOverlay {
   readonly #ingest: HTMLDivElement;
   readonly #lagged: HTMLDivElement;
   readonly #createEventSource: EventSourceFactory;
+  readonly #ramp = bytesRamp();
+  readonly #zero = bytesZero();
+  readonly #decisions = decisionColors();
+  #readouts: HTMLElement | undefined;
+  #chrome: XRayChrome | undefined;
   readonly #capacity: number;
   readonly #onMove: () => void;
 
@@ -643,12 +669,16 @@ export class XRayOverlay {
   constructor(
     host: HTMLElement,
     map: XRayMapLike,
-    options: { createEventSource?: EventSourceFactory | undefined; capacity?: number } = {},
+    options: {
+      createEventSource?: EventSourceFactory | undefined;
+      capacity?: number;
+      chrome?: XRayChrome | undefined;
+    } = {},
   ) {
     this.#map = map;
     this.#createEventSource = options.createEventSource ?? ((url) => new EventSource(url));
     this.#capacity = options.capacity ?? DEFAULT_CAPACITY;
-    injectStyles(host.ownerDocument);
+    adoptSheet(OVERLAY_SHEET, host.ownerDocument);
 
     this.#root = document.createElement("div");
     this.#root.className = "swath-xray";
@@ -679,7 +709,7 @@ export class XRayOverlay {
     const zeroLabel = document.createElement("span");
     zeroLabel.textContent = "0 (cache)";
     this.#scale.append(zeroSwatch, zeroLabel);
-    for (const step of BYTES_RAMP) {
+    for (const step of this.#ramp) {
       const swatch = document.createElement("span");
       swatch.className = "swath-xray-scale-swatch";
       swatch.style.backgroundColor = step.border;
@@ -734,6 +764,7 @@ export class XRayOverlay {
     this.#feedLines.hidden = true;
     this.#feed.append(feedHeader, this.#feedLines);
 
+    this.#readouts = readouts;
     this.#root.append(
       this.#badges,
       this.#badgesLeft,
@@ -743,6 +774,7 @@ export class XRayOverlay {
       this.#feed,
     );
     host.append(this.#root);
+    this.setChrome(options.chrome);
 
     this.#onMove = () => this.#schedule();
     this.#map.on("move", this.#onMove);
@@ -751,6 +783,41 @@ export class XRayOverlay {
   /** Number of stored traces (bounded by the capacity). */
   get size(): number {
     return this.#store.size;
+  }
+
+  /** Re-home the chrome (#286): each part goes into the given container
+   * (a shell's HUD cards / rail section) or back into the overlay root
+   * where it floats over the map. Badges never move — they are positioned
+   * in map pixels. Unit tests keep driving the in-map layout. */
+  setChrome(chrome: XRayChrome | undefined): void {
+    this.#chrome = chrome;
+    const place = (element: HTMLElement | undefined, target: HTMLElement | undefined): void => {
+      if (!element) {
+        return;
+      }
+      if (target) {
+        element.classList.add("swath-xray-docked");
+        target.append(element);
+      } else {
+        element.classList.remove("swath-xray-docked");
+        this.#root.append(element);
+      }
+    };
+    place(this.#readouts, chrome?.readouts);
+    place(this.#modes, chrome?.modes);
+    place(this.#feed, chrome?.feed);
+    // The analytics summary rides in the readouts unless the host gives it
+    // its own place (the rail under view=xray).
+    if (chrome?.analytics) {
+      this.#analytics.element.classList.add("swath-xray-docked");
+      chrome.analytics.append(this.#analytics.element);
+    } else if (this.#readouts) {
+      this.#analytics.element.classList.remove("swath-xray-docked");
+      this.#readouts.insertBefore(this.#analytics.element, this.#ingest);
+    }
+    if (this.#inspector) {
+      place(this.#inspector, chrome?.inspector);
+    }
   }
 
   /** The stored trace for `"layer/z/x/y"`, if retained. */
@@ -1161,7 +1228,7 @@ export class XRayOverlay {
     badge.style.height = `${se.y - nw.y}px`;
     if (bytesRange) {
       const bucket = bytesBucket(trace.bytes_read, bytesRange.min, bytesRange.max);
-      const colors = bucket === 0 ? BYTES_ZERO : (BYTES_RAMP[bucket - 1] ?? BYTES_ZERO);
+      const colors = bucket === 0 ? this.#zero : (this.#ramp[bucket - 1] ?? this.#zero);
       badge.dataset.bytesBucket = String(bucket);
       badge.style.borderColor = colors.border;
       badge.style.backgroundColor = colors.tint;
@@ -1169,7 +1236,7 @@ export class XRayOverlay {
         badge.style.borderStyle = "dashed";
       }
     } else {
-      const colors = DECISION_COLORS[kind];
+      const colors = this.#decisions[kind];
       badge.style.borderColor = colors.border;
       badge.style.backgroundColor = colors.tint;
     }
@@ -1261,7 +1328,12 @@ export class XRayOverlay {
         this.#closeInspector();
       }
     });
-    this.#root.append(dialog);
+    if (this.#chrome?.inspector) {
+      dialog.classList.add("swath-xray-docked");
+      this.#chrome.inspector.append(dialog);
+    } else {
+      this.#root.append(dialog);
+    }
     this.#inspector = dialog;
     dialog.focus();
   }

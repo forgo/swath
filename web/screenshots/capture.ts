@@ -254,7 +254,7 @@ test("x-ray decisions + why-view inspector", async ({ page }) => {
   // per-run cache every badge shows a real live-render decision.
   await gotoAndWaitForTiles(
     page,
-    `${DEMO_PATH}?xray&layer=truecolor&center=${CENTER}&zoom=13`,
+    `${DEMO_PATH}?xray&view=xray&layer=truecolor&center=${CENTER}&zoom=13`,
     "truecolor",
   );
   await waitForXRay(page);
@@ -267,10 +267,8 @@ test("x-ray decisions + why-view inspector", async ({ page }) => {
 
   // "First badge" is arrival-order nondeterministic; inspect the
   // lexicographically smallest key so both capture runs open the SAME tile.
-  const key = await page.evaluate(() => {
-    const keys = [...document.querySelectorAll<HTMLElement>(".swath-xray-badge")]
-      .map((badge) => badge.dataset.key ?? "")
-      .filter((k) => k !== "");
+  const key = await page.locator(".swath-xray-badge").evaluateAll((badges: HTMLElement[]) => {
+    const keys = badges.map((badge) => badge.dataset.key ?? "").filter((k) => k !== "");
     return keys.sort()[0];
   });
   if (key === undefined) {
@@ -291,7 +289,11 @@ test("x-ray decisions + why-view inspector", async ({ page }) => {
 test("x-ray bytes heatmap + trace feed", async ({ page }) => {
   // NDVI at z13 is also untouched in this run: live renders with real
   // bytes_read, so the log-scale heatmap has an actual range to show.
-  await gotoAndWaitForTiles(page, `${DEMO_PATH}?xray&layer=ndvi&center=${CENTER}&zoom=13`, "ndvi");
+  await gotoAndWaitForTiles(
+    page,
+    `${DEMO_PATH}?xray&view=xray&layer=ndvi&center=${CENTER}&zoom=13`,
+    "ndvi",
+  );
   await waitForXRay(page);
 
   const modes = page.locator(".swath-xray-modes");
@@ -440,7 +442,11 @@ test("dataset browser: granule footprints on the map", async ({ page }) => {
 });
 
 test("trace analytics panel under load", async ({ page }) => {
-  await gotoAndWaitForTiles(page, `${DEMO_PATH}?xray&layer=ndvi&center=${CENTER}&zoom=12`, "ndvi");
+  await gotoAndWaitForTiles(
+    page,
+    `${DEMO_PATH}?xray&view=xray&layer=ndvi&center=${CENTER}&zoom=12`,
+    "ndvi",
+  );
   await waitForXRay(page);
 
   // Generate load beyond the initial view: a zoom-out to z11 (fresh
@@ -487,7 +493,7 @@ test("time slider: first pass live, second pass cached (issue #182)", async ({ p
 
   await gotoAndWaitForTiles(
     page,
-    `${DEMO_PATH}?xray&layer=park-fire-ndvi&center=-121.6932,40.0208&zoom=12`,
+    `${DEMO_PATH}?xray&view=xray&layer=park-fire-ndvi&center=-121.6932,40.0208&zoom=12`,
     "park-fire-ndvi",
   );
   await waitForXRay(page);

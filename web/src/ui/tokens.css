@@ -31,8 +31,14 @@
   --swath-color-compare: #f472b6;
   --swath-color-decision-live: #4ade80;
   --swath-color-decision-overview: #fbbf24;
-  --swath-color-decision-cache: #94a3b8;
+  --swath-color-decision-cache: #2563eb;
   --swath-color-focus: #93c5fd;
+  /* the x-ray's bytes-read heat ramp, coolest → hottest (#286) */
+  --swath-color-heat-1: #ffedd5;
+  --swath-color-heat-2: #fdba74;
+  --swath-color-heat-3: #f97316;
+  --swath-color-heat-4: #c2410c;
+  --swath-color-heat-5: #7c2d12;
 
   /* type */
   --swath-font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;

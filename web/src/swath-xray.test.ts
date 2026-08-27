@@ -1031,3 +1031,62 @@ test("UDF traces (#208): inspector facts, feed line, and the analytics per-tile 
   source?.emit("trace", envelope("udf-layer", "2/1/1", { decision: "cache_hit" }));
   expect(panel?.dataset.udfTiles).toBe("1");
 });
+
+// --- The chrome sink (issue #286): a host re-homes the readouts, modes, feed, inspector ---
+
+test("chrome containers receive the readouts, modes, feed and analytics; badges stay in-map", () => {
+  const host = mountHost();
+  const readouts = document.createElement("div");
+  const modes = document.createElement("div");
+  const feed = document.createElement("div");
+  const analytics = document.createElement("div");
+  document.body.append(readouts, modes, feed, analytics);
+  const factory = fakeFactory();
+  const overlay = new XRayOverlay(host, fakeMap(), {
+    createEventSource: factory.create,
+    chrome: { readouts, modes, feed, analytics },
+  });
+  overlay.connect(`${SERVER}/traces`);
+  overlay.setLayer("truecolor");
+  factory.opened[0]?.emit("trace", envelope("truecolor", "2/1/1"));
+  overlay.refresh();
+  expect(
+    readouts.querySelector(".swath-xray-readouts")?.classList.contains("swath-xray-docked"),
+  ).toBe(true);
+  expect(modes.querySelector(".swath-xray-modes")).not.toBeNull();
+  expect(feed.querySelector(".swath-xray-feed")).not.toBeNull();
+  expect(analytics.querySelector(".swath-xray-analytics")).not.toBeNull();
+  expect(readouts.querySelector(".swath-xray-analytics")).toBeNull();
+  expect(badges(host)).toHaveLength(1); // map-pixel chrome never leaves the map
+  expect(host.querySelector(".swath-xray-modes")).toBeNull();
+
+  // Back to floating in the map: every part returns, undocked.
+  overlay.setChrome(undefined);
+  expect(host.querySelector(".swath-xray-modes")?.classList.contains("swath-xray-docked")).toBe(
+    false,
+  );
+  expect(host.querySelector(".swath-xray-readouts .swath-xray-analytics")).not.toBeNull();
+  expect(modes.childElementCount).toBe(0);
+});
+
+test("with a chrome inspector container, the why-view opens there and closes as before", () => {
+  const host = mountHost();
+  const inspector = document.createElement("div");
+  document.body.append(inspector);
+  const factory = fakeFactory();
+  const overlay = new XRayOverlay(host, fakeMap(), {
+    createEventSource: factory.create,
+    chrome: { inspector },
+  });
+  overlay.connect(`${SERVER}/traces`);
+  overlay.setLayer("truecolor");
+  factory.opened[0]?.emit("trace", envelope("truecolor", "2/1/1"));
+  overlay.refresh();
+  badges(host)[0]?.click();
+  const dialog = inspector.querySelector<HTMLElement>(".swath-xray-inspector");
+  expect(dialog?.getAttribute("role")).toBe("dialog");
+  expect(dialog?.classList.contains("swath-xray-docked")).toBe(true);
+  expect(host.querySelector(".swath-xray-inspector")).toBeNull();
+  dialog?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  expect(inspector.querySelector(".swath-xray-inspector")).toBeNull();
+});
