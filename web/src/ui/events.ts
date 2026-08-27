@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+import type { CatalogGranule } from "../catalog-model.js";
 /**
  * The typed event catalog (docs/design/ui-system.md §4.3) — the one home
  * of `new CustomEvent(` under web/ (scripts/check-ui-dry.mjs).
@@ -17,7 +18,6 @@
  * dispatches both for one milestone.
  */
 import type { GranuleBbox } from "../granule-footprints.js";
-import type { GranuleListItem } from "../swath-dataset-panel.js";
 import type { LonLatBounds, SwathLayer } from "../swath-map.js";
 import type { TraceEnvelope } from "../swath-xray.js";
 
@@ -46,7 +46,7 @@ export interface SwathEventMap {
   /** One trace envelope off the SSE stream — with or without badges. */
   "swath-trace": { envelope: TraceEnvelope };
   "swath-error": { error: unknown };
-  "swath-dataset-granules": { dataset: string; granules: GranuleListItem[] };
+  "swath-dataset-granules": { dataset: string; granules: CatalogGranule[] };
   "swath-granule-zoom": { dataset: string; id: string; bbox: GranuleBbox };
   "swath-data-added": { dataset: string; layer: string };
   "swath-service-created": { id: string };

@@ -18,7 +18,7 @@ test("/?view=data lands in Data mode with the URL untouched", async ({ page }) =
   await page.goto(`${DEMO_PATH}?view=data`);
   await pressed(page, "data");
   await expect(page.locator("swath-layer-list")).toBeHidden();
-  await expect(page.locator("swath-dataset-panel")).toBeVisible();
+  await expect(page.locator("swath-catalog")).toBeVisible();
   await expect(page.locator("swath-add-data-panel")).toBeVisible();
   await expect(page.locator("swath-authoring-panel")).toBeHidden();
   await page.waitForTimeout(1_500); // the landing loop must not touch a deep link

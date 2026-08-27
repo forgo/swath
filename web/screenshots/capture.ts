@@ -411,10 +411,17 @@ test("authoring publish: the authored layer serves immediately", async ({ page }
 });
 
 test("dataset browser: granule footprints on the map", async ({ page }) => {
-  await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`, "ndvi");
-  await page.locator("swath-dataset-panel .swath-dataset-panel-toggle").click();
-  await page.locator('swath-dataset-panel button[data-dataset="hls-s30"]').click();
-  await expect(page.locator("swath-dataset-panel button[data-granule]").first()).toBeVisible();
+  await gotoAndWaitForTiles(
+    page,
+    `${DEMO_PATH}?view=data&layer=ndvi&center=${CENTER}&zoom=12`,
+    "ndvi",
+  );
+  await page.locator('swath-catalog [part="dataset"] select').selectOption("hls-s30");
+  const firstCard = page.locator("swath-catalog swath-granule-card").first();
+  await expect(firstCard).toBeVisible();
+  // Every thumbnail is a preview the engine rendered: wait for the first
+  // card's <img> to decode before freezing the frame.
+  await expect(firstCard.locator('img[part="media"]')).toBeVisible({ timeout: 60_000 });
   // The footprint layer is a real MapLibre line layer over a GeoJSON
   // source; wait for it to carry the granule polygon.
   await page.waitForFunction((id) => {
@@ -437,7 +444,7 @@ test("dataset browser: granule footprints on the map", async ({ page }) => {
   await capture(
     page,
     "11-dataset-footprints.png",
-    "Dataset browser expanded: the catalog's granules listed in the rail, footprints outlined live on the map.",
+    "Data mode: the catalog's granule cards with engine-rendered thumbnails in the rail, footprints outlined live on the map.",
   );
 });
 
