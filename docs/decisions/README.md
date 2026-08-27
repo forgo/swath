@@ -27,3 +27,8 @@ that produced the evidence).
 | 0014 | 2026-08-11 | Preview: openEO `POST /result` as a preview-bounded sync subset (extends 0010) | Accepted |
 | 0015 | 2026-08-12 | Time dimension: frame selection via `datetime=`, latest-at-or-before (consumes roadmap row 7) | Accepted |
 | 0016 | 2026-08-13 | Extraction boundary: swath-warp/-manifest/-referencer/-planner ship as 0.x alphas; the product stays | Accepted |
+| 0017 | 2026-08-18 | Icechunk interop target: spec v2.1 via the icechunk crate | Accepted |
+| 0018 | 2026-08-18 | `run_udf` as sandboxed WASM in the tile path | Accepted |
+| 0019 | 2026-08-18 | Add-data goes through the engine; client-side COG rendering rejected | Accepted |
+| 0020 | 2026-08-19 | Publish the UDF guest kit: `swath-udf-guest` is the fifth crate | Accepted |
+| 0021 | 2026-08-26 | The UI system: shadow-DOM primitives on design tokens, one shell, modes in the URL (builds ADR 0005's reactive layer) | Accepted |

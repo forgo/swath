@@ -45,7 +45,9 @@ format. TypeScript 7, strict baseline. Vitest 4 Browser Mode for component tests
 untestable outside a real browser — plus Playwright e2e. ESM-only; vanilla-vs-Lit stays
 per-ADR-0005 vanilla. `custom-elements.json` manifest: **explicitly deferred** until the
 components are published as a library (ADR 0007); the showcase exists as the embedded demo
-viewer (`web/demo/`).
+viewer (`web/demo/`). UI structure per ADR 0021 / `docs/design/ui-system.md`: shadow-DOM
+primitives in `web/src/ui/` (never importing upward) on `tokens.css`; the DRY gate
+(`check-ui-dry`) runs in `pnpm run lint`.
 
 ## 4. Python sidecar standards (`python/`)
 
@@ -115,3 +117,4 @@ per-commit commitlint, harden-runner-as-boundary, workflow-level `paths:` filter
 - 2026-08-10 — §7 planned → implemented (pre-release tier; #116).
 - 2026-08-11 — full aspiration-vs-reality pass (#123): every practice now either exists in the
   tree/CI or carries an explicit status marker (§§2-3, 5, 8).
+- 2026-08-26 — §3: the UI system (ADR 0021) and its DRY gate (#277).
