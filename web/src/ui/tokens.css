@@ -1,0 +1,94 @@
+/* SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0 */
+
+/* Swath design tokens (docs/design/ui-system.md §4.1).
+ *
+ * The ONLY file under web/ allowed to hold raw colour, font-stack or size
+ * values (scripts/check-ui-dry.mjs enforces it). Adopted once per document
+ * by `adoptTokens()`; custom properties inherit through shadow boundaries,
+ * so every shadow sheet writes `var(--swath-…)` and nothing else.
+ *
+ * Names are semantic roles, frozen by tokens.test.ts: M12 changes VALUES
+ * (and may add themes under the same names), never names.
+ *
+ * Breakpoints cannot be custom properties (`@media` can't read them); they
+ * live in breakpoints.ts as 640 / 1024 / 1280 — keep this comment in sync. */
+:root {
+  /* colour */
+  --swath-color-bg: #0f172a;
+  --swath-color-bg-raised: #1e293b;
+  --swath-color-bg-hud: rgb(15 23 42 / 92%);
+  --swath-color-fg: #e2e8f0;
+  --swath-color-fg-muted: #94a3b8;
+  --swath-color-line: rgb(148 163 184 / 30%);
+  --swath-color-accent: #4ade80;
+  --swath-color-accent-bg: rgb(74 222 128 / 10%);
+  --swath-color-accent-border: rgb(74 222 128 / 45%);
+  --swath-color-warn: #fbbf24;
+  --swath-color-danger: #f87171;
+  --swath-color-info: #60a5fa;
+  --swath-color-udf: #c084fc;
+  --swath-color-compare: #f472b6;
+  --swath-color-decision-live: #4ade80;
+  --swath-color-decision-overview: #fbbf24;
+  --swath-color-decision-cache: #94a3b8;
+  --swath-color-focus: #93c5fd;
+
+  /* type */
+  --swath-font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --swath-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --swath-text-xs: 11px;
+  --swath-text-sm: 12px;
+  --swath-text-md: 13px;
+  --swath-text-lg: 16px;
+  --swath-leading-tight: 1.25;
+  --swath-leading-normal: 1.5;
+  --swath-tracking-wide: 0.06em;
+
+  /* space — a 4 px grid */
+  --swath-space-0: 0;
+  --swath-space-1: 4px;
+  --swath-space-2: 8px;
+  --swath-space-3: 12px;
+  --swath-space-4: 16px;
+  --swath-space-5: 20px;
+  --swath-space-6: 24px;
+  --swath-space-7: 32px;
+  --swath-space-8: 40px;
+
+  /* shape */
+  --swath-radius-sm: 4px;
+  --swath-radius-md: 8px;
+  --swath-radius-pill: 999px;
+  --swath-border-hairline: 1px solid var(--swath-color-line);
+  --swath-border-focus: 2px solid var(--swath-color-focus);
+  --swath-shadow-hud: none;
+
+  /* fixed dimensions of the shell geometry (§6) */
+  --swath-size-rail: 248px;
+  --swath-size-rail-icon: 56px;
+  --swath-size-inspector: 320px;
+  --swath-size-topbar: 44px;
+  --swath-size-statusbar: 24px;
+  --swath-size-target: 44px;
+  --swath-size-icon: 16px;
+
+  /* stacking */
+  --swath-z-overlay: 1;
+  --swath-z-controls: 2;
+  --swath-z-hud: 3;
+  --swath-z-drawer: 4;
+  --swath-z-palette: 5;
+
+  /* motion */
+  --swath-motion-fast: 120ms;
+  --swath-motion-normal: 200ms;
+  --swath-motion-ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --swath-motion-fast: 0ms;
+    --swath-motion-normal: 0ms;
+  }
+}

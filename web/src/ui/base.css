@@ -1,0 +1,41 @@
+/* SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0 */
+
+/* The shared shadow-root sheet (ui-system.md §4.1), adopted into every
+ * SwathElement's renderRoot ahead of the element's own styles: a box-sizing
+ * reset, `[hidden]`, the one focus ring (no element writes its own outline),
+ * and reduced-motion zeroing. Values come from tokens — none are raw here. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:host {
+  font-family: var(--swath-font-ui);
+  font-size: var(--swath-text-sm);
+  line-height: var(--swath-leading-normal);
+  color: var(--swath-color-fg);
+}
+
+:host([hidden]),
+[hidden] {
+  /* biome-ignore lint/complexity/noImportantStyles: must beat an element sheet's own `:host { display }`, adopted after this one */
+  display: none !important;
+}
+
+:focus-visible {
+  outline: var(--swath-border-focus);
+  outline-offset: var(--swath-space-0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced motion overrides every element sheet */
+    animation: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: same */
+    transition: none !important;
+  }
+}
