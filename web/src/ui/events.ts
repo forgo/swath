@@ -2,21 +2,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The typed event seam (docs/design/ui-system.md §4.3) — the one home of
- * `new CustomEvent(` under web/ (scripts/check-ui-dry.mjs).
+ * The typed event catalog (docs/design/ui-system.md §4.3) — the one home
+ * of `new CustomEvent(` under web/ (scripts/check-ui-dry.mjs).
  *
- * `SwathEventMap` is the catalog: event name → detail type. Issue #279 fills
- * it; until then it is empty and each element (or test) augments it with
- * `declare module "./events.js" { interface SwathEventMap { … } }`. The
- * global augmentation below makes `addEventListener("swath-…", e => …)`
- * typed on every element without casts.
+ * `SwathEventMap` maps event name → detail. The global augmentation makes
+ * `el.addEventListener("swath-…", (e) => e.detail)` typed on every element
+ * with no cast. Every Swath event is `bubbles: true, composed: true` — one
+ * that is not composed dies at the first shadow boundary — hardcoded here
+ * and pinned by element.test.ts.
  *
- * Every Swath event is `bubbles: true, composed: true` — one that is not
- * composed dies at the first shadow boundary — so it is hardcoded here and
- * pinned by element.test.ts, not left to each caller.
+ * Naming going forward is `swath-<subject>-<verb>`; the M5–M9 names below
+ * are kept verbatim until each organism migrates (#282–#291), so hosts see
+ * no behaviour change. `layerchange` → `swath-layer-change`: the map
+ * dispatches both for one milestone.
  */
-// biome-ignore lint/suspicious/noEmptyInterface: the catalog is filled by augmentation (#279)
-export interface SwathEventMap {}
+import type { GranuleBbox } from "../granule-footprints.js";
+import type { GranuleListItem } from "../swath-dataset-panel.js";
+import type { LonLatBounds, SwathLayer } from "../swath-map.js";
+
+export interface SwathEventMap {
+  /** The viewed layer changed (`<swath-map>`). */
+  "swath-layer-change": { layer: string; layers: SwathLayer[] };
+  /** Alias of `swath-layer-change` for one milestone. */
+  layerchange: { layer: string; layers: SwathLayer[] };
+  "swath-layer-select": { layer: string };
+  "swath-timechange": { datetime: string | null; cinematic: boolean };
+  "swath-comparechange": {
+    compareTime: string | null;
+    compareLayer: string | null;
+    swipe: string | null;
+  };
+  "swath-framedata": { bounds: LonLatBounds };
+  "swath-error": { error: unknown };
+  "swath-dataset-granules": { dataset: string; granules: GranuleListItem[] };
+  "swath-granule-zoom": { dataset: string; id: string; bbox: GranuleBbox };
+  "swath-data-added": { dataset: string; layer: string };
+  "swath-service-created": { id: string };
+  "swath-service-deleted": { id: string };
+}
 
 type SwathCustomEvents = {
   [K in keyof SwathEventMap]: CustomEvent<SwathEventMap[K]>;

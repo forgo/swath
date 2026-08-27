@@ -70,7 +70,9 @@ const RULES = [
     home: null,
     tests: true,
     only: /^src\/ui\//,
-    pattern: /from\s+["']\.\.\//g,
+    // A value import creates the dependency; `import type` is erased and
+    // only names an organism's detail shape in the event catalog.
+    pattern: /^import\s+(?!type\b)[^;]*?from\s+["']\.\.\//gm,
   },
 ];
 

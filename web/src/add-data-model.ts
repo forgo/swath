@@ -14,6 +14,8 @@
  * rejected alternative).
  */
 
+import { ApiProblem, type FieldNote, type FieldRule, fieldFor } from "./api.js";
+
 /** What the server's capabilities document says this panel may do. */
 export interface AddDataCapabilities {
   /** `POST /datasets` is mounted — the panel may exist at all. */
@@ -323,44 +325,38 @@ export function quicklookService(
 export type ProblemField = "link" | "dataset" | "band" | "granule" | "datetime" | "";
 
 /** A server problem translated for the form. */
-export interface ProblemNote {
-  field: ProblemField;
-  note: string;
-}
+export type ProblemNote = FieldNote<ProblemField>;
+
+/** The dataset surface's refusals, routed onto the form (`fieldFor`). */
+const PROBLEM_RULES: readonly FieldRule<ProblemField>[] = [
+  {
+    includes: "failed header validation",
+    field: "link",
+    note: (detail) =>
+      `the server could not read that file as a cloud-optimized GeoTIFF — ${detail}`,
+  },
+  {
+    includes: "bbox derivation",
+    field: "link",
+    note: (detail) =>
+      `the server could not read that file as a cloud-optimized GeoTIFF — ${detail}`,
+  },
+  // The inline item's `collection` must agree with the dataset id — this
+  // refusal is about the dataset choice, not the link.
+  { includes: "does not match dataset", field: "dataset" },
+  { includes: "stac_item", field: "link" },
+  {
+    includes: "is not URL-safe",
+    field: "dataset",
+    note: () => "use only letters, digits, - and _",
+  },
+  { includes: "declared bands", field: "band" },
+  { includes: "`datetime`", field: "datetime" },
+];
 
 /** Reads an RFC 7807 body (`{type,title,status,detail}` — every non-2xx
  * of the dataset surface) into a field-routed plain-words note. Unknown
  * shapes fall back to the HTTP status. */
 export function mapProblem(status: number, body: unknown): ProblemNote {
-  const detail =
-    typeof body === "object" && body !== null
-      ? (body as Record<string, unknown>)["detail"]
-      : undefined;
-  if (typeof detail !== "string" || detail === "") {
-    return { field: "", note: `the server refused with HTTP ${status}` };
-  }
-  if (detail.includes("failed header validation") || detail.includes("bbox derivation")) {
-    return {
-      field: "link",
-      note: `the server could not read that file as a cloud-optimized GeoTIFF — ${detail}`,
-    };
-  }
-  if (detail.includes("does not match dataset")) {
-    // The inline item's `collection` must agree with the dataset id —
-    // this refusal is about the dataset choice, not the link.
-    return { field: "dataset", note: detail };
-  }
-  if (detail.includes("stac_item")) {
-    return { field: "link", note: detail };
-  }
-  if (detail.includes("is not URL-safe")) {
-    return { field: "dataset", note: "use only letters, digits, - and _" };
-  }
-  if (detail.includes("declared bands")) {
-    return { field: "band", note: detail };
-  }
-  if (detail.includes("`datetime`")) {
-    return { field: "datetime", note: detail };
-  }
-  return { field: "", note: detail };
+  return fieldFor(new ApiProblem(status, body), PROBLEM_RULES);
 }

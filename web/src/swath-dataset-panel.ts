@@ -29,7 +29,9 @@
  * mirroring `<swath-map>`.
  */
 
+import { SwathApi } from "./api.js";
 import { type FootprintGranule, parseBbox } from "./granule-footprints.js";
+import { createSwathEvent } from "./ui/events.js";
 
 /** One dataset of the listing. */
 export interface DatasetItem {
@@ -179,6 +181,25 @@ export class SwathDatasetPanel extends HTMLElement {
     return (this.getAttribute("server") ?? "").replace(/\/+$/, "");
   }
 
+  #api: SwathApi | undefined;
+  #ownApi: SwathApi | undefined;
+
+  /** The API client (ui-system.md §4.4): injected by a host or test, else
+   * built from `server` — same origin when the attribute is absent. */
+  get api(): SwathApi {
+    if (this.#api !== undefined) {
+      return this.#api;
+    }
+    if (this.#ownApi === undefined || this.#ownApi.base !== this.server) {
+      this.#ownApi = new SwathApi({ base: this.server });
+    }
+    return this.#ownApi;
+  }
+
+  set api(api: SwathApi) {
+    this.#api = api;
+  }
+
   /** `await el.ready` before inspecting the DOM after an interaction. */
   get ready(): Promise<void> {
     return this.#ready;
@@ -214,7 +235,7 @@ export class SwathDatasetPanel extends HTMLElement {
     this.#datasetsError = undefined;
     this.#render();
     try {
-      const response = await fetch(`${this.server}/collections`, {
+      const response = await this.api.fetch("/collections", {
         headers: { accept: "application/json" },
       });
       if (!response.ok) {
@@ -265,10 +286,10 @@ export class SwathDatasetPanel extends HTMLElement {
     let granules: GranuleListItem[] = [];
     let failure: string | undefined;
     try {
-      const url = `${this.server}/datasets/${encodeURIComponent(id)}/granules`;
-      const response = await fetch(url, { headers: { accept: "application/json" } });
+      const url = `/datasets/${encodeURIComponent(id)}/granules`;
+      const response = await this.api.fetch(url, { headers: { accept: "application/json" } });
       if (!response.ok) {
-        throw new Error(`GET ${url} failed: ${response.status}`);
+        throw new Error(`GET ${this.api.url(url)} failed: ${response.status}`);
       }
       const body = (await response.json()) as {
         granules?: { id?: string; bbox?: unknown; datetime?: string }[];
@@ -297,10 +318,7 @@ export class SwathDatasetPanel extends HTMLElement {
 
   #announceGranules(dataset: string, granules: readonly GranuleListItem[]): void {
     this.dispatchEvent(
-      new CustomEvent("swath-dataset-granules", {
-        detail: { dataset, granules: [...granules] },
-        bubbles: true,
-      }),
+      createSwathEvent("swath-dataset-granules", { dataset, granules: [...granules] }),
     );
   }
 
@@ -396,10 +414,7 @@ export class SwathDatasetPanel extends HTMLElement {
       button.append(id, datetime);
       button.addEventListener("click", () => {
         this.dispatchEvent(
-          new CustomEvent("swath-granule-zoom", {
-            detail: { dataset, id: granule.id, bbox: granule.bbox },
-            bubbles: true,
-          }),
+          createSwathEvent("swath-granule-zoom", { dataset, id: granule.id, bbox: granule.bbox }),
         );
       });
       item.append(button);

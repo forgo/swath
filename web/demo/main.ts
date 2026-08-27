@@ -25,16 +25,12 @@
 //   the fire-season loop auto-plays there and nowhere else. Its own
 //   frame advances are not interactions (`swath-timechange` flags them
 //   `cinematic`): the bare URL stays bare until the user takes over.
-import { type GranuleBbox, GranuleFootprints } from "../src/granule-footprints.js";
+import { GranuleFootprints } from "../src/granule-footprints.js";
 import { defineSwathAddDataPanel, SwathAddDataPanel } from "../src/swath-add-data-panel.js";
 import { defineSwathAuthoringPanel, SwathAuthoringPanel } from "../src/swath-authoring-panel.js";
-import {
-  defineSwathDatasetPanel,
-  type GranuleListItem,
-  SwathDatasetPanel,
-} from "../src/swath-dataset-panel.js";
+import { defineSwathDatasetPanel, SwathDatasetPanel } from "../src/swath-dataset-panel.js";
 import { defineSwathLayerPanel, SwathLayerPanel } from "../src/swath-layer-panel.js";
-import { defineSwathMap, type SwathLayer, SwathMap } from "../src/swath-map.js";
+import { defineSwathMap, SwathMap } from "../src/swath-map.js";
 import {
   formatCenter,
   formatSwipe,
@@ -131,7 +127,7 @@ if (mapElement instanceof SwathMap && datasetElement instanceof SwathDatasetPane
 if (mapElement instanceof SwathMap && addDataElement instanceof SwathAddDataPanel) {
   const map = mapElement;
   addDataElement.addEventListener("swath-data-added", (event) => {
-    const layer = (event as CustomEvent<{ dataset: string; layer: string }>).detail.layer;
+    const layer = event.detail.layer;
     if (layer !== "") {
       // Failures surface via the map's own `swath-error` + retry loop.
       map.setLayer(layer).catch(() => undefined);
@@ -153,11 +149,11 @@ function wireDatasetBrowser(map: SwathMap, panel: SwathDatasetPanel): void {
     return footprints;
   };
   panel.addEventListener("swath-dataset-granules", (event) => {
-    const detail = (event as CustomEvent<{ dataset: string; granules: GranuleListItem[] }>).detail;
+    const detail = event.detail;
     paint()?.set(detail.granules);
   });
   panel.addEventListener("swath-granule-zoom", (event) => {
-    const detail = (event as CustomEvent<{ bbox: GranuleBbox }>).detail;
+    const detail = event.detail;
     paint()?.zoomTo(detail.bbox);
   });
 }
@@ -241,8 +237,8 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
     interacted = true;
   };
 
-  map.addEventListener("layerchange", (event) => {
-    const detail = (event as CustomEvent<{ layer: string; layers: SwathLayer[] }>).detail;
+  map.addEventListener("swath-layer-change", (event) => {
+    const detail = event.detail;
     panel.update(detail.layers, detail.layer);
     // A layer change after the initial apply is always user-driven on
     // this page (the rail, an authored or added layer, a deletion).
@@ -261,7 +257,7 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
   });
 
   panel.addEventListener("swath-layer-select", (event) => {
-    const layer = (event as CustomEvent<{ layer: string }>).detail.layer;
+    const layer = event.detail.layer;
     // Failures surface via the map's own `swath-error` + retry loop.
     map.setLayer(layer).catch(() => undefined);
   });
@@ -299,7 +295,7 @@ function wire(map: SwathMap, panel: SwathLayerPanel): void {
   // URL already encodes the same state. Frames the cinematic landing
   // advanced on its own (issue #211) are not the user's: no write.
   map.addEventListener("swath-timechange", (event) => {
-    if (!(event as CustomEvent<{ cinematic: boolean }>).detail.cinematic) {
+    if (!event.detail.cinematic) {
       interact();
     }
     persist();
@@ -374,11 +370,11 @@ function wireShare(button: HTMLButtonElement, snapshot: () => ViewState): void {
 // the layer list.
 function wireAuthoring(map: SwathMap, authoring: SwathAuthoringPanel): void {
   authoring.addEventListener("swath-service-created", (event) => {
-    const id = (event as CustomEvent<{ id: string }>).detail.id;
+    const id = event.detail.id;
     map.setLayer(id).catch(() => undefined);
   });
   authoring.addEventListener("swath-service-deleted", (event) => {
-    const id = (event as CustomEvent<{ id: string }>).detail.id;
+    const id = event.detail.id;
     if (map.getAttribute("layer") === id) {
       map.removeAttribute("layer"); // re-applies with the server default
     } else {
