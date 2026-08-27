@@ -11,7 +11,7 @@
  * (see granule-footprints.ts); clicking a granule announces a zoom.
  *
  * Plain Custom Element, light DOM, no framework (ADR 0005). Unlike the
- * deliberately presentational `<swath-layer-panel>`, this panel owns its
+ * deliberately presentational `<swath-layer-list>`, this panel owns its
  * fetching — but LAZILY, and that laziness is contractual (asserted by a
  * network-count test): the panel mounts collapsed and issues NO requests
  * until the user opens it, so the entry page's cost is untouched for

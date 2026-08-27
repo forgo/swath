@@ -859,3 +859,41 @@ test("cinematic: a layer switch drops the loop's frame back to latest; a scrubbe
   await scrubbed.setLayer("truecolor");
   expect(scrubbed.getAttribute("datetime")).toBe(FIRE_FRAMES[2]);
 });
+
+// --- The viewed layer's eye and opacity (issue #282) ---
+
+test("setLayerVisibility / setLayerOpacity paint the raster, survive a restyle, reach the compare side, reset on a switch", async () => {
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const el = mount({ server: SERVER, layer: "ndvi", datetime: FIRE_FRAMES[0] ?? "" });
+  await el.ready;
+  const paint = (map = el.map) => ({
+    visibility: map?.getLayoutProperty("swath", "visibility") ?? "visible",
+    opacity: map?.getPaintProperty("swath", "raster-opacity") ?? 1,
+  });
+  expect(paint()).toEqual({ visibility: "visible", opacity: 1 });
+
+  el.setLayerOpacity(0.35);
+  el.setLayerVisibility(false);
+  expect(paint()).toEqual({ visibility: "none", opacity: 0.35 });
+  expect(el.layerVisible).toBe(false);
+  expect(el.layerOpacity).toBe(0.35);
+
+  // A compare side built afterwards inherits the same paint.
+  const comparechange = new Promise<void>((resolve) => {
+    el.addEventListener("swath-comparechange", () => resolve(), { once: true });
+  });
+  el.setAttribute("compare-datetime", FIRE_FRAMES[3] ?? "");
+  await comparechange;
+  await vi.waitFor(() => expect(el.compareMap?.getLayer("swath")).toBeDefined());
+  await vi.waitFor(() =>
+    expect(paint(el.compareMap)).toEqual({ visibility: "none", opacity: 0.35 }),
+  );
+
+  // A layer switch is a fresh start: the next layer is never born hidden.
+  const changed = new Promise<{ visible: boolean; opacity: number }>((resolve) => {
+    el.addEventListener("swath-layer-change", (event) => resolve(event.detail), { once: true });
+  });
+  await el.setLayer("truecolor");
+  expect(await changed).toMatchObject({ visible: true, opacity: 1 });
+  expect(paint()).toEqual({ visibility: "visible", opacity: 1 });
+});

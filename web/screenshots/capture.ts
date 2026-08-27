@@ -376,7 +376,7 @@ test("authoring publish: the authored layer serves immediately", async ({ page }
   try {
     // The authored layer lands in the rail and becomes the viewed layer;
     // wait for its tiles before freezing the frame.
-    const layerButton = page.locator(`swath-layer-panel button[data-layer="${id}"]`);
+    const layerButton = page.locator(`swath-layer-item[data-layer="${id}"] [part="row"]`);
     await expect(layerButton).toHaveAttribute("aria-pressed", "true");
     await page.waitForResponse(
       (r) => r.url().includes(`/tilesets/${id}/tiles/`) && r.status() === 200,

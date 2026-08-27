@@ -22,10 +22,16 @@ import type { LonLatBounds, SwathLayer } from "../swath-map.js";
 
 export interface SwathEventMap {
   /** The viewed layer changed (`<swath-map>`). */
-  "swath-layer-change": { layer: string; layers: SwathLayer[] };
+  "swath-layer-change": { layer: string; layers: SwathLayer[]; visible: boolean; opacity: number };
   /** Alias of `swath-layer-change` for one milestone. */
-  layerchange: { layer: string; layers: SwathLayer[] };
+  layerchange: { layer: string; layers: SwathLayer[]; visible: boolean; opacity: number };
   "swath-layer-select": { layer: string };
+  /** The eye on a layer row (`<swath-layer-item>`). */
+  "swath-layer-visibility": { layer: string; visible: boolean };
+  /** The opacity slider on a layer row, live. */
+  "swath-layer-opacity": { layer: string; opacity: number };
+  /** A kebab action on a layer row; the host decides what it means. */
+  "swath-layer-action": { layer: string; action: "zoom" | "compare" | "info" | "delete" };
   "swath-timechange": { datetime: string | null; cinematic: boolean };
   "swath-comparechange": {
     compareTime: string | null;
