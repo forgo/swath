@@ -61,6 +61,11 @@ or bring the stack up yourself and `pnpm exec vite dev`.
         border-color: var(--swath-color-danger);
         color: var(--swath-color-danger);
       }
+      #swath-modes {
+        display: flex;
+        gap: var(--swath-space-1);
+        margin: 0 0 var(--swath-space-3);
+      }
       .swath-rail header p {
         margin: 4px 0 0;
         font: 12px/1.5 system-ui, sans-serif;
@@ -105,6 +110,15 @@ or bring the stack up yourself and `pnpm exec vite dev`.
         </div>
         <p>Live tiles from freshly ingested granules. Pick a layer; share copies the link to this exact view.</p>
       </header>
+      <!-- Modes (issue #283): the URL's view= param, shown as a pressed
+           strip until the shell's rail (#284) replaces it. Panels below
+           are shown or hidden per mode; `layers` is today's full rail. -->
+      <nav id="swath-modes" aria-label="Mode">
+        <swath-button size="sm" data-mode="layers" pressed>layers</swath-button>
+        <swath-button size="sm" data-mode="data" pressed="false">data</swath-button>
+        <swath-button size="sm" data-mode="author" pressed="false">author</swath-button>
+        <swath-button size="sm" data-mode="xray" pressed="false">x-ray</swath-button>
+      </nav>
       <swath-layer-list></swath-layer-list>
 <!-- Collapsed by default; fetches nothing until opened (issue #110). -->
       <swath-dataset-panel></swath-dataset-panel>
