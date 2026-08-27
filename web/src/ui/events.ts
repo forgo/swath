@@ -55,6 +55,8 @@ export interface SwathEventMap {
   "swath-menu-select": { id: string };
   /** A drawer, sheet or menu asks to close; the host decides. */
   "swath-drawer-close": { reason: "esc" | "scrim" | "swipe" | "select" | "outside" };
+  /** The rail's mode switcher picked a mode (`<swath-rail>`). */
+  "swath-mode-change": { mode: string };
   /** An interactive card was activated; `long` for a long-press / context. */
   "swath-activate": { id: string; long: boolean };
 }

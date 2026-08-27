@@ -41,7 +41,11 @@ import { defineSwathAuthoringPanel, SwathAuthoringPanel } from "../src/swath-aut
 import { defineSwathDatasetPanel, SwathDatasetPanel } from "../src/swath-dataset-panel.js";
 import { defineSwathLayerList, SwathLayerList } from "../src/swath-layer-list.js";
 import { defineSwathMap, SwathMap } from "../src/swath-map.js";
+import { defineSwathShell, SwathShell } from "../src/swath-shell.js";
 import { SwathButton } from "../src/ui/button.js";
+import { SwathHudDock } from "../src/ui/hud-dock.js";
+import { SwathRail } from "../src/ui/rail.js";
+import { SwathStatusBar, SwathStatusCell } from "../src/ui/status-bar.js";
 import {
   formatCenter,
   formatSwipe,
@@ -64,6 +68,13 @@ const datasetElement = document.querySelector("swath-dataset-panel");
 const addDataElement = document.querySelector("swath-add-data-panel");
 const authoringElement = document.querySelector("swath-authoring-panel");
 SwathButton.define();
+SwathRail.define();
+SwathHudDock.define();
+SwathStatusBar.define();
+SwathStatusCell.define();
+defineSwathShell();
+const shellElement = document.querySelector("swath-shell");
+const railElement = document.querySelector("swath-rail");
 const shareElement = document.querySelector<SwathButton>("#swath-share");
 
 const storage = safeLocalStorage();
@@ -261,12 +272,24 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     history.replaceState(null, "", `${location.pathname}${next}${location.hash}`);
   };
 
-  // Modes over today's panels (no shell yet — the #283 scope fence):
-  // `layers` is the full rail as it always was; the others narrow it.
-  // Entering `xray` turns the overlay on (a user act); leaving leaves it.
-  const modeButtons = [...document.querySelectorAll<SwathButton>("#swath-modes [data-mode]")];
+  // Modes over the rail's content (#283/#284): `layers` is the full rail
+  // as it always was; the others narrow it. Entering `xray` turns the
+  // overlay on (a user act); leaving leaves it. The rail's collapse is a
+  // device preference: storage only, never the URL (honoured from a
+  // `rail=collapsed` link without rewriting it).
+  const MODE_TITLES = { layers: "Layers", data: "Data", author: "Author", xray: "X-ray" } as const;
+  const modeTitle = document.querySelector("#swath-mode-title");
   const applyMode = (mode: ViewMode): void => {
     document.body.dataset["view"] = mode;
+    if (shellElement instanceof SwathShell) {
+      shellElement.view = mode;
+    }
+    if (railElement instanceof SwathRail) {
+      railElement.mode = mode;
+    }
+    if (modeTitle) {
+      modeTitle.textContent = MODE_TITLES[mode];
+    }
     const show = {
       layers: mode === "layers" || mode === "xray",
       data: mode === "layers" || mode === "data",
@@ -282,8 +305,10 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     if (authoringElement instanceof HTMLElement) {
       authoringElement.hidden = !show.author;
     }
-    for (const button of modeButtons) {
-      button.pressed = button.dataset["mode"] === mode;
+  };
+  const savePreference = (): void => {
+    if (storage) {
+      saveAppPreference(storage, appState);
     }
   };
   const setMode = (mode: ViewMode): void => {
@@ -300,22 +325,55 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
       map.setAttribute("xray", "");
     }
     interact();
-    if (storage) {
-      saveAppPreference(storage, appState);
-    }
+    savePreference();
     syncUrl();
   };
   applyMode(appState.view);
-  for (const button of modeButtons) {
-    button.addEventListener("click", () => {
-      const mode = button.dataset["mode"];
+  if (railElement instanceof SwathRail) {
+    railElement.items = [
+      { id: "layers", label: "Layers", icon: "layers" },
+      { id: "data", label: "Data", icon: "data" },
+      { id: "author", label: "Author", icon: "author" },
+      { id: "xray", label: "X-ray", icon: "xray" },
+    ];
+    railElement.collapsed = appState.rail === "collapsed";
+    railElement.addEventListener("swath-mode-change", (event) => {
+      const mode = event.detail.mode;
       if (isViewMode(mode)) {
         setMode(mode);
       }
     });
+    railElement.addEventListener("swath-toggle", (event) => {
+      const next: AppState = { view: appState.view };
+      if (event.detail.pressed) {
+        next.rail = "collapsed";
+      }
+      appState = next;
+      savePreference();
+      syncUrl(); // a no-op by construction: `rail` is never written
+    });
   }
 
-  /** A user act: from here on the URL and storage follow the view. */
+  // The status bar (#284; ingest→pixel joins in #287): the view's own
+  // numbers, from the map, on every move.
+  const lonlat = document.querySelector("#swath-status-lonlat");
+  const zoomCell = document.querySelector("#swath-status-zoom");
+  const paintStatus = (): void => {
+    const inner = map.map;
+    if (!inner) {
+      return;
+    }
+    const center = inner.getCenter().wrap();
+    if (lonlat instanceof SwathStatusCell) {
+      lonlat.value = formatCenter([center.lng, center.lat]).replace(",", ", ");
+    }
+    if (zoomCell instanceof SwathStatusCell) {
+      zoomCell.value = formatZoom(inner.getZoom());
+    }
+  };
+  map.map?.on("move", paintStatus);
+  map.addEventListener("swath-layer-change", paintStatus);
+
   const interact = (): void => {
     interacted = true;
   };

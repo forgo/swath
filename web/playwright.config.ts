@@ -45,7 +45,7 @@ export default defineConfig({
     // the trace-feed overlay (seen on CI: "subtree intercepts pointer
     // events"). Widen by exactly the rail so the canvas keeps its
     // historical 1280x720 geometry in both modes.
-    viewport: { width: 1528, height: 720 },
+    viewport: { width: 1528, height: 788 }, // shell: 44 top bar + 720 canvas + 24 status bar (#284)
   },
   ...(binaryMode
     ? {}

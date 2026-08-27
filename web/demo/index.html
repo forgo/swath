@@ -17,41 +17,52 @@ or bring the stack up yourself and `pnpm exec vite dev`.
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Swath</title>
     <style>
+      /* The page IS the shell (#284): tokens are adopted by the first
+       * SwathElement; the page keeps only what no element owns. */
       html,
       body {
         margin: 0;
         height: 100%;
       }
       body {
-        display: flex;
-        background: #0f172a;
-        color: #e2e8f0;
+        background: var(--swath-color-bg);
+        color: var(--swath-color-fg);
+        font-family: var(--swath-font-ui);
       }
-      .swath-rail {
-        flex: 0 0 248px;
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-        padding: 16px 14px;
-        box-sizing: border-box;
-        overflow-y: auto;
-        border-right: 1px solid rgb(148 163 184 / 15%);
+      swath-shell {
+        display: grid;
+        height: 100%;
+      }
+      /* The slotted map fills the shell's main region. Sized HERE, not by
+       * the shell's ::slotted() rule: document styles beat a shadow tree's
+       * ::slotted() in the cascade, so the component's own :where(swath-map)
+       * 400px default would otherwise win (it did — a 400px canvas). */
+      swath-map[slot="map"] {
+        position: absolute;
+        inset: 0;
+        height: 100%;
       }
       .swath-rail-title {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 8px;
+        gap: var(--swath-space-2);
       }
-      .swath-rail header h1 {
+      .swath-rail-title h1 {
         margin: 0;
-        font: 700 15px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        letter-spacing: 0.22em;
+        font-family: var(--swath-font-mono);
+        font-size: var(--swath-text-lg);
+        font-weight: 700;
+        letter-spacing: var(--swath-tracking-wide);
         text-transform: uppercase;
       }
-      /* Share (issue #211) is a <swath-button> (#280): its skin comes from
-       * the primitive; only the copied/failed feedback states live here,
-       * through ::part and the tokens. */
+      .swath-rail-lede {
+        margin: var(--swath-space-1) 0 0;
+        font-size: var(--swath-text-sm);
+        line-height: var(--swath-leading-normal);
+        color: var(--swath-color-fg-muted);
+      }
+      /* Share (issue #211) feedback states, through ::part and the tokens. */
       #swath-share[data-state="copied"]::part(base) {
         border-color: var(--swath-color-accent-border);
         background: var(--swath-color-accent-bg);
@@ -60,11 +71,6 @@ or bring the stack up yourself and `pnpm exec vite dev`.
       #swath-share[data-state="failed"]::part(base) {
         border-color: var(--swath-color-danger);
         color: var(--swath-color-danger);
-      }
-      #swath-modes {
-        display: flex;
-        gap: var(--swath-space-1);
-        margin: 0 0 var(--swath-space-3);
       }
       /* Modes hide panels with `hidden`; each panel's own injected CSS says
        * `display: block`, which would beat the UA's [hidden] rule — this
@@ -75,70 +81,57 @@ or bring the stack up yourself and `pnpm exec vite dev`.
       swath-authoring-panel[hidden] {
         display: none;
       }
-      .swath-rail header p {
-        margin: 4px 0 0;
-        font: 12px/1.5 system-ui, sans-serif;
-        color: rgb(148 163 184 / 90%);
-      }
-      .swath-rail footer {
-        margin-top: auto;
-        font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        color: rgb(148 163 184 / 70%);
-      }
-      swath-map {
-        flex: 1;
-        height: 100%;
-        min-width: 0;
-      }
-      @media (max-width: 640px) {
-        body {
-          flex-direction: column;
-        }
-        .swath-rail {
-          flex: 0 0 auto;
-          max-height: 40%;
-          border-right: none;
-          border-bottom: 1px solid rgb(148 163 184 / 15%);
-        }
+      .swath-rail-footer {
+        font-family: var(--swath-font-mono);
+        font-size: var(--swath-text-xs);
+        color: var(--swath-color-fg-muted);
       }
     </style>
     <script type="module" src="./main.ts"></script>
   </head>
   <body>
-    <aside class="swath-rail">
-      <header>
-        <div class="swath-rail-title">
-          <h1>Swath</h1>
-          <!-- Enabled once the first layer has applied (main.ts): it copies
-               the deep link of the CURRENT view — layer, center, zoom,
-               frame, x-ray — the same URL the address bar shows after an
-               interaction. -->
-          <swath-button id="swath-share" size="sm" label="Copy a link to this exact view" disabled>
-            share
-          </swath-button>
+    <!-- One shell, five regions (ui-system.md §6). The map is slotted in
+         LIGHT DOM so MapLibre keeps document scope and every
+         document.querySelector("swath-map") keeps working. The HUD dock is
+         empty until the map chrome moves onto it (#285/#286); map toggles
+         stay MapLibre controls for now. -->
+    <swath-shell view="layers">
+      <swath-rail slot="rail" mode="layers">
+        <div slot="brand">
+          <div class="swath-rail-title">
+            <h1>Swath</h1>
+            <!-- Enabled once the first layer has applied (main.ts): it copies
+                 the deep link of the CURRENT view — layer, center, zoom,
+                 frame, x-ray — the same URL the address bar shows after an
+                 interaction. -->
+            <swath-button id="swath-share" size="sm" label="Copy a link to this exact view" disabled>
+              share
+            </swath-button>
+          </div>
+          <p class="swath-rail-lede">Live tiles from freshly ingested granules. Pick a layer; share copies the link to this exact view.</p>
         </div>
-        <p>Live tiles from freshly ingested granules. Pick a layer; share copies the link to this exact view.</p>
-      </header>
-      <!-- Modes (issue #283): the URL's view= param, shown as a pressed
-           strip until the shell's rail (#284) replaces it. Panels below
-           are shown or hidden per mode; `layers` is today's full rail. -->
-      <nav id="swath-modes" aria-label="Mode">
-        <swath-button size="sm" data-mode="layers" pressed>layers</swath-button>
-        <swath-button size="sm" data-mode="data" pressed="false">data</swath-button>
-        <swath-button size="sm" data-mode="author" pressed="false">author</swath-button>
-        <swath-button size="sm" data-mode="xray" pressed="false">x-ray</swath-button>
-      </nav>
-      <swath-layer-list></swath-layer-list>
-<!-- Collapsed by default; fetches nothing until opened (issue #110). -->
-      <swath-dataset-panel></swath-dataset-panel>
-      <!-- Collapsed and lazy (issue #197); its first open reads the
-           capabilities document, so a read-only server shows no form. -->
-      <swath-add-data-panel></swath-add-data-panel>
-      <!-- Also collapsed and lazy (issue #109): fetches nothing until opened. -->
-      <swath-authoring-panel></swath-authoring-panel>
-      <footer>granule → pixel</footer>
-    </aside>
-    <!-- switcher="off": the layer panel IS the switcher on this page. -->
-    <swath-map switcher="off"></swath-map>
+        <!-- Mode content: `layers` is the full rail as it always was; the
+             other modes narrow it (main.ts, issue #283). -->
+        <swath-layer-list></swath-layer-list>
+        <!-- Collapsed by default; fetches nothing until opened (issue #110). -->
+        <swath-dataset-panel></swath-dataset-panel>
+        <!-- Collapsed and lazy (issue #197); its first open reads the
+             capabilities document, so a read-only server shows no form. -->
+        <swath-add-data-panel></swath-add-data-panel>
+        <!-- Also collapsed and lazy (issue #109): fetches nothing until opened. -->
+        <swath-authoring-panel></swath-authoring-panel>
+        <span slot="footer" class="swath-rail-footer">granule → pixel</span>
+      </swath-rail>
+      <span slot="topbar" id="swath-mode-title">Layers</span>
+      <!-- switcher="off": the layer list IS the switcher on this page. -->
+      <swath-map slot="map" switcher="off"></swath-map>
+      <swath-hud-dock slot="hud"></swath-hud-dock>
+      <swath-status-bar slot="statusbar">
+        <swath-status-cell id="swath-status-lonlat" label="lon/lat" mono></swath-status-cell>
+        <swath-status-cell id="swath-status-zoom" label="zoom" mono></swath-status-cell>
+        <swath-status-cell label="crs" value="EPSG:3857" mono></swath-status-cell>
+        <swath-status-cell id="swath-status-ingest" label="ingest→pixel" mono></swath-status-cell>
+      </swath-status-bar>
+    </swath-shell>
   </body>
 </html>
