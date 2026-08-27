@@ -43,6 +43,14 @@ export interface SwathEventMap {
   "swath-change": { name: string; value: string | number | boolean };
   /** A pressed-state button was activated (`<swath-button pressed>`). */
   "swath-toggle": { pressed: boolean };
+  /** A live (uncommitted) value while the user drags or types. */
+  "swath-input": { name: string; value: string | number | boolean };
+  /** A menu item was chosen (`<swath-menu>`). */
+  "swath-menu-select": { id: string };
+  /** A drawer, sheet or menu asks to close; the host decides. */
+  "swath-drawer-close": { reason: "esc" | "scrim" | "swipe" | "select" | "outside" };
+  /** An interactive card was activated; `long` for a long-press / context. */
+  "swath-activate": { id: string; long: boolean };
 }
 
 type SwathCustomEvents = {
