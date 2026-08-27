@@ -81,6 +81,9 @@ or bring the stack up yourself and `pnpm exec vite dev`.
       swath-authoring-panel[hidden] {
         display: none;
       }
+      #swath-status-lonlat {
+        cursor: copy;
+      }
       #swath-xray-rail {
         display: flex;
         flex-direction: column;
@@ -143,12 +146,14 @@ or bring the stack up yourself and `pnpm exec vite dev`.
       </swath-rail>
       <span slot="topbar" id="swath-mode-title">Layers</span>
       <!-- switcher="off": the layer list IS the switcher on this page. -->
-      <swath-map slot="map" switcher="off"></swath-map>
+      <!-- traces: the status bar's ingest→pixel cell wants the trace stream
+           even with the x-ray off (issue #287). -->
+      <swath-map slot="map" switcher="off" traces></swath-map>
       <swath-hud-dock slot="hud"></swath-hud-dock>
       <swath-status-bar slot="statusbar">
-        <swath-status-cell id="swath-status-lonlat" label="lon/lat" mono></swath-status-cell>
+        <swath-status-cell id="swath-status-lonlat" label="lon/lat" mono title="Click to copy"></swath-status-cell>
         <swath-status-cell id="swath-status-zoom" label="zoom" mono></swath-status-cell>
-        <swath-status-cell label="crs" value="EPSG:3857" mono></swath-status-cell>
+        <swath-status-cell id="swath-status-crs" label="crs" mono></swath-status-cell>
         <swath-status-cell id="swath-status-ingest" label="ingest→pixel" mono></swath-status-cell>
       </swath-status-bar>
     </swath-shell>

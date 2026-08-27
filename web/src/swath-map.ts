@@ -81,7 +81,13 @@ import {
 } from "./compare-model.js";
 import { type GranuleBbox, parseBbox, unionBbox } from "./granule-footprints.js";
 import { CompareView } from "./swath-compare.js";
-import { type EventSourceFactory, type XRayChrome, XRayOverlay } from "./swath-xray.js";
+import {
+  type EventSourceFactory,
+  type TraceEnvelope,
+  TraceStream,
+  type XRayChrome,
+  XRayOverlay,
+} from "./swath-xray.js";
 import { parseGranuleDatetimes, TimeSlider } from "./time-slider.js";
 import { centerTile } from "./tms.js";
 import { createSwathEvent } from "./ui/events.js";
@@ -731,6 +737,7 @@ export class SwathMap extends HTMLElement {
       "compare-datetime",
       "compare-layer",
       "swipe",
+      "traces",
     ];
   }
 
@@ -811,6 +818,56 @@ export class SwathMap extends HTMLElement {
    * every part floats in the map. Settable at any time — a live overlay
    * re-homes its chrome. */
   #xrayChrome: Pick<XRayChrome, "modes" | "analytics"> | undefined;
+  /** The badge-less trace stream (#287). Connection policy: while the
+   * x-ray overlay exists its stream is shared (`onEnvelope`); otherwise,
+   * while the `traces` attribute asks for it (the shell's status bar is
+   * on screen), this stream is open; without either, no SSE connection. */
+  #traces: TraceStream | undefined;
+  #cursorFrame: number | undefined;
+  #pointer: { lng: number; lat: number } | undefined;
+
+  #onEnvelope = (envelope: TraceEnvelope): void => {
+    this.dispatchEvent(createSwathEvent("swath-trace", { envelope }));
+  };
+
+  /** One `swath-cursor` per animation frame at most. */
+  #scheduleCursor(): void {
+    if (this.#cursorFrame !== undefined) {
+      return;
+    }
+    this.#cursorFrame = requestAnimationFrame(() => {
+      this.#cursorFrame = undefined;
+      const map = this.#map;
+      if (!map) {
+        return;
+      }
+      const at = this.#pointer ?? map.getCenter().wrap();
+      this.dispatchEvent(
+        createSwathEvent("swath-cursor", {
+          lng: at.lng,
+          lat: at.lat,
+          zoom: map.getZoom(),
+          source: this.#pointer ? "pointer" : "center",
+        }),
+      );
+    });
+  }
+
+  #syncTraces(): void {
+    const wanted = this.hasAttribute("traces") && !this.#xray;
+    if (wanted && !this.#traces) {
+      this.#traces = new TraceStream(
+        this.xrayEventSource ?? ((url) => this.api.events(url)),
+        this.#onEnvelope,
+      );
+    } else if (!wanted && this.#traces) {
+      this.#traces.dispose();
+      this.#traces = undefined;
+    }
+    if (this.#traces && this.#activeLayer !== "") {
+      this.#traces.connect(`${this.server}/traces`);
+    }
+  }
   #xrayCards: HTMLElement[] = [];
 
   get xrayChrome(): Pick<XRayChrome, "modes" | "analytics"> | undefined {
@@ -922,6 +979,17 @@ export class SwathMap extends HTMLElement {
       this.#switcher = new LayerSwitcherControl(this);
       this.#map.addControl(this.#switcher, "top-right");
     }
+    // Cursor readout (#287): the pointer while a mouse is over the map,
+    // the centre otherwise; one event per frame.
+    this.#map.on("mousemove", (event) => {
+      this.#pointer = { lng: event.lngLat.wrap().lng, lat: event.lngLat.lat };
+      this.#scheduleCursor();
+    });
+    this.#map.on("mouseout", () => {
+      this.#pointer = undefined;
+      this.#scheduleCursor();
+    });
+    this.#map.on("move", () => this.#scheduleCursor());
     this.#xrayToggle = new XRayToggleControl(this);
     this.#map.addControl(this.#xrayToggle, "top-right");
     this.#compareToggle = new CompareToggleControl(this);
@@ -1089,6 +1157,12 @@ export class SwathMap extends HTMLElement {
     this.#compareSides = undefined;
     this.#compareTemplate = "";
     this.#time?.dispose();
+    this.#traces?.dispose();
+    this.#traces = undefined;
+    if (this.#cursorFrame !== undefined) {
+      cancelAnimationFrame(this.#cursorFrame);
+      this.#cursorFrame = undefined;
+    }
     this.#time?.element.remove(); // docked chrome lives outside this element (#285)
     this.#landing?.element.remove();
     this.#time = undefined;
@@ -1113,6 +1187,9 @@ export class SwathMap extends HTMLElement {
       case "layer":
       case "basemap":
         this.#startApply();
+        break;
+      case "traces":
+        this.#syncTraces();
         break;
       case "center": {
         const center = parseCenter(newValue);
@@ -1344,7 +1421,9 @@ export class SwathMap extends HTMLElement {
     this.#xray = new XRayOverlay(this, map, {
       createEventSource: this.xrayEventSource ?? ((url) => this.api.events(url)),
       chrome: this.#buildXrayChrome(),
+      onEnvelope: this.#onEnvelope,
     });
+    this.#syncTraces();
     this.#xray.connect(`${this.server}/traces`);
     this.#xray.setLayer(this.#activeLayer);
     // X-ray toggled on mid-compare: hand the fresh overlay the sides.
@@ -1366,6 +1445,7 @@ export class SwathMap extends HTMLElement {
       card.remove();
     }
     this.#xrayCards = [];
+    this.#syncTraces();
   }
 
   /** OGC `{tileMatrix}/{tileRow}/{tileCol}` is z/y/x, so MapLibre's
@@ -1566,6 +1646,7 @@ export class SwathMap extends HTMLElement {
     // `connect` is idempotent per URL: this only reconnects after a
     // `server` change, while layer switches just re-filter the badges.
     this.#xray?.connect(`${this.server}/traces`);
+    this.#syncTraces();
     this.#xray?.setLayer(layerId);
     this.#switcher?.update(available, layerId);
     // `layers` rides along (issue #108) so page chrome — the entry page's

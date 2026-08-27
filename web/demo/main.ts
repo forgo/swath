@@ -36,6 +36,7 @@ import {
 //   frame advances are not interactions (`swath-timechange` flags them
 //   `cinematic`): the bare URL stays bare until the user takes over.
 import { GranuleFootprints } from "../src/granule-footprints.js";
+import { formatCrs, formatIngest, formatLonLat, formatZoomCell } from "../src/status-model.js";
 import { defineSwathAddDataPanel, SwathAddDataPanel } from "../src/swath-add-data-panel.js";
 import { defineSwathAuthoringPanel, SwathAuthoringPanel } from "../src/swath-authoring-panel.js";
 import { defineSwathDatasetPanel, SwathDatasetPanel } from "../src/swath-dataset-panel.js";
@@ -365,25 +366,56 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     });
   }
 
-  // The status bar (#284; ingest→pixel joins in #287): the view's own
-  // numbers, from the map, on every move.
+  // The status bar (#284, #287): lat/lon of the cursor (copy on click),
+  // zoom, the tiling CRS, and ingest→pixel — the glass-box number, fed by
+  // `swath-trace` with or without the x-ray on (`traces` attribute).
   const lonlat = document.querySelector("#swath-status-lonlat");
   const zoomCell = document.querySelector("#swath-status-zoom");
-  const paintStatus = (): void => {
-    const inner = map.map;
-    if (!inner) {
-      return;
-    }
-    const center = inner.getCenter().wrap();
+  const crsCell = document.querySelector("#swath-status-crs");
+  const ingestCell = document.querySelector("#swath-status-ingest");
+  if (crsCell instanceof SwathStatusCell) {
+    crsCell.value = formatCrs();
+  }
+  let ingestMs: number | undefined;
+  if (ingestCell instanceof SwathStatusCell) {
+    ingestCell.value = formatIngest(ingestMs);
+  }
+  map.addEventListener("swath-cursor", (event) => {
     if (lonlat instanceof SwathStatusCell) {
-      lonlat.value = formatCenter([center.lng, center.lat]).replace(",", ", ");
+      lonlat.value = formatLonLat(event.detail.lng, event.detail.lat);
+      lonlat.dataset["source"] = event.detail.source;
     }
     if (zoomCell instanceof SwathStatusCell) {
-      zoomCell.value = formatZoom(inner.getZoom());
+      zoomCell.value = formatZoomCell(event.detail.zoom);
     }
-  };
-  map.map?.on("move", paintStatus);
-  map.addEventListener("swath-layer-change", paintStatus);
+  });
+  map.addEventListener("swath-trace", (event) => {
+    const ms = event.detail.envelope.trace.ingest_to_pixel_ms;
+    if (ms === null) {
+      return;
+    }
+    ingestMs = Math.min(ingestMs ?? Number.POSITIVE_INFINITY, ms);
+    if (ingestCell instanceof SwathStatusCell) {
+      ingestCell.value = formatIngest(ingestMs);
+    }
+  });
+  if (lonlat instanceof SwathStatusCell) {
+    lonlat.addEventListener("click", () => {
+      const text = lonlat.value ?? "";
+      if (text === "") {
+        return;
+      }
+      navigator.clipboard
+        .writeText(text)
+        .then(() => {
+          lonlat.dataset["copied"] = text;
+          if (shellElement instanceof SwathShell) {
+            shellElement.announce(`Copied ${text}`);
+          }
+        })
+        .catch(() => undefined);
+    });
+  }
 
   const interact = (): void => {
     interacted = true;
