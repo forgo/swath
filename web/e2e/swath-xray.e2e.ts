@@ -201,9 +201,6 @@ test("overlay paints decisions matching the traces the test received over SSE", 
 
   // Toggle off: overlay DOM (badges, readout, inspector) is fully removed.
   await toggle.click();
-  // The display modes and the analytics summary live in the rail under
-  // X-ray mode (issue #286): enter it (the overlay is already on).
-  await page.locator('swath-rail [part="item"][data-mode="xray"]').click();
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator("swath-map .swath-xray")).toHaveCount(0);
 });

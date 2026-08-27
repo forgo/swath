@@ -521,6 +521,9 @@ test("UDF stage: upload → preview → publish → x-ray shows fuel → delete 
   // the moment publishing switches the map to it.
   const toggle = page.getByRole("button", { name: "Toggle x-ray overlay" });
   await toggle.click();
+  // The analytics summary (its UDF line included) lives in the rail under
+  // X-ray mode (issue #286): enter it — the overlay is already on.
+  await page.locator('swath-rail [part="item"][data-mode="xray"]').click();
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
 
   await fieldById(page, "s1-id").selectOption("hls-s30");
