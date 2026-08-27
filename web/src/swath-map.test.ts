@@ -8,8 +8,10 @@
 // ordering — without a network. The real-server proof is `just e2e-web`.
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { defineSwathMap, SwathMap } from "./swath-map.js";
+import { defineSwathShell } from "./swath-shell.js";
 import type { EventSourceLike } from "./swath-xray.js";
 import { PLAY_INTERVAL_MS } from "./time-slider.js";
+import { SwathHudDock } from "./ui/hud-dock.js";
 
 const SERVER = "https://swath.test";
 const OTHER_SERVER = "https://other.test";
@@ -896,4 +898,40 @@ test("setLayerVisibility / setLayerOpacity paint the raster, survive a restyle, 
   await el.setLayer("truecolor");
   expect(await changed).toMatchObject({ visible: true, opacity: 1 });
   expect(paint()).toEqual({ visibility: "visible", opacity: 1 });
+});
+
+// --- Chrome placement (issue #285): docked under a shell, in-map otherwise ---
+
+test("under a shell with a HUD dock, the slider and landing card render into the dock's slots", async () => {
+  defineSwathShell();
+  SwathHudDock.define();
+  const host = document.createElement("div");
+  host.style.cssText = "width:1000px;height:600px";
+  host.innerHTML = `<swath-shell><swath-hud-dock slot="hud"></swath-hud-dock></swath-shell>`;
+  document.body.append(host);
+  const shell = host.querySelector("swath-shell") as HTMLElement;
+  const el = document.createElement("swath-map") as SwathMap;
+  el.setAttribute("server", SERVER);
+  el.setAttribute("layer", "truecolor");
+  el.slot = "map";
+  shell.append(el);
+  await el.ready;
+  const dock = host.querySelector("swath-hud-dock") as HTMLElement;
+  expect(dock.querySelector(".swath-map-time")?.slot).toBe("bottom-center");
+  expect(dock.querySelector(".swath-map-landing")?.slot).toBe("top-center");
+  expect(el.querySelector(".swath-map-time")).toBeNull();
+  const slot = dock.shadowRoot?.querySelector<HTMLSlotElement>('slot[name="bottom-center"]');
+  expect(slot?.assignedElements().map((e) => e.className)).toEqual(["swath-map-time"]);
+  el.remove();
+  expect(dock.querySelector(".swath-map-time")).toBeNull(); // docked chrome leaves with the map
+  host.remove();
+});
+
+test("bare <swath-map>: the chrome floats in-map and its colours resolve from tokens", async () => {
+  const el = mount({ server: SERVER, layer: "truecolor" });
+  await el.ready;
+  const time = el.querySelector(".swath-map-time") as HTMLElement;
+  expect(time).not.toBeNull();
+  expect(getComputedStyle(time).position).toBe("absolute");
+  expect(getComputedStyle(time).backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
 });

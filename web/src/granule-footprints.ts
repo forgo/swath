@@ -20,6 +20,8 @@
  * MapLibre `Map` satisfies it structurally.
  */
 
+import { readToken } from "./ui/styles.js";
+
 /** A WGS84 footprint, CRS84 order: `[west, south, east, north]` — the
  * `bbox` field of the granules API (`GET /datasets/{id}/granules`). */
 export type GranuleBbox = readonly [number, number, number, number];
@@ -207,7 +209,13 @@ export class GranuleFootprints {
           id: FOOTPRINT_LAYER_ID,
           type: "line",
           source: FOOTPRINT_SOURCE_ID,
-          paint: { "line-color": "#4ade80", "line-width": 2, "line-opacity": 0.9 },
+          // MapLibre paint cannot read custom properties: the token is
+          // resolved at paint time (ui-system.md §4.1).
+          paint: {
+            "line-color": readToken("--swath-color-accent"),
+            "line-width": 2,
+            "line-opacity": 0.9,
+          },
         });
       }
     } catch {
