@@ -94,6 +94,20 @@ test("hud-card: title + actions; collapsible folds the body and emits swath-togg
   expect(plain.shadowRoot?.querySelector('button[part="header"]')).toBeNull();
 });
 
+test("hud-card auto-hide: hidden while the default slot is empty, shown once content arrives", async () => {
+  const card = await mount(
+    '<swath-hud-card auto-hide title="Inspector"></swath-hud-card>',
+    "swath-hud-card",
+  );
+  expect(card.hidden).toBe(true);
+  card.append(document.createElement("p"));
+  await new Promise((r) => setTimeout(r, 0)); // slotchange is async
+  expect(card.hidden).toBe(false);
+  card.replaceChildren();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(card.hidden).toBe(true);
+});
+
 test("status bar: cells render label/value, mono reflects, an empty value reads as —", async () => {
   const bar = await mount(
     '<swath-status-bar><swath-status-cell label="zoom" value="8.25" mono></swath-status-cell><swath-status-cell label="crs"></swath-status-cell></swath-status-bar>',

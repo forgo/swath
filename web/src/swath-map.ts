@@ -842,10 +842,12 @@ export class SwathMap extends HTMLElement {
         dock.append(el);
         return el;
       };
+      const inspector = card("right", "Trace inspector");
+      inspector.autoHide = true; // only there once a badge opens the why-view
       this.#xrayCards = [
         card("bottom-left", "X-ray readouts"),
         card("bottom-right", "Trace feed"),
-        card("right", "Trace inspector"),
+        inspector,
       ];
     }
     const [readouts, feed, inspector] = this.#xrayCards;
