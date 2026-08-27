@@ -157,12 +157,8 @@ export class SwathField extends SwathElement {
           ? el("textarea", { part: "control" })
           : el("input", { part: "control", type });
     control.id = "control";
-    control.addEventListener("input", () => this.#onInput("swath-input"), {
-      signal: this.disconnected,
-    });
-    control.addEventListener("change", () => this.#onInput("swath-change"), {
-      signal: this.disconnected,
-    });
+    control.addEventListener("input", () => this.#onInput("swath-input"));
+    control.addEventListener("change", () => this.#onInput("swath-change"));
     this.#control = control;
     this.#controlType = type;
     const base = el(

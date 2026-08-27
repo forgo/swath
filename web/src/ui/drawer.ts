@@ -181,9 +181,7 @@ export class SwathDrawer extends SwathElement {
       return this.#base;
     }
     const scrim = el("div", { part: "scrim" });
-    scrim.addEventListener("click", () => this.#requestClose("scrim"), {
-      signal: this.disconnected,
-    });
+    scrim.addEventListener("click", () => this.#requestClose("scrim"));
     const handle = el("div", { part: "handle", "aria-hidden": "true" });
     this.#wireDrag(handle);
     const base = el(
@@ -242,35 +240,27 @@ export class SwathDrawer extends SwathElement {
 
   #wireDrag(handle: HTMLElement): void {
     let start: { x: number; y: number; height: number; width: number } | undefined;
-    handle.addEventListener(
-      "pointerdown",
-      (event) => {
-        const rect = this.#base?.getBoundingClientRect();
-        if (!rect) {
-          return;
-        }
-        start = { x: event.clientX, y: event.clientY, height: rect.height, width: rect.width };
-        handle.setPointerCapture(event.pointerId);
-        event.preventDefault();
-      },
-      { signal: this.disconnected },
-    );
-    handle.addEventListener(
-      "pointermove",
-      (event) => {
-        if (!start || !this.#base) {
-          return;
-        }
-        if (this.presentation === "bottom") {
-          const height = Math.max(0, start.height - (event.clientY - start.y));
-          this.#base.style.setProperty("--swath-drawer-size", `${height}px`);
-        } else if (this.resizable) {
-          const width = Math.max(0, start.width - (event.clientX - start.x));
-          this.style.setProperty("--swath-drawer-size", `${width}px`);
-        }
-      },
-      { signal: this.disconnected },
-    );
+    handle.addEventListener("pointerdown", (event) => {
+      const rect = this.#base?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+      start = { x: event.clientX, y: event.clientY, height: rect.height, width: rect.width };
+      handle.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    });
+    handle.addEventListener("pointermove", (event) => {
+      if (!start || !this.#base) {
+        return;
+      }
+      if (this.presentation === "bottom") {
+        const height = Math.max(0, start.height - (event.clientY - start.y));
+        this.#base.style.setProperty("--swath-drawer-size", `${height}px`);
+      } else if (this.resizable) {
+        const width = Math.max(0, start.width - (event.clientX - start.x));
+        this.style.setProperty("--swath-drawer-size", `${width}px`);
+      }
+    });
     const finish = (event: PointerEvent): void => {
       if (!start || !this.#base) {
         return;
@@ -304,8 +294,8 @@ export class SwathDrawer extends SwathElement {
       }
       this.snapIndex = nearest;
     };
-    handle.addEventListener("pointerup", finish, { signal: this.disconnected });
-    handle.addEventListener("pointercancel", finish, { signal: this.disconnected });
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
   }
 
   #presentation(): "right" | "bottom" {

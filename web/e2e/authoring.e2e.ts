@@ -491,7 +491,7 @@ test("the layer row's kebab deletes a published service (issue #282)", async ({ 
   await expect(item).toBeVisible();
 
   // The delete action exists only on rows the server lists as services.
-  await item.locator('[part="menu"] [part="trigger"] button').click();
+  await item.locator('[part="menu"] swath-button button').click();
   const deleted = page.waitForResponse(
     (response) =>
       response.url().includes(`/services/${id}`) && response.request().method() === "DELETE",

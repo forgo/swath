@@ -113,9 +113,9 @@ export class SwathMenu extends SwathElement {
     }
     const trigger = el("div", { part: "trigger" }, el("slot", { name: "trigger" }));
     const list = el("ul", { part: "list", role: "menu", hidden: true });
-    trigger.addEventListener("click", () => this.toggle(), { signal: this.disconnected });
+    trigger.addEventListener("click", () => this.toggle());
     this.#wireLongPress(trigger);
-    list.addEventListener("keydown", (event) => this.#onKey(event), { signal: this.disconnected });
+    list.addEventListener("keydown", (event) => this.#onKey(event));
     this.#list = list;
     this.renderRoot.replaceChildren(el("div", { part: "base" }, trigger, list));
     return list;
@@ -129,34 +129,26 @@ export class SwathMenu extends SwathElement {
       timer = undefined;
       origin = undefined;
     };
-    trigger.addEventListener(
-      "pointerdown",
-      (event) => {
-        if (event.pointerType === "mouse") {
-          return;
-        }
-        origin = { x: event.clientX, y: event.clientY };
-        timer = window.setTimeout(() => {
-          cancel();
-          this.show();
-        }, LONG_PRESS_MS);
-      },
-      { signal: this.disconnected },
-    );
-    trigger.addEventListener(
-      "pointermove",
-      (event) => {
-        if (
-          origin &&
-          Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > LONG_PRESS_DRIFT
-        ) {
-          cancel();
-        }
-      },
-      { signal: this.disconnected },
-    );
+    trigger.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "mouse") {
+        return;
+      }
+      origin = { x: event.clientX, y: event.clientY };
+      timer = window.setTimeout(() => {
+        cancel();
+        this.show();
+      }, LONG_PRESS_MS);
+    });
+    trigger.addEventListener("pointermove", (event) => {
+      if (
+        origin &&
+        Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > LONG_PRESS_DRIFT
+      ) {
+        cancel();
+      }
+    });
     for (const type of ["pointerup", "pointercancel"]) {
-      trigger.addEventListener(type, cancel, { signal: this.disconnected });
+      trigger.addEventListener(type, cancel);
     }
   }
 
@@ -282,14 +274,10 @@ export class SwathMenu extends SwathElement {
           item.icon ? el("swath-icon", { name: item.icon }) : null,
           item.label,
         );
-        button.addEventListener(
-          "click",
-          () => {
-            this.emit("swath-menu-select", { id: item.id });
-            this.close("select");
-          },
-          { signal: this.disconnected },
-        );
+        button.addEventListener("click", () => {
+          this.emit("swath-menu-select", { id: item.id });
+          this.close("select");
+        });
         return el("li", { role: "none" }, button);
       }),
     );

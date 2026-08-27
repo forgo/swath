@@ -77,19 +77,13 @@ export class SwathSlider extends SwathElement {
     }
     const control = el("input", { part: "control", type: "range" });
     const readout = el("output", { part: "value" });
-    control.addEventListener(
-      "input",
-      () => {
-        this.value = control.valueAsNumber;
-        this.#paint();
-        this.emit("swath-input", { name: this.name ?? "", value: control.valueAsNumber });
-      },
-      { signal: this.disconnected },
-    );
-    control.addEventListener(
-      "change",
-      () => this.emit("swath-change", { name: this.name ?? "", value: control.valueAsNumber }),
-      { signal: this.disconnected },
+    control.addEventListener("input", () => {
+      this.value = control.valueAsNumber;
+      this.#paint();
+      this.emit("swath-input", { name: this.name ?? "", value: control.valueAsNumber });
+    });
+    control.addEventListener("change", () =>
+      this.emit("swath-change", { name: this.name ?? "", value: control.valueAsNumber }),
     );
     this.#control = control;
     this.#readout = readout;

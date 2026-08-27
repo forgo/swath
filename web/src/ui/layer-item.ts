@@ -140,19 +140,13 @@ export class SwathLayerItem extends SwathElement {
       el("span", { part: "title" }),
       el("span", { part: "meta" }),
     );
-    row.addEventListener("click", () => this.emit("swath-layer-select", { layer: this.#id }), {
-      signal: this.disconnected,
-    });
+    row.addEventListener("click", () => this.emit("swath-layer-select", { layer: this.#id }));
     const eye = el("swath-button", { part: "eye", icon: "eye", pressed: true, size: "sm" });
-    eye.addEventListener(
-      "swath-toggle",
-      (event) => {
-        event.stopPropagation();
-        this.visible = event.detail.pressed;
-        this.emit("swath-layer-visibility", { layer: this.#id, visible: this.visible });
-      },
-      { signal: this.disconnected },
-    );
+    eye.addEventListener("swath-toggle", (event) => {
+      event.stopPropagation();
+      this.visible = event.detail.pressed;
+      this.emit("swath-layer-visibility", { layer: this.#id, visible: this.visible });
+    });
     const slider = el("swath-slider", { part: "opacity", min: 0, max: 1, step: 0.05, value: 1 });
     slider.format = (value) => `${Math.round(value * 100)}%`;
     const onOpacity = (event: CustomEvent<{ value: string | number | boolean }>): void => {
@@ -160,25 +154,19 @@ export class SwathLayerItem extends SwathElement {
       this.opacity = Number(event.detail.value);
       this.emit("swath-layer-opacity", { layer: this.#id, opacity: this.opacity });
     };
-    slider.addEventListener("swath-input", onOpacity, { signal: this.disconnected });
-    slider.addEventListener("swath-change", onOpacity, { signal: this.disconnected });
+    slider.addEventListener("swath-input", onOpacity);
+    slider.addEventListener("swath-change", onOpacity);
     const menu = el("swath-menu", { part: "menu" });
     menu.append(el("swath-button", { slot: "trigger", icon: "more", size: "sm" }));
-    menu.addEventListener(
-      "swath-menu-select",
-      (event) => {
-        event.stopPropagation();
-        const action = event.detail.id as LayerAction;
-        if (action === "info") {
-          this.expanded = !this.expanded;
-        }
-        this.emit("swath-layer-action", { layer: this.#id, action });
-      },
-      { signal: this.disconnected },
-    );
-    menu.addEventListener("swath-drawer-close", (event) => event.stopPropagation(), {
-      signal: this.disconnected,
+    menu.addEventListener("swath-menu-select", (event) => {
+      event.stopPropagation();
+      const action = event.detail.id as LayerAction;
+      if (action === "info") {
+        this.expanded = !this.expanded;
+      }
+      this.emit("swath-layer-action", { layer: this.#id, action });
     });
+    menu.addEventListener("swath-drawer-close", (event) => event.stopPropagation());
     const info = el("div", { part: "info" });
     this.#row = row;
     this.#eye = eye;

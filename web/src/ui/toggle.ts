@@ -104,17 +104,13 @@ export class SwathToggle extends SwathElement {
       { part: "control", type: "button", role: "switch" },
       el("span", { part: "track" }, el("span", { part: "thumb" })),
     );
-    control.addEventListener(
-      "click",
-      () => {
-        if (this.disabled) {
-          return;
-        }
-        this.checked = !this.checked;
-        this.emit("swath-change", { name: this.name ?? "", value: this.checked });
-      },
-      { signal: this.disconnected },
-    );
+    control.addEventListener("click", () => {
+      if (this.disabled) {
+        return;
+      }
+      this.checked = !this.checked;
+      this.emit("swath-change", { name: this.name ?? "", value: this.checked });
+    });
     const base = el("label", { part: "base" }, control, el("slot", { name: "label" }));
     this.#control = control;
     this.renderRoot.replaceChildren(base);

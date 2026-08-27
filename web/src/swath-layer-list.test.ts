@@ -82,3 +82,22 @@ test("a row's select bubbles out of the list as swath-layer-select", async () =>
   items(list)[1]?.shadowRoot?.querySelector<HTMLButtonElement>('[part="row"]')?.click();
   expect(await selected).toBe("ndvi");
 });
+
+test("rows keep their handlers across updates (the #307 regression): a click after two updates still selects", async () => {
+  const list = await mount();
+  list.update(LAYERS, "truecolor");
+  await list.updateComplete;
+  list.update(LAYERS, "truecolor", { visible: true, opacity: 1 });
+  await list.updateComplete;
+  list.update([...LAYERS].reverse(), "ndvi"); // an order change moves rows — handlers survive that too
+  await list.updateComplete;
+  await Promise.all(items(list).map((item) => item.updateComplete));
+  const selected: string[] = [];
+  document.body.addEventListener("swath-layer-select", (event) =>
+    selected.push(event.detail.layer),
+  );
+  for (const item of items(list)) {
+    item.shadowRoot?.querySelector<HTMLButtonElement>('[part="row"]')?.click();
+  }
+  expect(selected).toEqual(["ndvi", "truecolor"]);
+});

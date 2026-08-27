@@ -110,8 +110,20 @@ export class SwathLayerList extends SwathElement {
       );
       return;
     }
+    // Rows are keyed by id and kept in place across updates: moving a
+    // custom element (a fresh <li> per render) fires disconnect/connect,
+    // which is what a real DOM change means — so only the order changes
+    // touch the tree, and a row in the same slot keeps its focus and state.
+    let list = this.renderRoot.querySelector<HTMLUListElement>('[part="list"]');
+    if (!list) {
+      list = el("ul", { part: "list" });
+      this.renderRoot.replaceChildren(heading, list);
+    } else {
+      this.renderRoot.firstElementChild?.replaceWith(heading);
+    }
     const seen = new Set<string>();
-    const rows = this.#layers.map((layer) => {
+    const wanted: HTMLLIElement[] = [];
+    for (const layer of this.#layers) {
       seen.add(layer.id);
       let item = this.#items.get(layer.id);
       if (!item) {
@@ -126,14 +138,19 @@ export class SwathLayerList extends SwathElement {
       item.active = active;
       item.visible = active ? this.#view.visible : true;
       item.opacity = active ? this.#view.opacity : 1;
-      return el("li", {}, item);
-    });
+      wanted.push(
+        item.parentElement instanceof HTMLLIElement ? item.parentElement : el("li", {}, item),
+      );
+    }
     for (const id of this.#items.keys()) {
       if (!seen.has(id)) {
         this.#items.delete(id);
       }
     }
-    this.renderRoot.replaceChildren(heading, el("ul", { part: "list" }, ...rows));
+    const current = [...list.children];
+    if (current.length !== wanted.length || current.some((node, i) => node !== wanted[i])) {
+      list.replaceChildren(...wanted);
+    }
   }
 }
 

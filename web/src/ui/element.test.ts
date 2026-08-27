@@ -195,3 +195,20 @@ test("emit() is bubbling and composed, typed through the catalog", () => {
   expect(probe.fire()).toBe(true);
   expect(seen).toEqual([5]);
 });
+
+test("a re-parented element keeps its own shadow listeners; only disconnected-bound ones die", () => {
+  const probe = mount();
+  const inner = document.createElement("button");
+  const clicks = vi.fn();
+  inner.addEventListener("click", clicks); // an element's own node: no signal
+  probe.shadowRoot?.append(inner);
+  const external = vi.fn();
+  probe.listen(window, "probe-ping", external);
+  const other = document.createElement("div");
+  document.body.append(other);
+  other.append(probe); // moved: disconnect + connect
+  inner.click();
+  window.dispatchEvent(new Event("probe-ping"));
+  expect(clicks).toHaveBeenCalledTimes(1);
+  expect(external).toHaveBeenCalledTimes(0);
+});
