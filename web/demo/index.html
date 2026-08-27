@@ -66,6 +66,15 @@ or bring the stack up yourself and `pnpm exec vite dev`.
         gap: var(--swath-space-1);
         margin: 0 0 var(--swath-space-3);
       }
+      /* Modes hide panels with `hidden`; each panel's own injected CSS says
+       * `display: block`, which would beat the UA's [hidden] rule — this
+       * element+attribute selector outranks it. */
+      swath-layer-list[hidden],
+      swath-dataset-panel[hidden],
+      swath-add-data-panel[hidden],
+      swath-authoring-panel[hidden] {
+        display: none;
+      }
       .swath-rail header p {
         margin: 4px 0 0;
         font: 12px/1.5 system-ui, sans-serif;
