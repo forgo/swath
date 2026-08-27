@@ -30,7 +30,11 @@ const FIRE = "park-fire-ndvi";
 const landingCard = (page: Page) => page.locator("swath-map .swath-map-landing");
 const playButton = (page: Page) => page.locator("swath-map .swath-map-time-play");
 const slider = (page: Page) => page.locator("swath-map .swath-map-time");
-const shareButton = (page: Page) => page.locator("#swath-share");
+// `#swath-share` is a <swath-button> host: enabled/disabled and clicks
+// belong to the native <button> in its shadow root (Playwright's CSS
+// pierces it); the copy feedback (`data-state`, `data-url`) sits on the host.
+const shareHost = (page: Page) => page.locator("#swath-share");
+const shareButton = (page: Page) => page.locator("#swath-share button");
 
 /** Waits for the loop to show a frame other than `from`. */
 async function waitForFrameChange(page: Page, from: string | null): Promise<string> {
@@ -65,9 +69,9 @@ async function granuleFrames(page: Page): Promise<string[]> {
  * thing) — which must also be what the button reports it copied. */
 async function copiedLink(page: Page): Promise<string> {
   await shareButton(page).click();
-  await expect(shareButton(page)).toHaveAttribute("data-state", "copied");
+  await expect(shareHost(page)).toHaveAttribute("data-state", "copied");
   const clipboard = await page.evaluate(() => navigator.clipboard.readText());
-  expect(await shareButton(page).getAttribute("data-url")).toBe(clipboard);
+  expect(await shareHost(page).getAttribute("data-url")).toBe(clipboard);
   return clipboard;
 }
 

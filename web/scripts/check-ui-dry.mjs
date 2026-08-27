@@ -21,8 +21,9 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SCANNED = ["src", "demo"];
 const EXTENSIONS = new Set([".ts", ".css", ".html"]);
 
-/** Files that must be clean even under --warn: migrated organisms. */
-const STRICT = new Set([]);
+/** Patterns of files that must be clean even under --warn: the UI system
+ * itself (#280) and each organism as it migrates. */
+const STRICT = [/^src\/ui\//, /^src\/swath-badge\.ts$/];
 
 /**
  * Rules: `home` is the one file allowed to match. `tests: false` skips
@@ -137,8 +138,9 @@ for (const dir of SCANNED) {
 }
 
 const stale = ALLOW.filter((entry) => allowHits.get(`${entry.file}::${entry.rule}`) === 0);
-const blocking = findings.filter((f) => !warn || STRICT.has(f.file));
-const advisory = findings.filter((f) => warn && !STRICT.has(f.file));
+const strict = (file) => STRICT.some((pattern) => pattern.test(file));
+const blocking = findings.filter((f) => !warn || strict(f.file));
+const advisory = findings.filter((f) => warn && !strict(f.file));
 
 const out = process.stdout;
 for (const f of advisory) {

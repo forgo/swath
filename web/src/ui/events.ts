@@ -39,6 +39,10 @@ export interface SwathEventMap {
   "swath-data-added": { dataset: string; layer: string };
   "swath-service-created": { id: string };
   "swath-service-deleted": { id: string };
+  /** A primitive's committed value changed by the user (`<swath-toggle>`). */
+  "swath-change": { name: string; value: string | number | boolean };
+  /** A pressed-state button was activated (`<swath-button pressed>`). */
+  "swath-toggle": { pressed: boolean };
 }
 
 type SwathCustomEvents = {

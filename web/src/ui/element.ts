@@ -135,7 +135,10 @@ export abstract class SwathElement extends HTMLElement {
     const ctor = this.constructor as typeof SwathElement;
     for (const [name, spec] of Object.entries(ctor.properties)) {
       if (attributeName(name, spec) === attr) {
-        const next = spec.type === "boolean" ? value !== null : (value ?? undefined);
+        // Boolean: present = true, except the literal "false" (aria-style),
+        // so a toggle can start unpressed: `<swath-button pressed="false">`.
+        const next =
+          spec.type === "boolean" ? value !== null && value !== "false" : (value ?? undefined);
         (this as Record<string, unknown>)[name] = next;
       }
     }

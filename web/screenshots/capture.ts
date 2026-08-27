@@ -221,7 +221,7 @@ test.describe("landing", () => {
       "data-state",
       "reduced",
     );
-    await expect(page.locator("#swath-share")).toBeEnabled();
+    await expect(page.locator("#swath-share button")).toBeEnabled();
     await capture(
       page,
       "01-landing-layer-rail.png",
