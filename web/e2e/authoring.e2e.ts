@@ -237,7 +237,7 @@ test("UI-authored NDVI serves tiles byte-identical to the built-in layer, no rel
 
   // The authored layer appears in the layer browser immediately — same
   // page, no reload — and becomes the viewed layer.
-  const layerButton = page.locator(`swath-layer-panel button[data-layer="${id}"]`);
+  const layerButton = page.locator(`swath-layer-item[data-layer="${id}"] [part="row"]`);
   await expect(layerButton).toBeVisible();
   await expect(layerButton).toContainText("NDVI (authored)");
   await expect(layerButton).toHaveAttribute("aria-pressed", "true");
@@ -462,7 +462,7 @@ test("deleting a published service 404s its tile URL and drops it from the brows
   await authorNdvi(page, "255", "grayscale");
   await fieldById(page, "title").fill("NDVI (deletable)");
   const id = await publish(page);
-  await expect(page.locator(`swath-layer-panel button[data-layer="${id}"]`)).toBeVisible();
+  await expect(page.locator(`swath-layer-item[data-layer="${id}"] [part="row"]`)).toBeVisible();
   const live = await page.request.get(`/tilesets/${id}/tiles/${TILE}`);
   expect(live.status()).toBe(200);
 
@@ -478,7 +478,30 @@ test("deleting a published service 404s its tile URL and drops it from the brows
   await expect
     .poll(async () => (await page.request.get(`/tilesets/${id}/tiles/${TILE}`)).status())
     .toBe(404);
-  await expect(page.locator(`swath-layer-panel button[data-layer="${id}"]`)).toHaveCount(0);
+  await expect(page.locator(`swath-layer-item[data-layer="${id}"] [part="row"]`)).toHaveCount(0);
+});
+
+test("the layer row's kebab deletes a published service (issue #282)", async ({ page }) => {
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+  await authorNdvi(page, "255", "grayscale");
+  await fieldById(page, "title").fill("NDVI (kebab-deletable)");
+  const id = await publish(page);
+  const item = page.locator(`swath-layer-item[data-layer="${id}"]`);
+  await expect(item).toBeVisible();
+
+  // The delete action exists only on rows the server lists as services.
+  await item.locator('[part="menu"] swath-button button').click();
+  const deleted = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/services/${id}`) && response.request().method() === "DELETE",
+  );
+  await item.locator('[part="menu"] [part="item"][data-id="delete"]').click();
+  expect((await deleted).status()).toBe(204);
+  await expect
+    .poll(async () => (await page.request.get(`/tilesets/${id}/tiles/${TILE}`)).status())
+    .toBe(404);
+  await expect(item).toHaveCount(0);
 });
 
 // --- The UDF stage (issue #208, ADR 0018): the run_udf loop end to end ---

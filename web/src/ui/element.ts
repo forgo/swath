@@ -115,7 +115,10 @@ export abstract class SwathElement extends HTMLElement {
     }
   }
 
-  /** Aborts on disconnect: `addEventListener(…, { signal: this.disconnected })`. */
+  /** Aborts on disconnect — for listeners on `window` / `document` / other
+   * elements: `addEventListener(…, { signal: this.disconnected })`. Never
+   * for the element's own shadow nodes: re-parenting fires disconnect, and
+   * a control built once would lose its handlers for good. */
   protected get disconnected(): AbortSignal {
     return this.#abort.signal;
   }

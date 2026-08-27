@@ -59,7 +59,7 @@ test("paste a fixture COG: registered, in the rail, serving, traced", async ({ p
 
   // The quick look appears in the layer rail immediately — no reload —
   // and becomes the viewed layer.
-  const layerButton = page.locator(`swath-layer-panel button[data-layer="${id}"]`);
+  const layerButton = page.locator(`swath-layer-item[data-layer="${id}"] [part="row"]`);
   await expect(layerButton).toBeVisible();
   await expect(layerButton).toContainText("quick look");
   await expect(layerButton).toHaveAttribute("aria-pressed", "true");

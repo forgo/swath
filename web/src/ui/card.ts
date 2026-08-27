@@ -84,26 +84,18 @@ export class SwathCard extends SwathElement {
       el("div", { part: "footer" }, el("slot", { name: "footer" })),
     );
     let pressed = false;
-    base.addEventListener(
-      "click",
-      () => {
-        if (this.interactive && !pressed) {
-          this.emit("swath-activate", { id: this.id, long: false });
-        }
-        pressed = false;
-      },
-      { signal: this.disconnected },
-    );
-    base.addEventListener(
-      "keydown",
-      (event) => {
-        if (this.interactive && (event.key === "Enter" || event.key === " ")) {
-          event.preventDefault();
-          this.emit("swath-activate", { id: this.id, long: false });
-        }
-      },
-      { signal: this.disconnected },
-    );
+    base.addEventListener("click", () => {
+      if (this.interactive && !pressed) {
+        this.emit("swath-activate", { id: this.id, long: false });
+      }
+      pressed = false;
+    });
+    base.addEventListener("keydown", (event) => {
+      if (this.interactive && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        this.emit("swath-activate", { id: this.id, long: false });
+      }
+    });
     let timer: number | undefined;
     let origin: { x: number; y: number } | undefined;
     const cancel = (): void => {
@@ -111,35 +103,27 @@ export class SwathCard extends SwathElement {
       timer = undefined;
       origin = undefined;
     };
-    base.addEventListener(
-      "pointerdown",
-      (event) => {
-        if (!this.interactive || event.pointerType === "mouse") {
-          return;
-        }
-        origin = { x: event.clientX, y: event.clientY };
-        timer = window.setTimeout(() => {
-          cancel();
-          pressed = true; // the click that follows is the long-press, not a tap
-          this.emit("swath-activate", { id: this.id, long: true });
-        }, LONG_PRESS_MS);
-      },
-      { signal: this.disconnected },
-    );
-    base.addEventListener(
-      "pointermove",
-      (event) => {
-        if (
-          origin &&
-          Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > LONG_PRESS_DRIFT
-        ) {
-          cancel();
-        }
-      },
-      { signal: this.disconnected },
-    );
+    base.addEventListener("pointerdown", (event) => {
+      if (!this.interactive || event.pointerType === "mouse") {
+        return;
+      }
+      origin = { x: event.clientX, y: event.clientY };
+      timer = window.setTimeout(() => {
+        cancel();
+        pressed = true; // the click that follows is the long-press, not a tap
+        this.emit("swath-activate", { id: this.id, long: true });
+      }, LONG_PRESS_MS);
+    });
+    base.addEventListener("pointermove", (event) => {
+      if (
+        origin &&
+        Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > LONG_PRESS_DRIFT
+      ) {
+        cancel();
+      }
+    });
     for (const type of ["pointerup", "pointercancel"]) {
-      base.addEventListener(type, cancel, { signal: this.disconnected });
+      base.addEventListener(type, cancel);
     }
     this.#base = base;
     this.#heading = heading;

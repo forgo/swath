@@ -113,7 +113,7 @@ export class SwathButton extends SwathElement {
     const base = wantAnchor
       ? el("a", { part: "base" }, icon, label)
       : el("button", { part: "base", type: "button" }, icon, label);
-    base.addEventListener("click", () => this.#activate(), { signal: this.disconnected });
+    base.addEventListener("click", () => this.#activate());
     this.#base = base;
     this.renderRoot.replaceChildren(base);
     return base;

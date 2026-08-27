@@ -111,9 +111,9 @@ test("map loads, fetches real tiles, renders pixels, and switches layers", async
   // The built-in switcher: real buttons, aria-pressed reflects state, and
   // switching re-points the raster source — new requests hit the other
   // tileset and succeed against the same granule.
-  const truecolorButton = page.getByRole("button", { name: "HLS true color" });
-  const ndviButton = page.getByRole("button", { name: "HLS NDVI" });
-  const fireButton = page.getByRole("button", { name: "Park Fire NDVI" });
+  const truecolorButton = page.getByRole("button", { name: "HLS true color", exact: true });
+  const ndviButton = page.getByRole("button", { name: "HLS NDVI", exact: true });
+  const fireButton = page.getByRole("button", { name: "Park Fire NDVI", exact: true });
   await expect(fireButton).toHaveAttribute("aria-pressed", "true");
   await expect(ndviButton).toHaveAttribute("aria-pressed", "false");
   await expect(truecolorButton).toHaveAttribute("aria-pressed", "false");

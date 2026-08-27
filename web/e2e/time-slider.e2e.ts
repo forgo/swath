@@ -437,7 +437,7 @@ test("switching to the off-screen fire layer auto-frames it; deep links are hono
 
   // The user picks the fire layer in the rail: its footprint is nowhere
   // near Colorado, so the view auto-frames the data.
-  await page.locator(`swath-layer-panel button[data-layer="${LAYER}"]`).click();
+  await page.locator(`swath-layer-item[data-layer="${LAYER}"] [part="row"]`).click();
   await expect.poll(async () => (await mapView(page)).lng, { timeout: 30_000 }).toBeLessThan(-121);
   const framedView = await mapView(page);
   expect(framedView.lng).toBeGreaterThan(-122.5);
