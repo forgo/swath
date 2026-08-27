@@ -7,6 +7,7 @@
 // continue, server problems routed to fields, and the local-mode upload.
 
 import { afterEach, beforeAll, expect, test } from "vitest";
+import { SwathApi } from "./api.js";
 import {
   defineSwathAddDataPanel,
   READ_ONLY_NOTE,
@@ -89,7 +90,7 @@ function mount(
   for (const [name, value] of Object.entries(attributes)) {
     panel.setAttribute(name, value);
   }
-  panel.fetchImpl = stub.impl;
+  panel.api = new SwathApi({ base: SERVER, fetch: stub.impl });
   document.body.append(panel);
   return panel;
 }

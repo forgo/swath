@@ -71,6 +71,7 @@
 
 import { type IControl, Map as MapLibreMap, type RasterTileSource } from "maplibre-gl";
 import maplibreCss from "maplibre-gl/dist/maplibre-gl.css?inline";
+import { SwathApi } from "./api.js";
 import {
   type CompareSides,
   clampSwipe,
@@ -83,6 +84,7 @@ import { CompareView } from "./swath-compare.js";
 import { type EventSourceFactory, XRayOverlay } from "./swath-xray.js";
 import { parseGranuleDatetimes, TimeSlider } from "./time-slider.js";
 import { centerTile } from "./tms.js";
+import { createSwathEvent } from "./ui/events.js";
 import { formatSwipe, parseCenter, parseNumber, parseSwipe, parseTime } from "./view-state.js";
 
 /** One entry of the server's tilesets list, as `layers()` returns it. */
@@ -94,7 +96,7 @@ export interface SwathLayer {
 }
 
 /** Geographic bounds from tileset metadata (CRS84 lon/lat degrees). */
-interface LonLatBounds {
+export interface LonLatBounds {
   west: number;
   south: number;
   east: number;
@@ -814,6 +816,25 @@ export class SwathMap extends HTMLElement {
     return (this.getAttribute("server") ?? "").replace(/\/+$/, "");
   }
 
+  #api: SwathApi | undefined;
+  #ownApi: SwathApi | undefined;
+
+  /** The API client (ui-system.md §4.4): injected by a host or test, else
+   * built from `server` — same origin when the attribute is absent. */
+  get api(): SwathApi {
+    if (this.#api !== undefined) {
+      return this.#api;
+    }
+    if (this.#ownApi === undefined || this.#ownApi.base !== this.server) {
+      this.#ownApi = new SwathApi({ base: this.server });
+    }
+    return this.#ownApi;
+  }
+
+  set api(api: SwathApi) {
+    this.#api = api;
+  }
+
   connectedCallback(): void {
     injectStyles(this.ownerDocument);
     const container = document.createElement("div");
@@ -1062,7 +1083,7 @@ export class SwathMap extends HTMLElement {
 
   /** Fetches the server's available layers from `/tilesets`. */
   async layers(): Promise<SwathLayer[]> {
-    const response = await fetch(`${this.server}/tilesets`, {
+    const response = await this.api.fetch("/tilesets", {
       headers: { accept: "application/json" },
     });
     if (!response.ok) {
@@ -1156,7 +1177,7 @@ export class SwathMap extends HTMLElement {
       return;
     }
     map.once("moveend", () => {
-      this.dispatchEvent(new CustomEvent("swath-framedata", { detail: { bounds }, bubbles: true }));
+      this.dispatchEvent(createSwathEvent("swath-framedata", { bounds }));
     });
     map.fitBounds(
       [
@@ -1193,7 +1214,9 @@ export class SwathMap extends HTMLElement {
     if (this.#xray || !map) {
       return;
     }
-    this.#xray = new XRayOverlay(this, map, { createEventSource: this.xrayEventSource });
+    this.#xray = new XRayOverlay(this, map, {
+      createEventSource: this.xrayEventSource ?? ((url) => this.api.events(url)),
+    });
     this.#xray.connect(`${this.server}/traces`);
     this.#xray.setLayer(this.#activeLayer);
     // X-ray toggled on mid-compare: hand the fresh overlay the sides.
@@ -1280,10 +1303,7 @@ export class SwathMap extends HTMLElement {
     this.#applyCompare();
     this.#xray?.setFrame(datetime);
     this.dispatchEvent(
-      new CustomEvent("swath-timechange", {
-        detail: { datetime, cinematic: this.#cinematicPlaying },
-        bubbles: true,
-      }),
+      createSwathEvent("swath-timechange", { datetime, cinematic: this.#cinematicPlaying }),
     );
   }
 
@@ -1308,14 +1328,14 @@ export class SwathMap extends HTMLElement {
     const bounds = map.getBounds();
     const nw = centerTile(bounds.getWest(), bounds.getNorth(), z);
     const se = centerTile(bounds.getEast(), bounds.getSouth(), z);
-    const path = `${this.server}/tilesets/${layer}/tiles`;
+    const path = `/tilesets/${layer}/tiles`;
     const query = `datetime=${encodeURIComponent(datetime)}`;
     let budget = SwathMap.#PREFETCH_MAX;
     for (let y = nw.y; y <= se.y && budget > 0; y += 1) {
       for (let x = nw.x; x <= se.x && budget > 0; x += 1) {
         budget -= 1;
         // OGC path order z/row/col = z/y/x.
-        fetch(`${path}/${z}/${y}/${x}?${query}`).catch(() => undefined);
+        this.api.fetch(`${path}/${z}/${y}/${x}?${query}`).catch(() => undefined);
       }
     }
   }
@@ -1327,7 +1347,7 @@ export class SwathMap extends HTMLElement {
     ready.catch((error: unknown) => {
       // Namespaced (not `error`): a bubbling `error` event would reach
       // `window` and read as an unhandled page error to host tooling.
-      this.dispatchEvent(new CustomEvent("swath-error", { detail: { error }, bubbles: true }));
+      this.dispatchEvent(createSwathEvent("swath-error", { error }));
       // Self-healing applies: a viewer opened while the server is still
       // starting (the demo prints its URL during the docker build) sees
       // /tilesets fail — without a retry the component would stay blank
@@ -1414,12 +1434,11 @@ export class SwathMap extends HTMLElement {
     // `layers` rides along (issue #108) so page chrome — the entry page's
     // layer browser — can list what exists without a second /tilesets
     // fetch that could disagree with the one this apply used.
-    this.dispatchEvent(
-      new CustomEvent("layerchange", {
-        detail: { layer: layerId, layers: available },
-        bubbles: true,
-      }),
-    );
+    // Both names for one milestone (ui-system.md §4.3): hosts move to
+    // `swath-layer-change`; `layerchange` is the M5 name.
+    const detail = { layer: layerId, layers: available };
+    this.dispatchEvent(createSwathEvent("swath-layer-change", detail));
+    this.dispatchEvent(createSwathEvent("layerchange", detail));
     this.#startLivenessProbe(layerId, epoch);
     // The data domain loads LAST, after the probe kicked off: the
     // probe's timing relative to MapLibre's first tile fetches is part
@@ -1469,7 +1488,7 @@ export class SwathMap extends HTMLElement {
           .replace("{z}", String(z))
           .replace("{y}", String(y))
           .replace("{x}", String(x));
-        const response = await fetch(url, { cache: "no-store" });
+        const response = await this.api.fetch(url, { cache: "no-store" });
         if (response.ok) {
           live = true;
         } else if (response.status !== 404) {
@@ -1503,7 +1522,7 @@ export class SwathMap extends HTMLElement {
    * undefined when the layer is not resolvable yet (e.g. empty catalog:
    * an honest 404) — the apply then proceeds without a fit or a slider. */
   async #layerMetadata(layerId: string): Promise<LayerMetadata | undefined> {
-    const response = await fetch(`${this.server}/tilesets/${layerId}`, {
+    const response = await this.api.fetch(`/tilesets/${layerId}`, {
       headers: { accept: "application/json" },
     });
     if (!response.ok) {
@@ -1569,8 +1588,8 @@ export class SwathMap extends HTMLElement {
    * affordances, never a reason the imagery fails to paint. */
   async #fetchDomain(dataset: string): Promise<LayerDomain> {
     try {
-      const url = `${this.server}/datasets/${encodeURIComponent(dataset)}/granules`;
-      const response = await fetch(url, { headers: { accept: "application/json" } });
+      const url = `/datasets/${encodeURIComponent(dataset)}/granules`;
+      const response = await this.api.fetch(url, { headers: { accept: "application/json" } });
       if (!response.ok) {
         return EMPTY_DOMAIN;
       }
@@ -1693,13 +1712,10 @@ export class SwathMap extends HTMLElement {
 
   #dispatchCompareChange(): void {
     this.dispatchEvent(
-      new CustomEvent("swath-comparechange", {
-        detail: {
-          compareTime: this.getAttribute("compare-datetime"),
-          compareLayer: this.getAttribute("compare-layer"),
-          swipe: this.getAttribute("swipe"),
-        },
-        bubbles: true,
+      createSwathEvent("swath-comparechange", {
+        compareTime: this.getAttribute("compare-datetime"),
+        compareLayer: this.getAttribute("compare-layer"),
+        swipe: this.getAttribute("swipe"),
       }),
     );
   }

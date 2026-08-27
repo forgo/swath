@@ -12,6 +12,7 @@
 // against a scripted fetch; no server involved. Real Custom Elements in
 // a real browser, like the rest of the suite.
 import { beforeAll, beforeEach, expect, test } from "vitest";
+import { SwathApi } from "./api.js";
 import {
   defineSwathAuthoringPanel,
   type ProcessDefinition,
@@ -251,7 +252,7 @@ beforeEach(() => {
 
 async function mount(stub: { impl: typeof fetch }): Promise<SwathAuthoringPanel> {
   const panel = document.createElement("swath-authoring-panel") as SwathAuthoringPanel;
-  panel.fetchImpl = stub.impl;
+  panel.api = new SwathApi({ fetch: stub.impl });
   document.body.append(panel);
   await panel.reload();
   return panel;
@@ -346,7 +347,7 @@ function helpText(panel: SwathAuthoringPanel, id: string): string {
 test("collapsed by default and lazy: no requests until opened", async () => {
   const stub = fetchStub({});
   const panel = document.createElement("swath-authoring-panel") as SwathAuthoringPanel;
-  panel.fetchImpl = stub.impl;
+  panel.api = new SwathApi({ fetch: stub.impl });
   document.body.append(panel);
   // Connected but closed: nothing fetched, only the toggle rendered.
   expect(stub.requests).toEqual([]);
@@ -1033,7 +1034,7 @@ test("#255: the Load card renders from /processes alone — in-flight catalog re
     return base.impl(input, init);
   }) as typeof fetch;
   const panel = document.createElement("swath-authoring-panel") as SwathAuthoringPanel;
-  panel.fetchImpl = impl;
+  panel.api = new SwathApi({ fetch: impl });
   document.body.append(panel);
   toggleOpen(panel);
 
@@ -1070,7 +1071,7 @@ test("#255: a transient catalog non-OK keeps the canvas up and retries on re-ope
     return base.impl(input, init);
   }) as typeof fetch;
   const panel = document.createElement("swath-authoring-panel") as SwathAuthoringPanel;
-  panel.fetchImpl = impl;
+  panel.api = new SwathApi({ fetch: impl });
   document.body.append(panel);
   toggleOpen(panel);
 
@@ -1102,7 +1103,7 @@ test("#255: a transient /processes failure retries on re-open instead of brickin
     return base.impl(input, init);
   }) as typeof fetch;
   const panel = document.createElement("swath-authoring-panel") as SwathAuthoringPanel;
-  panel.fetchImpl = impl;
+  panel.api = new SwathApi({ fetch: impl });
   document.body.append(panel);
   toggleOpen(panel);
   await expect

@@ -102,6 +102,7 @@
  * `swath-service-deleted`.
  */
 
+import { ApiProblem, SwathApi } from "./api.js";
 import {
   buildReducerGraph,
   CUBE_PARAM,
@@ -125,6 +126,7 @@ import {
   udfDiagnostic,
   wasmDataUrl,
 } from "./authoring-model.js";
+import { createSwathEvent } from "./ui/events.js";
 
 export type { ProcessDefinition, ProcessParameter } from "./authoring-model.js";
 
@@ -974,14 +976,29 @@ export class SwathAuthoringPanel extends HTMLElement {
    * the next preview answers, so a fixed draft loses its stale note. */
   #previewNoteKeys = new Set<string>();
 
-  /** Test seam: the fetch this panel uses for every request. Assign a
-   * stub BEFORE the element connects; leave unset for the real fetch. */
-  fetchImpl: typeof fetch | undefined;
-
   /** Base URL of a Swath API (no trailing slash); same origin when the
    * `server` attribute is absent — mirroring `<swath-map>`. */
   get server(): string {
     return (this.getAttribute("server") ?? "").replace(/\/+$/, "");
+  }
+
+  #api: SwathApi | undefined;
+  #ownApi: SwathApi | undefined;
+
+  /** The API client (ui-system.md §4.4): injected by a host or test, else
+   * built from `server` — same origin when the attribute is absent. */
+  get api(): SwathApi {
+    if (this.#api !== undefined) {
+      return this.#api;
+    }
+    if (this.#ownApi === undefined || this.#ownApi.base !== this.server) {
+      this.#ownApi = new SwathApi({ base: this.server });
+    }
+    return this.#ownApi;
+  }
+
+  set api(api: SwathApi) {
+    this.#api = api;
   }
 
   connectedCallback(): void {
@@ -1017,11 +1034,6 @@ export class SwathAuthoringPanel extends HTMLElement {
     this.#render();
   }
 
-  #fetch(path: string, init?: RequestInit): Promise<Response> {
-    const call = this.fetchImpl ?? fetch;
-    return call(`${this.server}${path}`, init);
-  }
-
   async #load(): Promise<void> {
     // The canvas gates ONLY on `/processes` — a static definitions
     // document with no catalog round trip behind it. `/collections` and
@@ -1032,7 +1044,7 @@ export class SwathAuthoringPanel extends HTMLElement {
     // parallel here and hydrate the already-open canvas when they land.
     const catalog = this.#loadCatalog();
     try {
-      const processes = await this.#fetch("/processes", {
+      const processes = await this.api.fetch("/processes", {
         headers: { accept: "application/json" },
       });
       if (!processes.ok) {
@@ -1075,8 +1087,8 @@ export class SwathAuthoringPanel extends HTMLElement {
     this.#catalogFailed = false;
     try {
       const [collections, services] = await Promise.all([
-        this.#fetch("/collections", { headers: { accept: "application/json" } }),
-        this.#fetch("/services", { headers: { accept: "application/json" } }),
+        this.api.fetch("/collections", { headers: { accept: "application/json" } }),
+        this.api.fetch("/services", { headers: { accept: "application/json" } }),
       ]);
       if (!collections.ok || !services.ok) {
         throw new Error(`catalog reads answered ${collections.status}/${services.status}`);
@@ -1114,7 +1126,9 @@ export class SwathAuthoringPanel extends HTMLElement {
 
   async #refreshServices(): Promise<void> {
     try {
-      const response = await this.#fetch("/services", { headers: { accept: "application/json" } });
+      const response = await this.api.fetch("/services", {
+        headers: { accept: "application/json" },
+      });
       if (!response.ok) {
         return;
       }
@@ -1440,7 +1454,7 @@ export class SwathAuthoringPanel extends HTMLElement {
     let note = "";
     let failure: { code: string; message: string } | undefined;
     try {
-      const response = await this.#fetch("/result", {
+      const response = await this.api.fetch("/result", {
         method: "POST",
         headers: { accept: "image/png", "content-type": "application/json" },
         body,
@@ -1679,7 +1693,7 @@ export class SwathAuthoringPanel extends HTMLElement {
       body["title"] = this.#title.trim();
     }
     try {
-      const response = await this.#fetch("/services", {
+      const response = await this.api.fetch("/services", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -1695,9 +1709,7 @@ export class SwathAuthoringPanel extends HTMLElement {
       this.#error = "";
       this.#render();
       if (id !== "") {
-        this.dispatchEvent(
-          new CustomEvent("swath-service-created", { detail: { id }, bubbles: true }),
-        );
+        this.dispatchEvent(createSwathEvent("swath-service-created", { id }));
       }
       await this.#refreshServices();
     } catch (error) {
@@ -1708,7 +1720,7 @@ export class SwathAuthoringPanel extends HTMLElement {
 
   async #delete(id: string): Promise<void> {
     try {
-      const response = await this.#fetch(`/services/${id}`, { method: "DELETE" });
+      const response = await this.api.fetch(`/services/${id}`, { method: "DELETE" });
       if (!response.ok) {
         this.#error = await readOpenEoError(response);
         this.#render();
@@ -1716,9 +1728,7 @@ export class SwathAuthoringPanel extends HTMLElement {
       }
       this.#error = "";
       this.#render();
-      this.dispatchEvent(
-        new CustomEvent("swath-service-deleted", { detail: { id }, bubbles: true }),
-      );
+      this.dispatchEvent(createSwathEvent("swath-service-deleted", { id }));
       await this.#refreshServices();
     } catch (error) {
       this.#error = `request failed: ${String(error)}`;
@@ -2658,13 +2668,9 @@ function previewFailureNote(failure: { code: string; message: string }): string 
 /** The standardized openEO error body (`{code, message}`); a non-openEO
  * body reads as an `HttpError` carrying the status line. */
 async function readOpenEoBody(response: Response): Promise<{ code: string; message: string }> {
-  try {
-    const body = (await response.json()) as { code?: unknown; message?: unknown };
-    if (typeof body.code === "string" && typeof body.message === "string") {
-      return { code: body.code, message: body.message };
-    }
-  } catch {
-    // Fall through to the status line.
+  const problem = await ApiProblem.from(response);
+  if (problem.title !== "" && problem.detail !== "") {
+    return { code: problem.title, message: problem.detail };
   }
   return { code: "HttpError", message: `request failed with HTTP ${response.status}` };
 }

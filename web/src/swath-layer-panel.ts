@@ -19,6 +19,7 @@
  */
 
 import type { SwathLayer } from "./swath-map.js";
+import { createSwathEvent } from "./ui/events.js";
 
 const STYLE_ELEMENT_ID = "swath-layer-panel-styles";
 
@@ -144,9 +145,7 @@ export class SwathLayerPanel extends HTMLElement {
       id.textContent = layer.id;
       button.append(title, id);
       button.addEventListener("click", () => {
-        this.dispatchEvent(
-          new CustomEvent("swath-layer-select", { detail: { layer: layer.id }, bubbles: true }),
-        );
+        this.dispatchEvent(createSwathEvent("swath-layer-select", { layer: layer.id }));
       });
       item.append(button);
       list.append(item);

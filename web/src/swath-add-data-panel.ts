@@ -46,6 +46,8 @@ import {
   quicklookService,
   stacDraft,
 } from "./add-data-model.js";
+import { SwathApi } from "./api.js";
+import { createSwathEvent } from "./ui/events.js";
 
 /** The read-only state, exported so tests assert the exact contract
  * string (the #198 capabilities document drives it). */
@@ -214,13 +216,29 @@ export class SwathAddDataPanel extends HTMLElement {
    * rejects — failures render as notes). Test seam. */
   #ready: Promise<void> = Promise.resolve();
 
-  /** Test seam: assign a stub BEFORE the element connects. */
-  fetchImpl: typeof fetch | undefined;
-
   /** Base URL of the Swath API (no trailing slash); same origin when the
    * `server` attribute is absent. */
   get server(): string {
     return (this.getAttribute("server") ?? "").replace(/\/+$/, "");
+  }
+
+  #api: SwathApi | undefined;
+  #ownApi: SwathApi | undefined;
+
+  /** The API client (ui-system.md §4.4): injected by a host or test, else
+   * built from `server` — same origin when the attribute is absent. */
+  get api(): SwathApi {
+    if (this.#api !== undefined) {
+      return this.#api;
+    }
+    if (this.#ownApi === undefined || this.#ownApi.base !== this.server) {
+      this.#ownApi = new SwathApi({ base: this.server });
+    }
+    return this.#ownApi;
+  }
+
+  set api(api: SwathApi) {
+    this.#api = api;
   }
 
   /** `await el.ready` before inspecting the DOM after an interaction. */
@@ -244,15 +262,6 @@ export class SwathAddDataPanel extends HTMLElement {
     this.#render();
   }
 
-  #fetch(input: string, init?: RequestInit): Promise<Response> {
-    const call = this.fetchImpl ?? fetch;
-    return call(input, init);
-  }
-
-  #api(path: string, init?: RequestInit): Promise<Response> {
-    return this.#fetch(`${this.server}${path}`, init);
-  }
-
   #togglePanel(): void {
     this.#open = !this.#open;
     if (this.#open && this.#capabilities === undefined) {
@@ -273,11 +282,7 @@ export class SwathAddDataPanel extends HTMLElement {
     }
     this.#capabilitiesError = undefined;
     try {
-      const response = await this.#api("/", { headers: { accept: "application/json" } });
-      if (!response.ok) {
-        throw new Error(`GET ${this.server}/ failed: ${response.status}`);
-      }
-      this.#capabilities = parseCapabilities(await response.json());
+      this.#capabilities = parseCapabilities(await this.api.capabilities());
     } catch (error) {
       this.#capabilitiesError = error instanceof Error ? error.message : String(error);
     }
@@ -313,7 +318,7 @@ export class SwathAddDataPanel extends HTMLElement {
     this.#render();
     let draft: AddDataDraft | string;
     try {
-      const response = await this.#fetch(link, { headers: { accept: "application/json" } });
+      const response = await this.api.fetch(link, { headers: { accept: "application/json" } });
       if (!response.ok) {
         throw new Error(`the link answered HTTP ${response.status}`);
       }
@@ -347,7 +352,7 @@ export class SwathAddDataPanel extends HTMLElement {
     this.#status = "";
     this.#render();
     try {
-      const response = await this.#api(`/uploads/${encodeURIComponent(name)}`, {
+      const response = await this.api.fetch(`/uploads/${encodeURIComponent(name)}`, {
         method: "PUT",
         body: file,
       });
@@ -384,7 +389,7 @@ export class SwathAddDataPanel extends HTMLElement {
     this.#render();
     try {
       const json = { "content-type": "application/json" };
-      const created = await this.#api("/datasets", {
+      const created = await this.api.fetch("/datasets", {
         method: "POST",
         headers: json,
         body: JSON.stringify(datasetBody(draft)),
@@ -394,16 +399,19 @@ export class SwathAddDataPanel extends HTMLElement {
         this.#reportProblem(created.status, await created.json().catch(() => undefined));
         return;
       }
-      const granule = await this.#api(`/datasets/${encodeURIComponent(draft.datasetId)}/granules`, {
-        method: "POST",
-        headers: json,
-        body: JSON.stringify(granuleBody(draft)),
-      });
+      const granule = await this.api.fetch(
+        `/datasets/${encodeURIComponent(draft.datasetId)}/granules`,
+        {
+          method: "POST",
+          headers: json,
+          body: JSON.stringify(granuleBody(draft)),
+        },
+      );
       if (!granule.ok) {
         this.#reportProblem(granule.status, await granule.json().catch(() => undefined));
         return;
       }
-      const service = await this.#api("/services", {
+      const service = await this.api.fetch("/services", {
         method: "POST",
         headers: json,
         body: JSON.stringify(
@@ -422,12 +430,7 @@ export class SwathAddDataPanel extends HTMLElement {
       }
       const layer = service.headers.get("openeo-identifier") ?? "";
       this.#status = `Serving: ${draft.datasetId} is registered and its quick look is on the map.`;
-      this.dispatchEvent(
-        new CustomEvent("swath-data-added", {
-          detail: { dataset: draft.datasetId, layer },
-          bubbles: true,
-        }),
-      );
+      this.dispatchEvent(createSwathEvent("swath-data-added", { dataset: draft.datasetId, layer }));
     } catch (error) {
       this.#flowError = `registration failed: ${
         error instanceof Error ? error.message : String(error)
