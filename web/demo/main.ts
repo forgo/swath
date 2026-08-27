@@ -1,6 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  type AppState,
+  appStatesEqual,
+  isViewMode,
+  parseAppState,
+  resolveInitialAppState,
+  saveAppPreference,
+  type ViewMode,
+  withAppState,
+} from "../src/app-state.js";
 // The entry page's app shell (issue #108). Semantics live in
 // src/view-state.ts; this file only wires them to the DOM:
 //
@@ -58,6 +68,9 @@ const shareElement = document.querySelector<SwathButton>("#swath-share");
 
 const storage = safeLocalStorage();
 const { state: initial, source } = resolveInitialState(location.search, storage);
+// The mode (issue #283): `view=` beats storage beats `layers`, exactly the
+// view-state precedence, resolved on the same search string.
+const { state: initialApp } = resolveInitialAppState(location.search, storage);
 
 // Nobody asked for a view: open on the season loop (when the server has
 // one). A deep link or a restored session is explicit state — honored
@@ -84,6 +97,11 @@ if (initial.compareTime !== undefined) {
 }
 if (initial.compareLayer !== undefined) {
   mapElement?.setAttribute("compare-layer", initial.compareLayer);
+}
+// A `view=xray` link opens with the overlay on; applied here with the other
+// initial attributes (before any observer), so the link's bytes stay its own.
+if (initialApp.view === "xray") {
+  mapElement?.setAttribute("xray", "");
 }
 if (initial.swipe !== undefined) {
   mapElement?.setAttribute("swipe", formatSwipe(initial.swipe));
@@ -219,20 +237,83 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     }
   };
 
+  // View params and app params compose on ONE search string (ui-system.md
+  // §4.5): view-state first, then app-state; each passes the other's
+  // params through byte-for-byte, and a write that changes nothing is
+  // skipped for both.
+  let appState: AppState = initialApp;
   const syncUrl = (): void => {
     if (!interacted) {
       return;
     }
     const state = snapshot();
-    if (viewStatesEqual(parseViewState(location.search), state)) {
+    const current = location.search;
+    if (
+      viewStatesEqual(parseViewState(current), state) &&
+      appStatesEqual(parseAppState(current), appState)
+    ) {
       return; // the URL already says this — leave its bytes alone
     }
-    history.replaceState(
-      null,
-      "",
-      `${location.pathname}${withViewState(location.search, state)}${location.hash}`,
-    );
+    const next = withAppState(withViewState(current, state), appState);
+    if (next === current) {
+      return;
+    }
+    history.replaceState(null, "", `${location.pathname}${next}${location.hash}`);
   };
+
+  // Modes over today's panels (no shell yet — the #283 scope fence):
+  // `layers` is the full rail as it always was; the others narrow it.
+  // Entering `xray` turns the overlay on (a user act); leaving leaves it.
+  const modeButtons = [...document.querySelectorAll<SwathButton>("#swath-modes [data-mode]")];
+  const applyMode = (mode: ViewMode): void => {
+    document.body.dataset["view"] = mode;
+    const show = {
+      layers: mode === "layers" || mode === "xray",
+      data: mode === "layers" || mode === "data",
+      author: mode === "layers" || mode === "author",
+    };
+    panel.hidden = !show.layers;
+    if (datasetElement instanceof HTMLElement) {
+      datasetElement.hidden = !show.data;
+    }
+    if (addDataElement instanceof HTMLElement) {
+      addDataElement.hidden = !show.data;
+    }
+    if (authoringElement instanceof HTMLElement) {
+      authoringElement.hidden = !show.author;
+    }
+    for (const button of modeButtons) {
+      button.pressed = button.dataset["mode"] === mode;
+    }
+  };
+  const setMode = (mode: ViewMode): void => {
+    if (appState.view === mode) {
+      return;
+    }
+    const next: AppState = { view: mode };
+    if (appState.rail !== undefined) {
+      next.rail = appState.rail;
+    }
+    appState = next;
+    applyMode(mode);
+    if (mode === "xray") {
+      map.setAttribute("xray", "");
+    }
+    interact();
+    if (storage) {
+      saveAppPreference(storage, appState);
+    }
+    syncUrl();
+  };
+  applyMode(appState.view);
+  for (const button of modeButtons) {
+    button.addEventListener("click", () => {
+      const mode = button.dataset["mode"];
+      if (isViewMode(mode)) {
+        setMode(mode);
+      }
+    });
+  }
 
   /** A user act: from here on the URL and storage follow the view. */
   const interact = (): void => {
