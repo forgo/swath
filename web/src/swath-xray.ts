@@ -553,6 +553,7 @@ const OVERLAY_SHEET = css`
 /* Hosted by a shell (a HUD card or the rail) instead of floating in the
  * map: the same chrome, flow layout (#286). */
 .swath-xray-docked { position: static; inset: auto; max-width: none; max-height: none; margin: 0; }
+.swath-xray-feed.swath-xray-docked { width: auto; min-width: max-content; align-items: stretch; }
 .swath-xray-feed.swath-xray-docked header { white-space: nowrap; }
 .swath-xray-inspector.swath-xray-docked { width: auto; }
 `;
