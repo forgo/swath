@@ -424,6 +424,25 @@ test("authoring publish: the authored layer serves immediately", async ({ page }
   }
 });
 
+test("change detection: the first DAG product on the canvas", async ({ page }) => {
+  await gotoAndWaitForTiles(
+    page,
+    `${DEMO_PATH}?layer=park-fire-ndvi&center=-121.6931,40.0208&zoom=13`,
+    "park-fire-ndvi",
+  );
+  await openAuthoringPanel(page);
+  await fieldById(page, "s1-id").selectOption("hls-s30-fire");
+  await page.locator(".swath-authoring-template-change").click();
+  await expect(page.locator("#swath-authoring-narrative")).toContainText("subtract");
+  await waitForAuthoringPreview(page);
+  await capture(
+    page,
+    "15-change-detection.png",
+    "Change detection (ADR 0022): two dated branches of one collection joined by a subtract resolver — NDVI(later) − NDVI(earlier), previewed before publishing.",
+    { maxBadFrac: 0.03 }, // the preview's live render carries a few seam pixels
+  );
+});
+
 test("dataset browser: granule footprints on the map", async ({ page }) => {
   await gotoAndWaitForTiles(
     page,
