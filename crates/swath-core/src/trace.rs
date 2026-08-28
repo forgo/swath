@@ -177,15 +177,35 @@ pub enum TemporalRule {
 /// dimension and no granule, so their traces carry nothing here.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TemporalTrace {
-    /// The granule the frame resolved to.
+    /// The granule the frame resolved to — for a layer over more than one
+    /// source (ADR 0022), the **primary** branch's (the first source, the
+    /// join's `cube1`); every branch is in [`sources`](Self::sources).
     pub granule_id: String,
     /// That granule's acquisition datetime (RFC 3339 UTC).
     pub granule_datetime: String,
     /// The request's raw `datetime` parameter, verbatim; `None` when the
     /// request carried none (absent = latest).
     pub requested: Option<String>,
-    /// The resolution rule that applied.
+    /// The resolution rule that applied (to every branch alike).
     pub rule: TemporalRule,
+    /// One record per source the frame read, in branch order (ADR 0022,
+    /// issue #296) — which two granules a change tile's pixels came from.
+    /// Empty (and omitted from the JSON, so single-source traces are
+    /// byte-identical) for layers over one source.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<TemporalSource>,
+}
+
+/// One branch of a multi-source frame's temporal decision: the
+/// `load_collection` node and the granule it resolved to.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TemporalSource {
+    /// The `load_collection` node id of the branch.
+    pub node: String,
+    /// The granule the branch resolved to.
+    pub granule_id: String,
+    /// That granule's acquisition datetime (RFC 3339 UTC).
+    pub granule_datetime: String,
 }
 
 /// The structured explanation of one rendered tile — what happened, from
@@ -411,6 +431,7 @@ mod tests {
             granule_datetime: "2024-07-22T19:03:00Z".to_owned(),
             requested: Some("2024-08-01T00:00:00Z".to_owned()),
             rule: super::TemporalRule::LatestAtOrBefore,
+            sources: Vec::new(),
         });
         let json = serde_json::to_value(&trace).unwrap();
         assert_eq!(

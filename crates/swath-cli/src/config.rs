@@ -726,6 +726,7 @@ impl LayerConfig {
             // Config-defined layers are temporally unconstrained: latest
             // wins, exactly as before ADR 0015.
             window: swath_core::catalog::TimeRange::default(),
+            sources: Vec::new(),
         };
         let domain_layer = domain::Layer {
             id: self.id.clone(),

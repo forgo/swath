@@ -138,7 +138,7 @@ how pixels combine; the one join, `merge_cubes` (ADR 0022), reads one pixel per 
 same location and keeps a window per source (`CompiledProduct::sources`). Products needing
 more are the reopen territory of ADR 0013 and ADR 0022.
 
-_Last verified against sources `53ad10b5a70a`._
+_Last verified against sources `72942444005a`._
 
 ## 4. A new colormap
 

@@ -515,6 +515,36 @@ pub(crate) fn openeo_app_seeded(
     (app, catalog)
 }
 
+/// [`openeo_app_seeded`] plus an in-memory write-through tile cache — the
+/// cache-identity tests over published layers (ADR 0022's granule pair).
+pub(crate) fn openeo_app_seeded_cached(
+    dataset: Dataset,
+    granules: Vec<Granule>,
+) -> (Router, MemoryCatalog) {
+    use swath_api::{CatalogLayers, OpenEoState, openeo_router};
+    use swath_cache_objectstore::ObjectStoreTileCache;
+
+    let catalog = MemoryCatalog::default();
+    catalog.seed(dataset, granules);
+    let provider = CatalogLayers::new(catalog.clone(), Vec::new());
+    let store: Arc<dyn object_store::ObjectStore> =
+        Arc::new(LocalFileSystem::new_with_prefix(fixtures_dir()).expect("fixture dir exists"));
+    let state = ApiState::new(
+        provider.clone(),
+        CogSource::new(Arc::clone(&store)),
+        Proj4rsReproject,
+        BASE_URL,
+    )
+    .with_openeo()
+    .with_cache(ObjectStoreTileCache::new(Arc::new(
+        object_store::memory::InMemory::new(),
+    )));
+    let openeo_state =
+        OpenEoState::new(provider, CogSource::new(store), Proj4rsReproject, BASE_URL);
+    let app = router(Arc::new(state)).merge(openeo_router(Arc::new(openeo_state)));
+    (app, catalog)
+}
+
 /// [`openeo_app`] with the preview budget's `max_estimated_live_bytes`
 /// ceiling overridden — the refusal-path tests force the planner over
 /// budget with a tiny ceiling (the default admits every fixture render).
@@ -552,6 +582,7 @@ pub(crate) fn openeo_app_with_budget(
             tile_size: layer.tile_size,
             budget: layer.budget.clone(),
             window: TimeRange::default(),
+            sources: Vec::new(),
         })
         .collect();
     let provider = CatalogLayers::new(catalog.clone(), templates);

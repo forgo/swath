@@ -18,12 +18,12 @@ use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use swath_core::cache::{NoCache, TileCache, TileKey, TileKeyInputs, layer_version};
+use swath_core::cache::{NoCache, TileCache, TileKey, TileKeyInputs, layer_version_over};
 use swath_core::crs::Crs;
 use swath_core::reproject::Reproject;
 use swath_core::source::RasterSource;
 use swath_core::tile::{LonLatBounds, TileCoord};
-use swath_core::trace::{Strategy, TemporalRule, TemporalTrace, Trace};
+use swath_core::trace::{Strategy, TemporalRule, TemporalSource, TemporalTrace, Trace};
 use swath_render::ir::PlanError;
 use swath_render::udf::UdfError;
 use swath_render::{NoUdf, TileError, render_tile, render_tile_cached};
@@ -554,7 +554,8 @@ where
             let plan_json = serde_json::to_string(&request.plan).map_err(|err| {
                 ApiError::internal(format!("render plan failed to serialize: {err}"))
             })?;
-            let version = layer_version(layer.granule_id.as_deref(), &plan_json);
+            let granules: Vec<&str> = layer.granules.iter().map(|g| g.id.as_str()).collect();
+            let version = layer_version_over(&granules, &plan_json);
             let key = TileKey::compute(&TileKeyInputs {
                 layer: &layer_id,
                 layer_version: &version,
@@ -591,6 +592,21 @@ where
                 None => TemporalRule::Latest,
                 Some(crate::temporal::DatetimeParam::Instant(_)) => TemporalRule::LatestAtOrBefore,
                 Some(crate::temporal::DatetimeParam::Interval(_)) => TemporalRule::LatestInInterval,
+            },
+            // Every branch of a multi-source frame (ADR 0022); one-source
+            // traces stay byte-identical (empty, omitted).
+            sources: if layer.granules.len() > 1 {
+                layer
+                    .granules
+                    .iter()
+                    .map(|g| TemporalSource {
+                        node: g.node.clone(),
+                        granule_id: g.id.clone(),
+                        granule_datetime: g.datetime.to_string(),
+                    })
+                    .collect()
+            } else {
+                Vec::new()
             },
         });
     }

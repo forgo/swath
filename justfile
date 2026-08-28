@@ -280,6 +280,16 @@ render-goldens:
             --input "$FIRE-$day-b8a.tif" --input "$FIRE-$day-b04.tif" \
             --expression "(b1 - b2) / (b1 + b2)" --rescale=-1,1 --resampling bilinear
     done
+    # The two-date change golden (ADR 0022, issue #296): NDVI(2024229) −
+    # NDVI(2024204) over the same z13 tile — what a published merge_cubes
+    # change layer must serve from its two resolved granules (matched by the
+    # swath-api openeo_change_detection suite). Inputs in plan order: the
+    # `after` branch's bands first.
+    compose 13 1326 3100 "$D/fire-change-13-1326-3100-2024204-2024229.png" \
+        --input "$FIRE-2024229-b8a.tif" --input "$FIRE-2024229-b04.tif" \
+        --input "$FIRE-2024204-b8a.tif" --input "$FIRE-2024204-b04.tif" \
+        --expression "(b1 - b2) / (b1 + b2) - (b3 - b4) / (b3 + b4)" \
+        --rescale=-1,1 --resampling bilinear
 
 # Regenerate the web TMS truth table (web/src/tms_truth.json) from the pinned
 # morecantile oracle (issue #106; the TS twin of the swath-core table). The

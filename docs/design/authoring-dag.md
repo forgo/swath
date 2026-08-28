@@ -100,7 +100,7 @@ ADR 0022 fixes these server-side; the editor makes them unconstructible or expla
 | Resolver required, over `x`/`y` | `MissingResolver` | the `merge_cubes` node is created *with* a resolver builder (the formula builder scoped to two operands) — never without |
 | `context` absent | rejected | not offered |
 | Both branches frame-selected | every pixel pair resolves to one granule per branch (ADR 0015) | each branch's `load_collection` carries a `temporal_extent`; the template pre-fills t₁/t₂ from the collection's extent |
-| `datetime=` intersects every branch | the served layer's frames = the intersection of both windows | the time slider's domain for a two-source layer is that intersection; a frame outside it is not offered |
+| `datetime=` intersects every branch | each branch resolves within *its own* window ∩ (…, `datetime`]; the layer advertises the **hull** of the branch windows (disjoint windows — May vs June — are the canonical product); a `datetime` that leaves either branch without a granule is a 404 naming that branch | the time slider's domain for a two-source layer is the hull; its ticks are where *either* branch's resolved granule changes |
 
 ## 6. Bad states × the DAG
 
