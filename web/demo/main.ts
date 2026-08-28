@@ -278,6 +278,14 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
   // device preference: storage only, never the URL (honoured from a
   // `rail=collapsed` link without rewriting it).
   const MODE_TITLES = { layers: "Layers", data: "Data", author: "Author", xray: "X-ray" } as const;
+  const xrayRail = document.querySelector("#swath-xray-rail");
+  // The x-ray's display modes + analytics summary live in the rail under
+  // view=xray (issue #286); the map re-homes a live overlay on assignment.
+  const xrayModes = document.querySelector("#swath-xray-modes");
+  const xrayAnalytics = document.querySelector("#swath-xray-analytics");
+  if (xrayModes instanceof HTMLElement && xrayAnalytics instanceof HTMLElement) {
+    map.xrayChrome = { modes: xrayModes, analytics: xrayAnalytics };
+  }
   const modeTitle = document.querySelector("#swath-mode-title");
   const applyMode = (mode: ViewMode): void => {
     document.body.dataset["view"] = mode;
@@ -304,6 +312,9 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     }
     if (authoringElement instanceof HTMLElement) {
       authoringElement.hidden = !show.author;
+    }
+    if (xrayRail instanceof HTMLElement) {
+      xrayRail.hidden = mode !== "xray";
     }
   };
   const savePreference = (): void => {

@@ -55,12 +55,16 @@ export class SwathHudCard extends SwathElement {
     `,
   ];
   static override properties = {
+    /** Hidden while the default slot is empty (an inspector card that
+     * only has content once a badge is clicked). */
+    autoHide: { type: "boolean", attribute: "auto-hide", reflect: true },
     title: { type: "string" },
     collapsible: { type: "boolean", reflect: true },
     collapsed: { type: "boolean", reflect: true },
     dense: { type: "boolean", reflect: true },
   } as const;
 
+  declare autoHide: boolean;
   declare title: string;
   declare collapsible: boolean;
   declare collapsed: boolean;
@@ -93,14 +97,26 @@ export class SwathHudCard extends SwathElement {
       });
     }
     this.#header = header;
+    const body = el("slot");
+    body.addEventListener("slotchange", () => this.#syncAutoHide());
+    this.#header = header;
     this.renderRoot.replaceChildren(
-      el("div", { part: "base" }, header, el("div", { part: "body" }, el("slot"))),
+      el("div", { part: "base" }, header, el("div", { part: "body" }, body)),
     );
     return header;
   }
 
+  #syncAutoHide(): void {
+    if (!this.autoHide) {
+      return;
+    }
+    const slot = this.renderRoot.querySelector<HTMLSlotElement>("slot:not([name])");
+    this.hidden = (slot?.assignedNodes({ flatten: true }).length ?? 0) === 0;
+  }
+
   protected render(): void {
     const header = this.#ensure();
+    this.#syncAutoHide();
     const title = header.querySelector('[part="title"]');
     if (title) {
       title.textContent = this.title ?? "";

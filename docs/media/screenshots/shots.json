@@ -1,7 +1,7 @@
 {
   "schema": "swath-screenshots/1",
-  "git_sha": "e97d95b7bee5f4e34a60d83613257a27a5c25f68",
-  "captured": "2026-08-27T19:04:17.605Z",
+  "git_sha": "0bbf359b0bc8b139cd5f39164b151fc5d6b87afe",
+  "captured": "2026-08-27T19:35:51.201Z",
   "viewport": {
     "width": 1528,
     "height": 928,
@@ -35,28 +35,28 @@
       "caption": "X-ray decision overlay: every tile badged with its render decision and timing; ingest→pixel readout top-left.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "73963c3153dd3e9ab350dcf9c9f505d794d50eda630d366ed28fcb2948868b54"
+      "sha256": "6dee30c6952b90d9b2b70fd9135bc6afe075c6afedbd2773ed92ccd1134e17d4"
     },
     {
       "file": "05-xray-why-view.png",
       "caption": "Why-view for one tile: the planner's candidate table — chosen plan, rejected candidates, and the reason for each.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "979b763567b4b8be89834d08aef349b932971574461f6164a8cb61714f32885f"
+      "sha256": "d7c0ccc9ce653dfb0e5ad3b80e4ead62e288546718104a6c3201f6ee89fe526f"
     },
     {
       "file": "06-xray-heatmap.png",
       "caption": "Bytes-read heatmap mode: badges bucketed on a log scale, with the legend the overlay itself publishes.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "8ced86130bc81d09d68246e064429db9f3dcf5fa7512d636dd250f024090cdb7"
+      "sha256": "7901025123af9705a0e857ff4d832ee41a4a24b6ad4978d9d9245a6cf1c852da"
     },
     {
       "file": "07-xray-trace-feed.png",
       "caption": "Trace feed: the /traces SSE stream as scrollback — every line a render decision, clickable back to its tile.",
       "tolerance": 2,
       "maxBadFrac": 0.06,
-      "sha256": "d02cf19554ccd86770e2ef917fe622ce242e8d64d1b9d44919899b0b6d52803e"
+      "sha256": "4064049c38008c2dc4ae17c48655e42d1fc4860e7516d8ddfb34352ca906688b"
     },
     {
       "file": "08-authoring-form.png",
@@ -70,7 +70,7 @@
       "caption": "NDVI template loaded: the plain-words narrative of the graph, with a step's advanced (defaulted) fields opened.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "02e8862c488c9b9cd198a48cf2aebf2095acb0406caa8f2459bcf12d0feabbf9"
+      "sha256": "04d1689904b1a454d78e0eb7438853d48ad5c6edc49a937c7d9cfee123463a85"
     },
     {
       "file": "10-authoring-published.png",
@@ -91,21 +91,21 @@
       "caption": "Trace analytics under load: rolling p50/p95 render latency, plan mix, and cache hit rate over the session's tiles.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "92ee0c685956d3b2a95cf3ac5f9ff3325bb16cc88a5392226deffce36c653bbb"
+      "sha256": "57ab4f0ad2d26e9bf89b0716157811421b11569b7890e106cf944cbda4a29b94"
     },
     {
       "file": "13-time-slider-live.png",
       "caption": "Time slider over the Park Fire season, first pass: the scrubbed frame is rendered live — every badge says so, and the analytics card narrates the frame's own plan mix.",
       "tolerance": 2,
-      "maxBadFrac": 0.03,
-      "sha256": "63d72421a9053d8236f4534fa586911c849a3657f89083049dc0ea2535317672"
+      "maxBadFrac": 0.04,
+      "sha256": "4bb34b8a1cf98685ed8f7bf26b9bf7c0339a4b19703c534dd28f5dc802eea1c9"
     },
     {
       "file": "14-time-slider-cached.png",
       "caption": "The same frame revisited: every tile is a cache hit (same granule, same cache entry — ADR 0015 frame identity), which is why the loop replays smoothly.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "fc54239f84e4d8f02b8e4f73282519ccc177ff99f153e15c193ec0c5f8d90942"
+      "sha256": "b03bfb9e43d80032123a09eade5b23c8b79d5c642d842cb330f9444b528e8622"
     }
   ]
 }

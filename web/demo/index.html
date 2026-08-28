@@ -81,6 +81,18 @@ or bring the stack up yourself and `pnpm exec vite dev`.
       swath-authoring-panel[hidden] {
         display: none;
       }
+      #swath-xray-rail {
+        display: flex;
+        flex-direction: column;
+        gap: var(--swath-space-2);
+      }
+      #swath-xray-rail[hidden] {
+        display: none;
+      }
+      /* The feed card sits above MapLibre's attribution pill. */
+      swath-hud-card[data-xray="bottom-right"] {
+        margin-bottom: var(--swath-space-7);
+      }
       .swath-rail-footer {
         font-family: var(--swath-font-mono);
         font-size: var(--swath-text-xs);
@@ -120,6 +132,13 @@ or bring the stack up yourself and `pnpm exec vite dev`.
         <swath-add-data-panel></swath-add-data-panel>
         <!-- Also collapsed and lazy (issue #109): fetches nothing until opened. -->
         <swath-authoring-panel></swath-authoring-panel>
+        <!-- X-ray mode (issue #286): the overlay's display modes and the
+             analytics summary live here under view=xray; the readouts,
+             feed and inspector are HUD cards over the map. -->
+        <section id="swath-xray-rail" aria-label="X-ray" hidden>
+          <div id="swath-xray-modes"></div>
+          <div id="swath-xray-analytics"></div>
+        </section>
         <span slot="footer" class="swath-rail-footer">granule → pixel</span>
       </swath-rail>
       <span slot="topbar" id="swath-mode-title">Layers</span>

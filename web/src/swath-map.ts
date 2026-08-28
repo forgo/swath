@@ -81,10 +81,11 @@ import {
 } from "./compare-model.js";
 import { type GranuleBbox, parseBbox, unionBbox } from "./granule-footprints.js";
 import { CompareView } from "./swath-compare.js";
-import { type EventSourceFactory, XRayOverlay } from "./swath-xray.js";
+import { type EventSourceFactory, type XRayChrome, XRayOverlay } from "./swath-xray.js";
 import { parseGranuleDatetimes, TimeSlider } from "./time-slider.js";
 import { centerTile } from "./tms.js";
 import { createSwathEvent } from "./ui/events.js";
+import { SwathHudCard } from "./ui/hud-card.js";
 import { adoptTokens } from "./ui/styles.js";
 import { formatSwipe, parseCenter, parseNumber, parseSwipe, parseTime } from "./view-state.js";
 
@@ -804,6 +805,61 @@ export class SwathMap extends HTMLElement {
    * scriptable fake BEFORE setting the `xray` attribute. */
   xrayEventSource: EventSourceFactory | undefined;
 
+  /** Where the host wants the x-ray's display modes and analytics summary
+   * (the rail under `view=xray`, issue #286). Readouts, feed and inspector
+   * always go to HUD cards when a shell's dock exists; without a shell
+   * every part floats in the map. Settable at any time — a live overlay
+   * re-homes its chrome. */
+  #xrayChrome: Pick<XRayChrome, "modes" | "analytics"> | undefined;
+  #xrayCards: HTMLElement[] = [];
+
+  get xrayChrome(): Pick<XRayChrome, "modes" | "analytics"> | undefined {
+    return this.#xrayChrome;
+  }
+
+  set xrayChrome(chrome: Pick<XRayChrome, "modes" | "analytics"> | undefined) {
+    this.#xrayChrome = chrome;
+    this.#xray?.setChrome(this.#buildXrayChrome());
+  }
+
+  /** HUD cards for the x-ray chrome, built once per overlay and removed
+   * with it: readouts bottom-left, the trace feed bottom-right, the
+   * why-view inspector on the right (ui-system.md §6). */
+  #buildXrayChrome(): XRayChrome | undefined {
+    const dock = this.closest("swath-shell")?.querySelector(":scope > swath-hud-dock");
+    if (!dock) {
+      return this.#xrayChrome ? { ...this.#xrayChrome } : undefined;
+    }
+    if (this.#xrayCards.length === 0) {
+      SwathHudCard.define();
+      const card = (slot: string, label: string): SwathHudCard => {
+        const el = document.createElement("swath-hud-card");
+        el.slot = slot;
+        el.dense = true;
+        el.className = "swath-map-xray-card";
+        el.setAttribute("aria-label", label);
+        el.dataset["xray"] = slot;
+        dock.append(el);
+        return el;
+      };
+      const inspector = card("right", "Trace inspector");
+      inspector.autoHide = true; // only there once a badge opens the why-view
+      this.#xrayCards = [
+        card("bottom-left", "X-ray readouts"),
+        card("bottom-right", "Trace feed"),
+        inspector,
+      ];
+    }
+    const [readouts, feed, inspector] = this.#xrayCards;
+    return {
+      readouts,
+      feed,
+      inspector,
+      modes: this.#xrayChrome?.modes ?? readouts,
+      analytics: this.#xrayChrome?.analytics,
+    };
+  }
+
   /**
    * The underlying MapLibre `Map` instance (undefined until connected).
    *
@@ -1287,6 +1343,7 @@ export class SwathMap extends HTMLElement {
     }
     this.#xray = new XRayOverlay(this, map, {
       createEventSource: this.xrayEventSource ?? ((url) => this.api.events(url)),
+      chrome: this.#buildXrayChrome(),
     });
     this.#xray.connect(`${this.server}/traces`);
     this.#xray.setLayer(this.#activeLayer);
@@ -1305,6 +1362,10 @@ export class SwathMap extends HTMLElement {
   #disableXRay(): void {
     this.#xray?.dispose();
     this.#xray = undefined;
+    for (const card of this.#xrayCards) {
+      card.remove();
+    }
+    this.#xrayCards = [];
   }
 
   /** OGC `{tileMatrix}/{tileRow}/{tileCol}` is z/y/x, so MapLibre's

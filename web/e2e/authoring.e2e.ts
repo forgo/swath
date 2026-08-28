@@ -568,6 +568,10 @@ test("UDF stage: upload → preview → publish → x-ray shows fuel → delete 
   // The published layer is the viewed layer, rendering live through
   // the same executor: the x-ray's analytics line narrates the latest
   // UDF tile's fuel and udf_ms from the trace stream…
+  // The analytics summary (its UDF line included) lives in the rail under
+  // X-ray MODE (issue #286), which hides the authoring panel — so enter the
+  // mode only now, for the assertion, with the overlay already on.
+  await page.locator('swath-rail [part="item"][data-mode="xray"]').click();
   const udfLine = page.locator(".swath-xray-analytics-udf");
   await expect(udfLine).toBeVisible({ timeout: 60_000 });
   // Exact values ride the card's data-* attributes (like p50/p95).
@@ -600,6 +604,8 @@ test("UDF stage: upload → preview → publish → x-ray shows fuel → delete 
     expect(served.udf_fuel_used).toBeGreaterThan(0);
   }
 
+  // Back to Layers: the authoring panel (and its delete button) is visible again.
+  await page.locator('swath-rail [part="item"][data-mode="layers"]').click();
   // Delete from the panel: gone from serving (the honest 404).
   const deleted = page.waitForResponse(
     (response) =>

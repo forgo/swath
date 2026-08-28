@@ -68,6 +68,26 @@ export function adoptTokens(doc: Document = document): void {
   doc.head.append(style);
 }
 
+const adoptedSheets = new WeakMap<Document, Set<CSSStyleSheet>>();
+
+/** Adopt `sheet` at document level exactly once per document — for
+ * light-DOM chrome that must live in the page's cascade (the x-ray's
+ * badges are positioned in map pixels inside `<swath-map>`). Constructed
+ * in the main realm; foreign documents are not supported here. */
+export function adoptSheet(sheet: CSSStyleSheet, doc: Document = document): void {
+  let set = adoptedSheets.get(doc);
+  if (!set) {
+    set = new Set();
+    adoptedSheets.set(doc, set);
+  }
+  if (set.has(sheet)) {
+    return;
+  }
+  set.add(sheet);
+  adoptTokens(doc);
+  doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet];
+}
+
 /** Read a token's computed value where custom properties can't be consumed
  * directly — MapLibre paint properties, canvas drawing. `name` is the full
  * property name (`--swath-color-accent`). Empty string when undeclared. */

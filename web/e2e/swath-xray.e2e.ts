@@ -119,10 +119,9 @@ test("overlay paints decisions matching the traces the test received over SSE", 
   // deeper (z15 tiles) than the vite-dev pass to keep its tiles unseen.
   await waitForFittedView(page);
   const fresh = process.env.SWATH_E2E_MODE === "binary" ? "14" : "13";
-  await page.evaluate((zoom) => {
-    const el = document.querySelector("swath-map");
-    el?.setAttribute("center", "-106.0,39.3");
-    el?.setAttribute("zoom", zoom);
+  await page.locator("swath-map").evaluate((el, zoom) => {
+    el.setAttribute("center", "-106.0,39.3");
+    el.setAttribute("zoom", zoom);
   }, fresh);
 
   // Badges appear once traces flow.
@@ -229,6 +228,9 @@ test("v1: heatmap buckets, feed lines, and why-view match the SSE stream", async
 
   const toggle = page.getByRole("button", { name: "Toggle x-ray overlay" });
   await toggle.click();
+  // The display modes and the analytics summary live in the rail under
+  // X-ray mode (issue #286): enter it (the overlay is already on).
+  await page.locator('swath-rail [part="item"][data-mode="xray"]').click();
   await expect(page.locator("swath-map .swath-xray")).toBeAttached();
   // A view of its OWN (different zoom than the v0 test): when this test
   // runs after v0 on the same stack, v0's tiles are all cache hits by
@@ -236,10 +238,9 @@ test("v1: heatmap buckets, feed lines, and why-view match the SSE stream", async
   // live/overview renders so the heatmap has a non-degenerate range too.
   // (Same fit-race guard as v0: jump only after the fitted view landed.)
   await waitForFittedView(page);
-  await page.evaluate(() => {
-    const el = document.querySelector("swath-map");
-    el?.setAttribute("center", "-105.95,39.25");
-    el?.setAttribute("zoom", "12");
+  await page.locator("swath-map").evaluate((el) => {
+    el.setAttribute("center", "-105.95,39.25");
+    el.setAttribute("zoom", "12");
   });
   await page.waitForFunction(() => document.querySelectorAll(".swath-xray-badge").length > 0);
 
@@ -480,6 +481,9 @@ async function setUpAgreedAnalytics(page: Page, center: string, zoom: string): P
 
   const toggle = page.getByRole("button", { name: "Toggle x-ray overlay" });
   await toggle.click();
+  // The display modes and the analytics summary live in the rail under
+  // X-ray mode (issue #286): enter it (the overlay is already on).
+  await page.locator('swath-rail [part="item"][data-mode="xray"]').click();
   await expect(page.locator("swath-map .swath-xray")).toBeAttached();
   await expect(page.locator(".swath-xray-analytics")).toBeVisible();
 

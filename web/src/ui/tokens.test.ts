@@ -30,6 +30,12 @@ const NAMES = [
     "decision-overview",
     "decision-cache",
     "focus",
+    // Added in #286 (a deliberate contract extension): the x-ray's heat ramp.
+    "heat-1",
+    "heat-2",
+    "heat-3",
+    "heat-4",
+    "heat-5",
   ].map((role) => `--swath-color-${role}`),
   "--swath-font-ui",
   "--swath-font-mono",

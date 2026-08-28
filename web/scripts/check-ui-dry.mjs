@@ -32,6 +32,8 @@ const STRICT = [
   /^src\/swath-compare\.ts$/,
   /^src\/time-slider\.ts$/,
   /^src\/granule-footprints\.ts$/,
+  /^src\/swath-xray\.ts$/,
+  /^src\/xray-analytics\.ts$/,
 ];
 
 /**
