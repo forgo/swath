@@ -301,7 +301,7 @@ test("v1: heatmap buckets, feed lines, and why-view match the SSE stream", async
 
   // --- Feed: every line is a trace the test received; the newest line
   // is the newest envelope (polled — both readers chase the same stream).
-  await page.getByRole("button", { name: "trace feed" }).click();
+  await page.getByRole("button", { name: "trace feed", exact: true }).click();
   await expect(page.locator(".swath-xray-feed-lines")).toBeVisible();
   await page.waitForFunction(() => {
     const received = window.__received ?? [];

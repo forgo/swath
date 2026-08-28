@@ -86,6 +86,7 @@ or bring the stack up yourself and `pnpm exec vite dev`.
       }
       #swath-author-inspector { padding: var(--swath-space-3); }
       #swath-search { margin-inline-start: auto; }
+      #swath-rail-drawer-body { display: grid; gap: var(--swath-space-3); }
       #swath-xray-rail {
         display: flex;
         flex-direction: column;
@@ -158,6 +159,11 @@ or bring the stack up yourself and `pnpm exec vite dev`.
       <!-- Author mode (issue #291): the step strip over the map, the
            selected step's fields in the inspector column. M11 swaps the
            strip for the DAG editor — a content change, not a layout one. -->
+      <!-- Below the wide tier the rail's mode content lives here (issue #293):
+           a right drawer at 640–1279, a bottom sheet with 40/90 snaps under 640. -->
+      <swath-drawer slot="main" id="swath-rail-drawer" edge="right" snap="40,90" label="Panel">
+        <div id="swath-rail-drawer-body"></div>
+      </swath-drawer>
       <swath-drawer slot="main" id="swath-author-dock" edge="bottom" size="38%" label="Pipeline">
         <span slot="header">Pipeline</span>
         <div id="swath-author-strip"></div>
@@ -167,7 +173,7 @@ or bring the stack up yourself and `pnpm exec vite dev`.
         <swath-status-cell id="swath-status-lonlat" label="lon/lat" mono title="Click to copy"></swath-status-cell>
         <swath-status-cell id="swath-status-zoom" label="zoom" mono></swath-status-cell>
         <swath-status-cell id="swath-status-crs" label="crs" mono></swath-status-cell>
-        <swath-status-cell id="swath-status-ingest" label="ingest→pixel" mono></swath-status-cell>
+        <swath-status-cell id="swath-status-ingest" label="ingest→pixel" mono chip-keep></swath-status-cell>
       </swath-status-bar>
     </swath-shell>
     <swath-command-palette label="Commands"></swath-command-palette>

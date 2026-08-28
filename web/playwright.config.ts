@@ -41,8 +41,13 @@ export default defineConfig({
     // suite opts in (everything else is desktop-only until #293).
     {
       name: "mobile",
-      testMatch: /canvas\.e2e\.ts/,
-      use: { ...devices["Pixel 7"] },
+      testMatch: /(canvas|mobile)\.e2e\.ts/,
+      use: {
+        ...devices["Pixel 7"],
+        viewport: { width: 393, height: 852 },
+        hasTouch: true,
+        isMobile: true,
+      },
     },
   ],
   use: {

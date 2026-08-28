@@ -554,8 +554,9 @@ test("the compare toggle starts before-vs-after on a time series and ends any co
   stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
   const el = mount({ server: SERVER, layer: "ndvi" });
   await el.ready;
-  const button = el.querySelector<HTMLButtonElement>(".swath-map-compare-toggle button");
-  expect(button?.closest<HTMLElement>(".swath-map-compare-toggle")?.hidden).toBe(false);
+  const toggle = el.querySelector<HTMLElement>(".swath-map-compare-toggle");
+  const button = toggle?.shadowRoot?.querySelector<HTMLButtonElement>("button");
+  expect(toggle?.hidden).toBe(false);
   expect(button?.getAttribute("aria-pressed")).toBe("false");
 
   // Viewing "latest": the toggle pins newest right, jumps left to oldest.
@@ -640,7 +641,7 @@ test("zoom to data: frames known bounds; hidden when nothing is known", async ()
   const control = el.querySelector<HTMLElement>(".swath-map-zoomdata");
   expect(control?.hidden).toBe(false);
   const frame = framed(el);
-  control?.querySelector("button")?.click();
+  control?.click(); // a <swath-button>: the map listens on the host
   await frame;
   const center = el.map?.getCenter();
   expect(center?.lng).toBeGreaterThan(BBOX.west);

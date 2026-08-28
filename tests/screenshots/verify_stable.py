@@ -42,15 +42,15 @@ RAIL_WIDTH = 248
 MAX_MODAL_FRAC = 0.97
 
 
-def content_ok(path: pathlib.Path) -> bool:
+def content_ok(path: pathlib.Path, rail_width: int = RAIL_WIDTH) -> bool:
     """One image, judged alone: is its map region actually painted?"""
-    print(f"content {path.name} (left {RAIL_WIDTH}, max modal fraction {MAX_MODAL_FRAC})")
+    print(f"content {path.name} (left {rail_width}, max modal fraction {MAX_MODAL_FRAC})")
     result = subprocess.run(
         [
             *PDIFF,
             "--content",
             "--left",
-            str(RAIL_WIDTH),
+            str(rail_width),
             "--max-modal-frac",
             str(MAX_MODAL_FRAC),
             str(path),
@@ -83,7 +83,7 @@ def main() -> int:
         f"{directory.name}/{shot['file']}"
         for directory in (first, second)
         for shot in shots
-        if not content_ok(directory / shot["file"])
+        if not content_ok(directory / shot["file"], int(shot.get("railWidth", RAIL_WIDTH)))
     ]
     if blanks:
         print(f"FAIL: {len(blanks)} shot(s) show an unpainted map: {', '.join(blanks)}")

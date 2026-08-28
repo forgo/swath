@@ -55,6 +55,8 @@ interface Shot {
    * show wall-clock timestamps or per-run timings budget for exactly that
    * text; pixel content everywhere else must reproduce. */
   maxBadFrac: number;
+  /** Left edge of the map region the content gate inspects (0 on phones). */
+  railWidth: number;
 }
 
 const captured: Shot[] = [];
@@ -63,7 +65,7 @@ async function capture(
   page: Page,
   file: string,
   caption: string,
-  policy?: { tolerance?: number; maxBadFrac?: number },
+  policy?: { tolerance?: number; maxBadFrac?: number; railWidth?: number },
 ): Promise<void> {
   // Let the last paint (overlay text, badge layout) settle before freezing.
   await page.waitForTimeout(400);
@@ -78,6 +80,9 @@ async function capture(
     caption,
     tolerance: policy?.tolerance ?? 2,
     maxBadFrac: policy?.maxBadFrac ?? 0.005,
+    // The content gate inspects the canvas right of the rail: 248 on the
+    // desktop shots, 0 on the phone shots (the rail is a bottom tab bar).
+    railWidth: policy?.railWidth ?? 248,
   });
 }
 
@@ -178,6 +183,11 @@ async function openAuthoringPanel(page: Page): Promise<void> {
   // Author mode (#291): the strip drawer over the map + the inspector.
   await page.locator('swath-rail [part="item"][data-mode="author"]').click();
   await page.locator("swath-authoring-panel .swath-authoring-toggle").click();
+  // The inspector (fields, preview, publish) shows the *selected* step.
+  const chip = page.locator('.swath-authoring-chip[data-chip="s1"]');
+  if ((await chip.count()) > 0 && (await chip.getAttribute("aria-pressed")) !== "true") {
+    await chip.click();
+  }
   await expect(page.locator('[data-step="s1"]')).toBeVisible();
 }
 
@@ -307,7 +317,8 @@ test("x-ray bytes heatmap + trace feed", async ({ page }) => {
     { maxBadFrac: 0.03 },
   );
 
-  await page.getByRole("button", { name: "trace feed" }).click();
+  // Exact: the feed card's header/pause controls are named "… trace feed" too.
+  await page.getByRole("button", { name: "trace feed", exact: true }).click();
   await expect(page.locator(".swath-xray-feed-lines")).toBeVisible();
   await expect(page.locator(".swath-xray-feed-lines li").first()).toBeVisible();
   await capture(
@@ -376,6 +387,8 @@ test("authoring publish: the authored layer serves immediately", async ({ page }
   try {
     // The authored layer lands in the rail and becomes the viewed layer;
     // wait for its tiles before freezing the frame.
+    // Author mode hides the layer list (issue #291): back to Layers to see the row.
+    await page.locator('swath-rail [part="item"][data-mode="layers"]').click();
     const layerButton = page.locator(`swath-layer-item[data-layer="${id}"] [part="row"]`);
     await expect(layerButton).toHaveAttribute("aria-pressed", "true");
     await page.waitForResponse(
@@ -389,11 +402,9 @@ test("authoring publish: the authored layer serves immediately", async ({ page }
       el.scrollTo({ top: 0 });
     });
     await expect(layerButton).toBeVisible();
-    // Publishing leaves the draft (and its preview) on the canvas: the
-    // post-publish re-render re-attaches the preview to a fresh <img>,
-    // so wait for it to decode exactly as shots 08/09 do (issue #270 —
-    // freezing before it lands framed an empty preview).
-    await waitForAuthoringPreview(page);
+    // The frame is Layers mode: the new rail entry (selected) over its
+    // tiles. The draft's preview lives in Author mode, which hides the
+    // layer list (#291) — shots 08/09 carry it.
     await capture(
       page,
       "10-authoring-published.png",
@@ -598,4 +609,78 @@ test.afterAll(() => {
     "",
   ];
   writeFileSync(path.join(OUT_DIR, "index.md"), `${lines.join("\n")}`);
+});
+
+// --- The phone tier (issue #293): m01–m04 at 393×852 with touch ---
+test.describe("phone", () => {
+  test.use({
+    viewport: { width: 393, height: 852 },
+    hasTouch: true,
+    isMobile: true,
+    deviceScaleFactor: 1,
+  });
+  const PHONE = { railWidth: 0, maxBadFrac: 0.03 };
+
+  test("m01 landing on a phone: tab bar, dock chip", async ({ page }) => {
+    await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=11`, "ndvi");
+    await expect(page.locator("swath-shell")).toHaveAttribute("tier", "phone");
+    await page.locator('swath-rail [part="item"][data-mode="layers"]').tap(); // fold the sheet away
+    await expect(page.locator("#swath-rail-drawer")).not.toHaveAttribute("open", "");
+    await waitForMapIdle(page);
+    await capture(
+      page,
+      "m01-phone-landing.png",
+      "Phone tier: the map with the bottom tab bar, the toggles top-right in the dock, the status chip bottom-left.",
+      PHONE,
+    );
+  });
+
+  test("m02 layers sheet", async ({ page }) => {
+    await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=11`, "ndvi");
+    await expect(page.locator("#swath-rail-drawer")).toHaveAttribute("open", "");
+    await expect(page.locator('swath-layer-item[data-layer="ndvi"] [part="row"]')).toBeVisible();
+    await waitForMapIdle(page);
+    await capture(
+      page,
+      "m02-phone-layers-sheet.png",
+      "Phone tier: the layer list as a bottom sheet at its 40% snap over the map.",
+      PHONE,
+    );
+  });
+
+  test("m03 data sheet with the catalog", async ({ page }) => {
+    await gotoAndWaitForTiles(
+      page,
+      `${DEMO_PATH}?view=data&layer=ndvi&center=${CENTER}&zoom=11`,
+      "ndvi",
+    );
+    await page.locator('swath-catalog [part="dataset"] select').selectOption("hls-s30");
+    const first = page.locator("swath-catalog swath-granule-card").first();
+    await expect(first).toBeVisible();
+    await expect(first.locator('img[part="media"]')).toBeVisible({ timeout: 60_000 });
+    await waitForMapIdle(page);
+    await capture(
+      page,
+      "m03-phone-data-sheet.png",
+      "Phone tier: Data mode's catalog in the sheet, an engine thumbnail on the first card.",
+      PHONE,
+    );
+  });
+
+  test("m04 x-ray on a phone", async ({ page }) => {
+    await gotoAndWaitForTiles(
+      page,
+      `${DEMO_PATH}?xray&view=xray&layer=truecolor&center=${CENTER}&zoom=13`,
+      "truecolor",
+    );
+    await page.locator('swath-rail [part="item"][data-mode="xray"]').tap(); // fold the sheet away
+    await expect(page.locator("#swath-rail-drawer")).not.toHaveAttribute("open", "");
+    await waitForXRay(page);
+    await capture(
+      page,
+      "m04-phone-xray.png",
+      "Phone tier: x-ray badges over the map, the readouts card in the dock strip, the toggles top-right.",
+      PHONE,
+    );
+  });
 });

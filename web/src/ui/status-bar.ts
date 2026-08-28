@@ -13,8 +13,23 @@ import { css } from "./styles.js";
 
 export class SwathStatusBar extends SwathElement {
   static override tagName = "swath-status-bar";
+  static override properties = {
+    /** One chip in the HUD dock (phones): only `chip-keep` cells show. */
+    chip: { type: "boolean", reflect: true },
+  } as const;
+
+  declare chip: boolean;
   static override styles = [
     css`
+      :host([chip]) {
+        block-size: auto;
+        padding: var(--swath-space-1) var(--swath-space-2);
+        border: var(--swath-border-hairline);
+        border-radius: var(--swath-radius-pill);
+        background: var(--swath-color-bg-hud);
+        gap: var(--swath-space-2);
+      }
+      :host([chip]) ::slotted(:not([chip-keep])) { display: none; }
       :host {
         box-sizing: border-box;
         display: flex;

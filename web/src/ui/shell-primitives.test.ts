@@ -3,13 +3,15 @@
 
 // The shell's primitives (#284): dock slots, card fold, status cells, rail.
 import { afterEach, beforeAll, expect, test } from "vitest";
-import { userEvent } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { SwathHudCard } from "./hud-card.js";
 import { DOCK_SLOTS, SwathHudDock } from "./hud-dock.js";
 import { SwathRail } from "./rail.js";
 import { SwathStatusBar, SwathStatusCell } from "./status-bar.js";
 
-beforeAll(() => {
+beforeAll(async () => {
+  // The shell reflows by VIEWPORT width (#293): pin the desktop tier.
+  await page.viewport(1528, 928);
   SwathHudDock.define();
   SwathHudCard.define();
   SwathStatusBar.define();
