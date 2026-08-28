@@ -10,6 +10,8 @@ Byte-identical to the compiler's pinned oracle copies in
 openeo-processes **1.2.0**, commit
 `d0ce91fcd347360b907ea2d9589d7564a2c1e1e3`); the test suite asserts the two
 sets stay identical, so a deliberate re-pin must update both.
+(`merge_cubes.json` is pinned ahead of its serving — the compiler admits the
+join per ADR 0022; `GET /processes` lists it once issue #297 lands.)
 
 Definitions are served **verbatim** except that, where Swath's v0 profile
 narrows a parameter's accepted range, the served document's `description`

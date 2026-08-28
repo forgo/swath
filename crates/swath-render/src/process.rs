@@ -63,6 +63,16 @@
 //!   post-eval presentation, so it rides the save node). It is rejected
 //!   on a multi-band (composite) result: a LUT maps one gray value per
 //!   pixel. Absent, gray results default to `"grayscale"`.
+//! * **`merge_cubes`** (ADR 0022, the two-cube join) — over two **gray**,
+//!   unscaled cubes (`ndvi` / `reduce_dimension` results) that load the
+//!   context's collection through **two different `load_collection`
+//!   nodes** — one per frame, each with its own resolution window.
+//!   `overlap_resolver` is **required**: a child graph over `x` (from
+//!   `cube1`) and `y` (from `cube2`) producing a scalar per pixel pair —
+//!   the same reducer mechanism, so `subtract` and its siblings apply
+//!   verbatim. `context` is not admitted. Multi-band, scaled, and UDF
+//!   inputs are rejected with the fix named (reduce first, scale after,
+//!   no UDF join in v1). The result is gray, over both sources.
 //! * **`run_udf`** (ADR 0018, the bounded profile's sandboxed-WASM
 //!   extension) — over a loaded, unscaled cube: every loaded band
 //!   (deduplicated, load order) becomes one request plane, in that order,
@@ -89,7 +99,18 @@
 //! graphs are DAGs), cube-vs-scalar type mismatches — produces typed
 //! errors naming the offending node.
 //!
-//! A gray result (from `reduce_dimension` or `ndvi`) compiles to
+//! # Sources (ADR 0022)
+//!
+//! A graph with one `load_collection` compiles exactly as before. With
+//! more than one, every loaded band is qualified `band@node` (the node
+//! id of its `load_collection`), so the plan's inputs stay a flat,
+//! unique namespace while [`BandInput::source`](crate::ir::BandInput)
+//! names the branch each is read through; [`CompiledProduct::sources`]
+//! lists every source with its own resolution window, and
+//! [`CompiledProduct::window`] is their hull. Serving resolves one
+//! granule per source (issue #296).
+//!
+//! A gray result (from `reduce_dimension`, `ndvi`, or `merge_cubes`) compiles to
 //! `BandMath → [Rescale] → Colormap(...)` (the `save_result` colormap
 //! option, `Grayscale` when absent); a multi-band result must
 //! have exactly three bands and compiles to `Composite → [Rescale]` in
@@ -242,8 +263,17 @@ pub struct CompiledProduct {
     /// `filter_temporal` on the result path. Granule resolution is
     /// constrained to it (ADR 0015 frame selection: the window selects
     /// *which frames the layer can show*, never how pixels combine).
-    /// Open on both sides when the graph says nothing about time.
+    /// Open on both sides when the graph says nothing about time. For a
+    /// product over more than one source this is the **hull** of the
+    /// sources' windows (a frame either branch can show lies inside it);
+    /// the per-branch windows are in [`sources`](Self::sources).
     pub window: TimeRange,
+    /// Every `load_collection` the plan reads through, in first-use
+    /// order, each with its own resolution window (ADR 0022). One entry
+    /// for the single-source chain; two for a `merge_cubes` join —
+    /// serving resolves one granule per entry and reads the plan inputs
+    /// whose [`BandInput::source`](crate::ir::BandInput) names it.
+    pub sources: Vec<SourceWindow>,
     /// The `run_udf` module bytes the plan's UDF stage was registered
     /// from — what the publish motion persists in the module store under
     /// the stage's `code_hash` (ADR 0018, #204). `None` for graphs
@@ -251,9 +281,21 @@ pub struct CompiledProduct {
     pub udf_module: Option<Vec<u8>>,
 }
 
+/// One source of a compiled product: a `load_collection` node and the
+/// resolution window its branch implies (ADR 0022).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceWindow {
+    /// The `load_collection` node id (what `band@node` inputs name).
+    pub node: String,
+    /// `temporal_extent` intersected with every `filter_temporal` on the
+    /// branch; open on both sides when the branch says nothing.
+    pub window: TimeRange,
+}
+
 /// The supported process ids, for diagnostics.
 const SUPPORTED: &str = "load_collection, filter_temporal, reduce_dimension, array_element, \
-     add, subtract, multiply, divide, linear_scale_range, ndvi, run_udf, save_result";
+     add, subtract, multiply, divide, linear_scale_range, ndvi, merge_cubes, run_udf, \
+     save_result";
 
 /// Why a process graph could not be compiled. Every variant names the
 /// offending node; the Display strings are user-facing diagnostics and are
@@ -372,6 +414,17 @@ pub enum CompileError {
         /// Why the window is empty.
         detail: String,
     },
+    /// `merge_cubes` without an `overlap_resolver` (ADR 0022): the spec's
+    /// default — fail on overlap — would reject every pixel of a join
+    /// whose whole point is the overlap, so the resolver is required.
+    #[error(
+        "node `{node}` (merge_cubes): overlap_resolver is required — a child graph over x \
+         (from cube1) and y (from cube2) producing one value per pixel pair, e.g. subtract"
+    )]
+    MissingResolver {
+        /// The `merge_cubes` node.
+        node: String,
+    },
     /// `filter_temporal`'s `dimension` names a dimension that is not the
     /// temporal dimension (the spec's `DimensionNotAvailable` exception).
     #[error(
@@ -463,10 +516,12 @@ struct Cube {
     /// The palette requested by `save_result`'s `colormap` option
     /// (gray results only; `None` = grayscale).
     colormap: Option<Colormap>,
-    /// The temporal resolution window so far: `temporal_extent`
-    /// intersected with every `filter_temporal` applied to this cube
-    /// (ADR 0015 frame selection). Open on both sides = unconstrained.
-    window: TimeRange,
+    /// The sources this cube reads through, each with its resolution
+    /// window so far: `temporal_extent` intersected with every
+    /// `filter_temporal` applied to the cube (ADR 0015 frame selection;
+    /// open on both sides = unconstrained). One entry until a
+    /// `merge_cubes` joins two (ADR 0022).
+    sources: Vec<SourceWindow>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -590,6 +645,9 @@ struct Scope<'a> {
 
 struct Compiler<'a> {
     ctx: &'a CompileContext,
+    /// The graph loads the collection through more than one node
+    /// (ADR 0022): loaded bands are qualified `band@node`.
+    multi_source: bool,
 }
 
 impl<'a> Compiler<'a> {
@@ -617,6 +675,7 @@ impl<'a> Compiler<'a> {
             "filter_temporal" => self.filter_temporal(scope, id),
             "reduce_dimension" => self.reduce_dimension(scope, id),
             "ndvi" => self.ndvi(scope, id),
+            "merge_cubes" => self.merge_cubes(scope, id),
             "linear_scale_range" => self.linear_scale_range(scope, id),
             "run_udf" => self.run_udf(scope, id),
             "save_result" => self.save_result(scope, id),
@@ -793,9 +852,16 @@ impl<'a> Compiler<'a> {
                     band: label.into(),
                     available: self.ctx.known_names(),
                 })?;
+            // More than one source in the graph: qualify the band by its
+            // load node so the plan's inputs stay unique (ADR 0022).
+            let dataset = if self.multi_source {
+                format!("{dataset}@{node}")
+            } else {
+                dataset.to_owned()
+            };
             loaded.push(LoadedBand {
                 label: label.into(),
-                dataset: dataset.into(),
+                dataset,
             });
         }
         let window = match Self::arg(n, "temporal_extent") {
@@ -808,7 +874,10 @@ impl<'a> Compiler<'a> {
             kind: CubeKind::Multi(loaded),
             rescale: None,
             colormap: None,
-            window,
+            sources: vec![SourceWindow {
+                node: node.into(),
+                window,
+            }],
         }))
     }
 
@@ -838,7 +907,9 @@ impl<'a> Compiler<'a> {
         }
         let extent = Self::require(scope, node, "extent")?;
         let filter = Self::temporal_interval(extent, node, "filter_temporal", "extent")?;
-        cube.window = Self::intersect_windows(&cube.window, &filter, node)?;
+        for source in &mut cube.sources {
+            source.window = Self::intersect_windows(&source.window, &filter, node)?;
+        }
         Ok(Value::Cube(cube))
     }
 
@@ -986,7 +1057,7 @@ impl<'a> Compiler<'a> {
         node: &'a str,
     ) -> Result<Value, CompileError> {
         let cube = self.cube_arg(scope, node, "data")?;
-        let window = cube.window.clone();
+        let sources = cube.sources.clone();
         let bands = Self::unscaled_multi(cube, node, "reduce_dimension")?;
 
         let dimension = Self::require(scope, node, "dimension")?;
@@ -1025,7 +1096,7 @@ impl<'a> Compiler<'a> {
                 kind: CubeKind::Gray(expr),
                 rescale: None,
                 colormap: None,
-                window,
+                sources,
             })),
             other => Err(CompileError::TypeMismatch {
                 node: node.into(),
@@ -1038,7 +1109,7 @@ impl<'a> Compiler<'a> {
 
     fn ndvi(&self, scope: &mut Scope<'a>, node: &'a str) -> Result<Value, CompileError> {
         let cube = self.cube_arg(scope, node, "data")?;
-        let window = cube.window.clone();
+        let sources = cube.sources.clone();
         let bands = Self::unscaled_multi(cube, node, "ndvi")?;
         let n = &scope.graph.nodes[node];
         if let Some(target) = Self::arg(n, "target_band")
@@ -1075,8 +1146,122 @@ impl<'a> Compiler<'a> {
             kind: CubeKind::Gray(expr),
             rescale: None,
             colormap: None,
-            window,
+            sources,
         }))
+    }
+
+    /// `merge_cubes` (ADR 0022): two gray, unscaled cubes from different
+    /// `load_collection` nodes, joined per pixel pair by the required
+    /// `overlap_resolver` child graph over `x` / `y` — the module docs
+    /// carry the profile's narrowing.
+    fn merge_cubes(&self, scope: &mut Scope<'a>, node: &'a str) -> Result<Value, CompileError> {
+        let n = &scope.graph.nodes[node];
+        if let Some(context) = Self::arg(n, "context")
+            && !context.is_null()
+        {
+            return Err(CompileError::InvalidArgument {
+                node: node.into(),
+                process: "merge_cubes".into(),
+                argument: "context".into(),
+                detail: "not admitted in the bounded profile: the resolver sees only x and y"
+                    .into(),
+            });
+        }
+        let cube1 = self.cube_arg(scope, node, "cube1")?;
+        let cube2 = self.cube_arg(scope, node, "cube2")?;
+        let (x, mut sources) = Self::gray_unscaled(cube1, node, "cube1")?;
+        let (y, more) = Self::gray_unscaled(cube2, node, "cube2")?;
+        if let Some(shared) = more
+            .iter()
+            .find(|s| sources.iter().any(|t| t.node == s.node))
+        {
+            return Err(CompileError::InvalidArgument {
+                node: node.into(),
+                process: "merge_cubes".into(),
+                argument: "cube2".into(),
+                detail: format!(
+                    "both cubes load the collection through node `{}` — load it once per \
+                     frame (a second load_collection with its own temporal_extent) so each \
+                     branch resolves its own granule",
+                    shared.node
+                ),
+            });
+        }
+        sources.extend(more);
+        let n = &scope.graph.nodes[node];
+        let resolver = match Self::arg(n, "overlap_resolver") {
+            None | Some(Json::Null) => {
+                return Err(CompileError::MissingResolver { node: node.into() });
+            }
+            Some(resolver) => resolver,
+        };
+        let sub = Graph::parse(resolver).map_err(|err| match err {
+            CompileError::Malformed { detail } => CompileError::InvalidArgument {
+                node: node.into(),
+                process: "merge_cubes".into(),
+                argument: "overlap_resolver".into(),
+                detail: format!("not a child process graph: {detail}"),
+            },
+            other => other,
+        })?;
+        let mut params = BTreeMap::new();
+        params.insert("x", Value::Scalar(x));
+        params.insert("y", Value::Scalar(y));
+        let mut sub_scope = Scope {
+            graph: sub,
+            params,
+            states: BTreeMap::new(),
+        };
+        let result_id = sub_scope.graph.result;
+        match self.eval_node(&mut sub_scope, result_id)? {
+            Value::Scalar(expr) => Ok(Value::Cube(Cube {
+                kind: CubeKind::Gray(expr),
+                rescale: None,
+                colormap: None,
+                sources,
+            })),
+            other => Err(CompileError::TypeMismatch {
+                node: node.into(),
+                process: "merge_cubes".into(),
+                expected: "an overlap_resolver producing a scalar per pixel pair".into(),
+                got: other.kind().into(),
+            }),
+        }
+    }
+
+    /// A `merge_cubes` input: gray (one value per pixel) and not yet
+    /// scaled, with the sources it reads through.
+    fn gray_unscaled(
+        cube: Cube,
+        node: &'a str,
+        argument: &str,
+    ) -> Result<(Expr, Vec<SourceWindow>), CompileError> {
+        let reject = |detail: String| CompileError::InvalidArgument {
+            node: node.into(),
+            process: "merge_cubes".into(),
+            argument: argument.into(),
+            detail,
+        };
+        if cube.rescale.is_some() {
+            return Err(reject(
+                "expected an unscaled data cube, got an already-scaled one — apply \
+                 linear_scale_range to the merged result instead"
+                    .into(),
+            ));
+        }
+        match cube.kind {
+            CubeKind::Gray(expr) => Ok((expr, cube.sources)),
+            CubeKind::Multi(bands) => Err(reject(format!(
+                "expected a gray (reduced) data cube, got a data cube with {} bands — reduce \
+                 to one value per pixel first (ndvi or reduce_dimension)",
+                bands.len()
+            ))),
+            CubeKind::Udf { .. } => Err(reject(
+                "expected a gray band-math cube, got a UDF result — a UDF result cannot feed \
+                 merge_cubes in v1"
+                    .into(),
+            )),
+        }
     }
 
     fn linear_scale_range(
@@ -1138,7 +1323,7 @@ impl<'a> Compiler<'a> {
     /// arity — the module docs carry the profile's narrowing.
     fn run_udf(&self, scope: &mut Scope<'a>, node: &'a str) -> Result<Value, CompileError> {
         let cube = self.cube_arg(scope, node, "data")?;
-        let window = cube.window.clone();
+        let sources = cube.sources.clone();
         let loaded = Self::unscaled_multi(cube, node, "run_udf")?;
         let n = &scope.graph.nodes[node];
         let invalid = |argument: &str, detail: String| CompileError::InvalidArgument {
@@ -1243,7 +1428,7 @@ impl<'a> Compiler<'a> {
             },
             rescale: None,
             colormap: None,
-            window,
+            sources,
         }))
     }
 
@@ -1468,7 +1653,12 @@ impl<'a> Compiler<'a> {
         let direct = bands.iter().find(|b| b.label == name);
         let via_ctx = || {
             let dataset = self.ctx.resolve(name)?;
-            bands.iter().find(|b| b.dataset == dataset)
+            bands.iter().find(|b| {
+                b.dataset
+                    .rsplit_once('@')
+                    .map_or(b.dataset.as_str(), |(d, _)| d)
+                    == dataset
+            })
         };
         direct
             .or_else(via_ctx)
@@ -1506,7 +1696,14 @@ pub fn compile(graph: &Json, ctx: &CompileContext) -> Result<CompiledProduct, Co
         params: BTreeMap::new(),
         states: BTreeMap::new(),
     };
-    let compiler = Compiler { ctx };
+    let multi_source = scope
+        .graph
+        .nodes
+        .values()
+        .filter(|n| n.process_id == "load_collection")
+        .count()
+        > 1;
+    let compiler = Compiler { ctx, multi_source };
     let value = compiler.eval_node(&mut scope, result_id)?;
     let Value::Cube(cube) = value else {
         // save_result always returns its data cube; anything else is a bug
@@ -1559,12 +1756,40 @@ pub fn compile(graph: &Json, ctx: &CompileContext) -> Result<CompiledProduct, Co
 
     let (plan, _) = plan_for(&spec);
     let bands = plan.inputs.iter().map(|input| input.name.clone()).collect();
+    let window = hull(cube.sources.iter().map(|source| &source.window));
     Ok(CompiledProduct {
         plan,
         collection: ctx.collection.clone(),
         bands,
         spec,
-        window: cube.window,
+        window,
+        sources: cube.sources,
         udf_module,
     })
+}
+
+/// The hull of resolution windows: the earliest start and the latest end,
+/// a side open as soon as any window is open there. What a product over
+/// more than one source reports as its window (ADR 0022) — a frame either
+/// branch can show lies inside it.
+fn hull<'w>(windows: impl Iterator<Item = &'w TimeRange>) -> TimeRange {
+    let mut windows = windows.peekable();
+    let Some(first) = windows.next() else {
+        return TimeRange::default();
+    };
+    let mut start = first.start.clone();
+    let mut end = first.end.clone();
+    for window in windows {
+        start = match (start, &window.start) {
+            (Some(a), Some(b)) if a.to_unix_millis() <= b.to_unix_millis() => Some(a),
+            (Some(_), Some(b)) => Some(b.clone()),
+            _ => None,
+        };
+        end = match (end, &window.end) {
+            (Some(a), Some(b)) if a.to_unix_millis() >= b.to_unix_millis() => Some(a),
+            (Some(_), Some(b)) => Some(b.clone()),
+            _ => None,
+        };
+    }
+    TimeRange { start, end }
 }

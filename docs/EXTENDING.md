@@ -132,11 +132,13 @@ structural proptests; surface honesty (`openeo_conformance.rs`).
 ### 3.3 Boundedness (what a process may not do)
 
 A process is a *pure per-pixel/per-band lowering* into the Render IR: no I/O, no new data
-sources (that is §2), no cross-granule pixels, no state between requests. Temporal arguments
-compile into the product's granule-resolution *window* — frame selection per ADR 0015, never
-how pixels combine. Products needing more are the reopen territory of ADR 0013.
+sources (that is §2), no neighbourhood pixels, no state between requests. Temporal arguments
+compile into a granule-resolution *window* per source — frame selection per ADR 0015, never
+how pixels combine; the one join, `merge_cubes` (ADR 0022), reads one pixel per source at the
+same location and keeps a window per source (`CompiledProduct::sources`). Products needing
+more are the reopen territory of ADR 0013 and ADR 0022.
 
-_Last verified against sources `cdfbc457b1a0`._
+_Last verified against sources `53ad10b5a70a`._
 
 ## 4. A new colormap
 
@@ -181,7 +183,7 @@ matplotlib directly); the two-level relation to the oracle-validated gray tile
 (`golden_ir.rs`); the openEO → plan → persisted metadata → recompiled round trips; the
 diagnostics snapshots.
 
-_Last verified against sources `ef67a86e77f1`._
+_Last verified against sources `b02ede57fdeb`._
 
 ## 5. The proof: a toy adapter built from §2
 

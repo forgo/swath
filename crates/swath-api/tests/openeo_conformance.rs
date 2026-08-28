@@ -253,7 +253,7 @@ fn runtime_process_definitions_match_the_pinned_oracle_copies() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 12, "all twelve supported definitions are served");
+    assert_eq!(checked, 13, "all thirteen pinned definitions are mirrored");
 }
 
 // --- Service types ---

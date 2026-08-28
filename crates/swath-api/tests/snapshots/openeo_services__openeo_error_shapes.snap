@@ -28,7 +28,7 @@ expression: shapes
     "status": 400,
     "error": {
       "code": "ProcessUnsupported",
-      "message": "node `smooth`: unsupported process `apply_kernel` — the supported subset is: load_collection, filter_temporal, reduce_dimension, array_element, add, subtract, multiply, divide, linear_scale_range, ndvi, run_udf, save_result"
+      "message": "node `smooth`: unsupported process `apply_kernel` — the supported subset is: load_collection, filter_temporal, reduce_dimension, array_element, add, subtract, multiply, divide, linear_scale_range, ndvi, merge_cubes, run_udf, save_result"
     }
   },
   "unknown band": {

@@ -62,7 +62,7 @@ pub use error::RenderError;
 pub use grid::TargetGrid;
 pub use ir::{Evaluation, RenderPlan, RgbaTile, UdfCost, eval, eval_with};
 pub use plan::{PlanMetadata, PlanSpec, ndvi_expr, plan_for};
-pub use process::{CompileContext, CompileError, CompiledProduct, compile};
+pub use process::{CompileContext, CompileError, CompiledProduct, SourceWindow, compile};
 pub use tiler::{EncodedTile, TileError, TileRequest, render_tile, render_tile_cached};
 pub use udf::{
     NoUdf, UdfError, UdfExecutor, UdfLimits, UdfOutput, UdfRegistrar, UdfRegistration, UdfSource,

@@ -291,6 +291,25 @@ fn pinned_definitions_still_say_what_the_compiler_assumes() {
     );
     // save_result: data + format.
     assert!(param_names(&process_def("save_result")).starts_with(&["data", "format"]));
+    // merge_cubes (ADR 0022): cube1 + cube2 + an OPTIONAL overlap_resolver
+    // (why the compiler must require it explicitly — the spec's default,
+    // failing on overlap, would reject every pixel of a join) + context;
+    // the resolver's parameters are named x and y.
+    let merge = process_def("merge_cubes");
+    assert_eq!(
+        param_names(&merge),
+        ["cube1", "cube2", "overlap_resolver", "context"]
+    );
+    assert_eq!(param(&merge, "overlap_resolver")["optional"], json!(true));
+    assert_eq!(param(&merge, "context")["optional"], json!(true));
+    let resolver_params: Vec<&str> = param(&merge, "overlap_resolver")["schema"]["parameters"]
+        .as_array()
+        .expect("resolver parameters")
+        .iter()
+        .map(|p| p["name"].as_str().expect("name"))
+        .collect();
+    assert!(resolver_params.starts_with(&["x", "y"]));
+    assert_eq!(merge["returns"]["schema"]["subtype"], json!("raster-cube"));
 }
 
 // --- Error paths: every variant, snapshot-pinned diagnostics ------------
@@ -397,7 +416,7 @@ fn unsupported_and_unknown_error_displays_are_pinned() {
                 "result": true
             }
         }))),
-        @"node `blur`: unsupported process `apply_kernel` — the supported subset is: load_collection, filter_temporal, reduce_dimension, array_element, add, subtract, multiply, divide, linear_scale_range, ndvi, run_udf, save_result"
+        @"node `blur`: unsupported process `apply_kernel` — the supported subset is: load_collection, filter_temporal, reduce_dimension, array_element, add, subtract, multiply, divide, linear_scale_range, ndvi, merge_cubes, run_udf, save_result"
     );
     // UnknownCollection.
     let mut wrong_collection = load_node();
@@ -1214,5 +1233,193 @@ mod udf {
         // inline source code.
         let udf_forms = param(&def, "udf")["schema"].as_array().expect("schemas");
         assert!(udf_forms.iter().any(|s| s["pattern"] == "^https?://"));
+    }
+}
+
+// --- merge_cubes (ADR 0022): the two-cube join ------------------------------
+
+mod merge_cubes {
+    use super::*;
+    use swath_render::SourceWindow;
+
+    /// The committed change-detection graph: NDVI(after) − NDVI(before),
+    /// two `load_collection` nodes of the same collection with disjoint
+    /// month windows, joined by a `subtract` resolver.
+    fn change_detection() -> Json {
+        graph("change-detection.json")
+    }
+
+    #[test]
+    fn change_detection_compiles_to_one_band_math_plan_over_two_sources() {
+        let product = swath_render::compile(&change_detection(), &hls_ctx()).expect("compiles");
+        // Inputs are qualified per source (first-reference order: cube1's
+        // branch first) and name the dataset band each reads.
+        let inputs: Vec<(&str, Option<&str>)> = product
+            .plan
+            .inputs
+            .iter()
+            .map(|i| (i.name.as_str(), i.source.as_deref()))
+            .collect();
+        assert_eq!(
+            inputs,
+            [
+                ("b8a@after", Some("after")),
+                ("b04@after", Some("after")),
+                ("b8a@before", Some("before")),
+                ("b04@before", Some("before")),
+            ]
+        );
+        let bands: Vec<&str> = product.plan.inputs.iter().map(BandInput::band).collect();
+        assert_eq!(bands, ["b8a", "b04", "b8a", "b04"]);
+        assert_eq!(
+            product.bands,
+            ["b8a@after", "b04@after", "b8a@before", "b04@before"]
+        );
+        // Each source keeps its own resolution window; the product's window
+        // is their hull.
+        let may = TimeRange {
+            start: Some(dt("2024-05-01T00:00:00Z")),
+            end: Some(dt("2024-05-31T23:59:59.999Z")),
+        };
+        let june = TimeRange {
+            start: Some(dt("2024-06-01T00:00:00Z")),
+            end: Some(dt("2024-06-30T23:59:59.999Z")),
+        };
+        assert_eq!(
+            product.sources,
+            [
+                SourceWindow {
+                    node: "after".into(),
+                    window: june,
+                },
+                SourceWindow {
+                    node: "before".into(),
+                    window: may,
+                },
+            ]
+        );
+        assert_eq!(
+            product.window,
+            TimeRange {
+                start: Some(dt("2024-05-01T00:00:00Z")),
+                end: Some(dt("2024-06-30T23:59:59.999Z")),
+            }
+        );
+        // One band-math plan: BandMath → Rescale → Colormap, exactly the
+        // single-source shape with qualified inputs.
+        insta::assert_json_snapshot!("change_detection_plan_json_shape", product.plan);
+    }
+
+    #[test]
+    fn filter_temporal_after_the_join_narrows_every_branch() {
+        let mut g = change_detection();
+        let nodes = g["process_graph"].as_object_mut().expect("nodes");
+        nodes.insert(
+            "late".into(),
+            json!({
+                "process_id": "filter_temporal",
+                "arguments": {
+                    "data": {"from_node": "change"},
+                    "extent": ["2024-05-15T00:00:00Z", null]
+                }
+            }),
+        );
+        nodes["scale"]["arguments"]["x"] = json!({"from_node": "late"});
+        let product = swath_render::compile(&g, &hls_ctx()).expect("compiles");
+        assert_eq!(
+            product.sources[0].window.start,
+            Some(dt("2024-06-01T00:00:00Z"))
+        );
+        assert_eq!(
+            product.sources[1].window.start,
+            Some(dt("2024-05-15T00:00:00Z"))
+        );
+    }
+
+    #[test]
+    fn single_source_graphs_keep_unqualified_inputs_and_one_source() {
+        let product =
+            swath_render::compile(&graph("ndvi-convenience.json"), &hls_ctx()).expect("compiles");
+        assert!(product.plan.inputs.iter().all(|i| i.source.is_none()));
+        assert_eq!(product.sources.len(), 1);
+        assert_eq!(product.sources[0].node, "load");
+        assert_eq!(product.sources[0].window, product.window);
+        // And the persisted plan JSON has no `source` key at all.
+        let json = serde_json::to_string(&product.plan).expect("serializes");
+        assert!(!json.contains("source"), "{json}");
+    }
+
+    fn err(g: &Json) -> CompileError {
+        swath_render::compile(g, &hls_ctx()).expect_err("must not compile")
+    }
+
+    #[test]
+    fn rejections_are_pinned() {
+        // multi × multi: the load nodes joined directly.
+        let mut g = change_detection();
+        g["process_graph"]["change"]["arguments"]["cube1"] = json!({"from_node": "after"});
+        g["process_graph"]["change"]["arguments"]["cube2"] = json!({"from_node": "before"});
+        insta::assert_snapshot!(
+            err(&g),
+            @"node `change` (merge_cubes): invalid argument `cube1`: expected a gray (reduced) data cube, got a data cube with 2 bands — reduce to one value per pixel first (ndvi or reduce_dimension)"
+        );
+        // A scaled input: linear_scale_range before the join.
+        let mut g = change_detection();
+        let nodes = g["process_graph"].as_object_mut().expect("nodes");
+        nodes.insert(
+            "early".into(),
+            json!({
+                "process_id": "linear_scale_range",
+                "arguments": {
+                    "x": {"from_node": "ndvi_before"},
+                    "inputMin": -1, "inputMax": 1, "outputMin": 0, "outputMax": 255
+                }
+            }),
+        );
+        nodes["change"]["arguments"]["cube2"] = json!({"from_node": "early"});
+        insta::assert_snapshot!(
+            err(&g),
+            @"node `change` (merge_cubes): invalid argument `cube2`: expected an unscaled data cube, got an already-scaled one — apply linear_scale_range to the merged result instead"
+        );
+        // No resolver.
+        let mut g = change_detection();
+        g["process_graph"]["change"]["arguments"]
+            .as_object_mut()
+            .expect("arguments")
+            .remove("overlap_resolver");
+        insta::assert_snapshot!(
+            err(&g),
+            @"node `change` (merge_cubes): overlap_resolver is required — a child graph over x (from cube1) and y (from cube2) producing one value per pixel pair, e.g. subtract"
+        );
+        // A resolver whose result is a cube, not a scalar per pixel pair.
+        let mut g = change_detection();
+        g["process_graph"]["change"]["arguments"]["overlap_resolver"] = json!({
+            "process_graph": {
+                "again": {
+                    "process_id": "load_collection",
+                    "arguments": {"id": "hls-s30", "bands": ["red"]},
+                    "result": true
+                }
+            }
+        });
+        insta::assert_snapshot!(
+            err(&g),
+            @"node `change` (merge_cubes): type mismatch — expected an overlap_resolver producing a scalar per pixel pair, got a multi-band data cube"
+        );
+        // Both branches through one load node: the frames would be
+        // indistinguishable.
+        let mut g = change_detection();
+        g["process_graph"]["ndvi_after"]["arguments"]["data"] = json!({"from_node": "before"});
+        insta::assert_snapshot!(
+            err(&g),
+            @"node `change` (merge_cubes): invalid argument `cube2`: both cubes load the collection through node `before` — load it once per frame (a second load_collection with its own temporal_extent) so each branch resolves its own granule"
+        );
+        // `context` is not admitted.
+        let mut g = change_detection();
+        g["process_graph"]["change"]["arguments"]["context"] = json!({"k": 1});
+        insta::assert_snapshot!(
+            err(&g),
+            @"node `change` (merge_cubes): invalid argument `context`: not admitted in the bounded profile: the resolver sees only x and y"
+        );
     }
 }
