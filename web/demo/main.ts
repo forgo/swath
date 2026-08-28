@@ -636,6 +636,105 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     wireShare(shareElement, snapshot);
   }
 
+  // Responsive reflow (issue #293, ui-system.md §6): the shell reports its
+  // tier; the host moves the pieces. Wide: as drawn. Medium/narrow: an
+  // icon rail, the mode content in a right drawer (modal with a scrim on
+  // narrow). Phone: a bottom tab bar, the content as a sheet (40/90 snaps),
+  // the status bar folded into the dock as one chip, the map inert under
+  // a 90% sheet. Tapping the active tab toggles the sheet.
+  const railDrawer = document.querySelector("#swath-rail-drawer");
+  const railDrawerBody = document.querySelector("#swath-rail-drawer-body");
+  const statusBar = document.querySelector("swath-status-bar");
+  const hudDock = document.querySelector("swath-hud-dock");
+  const railContent = (): HTMLElement[] =>
+    [panel, datasetElement, addDataElement, authoringElement, xrayRail].filter(
+      (node): node is HTMLElement => node instanceof HTMLElement,
+    );
+  let tier = "wide";
+  const modeHasContent = (): boolean => appState.view !== "xray" || map.hasAttribute("xray");
+  const applyTier = (next: string): void => {
+    tier = next;
+    document.body.dataset["tier"] = next;
+    const compact = next !== "wide";
+    if (
+      railDrawer instanceof SwathDrawer &&
+      railDrawerBody instanceof HTMLElement &&
+      railElement instanceof SwathRail
+    ) {
+      if (compact) {
+        railDrawerBody.append(...railContent());
+        railDrawer.modal = next === "narrow";
+        railDrawer.open = modeHasContent();
+      } else {
+        railElement.append(...railContent());
+        railDrawer.open = false;
+      }
+    }
+    if (
+      statusBar instanceof SwathStatusBar &&
+      hudDock instanceof HTMLElement &&
+      shellElement instanceof SwathShell
+    ) {
+      if (next === "phone") {
+        statusBar.chip = true;
+        statusBar.slot = "bottom-left";
+        hudDock.append(statusBar);
+      } else {
+        statusBar.chip = false;
+        statusBar.slot = "statusbar";
+        shellElement.append(statusBar);
+      }
+    }
+    syncInert();
+  };
+  const syncInert = (): void => {
+    const sheetFull =
+      railDrawer instanceof SwathDrawer &&
+      railDrawer.open &&
+      railDrawer.getAttribute("presentation") === "bottom" &&
+      railDrawer.snapIndex === 1;
+    const modalOpen = railDrawer instanceof SwathDrawer && railDrawer.open && railDrawer.modal;
+    map.inert = sheetFull || modalOpen;
+  };
+  if (shellElement instanceof SwathShell) {
+    shellElement.addEventListener("swath-change", (event) => {
+      if (event.detail.name === "tier") {
+        applyTier(String(event.detail.value));
+      }
+    });
+    if (shellElement.tier !== undefined) {
+      applyTier(shellElement.tier);
+    }
+  }
+  if (railDrawer instanceof SwathDrawer) {
+    railDrawer.addEventListener("swath-drawer-close", () => {
+      railDrawer.open = false;
+      syncInert();
+    });
+    railDrawer.addEventListener("swath-change", (event) => {
+      if (event.detail.name === "snap") {
+        syncInert();
+      }
+    });
+  }
+  if (railElement instanceof SwathRail && railDrawer instanceof SwathDrawer) {
+    railElement.addEventListener("click", (event) => {
+      const item = event
+        .composedPath()
+        .find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset["mode"] !== undefined);
+      if (item && item.dataset["mode"] === appState.view && tier !== "wide") {
+        railDrawer.open = !railDrawer.open;
+        syncInert();
+      }
+    });
+    railElement.addEventListener("swath-mode-change", () => {
+      if (tier !== "wide" && railDrawer instanceof SwathDrawer) {
+        railDrawer.open = modeHasContent();
+        syncInert();
+      }
+    });
+  }
+
   // The command palette (issue #292): built from live state each time it
   // opens — layers, the other modes, the map toggles, share, and in Data
   // mode a jump to any listed granule. ⌘K / Ctrl-K anywhere, or the top

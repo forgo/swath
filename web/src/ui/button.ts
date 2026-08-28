@@ -121,8 +121,16 @@ export class SwathButton extends SwathElement {
 
   override attributeChangedCallback(attr: string, old: string | null, value: string | null): void {
     super.attributeChangedCallback(attr, old, value);
-    if (attr === "pressed" && value !== null) {
-      this.#toggle = true;
+    if (attr === "pressed") {
+      if (value !== null) {
+        this.#toggle = true;
+      }
+      // `pressed` reflects synchronously; mirror it to the control at once so
+      // a reader in the same tick (a test, a host reacting to its own
+      // attribute change) sees the state the render will confirm.
+      if (this.#toggle && this.#base) {
+        this.#base.setAttribute("aria-pressed", String(this.pressed));
+      }
     }
   }
 

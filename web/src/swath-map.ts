@@ -90,6 +90,7 @@ import {
 } from "./swath-xray.js";
 import { parseGranuleDatetimes, TimeSlider } from "./time-slider.js";
 import { centerTile } from "./tms.js";
+import { SwathButton } from "./ui/button.js";
 import { createSwathEvent } from "./ui/events.js";
 import { SwathHudCard } from "./ui/hud-card.js";
 import { adoptTokens } from "./ui/styles.js";
@@ -210,10 +211,7 @@ swath-map .swath-map-container { width: 100%; height: 100%; }
 /* MapLibre control skins: the library's white buttons, our type. Every
  * colour is a token (issue #285); translucent variants mix a token with
  * transparent so M12 retunes them from tokens.css alone. */
-swath-map .swath-map-switcher button,
-swath-map .swath-map-xray-toggle button,
-swath-map .swath-map-zoomdata button,
-swath-map .swath-map-compare-toggle button {
+swath-map .swath-map-switcher button {
   width: auto;
   padding: 0 8px;
   font-family: var(--swath-font-ui);
@@ -224,16 +222,18 @@ swath-map .swath-map-switcher button[aria-pressed="true"] {
   font-weight: 700;
   background: color-mix(in srgb, var(--swath-color-bg) 8%, transparent);
 }
-swath-map .swath-map-xray-toggle button[aria-pressed="true"] {
-  font-weight: 700;
-  background: color-mix(in srgb, var(--swath-color-decision-live) 15%, transparent);
+/* The map's own toggles (#293): a column top-right, in-map when bare. */
+.swath-map-toggles {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--swath-space-1);
 }
-swath-map .swath-map-zoomdata[hidden] { display: none; }
-swath-map .swath-map-compare-toggle button[aria-pressed="true"] {
-  font-weight: 700;
-  background: color-mix(in srgb, var(--swath-color-info) 15%, transparent);
-}
-swath-map .swath-map-compare-toggle[hidden] { display: none; }
+swath-hud-dock > .swath-map-toggles { position: static; }
 /* The time slider (issue #182) and the landing card (issue #211) are the
  * map's own chrome, class-scoped (not \`swath-map .…\`) because a shell
  * hosts them in its HUD dock (issue #285): docked, they sit in the dock's
@@ -484,135 +484,78 @@ class LayerSwitcherControl implements IControl {
 /** The x-ray toggle: one accessible button whose `aria-pressed` mirrors
  * the host's `xray` attribute — the attribute is the single source of
  * truth, the button just flips it. */
-class XRayToggleControl implements IControl {
-  readonly #host: SwathMap;
-  #button: HTMLButtonElement | undefined;
+/** The map's own toggles (#293): x-ray, compare, zoom-to-data as
+ * `<swath-button>`s. Under a shell they sit in the HUD dock's `top-right`
+ * slot; a bare map floats them top-right in-map. Same classes and
+ * accessible names as the MapLibre controls they replace, so every suite
+ * keeps its selectors; `hidden` follows the old `update()` rules. */
+class MapToggles {
+  readonly xray: SwathButton;
+  readonly compare: SwathButton;
+  readonly zoomData: SwathButton;
+  readonly container: HTMLElement;
+  #compareActive = false;
+  #compareAvailable = false;
 
   constructor(host: SwathMap) {
-    this.#host = host;
-  }
-
-  onAdd(): HTMLElement {
-    const container = document.createElement("div");
-    container.className = "maplibregl-ctrl maplibregl-ctrl-group swath-map-xray-toggle";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = "X-ray";
-    button.setAttribute("aria-label", "Toggle x-ray overlay");
-    button.addEventListener("click", () => {
-      this.#host.toggleAttribute("xray");
+    SwathButton.define();
+    const make = (
+      className: string,
+      label: string,
+      text: string,
+      pressed?: boolean,
+    ): SwathButton => {
+      const button = document.createElement("swath-button");
+      button.className = className;
+      button.label = label;
+      button.size = "sm";
+      button.textContent = text;
+      if (pressed !== undefined) {
+        button.setAttribute("pressed", String(pressed));
+      }
+      return button;
+    };
+    this.xray = make(
+      "swath-map-xray-toggle",
+      "Toggle x-ray overlay",
+      "X-ray",
+      host.hasAttribute("xray"),
+    );
+    this.xray.addEventListener("swath-toggle", (event) => {
+      event.stopPropagation();
+      host.toggleAttribute("xray", event.detail.pressed);
     });
-    this.#button = button;
-    container.append(button);
-    this.update(this.#host.hasAttribute("xray"));
-    return container;
-  }
-
-  onRemove(): void {
-    this.#button?.parentElement?.remove();
-    this.#button = undefined;
-  }
-
-  update(pressed: boolean): void {
-    this.#button?.setAttribute("aria-pressed", String(pressed));
-  }
-}
-
-/** The compare toggle (issue #210): one button that starts/ends the
- * before-vs-after gesture on the current layer's time series. Hidden
- * while the layer has fewer than two frames AND no compare is active (a
- * dead button would promise what it cannot do — but an active
- * layer-vs-layer compare must always be dismissable). The host's
- * attributes are the single source of truth; the button just asks. */
-class CompareToggleControl implements IControl {
-  readonly #host: SwathMap;
-  #container: HTMLElement | undefined;
-  #button: HTMLButtonElement | undefined;
-  #active = false;
-  #available = false;
-
-  constructor(host: SwathMap) {
-    this.#host = host;
-  }
-
-  onAdd(): HTMLElement {
-    const container = document.createElement("div");
-    container.className = "maplibregl-ctrl maplibregl-ctrl-group swath-map-compare-toggle";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = "compare";
-    button.setAttribute("aria-label", "Toggle compare swipe");
-    button.addEventListener("click", () => {
-      this.#host.toggleCompare();
+    this.compare = make("swath-map-compare-toggle", "Toggle compare swipe", "compare", false);
+    this.compare.addEventListener("swath-toggle", (event) => {
+      event.stopPropagation();
+      host.toggleCompare();
     });
-    container.append(button);
-    this.#container = container;
-    this.#button = button;
-    this.#render();
-    return container;
+    this.zoomData = make("swath-map-zoomdata", "Zoom to the layer's data", "zoom to data");
+    this.zoomData.addEventListener("click", () => host.zoomToData());
+    this.container = document.createElement("div");
+    this.container.className = "swath-map-toggles";
+    this.container.append(this.xray, this.compare, this.zoomData);
+    this.updateCompare(false, false);
+    this.updateZoomData(false);
   }
 
-  onRemove(): void {
-    this.#container?.remove();
-    this.#container = undefined;
-    this.#button = undefined;
+  updateXray(pressed: boolean): void {
+    this.xray.pressed = pressed;
   }
 
-  update(active: boolean, available: boolean): void {
-    this.#active = active;
-    this.#available = available;
-    this.#render();
+  updateCompare(active: boolean, available: boolean): void {
+    this.#compareActive = active;
+    this.#compareAvailable = available;
+    this.compare.pressed = active;
+    this.compare.hidden = !this.#compareActive && !this.#compareAvailable;
   }
 
-  #render(): void {
-    if (this.#container) {
-      this.#container.hidden = !this.#active && !this.#available;
-    }
-    this.#button?.setAttribute("aria-pressed", String(this.#active));
-  }
-}
-
-/** The "zoom to data" control (issue #182 follow-up): one button that
- * frames the current layer's data footprint — the recovery affordance
- * for "I picked a layer and see nothing; where on Earth is it?". Hidden
- * whenever the layer's footprint is unknown (a dead button would
- * promise what it cannot do). */
-class ZoomToDataControl implements IControl {
-  readonly #host: SwathMap;
-  #container: HTMLElement | undefined;
-  #known = false;
-
-  constructor(host: SwathMap) {
-    this.#host = host;
+  updateZoomData(known: boolean): void {
+    this.zoomData.hidden = !known;
   }
 
-  onAdd(): HTMLElement {
-    const container = document.createElement("div");
-    container.className = "maplibregl-ctrl maplibregl-ctrl-group swath-map-zoomdata";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = "zoom to data";
-    button.setAttribute("aria-label", "Zoom to the layer's data");
-    button.addEventListener("click", () => {
-      this.#host.zoomToData();
-    });
-    container.append(button);
-    container.hidden = !this.#known;
-    this.#container = container;
-    return container;
-  }
-
-  onRemove(): void {
-    this.#container?.remove();
-    this.#container = undefined;
-  }
-
-  /** Shows the button exactly while a footprint is known. */
-  update(known: boolean): void {
-    this.#known = known;
-    if (this.#container) {
-      this.#container.hidden = !known;
-    }
+  remove(): void {
+    this.container.remove();
   }
 }
 
@@ -751,7 +694,7 @@ export class SwathMap extends HTMLElement {
   #retrySeq = 0;
   #probedEmpty = false;
   #switcher: LayerSwitcherControl | undefined;
-  #xrayToggle: XRayToggleControl | undefined;
+  #toggles: MapToggles | undefined;
   #xray: XRayOverlay | undefined;
   #time: TimeSlider | undefined;
   #landing: LandingCard | undefined;
@@ -767,7 +710,6 @@ export class SwathMap extends HTMLElement {
   #cinematicReduced = false;
   /** The cinematic loop is paused under the pointer (resumes on leave). */
   #hoverPaused = false;
-  #zoomData: ZoomToDataControl | undefined;
   /** The compare swipe (issue #210): present exactly while a coherent
    * compare is asked for via `compare-datetime` / `compare-layer`. */
   #compare: CompareView | undefined;
@@ -776,7 +718,6 @@ export class SwathMap extends HTMLElement {
    * layer switch so a hidden layer cannot make the next one blank. */
   #layerVisible = true;
   #layerOpacity = 1;
-  #compareToggle: CompareToggleControl | undefined;
   /** The sides of the active compare — what the x-ray overlay matches
    * traces against, and the guard that keeps swipe-only updates from
    * touching the right map's source. */
@@ -889,10 +830,15 @@ export class SwathMap extends HTMLElement {
     }
     if (this.#xrayCards.length === 0) {
       SwathHudCard.define();
+      const tier = this.closest("swath-shell")?.getAttribute("tier") ?? "wide";
       const card = (slot: string, label: string): SwathHudCard => {
         const el = document.createElement("swath-hud-card");
         el.slot = slot;
         el.dense = true;
+        // 640–1023 (ui-system.md §6): HUD cards default collapsed.
+        el.collapsible = true;
+        el.collapsed = tier === "narrow";
+        el.title = label;
         el.className = "swath-map-xray-card";
         el.setAttribute("aria-label", label);
         el.dataset["xray"] = slot;
@@ -990,12 +936,7 @@ export class SwathMap extends HTMLElement {
       this.#scheduleCursor();
     });
     this.#map.on("move", () => this.#scheduleCursor());
-    this.#xrayToggle = new XRayToggleControl(this);
-    this.#map.addControl(this.#xrayToggle, "top-right");
-    this.#compareToggle = new CompareToggleControl(this);
-    this.#map.addControl(this.#compareToggle, "top-right");
-    this.#zoomData = new ZoomToDataControl(this);
-    this.#map.addControl(this.#zoomData, "top-right");
+    this.#toggles = new MapToggles(this);
     this.#time = new TimeSlider(this.ownerDocument, {
       scrubTo: (datetime) => {
         this.setAttribute("datetime", datetime);
@@ -1024,12 +965,20 @@ export class SwathMap extends HTMLElement {
     // bottom-center, the landing card at top-center. Without a shell (a
     // bare <swath-map>, every vitest mount) they float over the map.
     const dock = this.closest("swath-shell")?.querySelector(":scope > swath-hud-dock");
+    const toggles = this.#toggles?.container;
     if (dock) {
       this.#time.element.slot = "bottom-center";
       this.#landing.element.slot = "top-center";
       dock.append(this.#time.element, this.#landing.element);
+      if (toggles) {
+        toggles.slot = "top-right";
+        dock.append(toggles);
+      }
     } else {
       this.append(this.#time.element, this.#landing.element);
+      if (toggles) {
+        this.append(toggles);
+      }
     }
     this.#cinematicArmed = false;
     this.#hoverPaused = false;
@@ -1172,9 +1121,8 @@ export class SwathMap extends HTMLElement {
     this.#map?.remove();
     this.#map = undefined;
     this.#switcher = undefined;
-    this.#xrayToggle = undefined;
-    this.#compareToggle = undefined;
-    this.#zoomData = undefined;
+    this.#toggles?.remove();
+    this.#toggles = undefined;
     this.replaceChildren();
   }
 
@@ -1231,7 +1179,7 @@ export class SwathMap extends HTMLElement {
         } else {
           this.#enableXRay();
         }
-        this.#xrayToggle?.update(newValue !== null);
+        this.#toggles?.updateXray(newValue !== null);
         this.#landing?.setXray(newValue !== null);
         break;
       default:
@@ -1852,7 +1800,7 @@ export class SwathMap extends HTMLElement {
     this.#dataBounds = union
       ? { west: union[0], south: union[1], east: union[2], north: union[3] }
       : metadata?.bounds;
-    this.#zoomData?.update(this.#dataBounds !== undefined);
+    this.#toggles?.updateZoomData(this.#dataBounds !== undefined);
     this.#frames = domain.frames;
     this.#time?.setDomain(domain.frames, this.getAttribute("datetime"));
     this.#armCinematic(title, domain.frames.length);
@@ -1898,7 +1846,7 @@ export class SwathMap extends HTMLElement {
             this.getAttribute("compare-layer") ?? undefined,
           )
         : undefined;
-    this.#compareToggle?.update(spec !== undefined, this.#frames.length >= 2);
+    this.#toggles?.updateCompare(spec !== undefined, this.#frames.length >= 2);
     if (!spec || !map) {
       this.#compare?.dispose();
       this.#compare = undefined;

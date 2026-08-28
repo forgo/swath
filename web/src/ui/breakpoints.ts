@@ -22,3 +22,19 @@ export type Breakpoint = keyof typeof BREAKPOINTS;
 export function minWidth(bp: Breakpoint): string {
   return `(min-width: ${BREAKPOINTS[bp]}px)`;
 }
+
+/** The layout tier the viewport is in (ui-system.md §6's table). */
+export type LayoutTier = "wide" | "medium" | "narrow" | "phone";
+
+export function layoutTier(width: number): LayoutTier {
+  if (width >= BREAKPOINTS.wide) {
+    return "wide";
+  }
+  if (width >= BREAKPOINTS.medium) {
+    return "medium";
+  }
+  if (width >= BREAKPOINTS.narrow) {
+    return "narrow";
+  }
+  return "phone";
+}

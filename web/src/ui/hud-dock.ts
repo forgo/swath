@@ -68,6 +68,18 @@ export class SwathHudDock extends SwathElement {
       [data-slot="bottom-left"], [data-slot="bottom-right"] { justify-content: flex-end; }
       [data-slot="left"], [data-slot="right"] { justify-content: center; }
       ::slotted(*) { pointer-events: auto; }
+      /* < 640: corners collapse to a strip along the bottom; the top row
+       * keeps the toggles. */
+      @media (max-width: 639px) {
+        [part="base"] { grid-template-columns: 1fr auto; grid-template-rows: auto 1fr auto; padding: var(--swath-space-1); }
+        [data-slot="top-left"] { grid-area: 1 / 1; }
+        [data-slot="top-center"] { grid-area: 1 / 1; }
+        [data-slot="top-right"] { grid-area: 1 / 2; }
+        [data-slot="left"], [data-slot="right"] { display: none; }
+        [data-slot="bottom-left"] { grid-area: 3 / 1; }
+        [data-slot="bottom-center"] { grid-area: 3 / 1; }
+        [data-slot="bottom-right"] { grid-area: 3 / 2; }
+      }
     `,
   ];
   static override properties = {

@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeAll, expect, test } from "vitest";
+import { page } from "vitest/browser";
 import { defineSwathShell, SwathShell } from "./swath-shell.js";
 
-beforeAll(() => {
+beforeAll(async () => {
+  // The shell reflows by VIEWPORT width (#293): pin the desktop tier.
+  await page.viewport(1528, 928);
   defineSwathShell();
 });
 

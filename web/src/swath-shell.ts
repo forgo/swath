@@ -12,6 +12,7 @@
  * fed by `announce(text)`, replaces ad-hoc status nodes. Desktop layout
  * only in #284; responsive reflow is its own issue.
  */
+import { layoutTier } from "./ui/breakpoints.js";
 import { el } from "./ui/dom.js";
 import { SwathElement } from "./ui/element.js";
 import { css } from "./ui/styles.js";
@@ -59,6 +60,22 @@ export class SwathShell extends SwathElement {
       }
       :host(:not([inspector])) [part="inspector"] { display: none; }
       [part="status"] { grid-area: status; min-inline-size: 0; }
+      /* Reflow (ui-system.md §6): below the wide tier the inspector is a
+       * drawer (the host moves it); under 640 px the rail is a bottom tab
+       * bar and the status bar folds into the dock as one chip. Viewport
+       * media queries, not container queries: the shell IS the viewport. */
+      @media (max-width: 639px) {
+        :host {
+          grid-template-columns: 1fr;
+          grid-template-rows: var(--swath-size-topbar) 1fr auto;
+          grid-template-areas:
+            "topbar"
+            "main"
+            "rail";
+        }
+        [part="status"] { display: none; }
+        [part="inspector"] { display: none; }
+      }
       [part="live"] {
         position: absolute;
         inline-size: 1px;
@@ -72,10 +89,24 @@ export class SwathShell extends SwathElement {
   static override properties = {
     view: { type: "string", reflect: true },
     inspector: { type: "boolean", reflect: true },
+    /** The layout tier (`wide | medium | narrow | phone`), reflected for
+     * hosts and tests; the shell computes it from its own width. */
+    tier: { type: "string", reflect: true },
   } as const;
 
   declare view: string | undefined;
   declare inspector: boolean;
+  declare tier: string | undefined;
+
+  #observer: ResizeObserver | undefined;
+
+  #syncTier(): void {
+    const next = layoutTier(this.clientWidth || window.innerWidth);
+    if (this.tier !== next) {
+      this.tier = next;
+      this.emit("swath-change", { name: "tier", value: next });
+    }
+  }
 
   #live: HTMLElement | undefined;
 
@@ -86,6 +117,15 @@ export class SwathShell extends SwathElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.render();
+    this.#syncTier();
+    this.#observer = new ResizeObserver(() => this.#syncTier());
+    this.#observer.observe(this);
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.#observer?.disconnect();
+    this.#observer = undefined;
   }
 
   /** Say `text` to assistive tech through the shell's one live region. */

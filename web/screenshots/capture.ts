@@ -55,6 +55,8 @@ interface Shot {
    * show wall-clock timestamps or per-run timings budget for exactly that
    * text; pixel content everywhere else must reproduce. */
   maxBadFrac: number;
+  /** Left edge of the map region the content gate inspects (0 on phones). */
+  railWidth: number;
 }
 
 const captured: Shot[] = [];
@@ -63,7 +65,7 @@ async function capture(
   page: Page,
   file: string,
   caption: string,
-  policy?: { tolerance?: number; maxBadFrac?: number },
+  policy?: { tolerance?: number; maxBadFrac?: number; railWidth?: number },
 ): Promise<void> {
   // Let the last paint (overlay text, badge layout) settle before freezing.
   await page.waitForTimeout(400);
@@ -78,6 +80,9 @@ async function capture(
     caption,
     tolerance: policy?.tolerance ?? 2,
     maxBadFrac: policy?.maxBadFrac ?? 0.005,
+    // The content gate inspects the canvas right of the rail: 248 on the
+    // desktop shots, 0 on the phone shots (the rail is a bottom tab bar).
+    railWidth: policy?.railWidth ?? 248,
   });
 }
 
@@ -598,4 +603,78 @@ test.afterAll(() => {
     "",
   ];
   writeFileSync(path.join(OUT_DIR, "index.md"), `${lines.join("\n")}`);
+});
+
+// --- The phone tier (issue #293): m01–m04 at 393×852 with touch ---
+test.describe("phone", () => {
+  test.use({
+    viewport: { width: 393, height: 852 },
+    hasTouch: true,
+    isMobile: true,
+    deviceScaleFactor: 1,
+  });
+  const PHONE = { railWidth: 0, maxBadFrac: 0.03 };
+
+  test("m01 landing on a phone: tab bar, dock chip", async ({ page }) => {
+    await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=11`, "ndvi");
+    await expect(page.locator("swath-shell")).toHaveAttribute("tier", "phone");
+    await page.locator('swath-rail [part="item"][data-mode="layers"]').tap(); // fold the sheet away
+    await expect(page.locator("#swath-rail-drawer")).not.toHaveAttribute("open", "");
+    await waitForMapIdle(page);
+    await capture(
+      page,
+      "m01-phone-landing.png",
+      "Phone tier: the map with the bottom tab bar, the toggles top-right in the dock, the status chip bottom-left.",
+      PHONE,
+    );
+  });
+
+  test("m02 layers sheet", async ({ page }) => {
+    await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=11`, "ndvi");
+    await expect(page.locator("#swath-rail-drawer")).toHaveAttribute("open", "");
+    await expect(page.locator('swath-layer-item[data-layer="ndvi"] [part="row"]')).toBeVisible();
+    await waitForMapIdle(page);
+    await capture(
+      page,
+      "m02-phone-layers-sheet.png",
+      "Phone tier: the layer list as a bottom sheet at its 40% snap over the map.",
+      PHONE,
+    );
+  });
+
+  test("m03 data sheet with the catalog", async ({ page }) => {
+    await gotoAndWaitForTiles(
+      page,
+      `${DEMO_PATH}?view=data&layer=ndvi&center=${CENTER}&zoom=11`,
+      "ndvi",
+    );
+    await page.locator('swath-catalog [part="dataset"] select').selectOption("hls-s30");
+    const first = page.locator("swath-catalog swath-granule-card").first();
+    await expect(first).toBeVisible();
+    await expect(first.locator('img[part="media"]')).toBeVisible({ timeout: 60_000 });
+    await waitForMapIdle(page);
+    await capture(
+      page,
+      "m03-phone-data-sheet.png",
+      "Phone tier: Data mode's catalog in the sheet, an engine thumbnail on the first card.",
+      PHONE,
+    );
+  });
+
+  test("m04 x-ray on a phone", async ({ page }) => {
+    await gotoAndWaitForTiles(
+      page,
+      `${DEMO_PATH}?xray&view=xray&layer=truecolor&center=${CENTER}&zoom=13`,
+      "truecolor",
+    );
+    await page.locator('swath-rail [part="item"][data-mode="xray"]').tap(); // fold the sheet away
+    await expect(page.locator("#swath-rail-drawer")).not.toHaveAttribute("open", "");
+    await waitForXRay(page);
+    await capture(
+      page,
+      "m04-phone-xray.png",
+      "Phone tier: x-ray badges over the map, the readouts card in the dock strip, the toggles top-right.",
+      PHONE,
+    );
+  });
 });

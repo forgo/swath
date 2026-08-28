@@ -513,7 +513,9 @@ test("the toggle control mirrors and flips the xray attribute", async () => {
   const factory = fakeFactory();
   const el = mountMap(factory.create, false);
   await el.ready;
-  const button = el.querySelector<HTMLButtonElement>(".swath-map-xray-toggle button");
+  const button = el
+    .querySelector<HTMLElement>(".swath-map-xray-toggle")
+    ?.shadowRoot?.querySelector<HTMLButtonElement>("button");
   expect(button?.getAttribute("aria-pressed")).toBe("false");
 
   button?.click();
@@ -583,7 +585,9 @@ for (const order of ["compare first", "x-ray first"] as const) {
     factory.opened[0]?.emit("trace", envelope("ndvi", "3/4/3"));
     factory.opened[0]?.emit("trace", envelope("ndvi", "3/4/4"));
     await painted();
-    const toggle = el.querySelector<HTMLButtonElement>(".swath-map-xray-toggle button");
+    const toggle = el
+      .querySelector<HTMLElement>(".swath-map-xray-toggle")
+      ?.shadowRoot?.querySelector<HTMLButtonElement>("button");
     if (!toggle) {
       throw new Error("no x-ray toggle");
     }
@@ -597,7 +601,13 @@ for (const order of ["compare first", "x-ray first"] as const) {
     );
     // ...and still the toggle wins the hit-test (the click lands).
     const hit = hitAt(toggle);
-    expect(hit).toBe(toggle);
+    // The toggle is a <swath-button> now: the hit is its host (the shadow
+    // boundary), which is exactly what a click lands on.
+    expect(hit).toBe(
+      toggle.getRootNode() instanceof ShadowRoot
+        ? (toggle.getRootNode() as ShadowRoot).host
+        : toggle,
+    );
     // A badge clear of the controls is hit over the compare map — the
     // overlay paints above the right side, not under it.
     const clear = el.querySelector<HTMLElement>('.swath-xray-badge[data-key="right:ndvi/3/4/4"]');

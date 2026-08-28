@@ -94,6 +94,28 @@ export class SwathRail extends SwathElement {
       [part="collapse"] { align-self: flex-end; margin: 0 var(--swath-space-2) var(--swath-space-2); }
       :host([collapsed]) [part="collapse"] { align-self: center; margin-inline: 0; }
       :host([collapsed]) [part="footer"] { display: none; }
+      /* 640–1279: an icon rail regardless of preference (the content goes
+       * to a drawer the host opens). */
+      @media (max-width: 1279px) {
+        :host { inline-size: var(--swath-size-rail-icon); min-inline-size: var(--swath-size-rail-icon); }
+        [part="brand"], [part="content"], [part="footer"], [part="collapse"] { display: none; }
+        [part="item"] { justify-content: center; padding: 0; }
+        [part="item"] span { display: none; }
+      }
+      /* < 640: a bottom tab bar with the safe-area inset. */
+      @media (max-width: 639px) {
+        :host {
+          inline-size: 100%;
+          min-inline-size: 0;
+          block-size: auto;
+          border-inline-end: 0;
+          border-block-start: var(--swath-border-hairline);
+          padding-block-end: env(safe-area-inset-bottom, 0);
+        }
+        [part="base"] { block-size: auto; }
+        [part="nav"] { flex-direction: row; justify-content: space-around; padding: var(--swath-space-1) 0; }
+        [part="item"] { flex: 1; min-block-size: var(--swath-size-target); }
+      }
     `,
   ];
   static override properties = {
