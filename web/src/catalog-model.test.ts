@@ -80,13 +80,13 @@ test("sortGranules: newest / oldest by datetime then id, or by id", () => {
   ]);
 });
 
-test("previewGraph: RGB quick look over the granule's footprint, gray when no RGB triple", () => {
+test("previewGraph: RGB quick look, extent left to the server (footprint-framed), gray when no RGB triple", () => {
   const hls = parseCollections({ collections: [HLS] })[0] as CatalogDataset;
   const rgb = previewGraph(hls, GRANULES[1] as CatalogGranule);
   expect(Object.keys(rgb)).toEqual(["load", "scale", "save"]);
   expect((rgb["load"] as { arguments: Record<string, unknown> }).arguments).toEqual({
     id: "hls-s30",
-    spatial_extent: { west: 10.3, south: 45.6, east: 11.1, north: 46.4 },
+    spatial_extent: null,
     temporal_extent: null,
     bands: ["b04", "b03", "b02"],
   });

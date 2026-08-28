@@ -134,24 +134,25 @@ export function sortGranules(
 
 /** The bounded preview graph for one granule: the dataset's quick look
  * (RGB when red/green/blue bands are declared, else the first band in
- * gray) over the granule's footprint, saved as PNG. The server frames
- * the named extent whole under ADR 0014's containing-tile rule and its
- * pixel budget — a refusal is the server's to make, and comes back as a
- * plain-words note. NOTE: previews render the dataset's *latest* granule
- * (the graph's `temporal_extent` is accepted-and-ignored until ADR 0015's
- * graph half, #181), so the picture is the current frame over this
- * footprint, not necessarily this granule's own pixels. */
+ * gray), saved as PNG, with NO extent named — the server then frames the
+ * preview on the footprint of the granule it renders (#276: the deepest
+ * tile at least as large as the footprint, around its centre), where a
+ * named bbox straddling a tile boundary would fall onto a far shallower
+ * containing tile and render the granule sub-pixel. ADR 0014's budget
+ * and refusal apply; a refusal comes back as a plain-words note. NOTE:
+ * previews render the dataset's *latest* granule (`temporal_extent` is
+ * accepted-and-ignored until ADR 0015's graph half, #181), so the picture
+ * is the current frame, not necessarily this granule's own pixels. */
 export function previewGraph(
   dataset: CatalogDataset,
   granule: CatalogGranule,
 ): Record<string, unknown> {
   const picked = quicklookBands(dataset.bands);
-  const [west, south, east, north] = granule.bbox;
   const load = {
     process_id: "load_collection",
     arguments: {
       id: dataset.id,
-      spatial_extent: { west, south, east, north },
+      spatial_extent: null,
       temporal_extent: null,
       bands: picked.length === 0 ? null : picked,
     },
