@@ -125,3 +125,11 @@ test("form reset clears value, checked and error; a disabled fieldset disables t
   expect(field.disabled).toBe(true);
   expect(control<HTMLInputElement>(field).disabled).toBe(true);
 });
+
+test("readonly reflects to the control (a STAC-named dataset id is not editable)", async () => {
+  const { field } = await mount('<swath-field name="id" value="hls-demo" readonly></swath-field>');
+  expect(control<HTMLInputElement>(field).readOnly).toBe(true);
+  field.readonly = false;
+  await field.updateComplete;
+  expect(control<HTMLInputElement>(field).readOnly).toBe(false);
+});

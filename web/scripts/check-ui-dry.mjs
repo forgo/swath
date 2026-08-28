@@ -34,6 +34,7 @@ const STRICT = [
   /^src\/granule-footprints\.ts$/,
   /^src\/swath-xray\.ts$/,
   /^src\/xray-analytics\.ts$/,
+  /^src\/swath-add-data-panel\.ts$/,
 ];
 
 /**

@@ -13,6 +13,8 @@ import {
   READ_ONLY_NOTE,
   SwathAddDataPanel,
 } from "./swath-add-data-panel.js";
+import type { SwathButton } from "./ui/button.js";
+import type { SwathField } from "./ui/field.js";
 
 const SERVER = "https://swath.test";
 
@@ -95,28 +97,43 @@ function mount(
   return panel;
 }
 
+/** The panel renders into its shadow root (#289); fields are <swath-field>s. */
+function q<T extends Element = HTMLElement>(panel: SwathAddDataPanel, selector: string): T | null {
+  return panel.shadowRoot?.querySelector<T>(selector) ?? null;
+}
+
+function fieldValue(panel: SwathAddDataPanel, id: string): string | undefined {
+  return q<SwathField>(panel, `#swath-add-data-${id}`)?.value;
+}
+
+function fieldControl(panel: SwathAddDataPanel, id: string): HTMLInputElement | null {
+  return q<SwathField>(panel, `#swath-add-data-${id}`)?.shadowRoot?.querySelector("input") ?? null;
+}
+
 function open(panel: SwathAddDataPanel): void {
-  panel.querySelector<HTMLButtonElement>(".swath-add-data-toggle")?.click();
+  q<HTMLElement>(panel, ".swath-add-data-toggle")?.click(); // the panel listens on the host
 }
 
 async function paste(panel: SwathAddDataPanel, link: string): Promise<void> {
-  const input = panel.querySelector<HTMLInputElement>("#swath-add-data-link");
+  await panel.updateComplete;
+  const input = fieldControl(panel, "link");
   if (input === null) {
     throw new Error("link input missing");
   }
   input.value = link;
-  input.dispatchEvent(new Event("input"));
-  input.dispatchEvent(new Event("change"));
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
   await panel.ready;
 }
 
 async function submit(panel: SwathAddDataPanel): Promise<void> {
-  const button = panel.querySelector<HTMLButtonElement>(".swath-add-data-submit");
+  await panel.updateComplete;
+  const button = q<SwathButton>(panel, ".swath-add-data-submit");
   if (button === null) {
     throw new Error("submit missing");
   }
   expect(button.disabled, "the flow must be submittable").toBe(false);
-  button.click();
+  button.click(); // the panel listens on the host
   await panel.ready;
 }
 
@@ -150,9 +167,9 @@ test("read-only capabilities render the note, never the form", async () => {
   const panel = mount(stub);
   open(panel);
   await panel.ready;
-  expect(panel.querySelector(".swath-add-data-readonly")?.textContent).toBe(READ_ONLY_NOTE);
-  expect(panel.querySelector("form")).toBeNull();
-  expect(panel.querySelector("#swath-add-data-link")).toBeNull();
+  expect(q(panel, ".swath-add-data-readonly")?.textContent).toBe(READ_ONLY_NOTE);
+  expect(q(panel, "form")).toBeNull();
+  expect(q(panel, "#swath-add-data-link")).toBeNull();
 });
 
 test("paste a STAC item: prefilled, registered inline, quick look announced", async () => {
@@ -170,14 +187,14 @@ test("paste a STAC item: prefilled, registered inline, quick look announced", as
   await paste(panel, ITEM_URL);
 
   // Pre-filled from the fetched item, editable before anything is sent.
-  expect(panel.querySelector<HTMLInputElement>("#swath-add-data-dataset")?.value).toBe("hls-demo");
+  expect(fieldValue(panel, "dataset")).toBe("hls-demo");
   expect(stub.requests.filter((r) => r.method === "POST")).toEqual([]);
 
   const announced = new Promise<{ dataset: string; layer: string }>((resolve) => {
     panel.addEventListener(
       "swath-data-added",
       (event) => {
-        resolve((event as CustomEvent<{ dataset: string; layer: string }>).detail);
+        resolve(event.detail);
       },
       { once: true },
     );
@@ -197,7 +214,7 @@ test("paste a STAC item: prefilled, registered inline, quick look announced", as
   // The quick look goes through the engine: an xyz service graph.
   expect(posts[2]?.body).toMatchObject({ type: "xyz" });
   expect(await announced).toEqual({ dataset: "hls-demo", layer: "xyz-abc123def456" });
-  expect(panel.querySelector(".swath-add-data-status")?.textContent).toContain("Serving");
+  expect(q(panel, ".swath-add-data-status")?.textContent).toContain("Serving");
 });
 
 test("an existing dataset (409) is added to, not an error", async () => {
@@ -216,7 +233,7 @@ test("an existing dataset (409) is added to, not an error", async () => {
   await paste(panel, ITEM_URL);
   await submit(panel);
   expect(stub.requests.filter((r) => r.method === "POST")).toHaveLength(3);
-  expect(panel.querySelector(".swath-add-data-status")?.textContent).toContain("Serving");
+  expect(q(panel, ".swath-add-data-status")?.textContent).toContain("Serving");
 });
 
 test("a server refusal lands under the field that caused it", async () => {
@@ -240,21 +257,20 @@ test("a server refusal lands under the field that caused it", async () => {
   await paste(panel, "no-such-scene.tif");
   // Complete the direct form (plain words gate the button until then).
   const set = (id: string, value: string): void => {
-    const input = panel.querySelector<HTMLInputElement>(`#swath-add-data-${id}`);
+    const input = fieldControl(panel, id);
     if (input === null) {
       throw new Error(`missing field ${id}`);
     }
     input.value = value;
-    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
   };
   set("datetime", "2024-06-06T17:54:00Z");
   await submit(panel);
 
   // The refusal names the link, in the link's own note — and the quick
   // look never fires.
-  expect(panel.querySelector("#swath-add-data-link-note")?.textContent).toContain(
-    "could not read that file",
-  );
+  await panel.updateComplete;
+  expect(q<SwathField>(panel, "#swath-add-data-link")?.error).toContain("could not read that file");
   expect(stub.requests.some((r) => r.url === `${SERVER}/services`)).toBe(false);
 });
 
@@ -267,7 +283,8 @@ test("local-mode drop: upload lands in the store, then the form continues", asyn
   open(panel);
   await panel.ready;
 
-  const picker = panel.querySelector<HTMLInputElement>("#swath-add-data-file");
+  await panel.updateComplete;
+  const picker = q<HTMLInputElement>(panel, "#swath-add-data-file");
   expect(picker, "the drop zone renders where uploads are mounted").not.toBeNull();
   if (picker === null) {
     return;
@@ -282,10 +299,8 @@ test("local-mode drop: upload lands in the store, then the form continues", asyn
   expect(put?.url).toBe(`${SERVER}/uploads/My-Scene.tif`);
   expect(put?.body).toBe("tiff bytes");
   // The returned store key is now the link; the direct form is open.
-  expect(panel.querySelector<HTMLInputElement>("#swath-add-data-link")?.value).toBe(
-    "uploads/My-Scene.tif",
-  );
-  expect(panel.querySelector("#swath-add-data-band")).not.toBeNull();
+  expect(fieldValue(panel, "link")).toBe("uploads/My-Scene.tif");
+  expect(q(panel, "#swath-add-data-band")).not.toBeNull();
 });
 
 test("no upload capability, no drop zone", async () => {
@@ -295,8 +310,8 @@ test("no upload capability, no drop zone", async () => {
   const panel = mount(stub);
   open(panel);
   await panel.ready;
-  expect(panel.querySelector("form")).not.toBeNull();
-  expect(panel.querySelector("#swath-add-data-file")).toBeNull();
+  expect(q(panel, "form")).not.toBeNull();
+  expect(q(panel, "#swath-add-data-file")).toBeNull();
 });
 
 test("a transient capabilities failure retries on re-open (review round 1, finding 1)", async () => {
@@ -312,15 +327,13 @@ test("a transient capabilities failure retries on re-open (review round 1, findi
   const panel = mount(stub);
   open(panel);
   await panel.ready;
-  expect(panel.querySelector(".swath-add-data-error")?.textContent).toContain(
-    "Cannot reach the server",
-  );
+  expect(q(panel, ".swath-add-data-error")?.textContent).toContain("Cannot reach the server");
 
   open(panel); // close…
   open(panel); // …and re-open: the promised retry
   await panel.ready;
-  expect(panel.querySelector(".swath-add-data-error")).toBeNull();
-  expect(panel.querySelector("#swath-add-data-link")).not.toBeNull();
+  expect(q(panel, ".swath-add-data-error")).toBeNull();
+  expect(q(panel, "#swath-add-data-link")).not.toBeNull();
   expect(calls).toBe(2);
 });
 
@@ -337,14 +350,16 @@ test("the dataset id is read-only in STAC mode — a mismatch is unconstructible
   // The item names its collection; registration must match it (the
   // server refuses otherwise), so the field shows but does not edit —
   // with the help text saying why in plain words.
-  const dataset = panel.querySelector<HTMLInputElement>("#swath-add-data-dataset");
-  expect(dataset?.readOnly).toBe(true);
+  await panel.updateComplete;
+  const dataset = q<SwathField>(panel, "#swath-add-data-dataset");
+  expect(dataset?.readonly).toBe(true);
   expect(dataset?.value).toBe("hls-demo");
-  expect(dataset?.closest("label")?.textContent).toContain("Named by the item's collection");
+  expect(dataset?.help).toContain("Named by the item's collection");
 
   // The direct (COG) form keeps the field editable.
   await paste(panel, "scene.tif");
-  expect(panel.querySelector<HTMLInputElement>("#swath-add-data-dataset")?.readOnly).toBe(false);
+  await panel.updateComplete;
+  expect(q<SwathField>(panel, "#swath-add-data-dataset")?.readonly).toBe(false);
 });
 
 test("a slow item fetch resolving late never clobbers a newer paste (finding 3)", async () => {
@@ -365,30 +380,27 @@ test("a slow item fetch resolving late never clobbers a newer paste (finding 3)"
   await panel.ready;
 
   // Paste the slow item…
-  const input = panel.querySelector<HTMLInputElement>("#swath-add-data-link");
+  await panel.updateComplete;
+  const input = fieldControl(panel, "link");
   if (input === null) {
     throw new Error("link input missing");
   }
   input.value = ITEM_URL;
-  input.dispatchEvent(new Event("input"));
-  input.dispatchEvent(new Event("change"));
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
   const stale = panel.ready;
 
   // …then move on to a raster link before the item arrives.
   await paste(panel, "newer-scene.tif");
-  expect(panel.querySelector<HTMLInputElement>("#swath-add-data-dataset")?.value).toBe(
-    "newer-scene",
-  );
+  expect(fieldValue(panel, "dataset")).toBe("newer-scene");
 
   // The stale response lands — and must change nothing: the newer draft
   // stays, and no leftover "Reading the item…" spinner survives.
   releaseSlow?.();
   await stale;
-  expect(panel.querySelector<HTMLInputElement>("#swath-add-data-dataset")?.value).toBe(
-    "newer-scene",
-  );
-  expect(panel.querySelector<HTMLInputElement>("#swath-add-data-band")).not.toBeNull();
-  expect(panel.textContent).not.toContain("Reading the item…");
+  expect(fieldValue(panel, "dataset")).toBe("newer-scene");
+  expect(q(panel, "#swath-add-data-band")).not.toBeNull();
+  expect(panel.shadowRoot?.textContent).not.toContain("Reading the item…");
 });
 
 test("the stac attribute (the ?stac= deep link) opens pre-filled, sends nothing", async () => {
@@ -399,8 +411,8 @@ test("the stac attribute (the ?stac= deep link) opens pre-filled, sends nothing"
   const panel = mount(stub, { stac: ITEM_URL });
   await panel.ready;
   // Open, link pre-filled, draft derived — and nothing was registered.
-  expect(panel.querySelector(".swath-add-data-toggle")?.getAttribute("aria-expanded")).toBe("true");
-  expect(panel.querySelector<HTMLInputElement>("#swath-add-data-link")?.value).toBe(ITEM_URL);
-  expect(panel.querySelector<HTMLInputElement>("#swath-add-data-dataset")?.value).toBe("hls-demo");
+  expect(panel.open).toBe(true);
+  expect(fieldValue(panel, "link")).toBe(ITEM_URL);
+  expect(fieldValue(panel, "dataset")).toBe("hls-demo");
   expect(stub.requests.every((r) => r.method === "GET")).toBe(true);
 });

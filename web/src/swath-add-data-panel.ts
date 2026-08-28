@@ -2,32 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `<swath-add-data-panel>` — the dataset-creation API's face (issue #197):
- * paste a link to a COG or a STAC Item (or, in local mode, drop a file) →
- * the #196 registration flow → a quick-look layer authored through the
- * openEO services surface → serving, traced, on the map. Everything goes
- * through the engine; the panel never decodes a pixel (ADR 0019).
- *
- * Plain Custom Element, light DOM, no framework (ADR 0005). Lazy like the
- * dataset browser: collapsed by default, no requests until opened. The
- * first open fetches `GET /` once — the capabilities document (#198)
- * decides what renders: no `POST /datasets` advertised (read-only, or a
- * catalog-less server) renders a plain "viewing only" note instead of the
- * form, and the file drop appears only where `PUT /uploads/{filename}` is
- * mounted. Capabilities-driven, never probed or hardcoded.
- *
- * A `stac` attribute (the `/?stac=<item-url>` deep link) opens the panel
- * on load, pre-fills the link, and fetches the item — the user still
- * reviews and clicks Add; nothing registers on page load.
- *
- * Events (bubbling):
- * - `swath-data-added` `{ dataset, layer }` — the quick-look service is
- *   published; the shell switches the map onto it.
- *
- * Attributes: `server` (API base URL, default same origin), `stac` (the
- * deep-linked STAC Item URL).
+ * `<swath-add-data-panel>` — Data mode's "Add data" drawer (issue #289,
+ * rebuilt on the primitives; issue #197 for the flow): paste a link to a
+ * cloud-optimized GeoTIFF or a STAC item (or drop a file where uploads
+ * are mounted), review the draft, register — the dataset, the granule,
+ * then a quick-look service the shell puts on the map. Everything goes
+ * through the engine (ADR 0019). Capabilities-driven (#198): the first
+ * open reads `GET /` once through `SwathApi.capabilities()`; a read-only
+ * server shows a note and no form. Server refusals route onto the field
+ * that caused them (`mapProblem` → `swath-field error`). The `stac`
+ * attribute (the `?stac=` deep link) opens pre-filled; registering stays
+ * a click. Lazy by contract: a closed panel issues zero requests.
  */
-
 import {
   type AddDataCapabilities,
   type AddDataDraft,
@@ -47,136 +33,23 @@ import {
   stacDraft,
 } from "./add-data-model.js";
 import { SwathApi } from "./api.js";
-import { createSwathEvent } from "./ui/events.js";
+import { SwathButton } from "./ui/button.js";
+import { el } from "./ui/dom.js";
+import { SwathDrawer } from "./ui/drawer.js";
+import { SwathElement } from "./ui/element.js";
+import { SwathField } from "./ui/field.js";
+import { css } from "./ui/styles.js";
 
-/** The read-only state, exported so tests assert the exact contract
- * string (the #198 capabilities document drives it). */
 export const READ_ONLY_NOTE =
   "This server is read-only: data can be viewed here but not added. " +
   "Serve without --read-only to register datasets.";
 
-/** Shown while nothing is pasted yet — the panel's one-line pitch. */
 export const LINK_HELP =
   "Paste a link to a cloud-optimized GeoTIFF, or to a STAC item (.json). " +
   "Swath reads files where they live — nothing is copied.";
 
-const STYLE_ELEMENT_ID = "swath-add-data-panel-styles";
-
-/** Dark-telemetry skin matching the rail's other panels; layout belongs
- * to the page. */
-const PANEL_CSS = `
-swath-add-data-panel { display: block; }
-swath-add-data-panel .swath-add-data-toggle {
-  display: block;
-  width: 100%;
-  margin: 0 0 8px;
-  padding: 0;
-  border: 0;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-  font: 700 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: rgb(148 163 184 / 90%);
-}
-swath-add-data-panel .swath-add-data-toggle::before { content: "▸ "; }
-swath-add-data-panel .swath-add-data-toggle[aria-expanded="true"]::before { content: "▾ "; }
-swath-add-data-panel .swath-add-data-toggle:focus-visible {
-  outline: 2px solid #4ade80;
-  outline-offset: 1px;
-}
-swath-add-data-panel form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-swath-add-data-panel label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font: 600 12px/1.4 system-ui, sans-serif;
-}
-swath-add-data-panel input {
-  padding: 5px 8px;
-  border: 1px solid rgb(148 163 184 / 30%);
-  border-radius: 4px;
-  background: rgb(15 23 42 / 60%);
-  color: inherit;
-  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-swath-add-data-panel input:focus-visible {
-  outline: 2px solid #4ade80;
-  outline-offset: 1px;
-}
-swath-add-data-panel input[readonly] {
-  border-style: dashed;
-  color: rgb(148 163 184 / 90%);
-}
-swath-add-data-panel .swath-add-data-help {
-  font: 11px/1.5 system-ui, sans-serif;
-  font-weight: 400;
-  color: rgb(148 163 184 / 80%);
-}
-swath-add-data-panel .swath-add-data-note {
-  font: 11px/1.5 system-ui, sans-serif;
-  font-weight: 400;
-  color: #fca5a5;
-}
-swath-add-data-panel .swath-add-data-drop {
-  padding: 10px;
-  border: 1px dashed rgb(148 163 184 / 30%);
-  border-radius: 6px;
-  text-align: center;
-  font: 12px/1.5 system-ui, sans-serif;
-  color: rgb(148 163 184 / 80%);
-}
-swath-add-data-panel .swath-add-data-drop[data-active] {
-  border-color: rgb(74 222 128 / 45%);
-  background: rgb(74 222 128 / 10%);
-}
-swath-add-data-panel .swath-add-data-submit {
-  padding: 6px 10px;
-  border: 1px solid rgb(74 222 128 / 45%);
-  border-radius: 6px;
-  background: rgb(74 222 128 / 10%);
-  color: inherit;
-  font: 600 12px/1.4 system-ui, sans-serif;
-  cursor: pointer;
-}
-swath-add-data-panel .swath-add-data-submit:disabled {
-  border-color: rgb(148 163 184 / 20%);
-  background: none;
-  color: rgb(148 163 184 / 75%);
-  cursor: default;
-}
-swath-add-data-panel .swath-add-data-submit:focus-visible {
-  outline: 2px solid #4ade80;
-  outline-offset: 1px;
-}
-swath-add-data-panel .swath-add-data-reason,
-swath-add-data-panel .swath-add-data-status,
-swath-add-data-panel .swath-add-data-error,
-swath-add-data-panel .swath-add-data-readonly {
-  margin: 0;
-  font: 12px/1.5 system-ui, sans-serif;
-  color: rgb(148 163 184 / 80%);
-}
-swath-add-data-panel .swath-add-data-error { color: #fca5a5; }
-swath-add-data-panel .swath-add-data-status { color: #4ade80; }
-`;
-
-function injectStyles(doc: Document): void {
-  if (doc.getElementById(STYLE_ELEMENT_ID)) {
-    return;
-  }
-  const style = doc.createElement("style");
-  style.id = STYLE_ELEMENT_ID;
-  style.textContent = PANEL_CSS;
-  doc.head.append(style);
-}
-
-/** One editable field of the draft form. */
+/** One form field: which draft value it edits, how it is explained, and
+ * the client-side issue that blocks submission. */
 interface Field {
   key: ProblemField | "brightest" | "title";
   label: string;
@@ -184,27 +57,74 @@ interface Field {
   get: (panel: SwathAddDataPanel) => string;
   set: (panel: SwathAddDataPanel, value: string) => void;
   issue: (value: string) => string;
-  /** Renders only for the direct (COG) form. */
   cogOnly?: boolean;
-  /** Shown but not editable (with the help text saying why). */
   readOnly?: boolean;
 }
 
-export class SwathAddDataPanel extends HTMLElement {
-  static readonly tagName = "swath-add-data-panel";
+export class SwathAddDataPanel extends SwathElement {
+  static override tagName = "swath-add-data-panel";
+  static override styles = [
+    css`
+      :host { display: block; }
+      [part="toggle"] { inline-size: 100%; }
+      form {
+        display: grid;
+        gap: var(--swath-space-3);
+        margin: 0;
+      }
+      .swath-add-data-drop {
+        padding: var(--swath-space-3);
+        border: var(--swath-border-hairline);
+        border-style: dashed;
+        border-radius: var(--swath-radius-sm);
+        font-size: var(--swath-text-sm);
+        color: var(--swath-color-fg-muted);
+        text-align: center;
+      }
+      .swath-add-data-drop[data-active] {
+        border-color: var(--swath-color-accent-border);
+        background: var(--swath-color-accent-bg);
+      }
+      .swath-add-data-drop input { margin-block-start: var(--swath-space-2); font: inherit; color: inherit; }
+      .swath-add-data-status, .swath-add-data-error, .swath-add-data-readonly, .swath-add-data-reason {
+        margin: 0;
+        font-size: var(--swath-text-sm);
+        line-height: var(--swath-leading-normal);
+        color: var(--swath-color-fg-muted);
+      }
+      .swath-add-data-status { color: var(--swath-color-accent); }
+      .swath-add-data-error { color: var(--swath-color-danger); }
+      .swath-add-data-reason { font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); }
+      .swath-add-data-help { margin: 0; font-size: var(--swath-text-xs); color: var(--swath-color-fg-muted); }
+      [slot="header"] {
+        font-family: var(--swath-font-mono);
+        font-size: var(--swath-text-xs);
+        font-weight: 700;
+        letter-spacing: var(--swath-tracking-wide);
+        text-transform: uppercase;
+        color: var(--swath-color-fg-muted);
+      }
+    `,
+  ];
+  static override properties = {
+    open: { type: "boolean", reflect: true },
+    /** The `?stac=` deep link: opens pre-filled, sends nothing. */
+    stac: { type: "string" },
+    server: { type: "string" },
+  } as const;
 
-  #open = false;
-  /** undefined until the first open's capabilities fetch settles. */
+  declare open: boolean;
+  declare stac: string | undefined;
+  declare server: string | undefined;
+
+  #api: SwathApi | undefined;
   #capabilities: AddDataCapabilities | undefined;
   #capabilitiesError: string | undefined;
   #link = "";
   #linkNote = "";
   #draft: AddDataDraft | undefined;
-  /** Editable overlay onto the draft. */
   #brightest = "10000";
   #inspecting = false;
-  /** Monotonic id of the latest `#inspect` call: a slow item fetch that
-   * resolves after a newer paste is stale and must not clobber it. */
   #inspectToken = 0;
   #submitting = false;
   #uploading = false;
@@ -215,26 +135,18 @@ export class SwathAddDataPanel extends HTMLElement {
   /** Settles when the last user-triggered flow has rendered (never
    * rejects — failures render as notes). Test seam. */
   #ready: Promise<void> = Promise.resolve();
+  #started = false;
 
-  /** Base URL of the Swath API (no trailing slash); same origin when the
-   * `server` attribute is absent. */
-  get server(): string {
-    return (this.getAttribute("server") ?? "").replace(/\/+$/, "");
+  constructor() {
+    super();
+    SwathButton.define();
+    SwathDrawer.define();
+    SwathField.define();
   }
 
-  #api: SwathApi | undefined;
-  #ownApi: SwathApi | undefined;
-
-  /** The API client (ui-system.md §4.4): injected by a host or test, else
-   * built from `server` — same origin when the attribute is absent. */
   get api(): SwathApi {
-    if (this.#api !== undefined) {
-      return this.#api;
-    }
-    if (this.#ownApi === undefined || this.#ownApi.base !== this.server) {
-      this.#ownApi = new SwathApi({ base: this.server });
-    }
-    return this.#ownApi;
+    this.#api ??= new SwathApi({ base: this.server ?? "" });
+    return this.#api;
   }
 
   set api(api: SwathApi) {
@@ -243,38 +155,34 @@ export class SwathAddDataPanel extends HTMLElement {
 
   /** `await el.ready` before inspecting the DOM after an interaction. */
   get ready(): Promise<void> {
-    return this.#ready;
+    return this.#ready.then(() => this.updateComplete);
   }
 
-  connectedCallback(): void {
-    injectStyles(this.ownerDocument);
+  override connectedCallback(): void {
+    super.connectedCallback();
+    this.render(); // synchronous first paint: the toggle exists the moment the panel does
     this.setAttribute("role", "group");
     if (!this.hasAttribute("aria-label")) {
       this.setAttribute("aria-label", "Add data");
     }
-    const stac = this.getAttribute("stac");
-    if (stac !== null && stac !== "") {
-      // The deep link pre-fills and fetches — registering stays a click.
-      this.#open = true;
+    const stac = this.stac ?? "";
+    if (stac !== "" && !this.#started) {
+      this.#started = true;
+      this.open = true;
       this.#link = stac;
       this.#ready = this.#ensureCapabilities().then(() => this.#inspect());
     }
-    this.#render();
   }
 
   #togglePanel(): void {
-    this.#open = !this.#open;
-    if (this.#open && this.#capabilities === undefined) {
-      // Re-opening after a failed fetch retries it (the error note says
-      // to do exactly that).
+    this.open = !this.open;
+    if (this.open && this.#capabilities === undefined) {
       this.#ready = this.#ensureCapabilities();
     }
-    this.#render();
   }
 
-  /** One capabilities fetch per success: `GET /` (JSON — the browser
-   * negotiation needs an explicit text/html, which this is not). A failed
-   * fetch clears on the next attempt, so "close and re-open to retry" is
+  /** One capabilities read per success, shared through `SwathApi`; a
+   * failure clears the client's cache, so "close and re-open to retry" is
    * a real retry, never a bricked panel. */
   async #ensureCapabilities(): Promise<void> {
     if (this.#capabilities !== undefined) {
@@ -286,12 +194,9 @@ export class SwathAddDataPanel extends HTMLElement {
     } catch (error) {
       this.#capabilitiesError = error instanceof Error ? error.message : String(error);
     }
-    this.#render();
+    this.requestUpdate();
   }
 
-  /** Resolves the pasted link into a draft: a `.json` link is fetched
-   * in-browser (the server never fetches URLs — no SSRF surface); any
-   * other link is handed to the server as the asset reference. */
   async #inspect(): Promise<void> {
     const token = ++this.#inspectToken;
     // This run owns the spinner from here on — a superseded run's flag
@@ -305,17 +210,17 @@ export class SwathAddDataPanel extends HTMLElement {
     this.#touched.clear();
     if (link === "") {
       this.#linkNote = "paste a link first";
-      this.#render();
+      this.requestUpdate();
       return;
     }
     this.#linkNote = "";
     if (classifyLink(link) === "cog") {
       this.#draft = cogDraft(link);
-      this.#render();
+      this.requestUpdate();
       return;
     }
     this.#inspecting = true;
-    this.#render();
+    this.requestUpdate();
     let draft: AddDataDraft | string;
     try {
       const response = await this.api.fetch(link, { headers: { accept: "application/json" } });
@@ -335,7 +240,7 @@ export class SwathAddDataPanel extends HTMLElement {
     } else {
       this.#draft = draft;
     }
-    this.#render();
+    this.requestUpdate();
   }
 
   /** Local-mode file drop: upload into the serving store, then continue
@@ -344,13 +249,13 @@ export class SwathAddDataPanel extends HTMLElement {
     const name = file.name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+/, "");
     if (name === "") {
       this.#linkNote = "that file has no usable name";
-      this.#render();
+      this.requestUpdate();
       return;
     }
     this.#uploading = true;
     this.#flowError = "";
     this.#status = "";
-    this.#render();
+    this.requestUpdate();
     try {
       const response = await this.api.fetch(`/uploads/${encodeURIComponent(name)}`, {
         method: "PUT",
@@ -372,7 +277,7 @@ export class SwathAddDataPanel extends HTMLElement {
       this.#uploading = false;
       this.#linkNote = `upload failed: ${error instanceof Error ? error.message : String(error)}`;
     }
-    this.#render();
+    this.requestUpdate();
   }
 
   /** The whole flow: register the dataset (409 = already there — fine),
@@ -386,7 +291,7 @@ export class SwathAddDataPanel extends HTMLElement {
     this.#flowError = "";
     this.#status = "";
     this.#serverNotes.clear();
-    this.#render();
+    this.requestUpdate();
     try {
       const json = { "content-type": "application/json" };
       const created = await this.api.fetch("/datasets", {
@@ -430,14 +335,14 @@ export class SwathAddDataPanel extends HTMLElement {
       }
       const layer = service.headers.get("openeo-identifier") ?? "";
       this.#status = `Serving: ${draft.datasetId} is registered and its quick look is on the map.`;
-      this.dispatchEvent(createSwathEvent("swath-data-added", { dataset: draft.datasetId, layer }));
+      this.emit("swath-data-added", { dataset: draft.datasetId, layer });
     } catch (error) {
       this.#flowError = `registration failed: ${
         error instanceof Error ? error.message : String(error)
       }`;
     } finally {
       this.#submitting = false;
-      this.#render();
+      this.requestUpdate();
     }
   }
 
@@ -451,8 +356,6 @@ export class SwathAddDataPanel extends HTMLElement {
       this.#serverNotes.set(problem.field, problem.note);
     }
   }
-
-  // --- Validation ---
 
   #fields(): Field[] {
     const draftField = (
@@ -571,20 +474,121 @@ export class SwathAddDataPanel extends HTMLElement {
 
   // --- Rendering ---
 
-  #render(): void {
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "swath-add-data-toggle";
-    toggle.textContent = "Add data";
-    toggle.setAttribute("aria-expanded", String(this.#open));
-    toggle.addEventListener("click", () => {
-      this.#togglePanel();
-    });
-    if (!this.#open) {
-      this.replaceChildren(toggle);
-      return;
+  #fieldNote(field: Field): string {
+    const server = this.#serverNotes.get(field.key);
+    if (server !== undefined) {
+      return server;
     }
-    this.replaceChildren(toggle, ...this.#body());
+    const value = field.get(this);
+    const issue = field.issue(value);
+    return this.#touched.has(field.key) || value.trim() !== "" ? issue : "";
+  }
+
+  #note(className: string, text: string): HTMLParagraphElement {
+    return el("p", { class: className }, text);
+  }
+
+  #linkField(): SwathField {
+    const field = el("swath-field", {
+      id: "swath-add-data-link",
+      name: "link",
+      label: "Link to data",
+      placeholder: "https://…/scene-b04.tif or …/item.json",
+      value: this.#link,
+    });
+    field.append(el("span", { slot: "help" }, LINK_HELP));
+    if (this.#linkNote !== "") {
+      field.error = this.#linkNote;
+    }
+    field.addEventListener("swath-input", (event) => {
+      event.stopPropagation();
+      this.#link = String(event.detail.value);
+    });
+    field.addEventListener("swath-change", (event) => {
+      event.stopPropagation();
+      this.#link = String(event.detail.value);
+      this.#ready = this.#inspect();
+    });
+    return field;
+  }
+
+  #dropZone(): HTMLElement {
+    const zone = el(
+      "div",
+      { class: "swath-add-data-drop" },
+      "…or drop a file here to upload it into the server's store",
+    );
+    zone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      zone.setAttribute("data-active", "");
+    });
+    zone.addEventListener("dragleave", () => zone.removeAttribute("data-active"));
+    zone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      zone.removeAttribute("data-active");
+      const file = event.dataTransfer?.files[0];
+      if (file) {
+        this.#ready = this.#uploadFile(file);
+      }
+    });
+    const picker = el("input", {
+      id: "swath-add-data-file",
+      type: "file",
+      "aria-label": "Upload a file",
+    });
+    picker.addEventListener("change", () => {
+      const file = picker.files?.[0];
+      if (file) {
+        this.#ready = this.#uploadFile(file);
+      }
+    });
+    zone.append(el("br"), picker);
+    return zone;
+  }
+
+  #fieldRow(field: Field): SwathField {
+    const row = el("swath-field", {
+      id: `swath-add-data-${field.key}`,
+      name: field.key,
+      label: field.label,
+      help: field.help,
+      value: field.get(this),
+      readonly: field.readOnly === true,
+    });
+    const note = this.#fieldNote(field);
+    if (note !== "") {
+      row.error = note;
+    }
+    row.addEventListener("swath-input", (event) => {
+      event.stopPropagation();
+      field.set(this, String(event.detail.value));
+      this.#touched.add(field.key);
+      this.#serverNotes.delete(field.key);
+      this.#updateValidity();
+    });
+    row.addEventListener("swath-change", (event) => event.stopPropagation());
+    return row;
+  }
+
+  /** Live validity without a re-render (typing must not re-create the
+   * field that has focus): notes, the submit state, the reason line. */
+  #updateValidity(): void {
+    for (const field of this.#fields()) {
+      const row = this.renderRoot.querySelector<SwathField>(`#swath-add-data-${field.key}`);
+      if (row) {
+        const note = this.#fieldNote(field);
+        row.error = note === "" ? undefined : note;
+      }
+    }
+    const issues = this.#issues();
+    const submit = this.renderRoot.querySelector<SwathButton>(".swath-add-data-submit");
+    if (submit) {
+      submit.disabled = issues.length > 0 || this.#submitting;
+    }
+    const reason = this.renderRoot.querySelector("#swath-add-data-reason");
+    if (reason) {
+      reason.textContent = issues.length > 0 ? `To add: ${issues.join("; ")}.` : "";
+    }
   }
 
   #body(): HTMLElement[] {
@@ -600,15 +604,14 @@ export class SwathAddDataPanel extends HTMLElement {
       return [this.#note("swath-add-data-status", "Checking what this server allows…")];
     }
     if (!this.#capabilities.register) {
-      // Capabilities-driven absence (#198): no write surface, no form.
       return [this.#note("swath-add-data-readonly", READ_ONLY_NOTE)];
     }
-    const form = document.createElement("form");
+    const form = el("form");
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       this.#ready = this.#register();
     });
-    form.append(this.#linkRow());
+    form.append(this.#linkField());
     if (this.#capabilities.upload) {
       form.append(this.#dropZone());
     }
@@ -625,7 +628,25 @@ export class SwathAddDataPanel extends HTMLElement {
         }
         form.append(this.#fieldRow(field));
       }
-      form.append(...this.#submitRow());
+      const issues = this.#issues();
+      const submit = el(
+        "swath-button",
+        {
+          class: "swath-add-data-submit",
+          variant: "accent",
+          disabled: issues.length > 0 || this.#submitting,
+        },
+        this.#submitting ? "Registering…" : "Add to Swath",
+      );
+      submit.addEventListener("click", () => form.requestSubmit());
+      form.append(
+        submit,
+        el(
+          "p",
+          { class: "swath-add-data-reason", id: "swath-add-data-reason" },
+          issues.length > 0 ? `To add: ${issues.join("; ")}.` : "",
+        ),
+      );
     }
     if (this.#flowError !== "") {
       form.append(this.#note("swath-add-data-error", this.#flowError));
@@ -636,148 +657,34 @@ export class SwathAddDataPanel extends HTMLElement {
     return [form];
   }
 
-  #linkRow(): HTMLLabelElement {
-    const label = document.createElement("label");
-    const caption = document.createElement("span");
-    caption.textContent = "Link to data";
-    const input = document.createElement("input");
-    input.id = "swath-add-data-link";
-    input.type = "text";
-    input.placeholder = "https://…/scene-b04.tif or …/item.json";
-    input.value = this.#link;
-    input.addEventListener("input", () => {
-      this.#link = input.value;
-    });
-    input.addEventListener("change", () => {
-      this.#ready = this.#inspect();
-    });
-    const help = document.createElement("small");
-    help.className = "swath-add-data-help";
-    help.textContent = LINK_HELP;
-    const note = document.createElement("small");
-    note.className = "swath-add-data-note";
-    note.id = "swath-add-data-link-note";
-    note.textContent = this.#linkNote;
-    label.append(caption, input, help, note);
-    return label;
-  }
-
-  #dropZone(): HTMLElement {
-    const zone = document.createElement("div");
-    zone.className = "swath-add-data-drop";
-    zone.textContent = "…or drop a file here to upload it into the server's store";
-    zone.addEventListener("dragover", (event) => {
-      event.preventDefault();
-      zone.setAttribute("data-active", "");
-    });
-    zone.addEventListener("dragleave", () => {
-      zone.removeAttribute("data-active");
-    });
-    zone.addEventListener("drop", (event) => {
-      event.preventDefault();
-      zone.removeAttribute("data-active");
-      const file = event.dataTransfer?.files[0];
-      if (file) {
-        this.#ready = this.#uploadFile(file);
-      }
-    });
-    const picker = document.createElement("input");
-    picker.id = "swath-add-data-file";
-    picker.type = "file";
-    picker.setAttribute("aria-label", "Upload a file");
-    picker.addEventListener("change", () => {
-      const file = picker.files?.[0];
-      if (file) {
-        this.#ready = this.#uploadFile(file);
-      }
-    });
-    zone.append(document.createElement("br"), picker);
-    return zone;
-  }
-
-  #fieldRow(field: Field): HTMLLabelElement {
-    const label = document.createElement("label");
-    const caption = document.createElement("span");
-    caption.textContent = field.label;
-    const input = document.createElement("input");
-    input.id = `swath-add-data-${field.key}`;
-    input.type = "text";
-    input.value = field.get(this);
-    input.readOnly = field.readOnly === true;
-    input.addEventListener("input", () => {
-      field.set(this, input.value);
-      this.#touched.add(field.key);
-      this.#serverNotes.delete(field.key);
-      this.#updateValidity();
-    });
-    const help = document.createElement("small");
-    help.className = "swath-add-data-help";
-    help.textContent = field.help;
-    const note = document.createElement("small");
-    note.className = "swath-add-data-note";
-    note.id = `swath-add-data-${field.key}-note`;
-    note.textContent = this.#fieldNote(field);
-    label.append(caption, input, help, note);
-    return label;
-  }
-
-  /** Server note first; then the local issue — but an untouched empty
-   * field stays quiet (a fresh form is not a wall of red). */
-  #fieldNote(field: Field): string {
-    const server = this.#serverNotes.get(field.key);
-    if (server !== undefined) {
-      return server;
+  protected render(): void {
+    const toggle = el(
+      "swath-button",
+      { part: "toggle", class: "swath-add-data-toggle", size: "sm", pressed: this.open },
+      "Add data",
+    );
+    toggle.addEventListener("click", () => this.#togglePanel());
+    if (!this.open) {
+      this.renderRoot.replaceChildren(toggle);
+      return;
     }
-    const value = field.get(this);
-    const issue = field.issue(value);
-    return this.#touched.has(field.key) || value.trim() !== "" ? issue : "";
-  }
-
-  #submitRow(): HTMLElement[] {
-    const issues = this.#issues();
-    const submit = document.createElement("button");
-    submit.type = "submit";
-    submit.className = "swath-add-data-submit";
-    submit.textContent = this.#submitting ? "Registering…" : "Add to Swath";
-    submit.disabled = issues.length > 0 || this.#submitting;
-    const reason = document.createElement("p");
-    reason.className = "swath-add-data-reason";
-    reason.id = "swath-add-data-reason";
-    reason.textContent = issues.length > 0 ? `To add: ${issues.join("; ")}.` : "";
-    return [submit, reason];
-  }
-
-  /** Patches notes and the submit gate in place — no re-render, no lost
-   * focus. */
-  #updateValidity(): void {
-    for (const field of this.#fields()) {
-      const note = this.querySelector(`#swath-add-data-${field.key}-note`);
-      if (note !== null) {
-        note.textContent = this.#fieldNote(field);
-      }
-    }
-    const issues = this.#issues();
-    const submit = this.querySelector<HTMLButtonElement>(".swath-add-data-submit");
-    if (submit !== null) {
-      submit.disabled = issues.length > 0 || this.#submitting;
-    }
-    const reason = this.querySelector("#swath-add-data-reason");
-    if (reason !== null) {
-      reason.textContent = issues.length > 0 ? `To add: ${issues.join("; ")}.` : "";
-    }
-  }
-
-  #note(className: string, text: string): HTMLParagraphElement {
-    const note = document.createElement("p");
-    note.className = className;
-    note.textContent = text;
-    return note;
+    const drawer = el("swath-drawer", { edge: "right", open: true, label: "Add data" });
+    drawer.append(el("span", { slot: "header" }, "Add data"), ...this.#body());
+    drawer.addEventListener("swath-drawer-close", (event) => {
+      event.stopPropagation();
+      this.open = false;
+    });
+    this.renderRoot.replaceChildren(toggle, drawer);
   }
 }
 
 /** Registers `<swath-add-data-panel>`; safe to call more than once. */
 export function defineSwathAddDataPanel(): void {
-  if (!customElements.get(SwathAddDataPanel.tagName)) {
-    customElements.define(SwathAddDataPanel.tagName, SwathAddDataPanel);
+  SwathAddDataPanel.define();
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "swath-add-data-panel": SwathAddDataPanel;
   }
 }
