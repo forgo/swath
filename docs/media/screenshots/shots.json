@@ -1,7 +1,7 @@
 {
   "schema": "swath-screenshots/1",
-  "git_sha": "45964a53f4064449f4335f702e7e72b49e437b4d",
-  "captured": "2026-08-28T04:47:02.534Z",
+  "git_sha": "2ae1058b2309403e67c7cffb5f82b20ff878e439",
+  "captured": "2026-08-28T04:54:37.072Z",
   "viewport": {
     "width": 1528,
     "height": 928,
@@ -14,98 +14,98 @@
       "caption": "Zero-config landing page: the Park Fire series auto-framed and playable (held on its latest frame here — the reduced-motion state, with its play affordance), the x-ray invitation top-center, the Share button in the rail.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "9126ff947335caf28a5d362252925d179637331503733e39b4a81587065b4020"
+      "sha256": "2f94df90dcb88b3f5b09c82572839ade8d6ce2f166171dc6c1de4d6533827b98"
     },
     {
       "file": "02-ndvi-colormapped.png",
       "caption": "Colormapped NDVI (rdylgn) rendered live at z12 from the fixture granule — nothing pre-baked.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "e2a5b5e11ff7992c55a6c48abc077d12d2d8c7100403987d69e373300fa498ea"
+      "sha256": "818a4f39fb39b0c6fd5be61e194dfb4ed6f225abc0a458bc914edc4490fcf4b5"
     },
     {
       "file": "03-truecolor-live.png",
       "caption": "HLS true color at the same viewpoint: selecting a layer in the rail re-points the raster source.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "657cd527d9879deac1486aff5a23d3b1a592d76a90a66ee5bd24876180cef720"
+      "sha256": "fd785703b0355e865b83d80ec0d62a3ec9082cd6cd07ff797a3c3955ac500537"
     },
     {
       "file": "04-xray-decisions.png",
       "caption": "X-ray decision overlay: every tile badged with its render decision and timing; ingest→pixel readout top-left.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "c5f4719e36c025c4d66cdbdfe08782df0899d11fe1475287dc9c3e1ad5db7c0a"
+      "sha256": "e40e44c5fa16bef3443c2ac9095acf0035d2e95acb654a07a1a79a45dafc81e0"
     },
     {
       "file": "05-xray-why-view.png",
       "caption": "Why-view for one tile: the planner's candidate table — chosen plan, rejected candidates, and the reason for each.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "d03c02b6668a5bc80fcdfb7ce0321b127596910fa086907bba552620f65895e3"
+      "sha256": "e3248e173c35904b5203c76a717dce65bc6f26016748828f28746ca3a6ddc1ec"
     },
     {
       "file": "06-xray-heatmap.png",
       "caption": "Bytes-read heatmap mode: badges bucketed on a log scale, with the legend the overlay itself publishes.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "170d5ec9434e36a081a49081176d1dba0b2e0351cdbe38650a8afe81a3814f67"
+      "sha256": "009d9b6acfec7d70983e01f79bdbe3b218c9b8751a505444254f278c205c5115"
     },
     {
       "file": "07-xray-trace-feed.png",
       "caption": "Trace feed: the /traces SSE stream as scrollback — every line a render decision, clickable back to its tile.",
       "tolerance": 2,
       "maxBadFrac": 0.06,
-      "sha256": "a007b3aa65209c98b033cf325b7d31b76ca7626123d6359c92845799e4ea8e78"
+      "sha256": "131f335bd1457094ed1d2d15f9a02a99761ddd829770770b373a4a73ec66126e"
     },
     {
       "file": "08-authoring-form.png",
       "caption": "openEO authoring canvas (Model B): cards generated from the server's own GET /processes, bands from the vocabulary, plain-language field help.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "c801155f5d23dbbbcfa03921ce292b33077660dff2d21a4c95c007151f7abef2"
+      "sha256": "9b75d732c3c8c6f85ba040c1608af5d02f042123f6e698b0f0c9d8946398a9cc"
     },
     {
       "file": "09-authoring-narrative-advanced.png",
       "caption": "NDVI template loaded: the plain-words narrative of the graph, with a step's advanced (defaulted) fields opened.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "0d1ec2d521cb9da53e3eb2c4e84f089084cd9132906cd919375eb56558851522"
+      "sha256": "2aeabf3997b249f620c3fc077a9245195b01f9ab4803b5b17fe386aeaaad9449"
     },
     {
       "file": "10-authoring-published.png",
       "caption": "Publish flow result: the authored NDVI service appears in the layer rail and serves on the map immediately — no reload.",
       "tolerance": 2,
       "maxBadFrac": 0.02,
-      "sha256": "fd37b0ed030acc84a633f361591952c64ec441a44cb456330e2fa096041ea324"
+      "sha256": "bbd80cf75725728d4c26a2891dc644cc08952838749be97d6c90de001b324acf"
     },
     {
       "file": "11-dataset-footprints.png",
       "caption": "Data mode: the catalog's granule cards with engine-rendered thumbnails in the rail, footprints outlined live on the map.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "c61acdca048179df85835ef0750053089baff2ee3de997dc51b9f2fd40a8fde6"
+      "sha256": "97c924b257b3766cbdaf6134727be8e15a51577ed9c112198455f9427ba895fd"
     },
     {
       "file": "12-analytics-under-load.png",
       "caption": "Trace analytics under load: rolling p50/p95 render latency, plan mix, and cache hit rate over the session's tiles.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "c132b97827e6722ff93ea5cee70553011d26048215c30b080ba0dbb3ec1eac93"
+      "sha256": "075a0f7a1a83662abdff2ac482115edb56b8052c4d054ba62694dde77a02f950"
     },
     {
       "file": "13-time-slider-live.png",
       "caption": "Time slider over the Park Fire season, first pass: the scrubbed frame is rendered live — every badge says so, and the analytics card narrates the frame's own plan mix.",
       "tolerance": 2,
       "maxBadFrac": 0.04,
-      "sha256": "24ae7c27c06fbe63d578e4824741834b5dae04e26f8c101bd1aef2991fb18144"
+      "sha256": "81535c20ee2f9af65751c649b1725c3fd71d1aa56be939b686060f711b794e02"
     },
     {
       "file": "14-time-slider-cached.png",
       "caption": "The same frame revisited: every tile is a cache hit (same granule, same cache entry — ADR 0015 frame identity), which is why the loop replays smoothly.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "d5995698de309309bf1e6893bc2c86dd616c9a8cd5d3321e70b73fbf5271308e"
+      "sha256": "df15870b468941ff3dcd88e8feca47fcf10b1f63cf07bc2f6544058d7fdedae0"
     }
   ]
 }
