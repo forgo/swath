@@ -3,7 +3,7 @@
 
 /**
  * Granule footprints as a MapLibre layer (issue #110): the map-side half
- * of the dataset browser. `<swath-dataset-panel>` owns the fetching and
+ * of the dataset browser. `<swath-catalog>` (#288) owns the fetching and
  * the list UI; this module owns the paint — a GeoJSON source of bbox
  * polygons plus a line layer of outlines — and the zoom-to-footprint
  * move. The page shell (demo/main.ts) wires the two through events, the

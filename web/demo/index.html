@@ -76,7 +76,7 @@ or bring the stack up yourself and `pnpm exec vite dev`.
        * `display: block`, which would beat the UA's [hidden] rule — this
        * element+attribute selector outranks it. */
       swath-layer-list[hidden],
-      swath-dataset-panel[hidden],
+      swath-catalog[hidden],
       swath-add-data-panel[hidden],
       swath-authoring-panel[hidden] {
         display: none;
@@ -128,8 +128,9 @@ or bring the stack up yourself and `pnpm exec vite dev`.
         <!-- Mode content: `layers` is the full rail as it always was; the
              other modes narrow it (main.ts, issue #283). -->
         <swath-layer-list></swath-layer-list>
-        <!-- Collapsed by default; fetches nothing until opened (issue #110). -->
-        <swath-dataset-panel></swath-dataset-panel>
+        <!-- Data mode's catalog (issue #288): lazy until the mode is entered;
+             every thumbnail is a preview the engine rendered. -->
+        <swath-catalog hidden></swath-catalog>
         <!-- Collapsed and lazy (issue #197); its first open reads the
              capabilities document, so a read-only server shows no form. -->
         <swath-add-data-panel></swath-add-data-panel>

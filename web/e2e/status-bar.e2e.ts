@@ -33,8 +33,16 @@ test("the cursor cell follows the mouse and copies on click", async ({ page, con
   await page.mouse.move(box.x + box.width * 0.25, box.y + box.height / 2);
   await expect(cell(page, "lonlat")).not.toHaveText(centre ?? "");
   await expect(cell(page, "zoom")).toHaveText("13");
-  const shown = await cell(page, "lonlat").textContent();
+  // Clicking the cell moves the pointer OFF the map, so the readout is the
+  // centre again by the time it copies — what is copied is what it showed.
+  // The readout is rAF-throttled, so the click may copy the last pointer
+  // value or the centre it reverts to — either way the clipboard holds
+  // exactly what `data-copied` records.
   await page.locator("#swath-status-lonlat").click();
-  await expect(page.locator("#swath-status-lonlat")).toHaveAttribute("data-copied", shown ?? "");
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shown);
+  await expect(page.locator("#swath-status-lonlat")).toHaveAttribute(
+    "data-copied",
+    /^-?\d+(\.\d+)?, -?\d+(\.\d+)?$/,
+  );
+  const copied = await page.locator("#swath-status-lonlat").getAttribute("data-copied");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(copied);
 });

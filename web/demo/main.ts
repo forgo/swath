@@ -39,7 +39,7 @@ import { GranuleFootprints } from "../src/granule-footprints.js";
 import { formatCrs, formatIngest, formatLonLat, formatZoomCell } from "../src/status-model.js";
 import { defineSwathAddDataPanel, SwathAddDataPanel } from "../src/swath-add-data-panel.js";
 import { defineSwathAuthoringPanel, SwathAuthoringPanel } from "../src/swath-authoring-panel.js";
-import { defineSwathDatasetPanel, SwathDatasetPanel } from "../src/swath-dataset-panel.js";
+import { defineSwathCatalog, SwathCatalog } from "../src/swath-catalog.js";
 import { defineSwathLayerList, SwathLayerList } from "../src/swath-layer-list.js";
 import { defineSwathMap, SwathMap } from "../src/swath-map.js";
 import { defineSwathShell, SwathShell } from "../src/swath-shell.js";
@@ -65,7 +65,7 @@ import {
 
 const mapElement = document.querySelector("swath-map");
 const panelElement = document.querySelector("swath-layer-list");
-const datasetElement = document.querySelector("swath-dataset-panel");
+const datasetElement = document.querySelector("swath-catalog");
 const addDataElement = document.querySelector("swath-add-data-panel");
 const authoringElement = document.querySelector("swath-authoring-panel");
 SwathButton.define();
@@ -138,7 +138,7 @@ if (stac !== null && stac !== "") {
 
 defineSwathMap();
 defineSwathLayerList();
-defineSwathDatasetPanel();
+defineSwathCatalog();
 defineSwathAddDataPanel();
 defineSwathAuthoringPanel();
 
@@ -149,7 +149,7 @@ if (mapElement instanceof SwathMap && authoringElement instanceof SwathAuthoring
   wireAuthoring(mapElement, authoringElement);
 }
 
-if (mapElement instanceof SwathMap && datasetElement instanceof SwathDatasetPanel) {
+if (mapElement instanceof SwathMap && datasetElement instanceof SwathCatalog) {
   wireDatasetBrowser(mapElement, datasetElement);
 }
 
@@ -170,7 +170,7 @@ if (mapElement instanceof SwathMap && addDataElement instanceof SwathAddDataPane
 /** Routes the dataset browser (issue #110) to the map: announced granules
  * become the footprint layer, a granule click becomes a bounds fit. The
  * panel fetches lazily on its own; nothing here runs until it announces. */
-function wireDatasetBrowser(map: SwathMap, panel: SwathDatasetPanel): void {
+function wireDatasetBrowser(map: SwathMap, panel: SwathCatalog): void {
   let footprints: GranuleFootprints | undefined;
   const paint = (): GranuleFootprints | undefined => {
     const inner = map.map;
@@ -188,6 +188,22 @@ function wireDatasetBrowser(map: SwathMap, panel: SwathDatasetPanel): void {
     const detail = event.detail;
     paint()?.zoomTo(detail.bbox);
   });
+  // The "in current view" filter follows the map (issue #288).
+  const follow = (): void => {
+    const inner = map.map;
+    if (!inner) {
+      return;
+    }
+    const b = inner.getBounds();
+    panel.viewBounds = {
+      west: b.getWest(),
+      south: b.getSouth(),
+      east: b.getEast(),
+      north: b.getNorth(),
+    };
+  };
+  map.map?.on("moveend", follow);
+  map.addEventListener("swath-layer-change", follow);
 }
 
 function wire(map: SwathMap, panel: SwathLayerList): void {
@@ -305,8 +321,11 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
       author: mode === "layers" || mode === "author",
     };
     panel.hidden = !show.layers;
-    if (datasetElement instanceof HTMLElement) {
+    if (datasetElement instanceof SwathCatalog) {
       datasetElement.hidden = !show.data;
+      if (mode === "data") {
+        datasetElement.active = true; // lazy by contract: the first entry fetches
+      }
     }
     if (addDataElement instanceof HTMLElement) {
       addDataElement.hidden = !show.data;

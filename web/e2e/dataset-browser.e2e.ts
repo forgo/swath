@@ -1,25 +1,15 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-// The dataset browser (issue #110) in real chromium, in both modes
-// (playwright.config.ts):
-//
-// - Laziness rides the REAL stack and is asserted as a network COUNT:
-//   zero /collections and granule requests until the panel opens, one
-//   listing per open, one granule fetch per dataset expand — and the
-//   expanded granules paint a real MapLibre footprint layer.
-// - Zoom-to-footprint and the empty state run over routed FIXTURES
-//   (page.route), so the asserted geometry and the asserted guidance
-//   string are deterministic regardless of what the stack has ingested.
+// Data mode's catalog (issue #288, the dataset browser of #110 rebuilt on
+// cards): lazy by contract, footprints on the map, zoom-to-granule, the
+// ingest guidance, and thumbnails that are previews the ENGINE rendered
+// (`POST /result`) — never a client-side decode (ADR 0019).
 import { expect, type Page, test } from "@playwright/test";
 
 const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
-
-/** The footprint source/layer id (src/granule-footprints.ts). */
 const FOOTPRINTS_ID = "swath-granule-footprints";
 
-/** Two granules over the Alps — far from the demo dataset's Colorado
- * footprint, so the zoom assertion cannot pass by accident. */
 const FIXTURE_GRANULES = {
   granules: [
     {
@@ -39,10 +29,8 @@ const FIXTURE_GRANULES = {
   numberReturned: 2,
   links: [],
 };
-
 const EMPTY_PAGE = { granules: [], numberMatched: 0, numberReturned: 0, links: [] };
 
-/** Same fitted-view discriminator as the landing suite. */
 async function waitForFittedView(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const el = document.querySelector("swath-map") as {
@@ -53,15 +41,12 @@ async function waitForFittedView(page: Page): Promise<void> {
   });
 }
 
-function panelToggle(page: Page) {
-  return page.locator("swath-dataset-panel .swath-dataset-panel-toggle");
-}
+const dataMode = (page: Page) => page.locator('swath-rail [part="item"][data-mode="data"]');
+const datasetSelect = (page: Page) => page.locator('swath-catalog [part="dataset"] select');
+const card = (page: Page, id: string) =>
+  page.locator(`swath-catalog swath-granule-card[data-granule="${id}"]`);
+const cards = (page: Page) => page.locator("swath-catalog swath-granule-card");
 
-function datasetButton(page: Page, id: string) {
-  return page.locator(`swath-dataset-panel button[data-dataset="${id}"]`);
-}
-
-/** Is a request one the dataset browser owns? (Counted for laziness.) */
 function browsePath(url: string): string | undefined {
   const { pathname } = new URL(url);
   if (pathname.endsWith("/collections") || /\/datasets\/[^/]+\/granules$/.test(pathname)) {
@@ -70,7 +55,9 @@ function browsePath(url: string): string | undefined {
   return undefined;
 }
 
-test("granule fetch is lazy: zero browse requests until the panel opens", async ({ page }) => {
+test("lazy by contract: zero browse requests until Data mode is entered; one listing, live granules", async ({
+  page,
+}) => {
   const hits: string[] = [];
   page.on("request", (request) => {
     const path = browsePath(request.url());
@@ -78,30 +65,17 @@ test("granule fetch is lazy: zero browse requests until the panel opens", async 
       hits.push(path);
     }
   });
-
   await page.goto(DEMO_PATH);
   await waitForFittedView(page);
-  // The page is fully up — map, tiles, layer panel — and the closed
-  // dataset browser has added NOTHING to the request log. The granules
-  // requests that ARE here belong to the map, not the panel: the
-  // cinematic landing (issue #211) scans tilesets in id order for a
-  // playable series — `ndvi`'s dataset (one date: skipped), then
-  // `park-fire-ndvi`'s (six: chosen) — and the apply reuses that read
-  // for the slider's domain (issue #182), so exactly two, no more.
-  await expect(panelToggle(page)).toBeVisible();
+  // The map's own temporal domain reads are the only granule requests.
   expect(hits.filter((path) => path.endsWith("/collections"))).toEqual([]);
   expect(hits).toEqual(["/datasets/hls-s30/granules", "/datasets/hls-s30-fire/granules"]);
-
-  // Opening fetches the dataset listing exactly once, still no further
-  // granules requests — the panel stays lazy.
-  await panelToggle(page).click();
-  await expect(datasetButton(page, "hls-s30")).toBeVisible();
-  expect(hits.filter((path) => path.endsWith("/collections"))).toHaveLength(1);
+  await dataMode(page).click();
+  await expect(datasetSelect(page)).toBeVisible();
+  await expect.poll(() => hits.filter((path) => path.endsWith("/collections")).length).toBe(1);
   expect(hits.filter((path) => path.includes("granules"))).toHaveLength(2);
-
-  // Expanding the dataset fetches its granules exactly once more.
-  await datasetButton(page, "hls-s30").click();
-  await expect(page.locator("swath-dataset-panel button[data-granule]").first()).toBeVisible();
+  await datasetSelect(page).selectOption("hls-s30");
+  await expect(cards(page).first()).toBeVisible();
   expect(hits.filter((path) => path.includes("granules"))).toEqual([
     "/datasets/hls-s30/granules",
     "/datasets/hls-s30-fire/granules",
@@ -109,16 +83,33 @@ test("granule fetch is lazy: zero browse requests until the panel opens", async 
   ]);
 });
 
-test("expanding renders footprint outlines as a MapLibre layer", async ({ page }) => {
-  await page.goto(DEMO_PATH);
+test("cards carry engine-rendered thumbnails (POST /result), never a client decode", async ({
+  page,
+}) => {
+  const previews: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("/result") && request.method() === "POST") {
+      previews.push(request.postData() ?? "");
+    }
+  });
+  await page.goto(`${DEMO_PATH}?view=data`);
   await waitForFittedView(page);
-  await panelToggle(page).click();
-  await datasetButton(page, "hls-s30").click();
-  await expect(page.locator("swath-dataset-panel button[data-granule]").first()).toBeVisible();
+  await datasetSelect(page).selectOption("hls-s30");
+  const first = cards(page).first();
+  await expect(first).toBeVisible();
+  await expect(first.locator('img[part="media"]')).toBeVisible({ timeout: 60_000 });
+  expect(previews.length).toBeGreaterThan(0);
+  expect(previews[0]).toContain('"load_collection"');
+  expect(previews[0]).toContain('"spatial_extent"');
+  const src = await first.locator('img[part="media"]').getAttribute("src");
+  expect(src).toMatch(/^blob:/); // the engine's PNG, as an object URL
+});
 
-  // A real line layer over a GeoJSON source carrying the granule's
-  // footprint polygon. `serialize()` reads the data the source was given —
-  // deterministic where querySourceFeatures depends on tile/render state.
+test("choosing a dataset renders footprint outlines as a MapLibre layer", async ({ page }) => {
+  await page.goto(`${DEMO_PATH}?view=data`);
+  await waitForFittedView(page);
+  await datasetSelect(page).selectOption("hls-s30");
+  await expect(cards(page).first()).toBeVisible();
   await page.waitForFunction((id) => {
     const el = document.querySelector("swath-map") as {
       map?: {
@@ -138,18 +129,18 @@ test("expanding renders footprint outlines as a MapLibre layer", async ({ page }
   }, FOOTPRINTS_ID);
 });
 
-test("clicking a granule zooms the map to its footprint (fixtures)", async ({ page }) => {
+test("activating a card zooms the map to its footprint (fixtures); filters narrow the count", async ({
+  page,
+}) => {
   await page.route("**/datasets/hls-s30/granules*", (route) =>
     route.fulfill({ json: FIXTURE_GRANULES }),
   );
-  await page.goto(DEMO_PATH);
+  await page.goto(`${DEMO_PATH}?view=data`);
   await waitForFittedView(page);
-  await panelToggle(page).click();
-  await datasetButton(page, "hls-s30").click();
-  await expect(page.locator('button[data-granule="FIX.A.2026"]')).toBeVisible();
-
-  await page.locator('button[data-granule="FIX.A.2026"]').click();
-  // The view fits the fixture bbox: centered on it, both corners inside.
+  await datasetSelect(page).selectOption("hls-s30");
+  await expect(card(page, "FIX.A.2026")).toBeVisible();
+  await expect(page.locator('swath-catalog [part="count"]')).toHaveText("2 of 2 granules");
+  await card(page, "FIX.A.2026").locator('swath-card [part="base"]').click();
   await page.waitForFunction(() => {
     const el = document.querySelector("swath-map") as {
       map?: {
@@ -170,18 +161,22 @@ test("clicking a granule zooms the map to its footprint (fixtures)", async ({ pa
       bounds.contains([11.1, 46.4])
     );
   });
+  // Date range: from June keeps only FIX.A; "in current view" (the map is
+  // now on FIX.A) drops FIX.B too.
+  await page.locator('swath-catalog swath-field[name="from"] input').fill("2026-06-01");
+  await page.locator('swath-catalog swath-field[name="from"] input').dispatchEvent("change");
+  await expect(page.locator('swath-catalog [part="count"]')).toHaveText("1 of 2 granules");
+  await expect(card(page, "FIX.B.2026")).toHaveCount(0);
 });
 
 test("a dataset with no granules shows the ingest guidance (fixtures)", async ({ page }) => {
   await page.route("**/datasets/hls-s30/granules*", (route) => route.fulfill({ json: EMPTY_PAGE }));
-  await page.goto(DEMO_PATH);
+  await page.goto(`${DEMO_PATH}?view=data`);
   await waitForFittedView(page);
-  await panelToggle(page).click();
-  await datasetButton(page, "hls-s30").click();
-
-  const empty = page.locator("swath-dataset-panel .swath-dataset-panel-empty");
+  await datasetSelect(page).selectOption("hls-s30");
+  const empty = page.locator('swath-catalog [part="empty"]');
   await expect(empty).toBeVisible();
   await expect(empty).toContainText("No granules ingested yet");
-  await expect(empty).toContainText("swath ingest"); // points at the ingest command
-  await expect(page.locator("swath-dataset-panel button[data-granule]")).toHaveCount(0);
+  await expect(empty).toContainText("swath ingest");
+  await expect(cards(page)).toHaveCount(0);
 });
