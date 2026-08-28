@@ -1414,6 +1414,14 @@ mod merge_cubes {
             err(&g),
             @"node `change` (merge_cubes): invalid argument `cube2`: both cubes load the collection through node `before` — load it once per frame (a second load_collection with its own temporal_extent) so each branch resolves its own granule"
         );
+        // A band label carrying the source qualifier can never be told
+        // apart from a qualified name.
+        let mut g = change_detection();
+        g["process_graph"]["after"]["arguments"]["bands"] = json!(["red", "nir@after"]);
+        insta::assert_snapshot!(
+            err(&g),
+            @"node `after` (load_collection): invalid argument `bands`: band name `nir@after` contains `@`, the source qualifier"
+        );
         // `context` is not admitted.
         let mut g = change_detection();
         g["process_graph"]["change"]["arguments"]["context"] = json!({"k": 1});

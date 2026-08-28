@@ -154,7 +154,7 @@ planner crate, ADR 0016 — re-exported at `swath_core::planner`; `PlanChoice` i
 `run_udf` executor as a `dyn` port (ADR 0018); the cached variant owns the probe +
 write-through.
 
-_Last verified against sources `cc9a7b02220b`._
+_Last verified against sources `9429e272f4b0`._
 
 ## 7. Adapters and inbound APIs
 
@@ -190,7 +190,7 @@ seam.
 | OGC API - EDR | 3 | not started |
 | OGC API - Features | 3 | not started |
 
-_Last verified against sources `552a07cd6343`._
+_Last verified against sources `5593dee56424`._
 
 ## 8. Data flows
 

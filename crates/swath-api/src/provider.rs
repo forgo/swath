@@ -39,8 +39,8 @@ use swath_core::catalog::{
     Bbox, Catalog, CatalogError, DatasetId, Datetime, Granule, GranuleQuery, TimeRange,
 };
 use swath_core::tile::TileCoord;
-use swath_render::TileRequest;
 use swath_render::ir::RenderPlan;
+use swath_render::{SourceWindow, TileRequest};
 
 use crate::error::ApiError;
 use crate::registry::{Layer, LayerRegistry};
@@ -90,6 +90,28 @@ pub struct ResolvedLayer {
     /// whole-world placeholder box (ROADMAP row 15), and a preview tile
     /// of the placeholder is one blank root tile, never the granule.
     pub granule_bbox: Option<Bbox>,
+    /// Every granule the frame resolved to, one per source in branch
+    /// order (ADR 0022) — the singular fields above are the first
+    /// (primary) entry, kept for the one-source transition. Empty for
+    /// static layers.
+    pub granules: Vec<ResolvedGranule>,
+}
+
+/// One branch's resolution: the `load_collection` node it serves and the
+/// granule that backs it.
+#[derive(Debug, Clone)]
+pub struct ResolvedGranule {
+    /// The `load_collection` node id (empty for config-defined layers,
+    /// which have no graph).
+    pub node: String,
+    /// The granule id.
+    pub id: String,
+    /// The granule's acquisition datetime.
+    pub datetime: Datetime,
+    /// The granule's WGS84 footprint.
+    pub bbox: Bbox,
+    /// When the granule was ingested.
+    pub ingested_at: Option<Datetime>,
 }
 
 impl ResolvedLayer {
@@ -170,6 +192,7 @@ impl LayerProvider for LayerRegistry {
             granule_id: None,
             granule_datetime: None,
             granule_bbox: None,
+            granules: Vec::new(),
         })
     }
 }
@@ -202,8 +225,14 @@ pub struct CatalogLayer {
     /// sides (the default) resolves against every granule — today's
     /// "latest wins", unchanged. Compiled from an openEO graph's
     /// `temporal_extent` / `filter_temporal`; config-defined layers are
-    /// unconstrained.
+    /// unconstrained. For a layer over more than one source this is the
+    /// hull of the branch windows; resolution runs per branch over
+    /// [`sources`](Self::sources).
     pub window: TimeRange,
+    /// The `load_collection` branches of a compiled graph, each with its
+    /// own resolution window (ADR 0022): one for a single-source graph,
+    /// two for a `merge_cubes` join. Empty for config-defined layers.
+    pub sources: Vec<SourceWindow>,
 }
 
 /// The catalog-backed [`LayerProvider`]: identities compiled from config
@@ -347,17 +376,18 @@ impl<C: Catalog> CatalogLayers<C> {
     ///
     /// [`resolve`]: LayerProvider::resolve
     ///
-    /// # Errors
-    ///
-    /// API-shaped like [`resolve`]: no granule in the window (none
-    /// ingested yet, or a `datetime` that selects none — before the
-    /// first acquisition, or a narrowed interval) → 404 of one shape,
-    /// catalog failure → 500, a granule missing a required band → 500.
-    pub async fn resolve_template(
+    /// One branch's granule (ADR 0015 composition, per branch under ADR
+    /// 0022): the request's `datetime` window intersected with the
+    /// branch's compiled resolution window, then latest-at-or-before.
+    /// `branch` names the `load_collection` node in the 404 when the
+    /// layer has more than one.
+    async fn resolve_branch(
         &self,
         entry: &CatalogLayer,
+        compiled: &TimeRange,
         window: Option<&TimeRange>,
-    ) -> Result<ResolvedLayer, ApiError> {
+        branch: Option<&str>,
+    ) -> Result<Granule, ApiError> {
         let id = &entry.id;
         // ADR 0015 composition: the request's `datetime` window (the
         // tiles route, #180) is intersected with the layer's *compiled*
@@ -366,7 +396,7 @@ impl<C: Catalog> CatalogLayers<C> {
         // earlier end. A layer without a graph window passes the request
         // window through untouched; no window at all keeps the exact
         // open query the provider always sent.
-        let compiled = (entry.window != TimeRange::default()).then_some(&entry.window);
+        let compiled = (*compiled != TimeRange::default()).then_some(compiled);
         let effective = match (compiled, window) {
             (None, None) => None,
             (Some(one), None) | (None, Some(one)) => Some(one.clone()),
@@ -393,28 +423,86 @@ impl<C: Catalog> CatalogLayers<C> {
                 .await
                 .map_err(|err| catalog_error(&entry.dataset, &err))?
         };
-        let granule = latest(granules).ok_or_else(|| {
+        latest(granules).ok_or_else(|| {
             let dataset = &entry.dataset;
+            let branch = branch.map_or_else(String::new, |node| format!(" (branch `{node}`)"));
             match &effective {
                 None => ApiError::not_found(format!(
-                    "layer `{id}`: no granule of dataset `{dataset}` has been ingested yet",
+                    "layer `{id}`{branch}: no granule of dataset `{dataset}` has been ingested yet",
                 )),
                 Some(window) => ApiError::not_found(format!(
-                    "layer `{id}`: no granule of dataset `{dataset}` has an acquisition \
+                    "layer `{id}`{branch}: no granule of dataset `{dataset}` has an acquisition \
                      datetime within [{start}, {end}]",
                     start = window.start.as_ref().map_or("..", Datetime::as_str),
                     end = window.end.as_ref().map_or("..", Datetime::as_str),
                 )),
             }
-        })?;
+        })
+    }
 
-        // Plan inputs name dataset bands; the granule must provide each.
+    /// # Errors
+    ///
+    /// API-shaped like [`resolve`]: no granule in the window (none
+    /// ingested yet, or a `datetime` that selects none — before the
+    /// first acquisition, or a narrowed interval) → 404 of one shape,
+    /// catalog failure → 500, a granule missing a required band → 500.
+    pub async fn resolve_template(
+        &self,
+        entry: &CatalogLayer,
+        window: Option<&TimeRange>,
+    ) -> Result<ResolvedLayer, ApiError> {
+        let id = &entry.id;
+        // One branch per source (ADR 0022); a config-defined layer, with
+        // no graph, is the single branch over its own window.
+        let branches: Vec<(&str, &TimeRange)> = if entry.sources.len() > 1 {
+            entry
+                .sources
+                .iter()
+                .map(|source| (source.node.as_str(), &source.window))
+                .collect()
+        } else {
+            vec![(
+                entry
+                    .sources
+                    .first()
+                    .map_or("", |source| source.node.as_str()),
+                &entry.window,
+            )]
+        };
+        let named = branches.len() > 1;
+        let mut granules = Vec::with_capacity(branches.len());
+        for (node, compiled) in branches {
+            let branch = named.then_some(node);
+            let granule = self.resolve_branch(entry, compiled, window, branch).await?;
+            granules.push((node.to_owned(), granule));
+        }
+
+        // Plan inputs name dataset bands — `band@node` in a multi-source
+        // plan; each must come from the granule its branch resolved to.
         let mut bands = std::collections::BTreeMap::new();
         for input in &entry.plan.inputs {
-            let asset = granule.assets.get(&input.name).ok_or_else(|| {
+            let (node, granule) = match &input.source {
+                Some(source) => granules
+                    .iter()
+                    .find(|(node, _)| node == source)
+                    .ok_or_else(|| {
+                        ApiError::internal(format!(
+                            "layer `{id}`: plan input `{name}` names source `{source}`, which \
+                             the layer does not load",
+                            name = input.name,
+                        ))
+                    })?,
+                None => &granules[0],
+            };
+            let asset = granule.assets.get(input.band()).ok_or_else(|| {
+                let branch = if named {
+                    format!(" (branch `{node}`)")
+                } else {
+                    String::new()
+                };
                 ApiError::internal(format!(
                     "granule `{granule_id}` of dataset `{dataset}` provides no band \
-                     `{band}` required by layer `{id}`",
+                     `{band}` required by layer `{id}`{branch}",
                     granule_id = granule.id,
                     dataset = entry.dataset,
                     band = input.name,
@@ -427,6 +515,24 @@ impl<C: Catalog> CatalogLayers<C> {
             bands.insert(input.name.clone(), asset.href.clone());
         }
 
+        // The frame is as fresh as its newest branch: ingest→pixel reads
+        // against the latest arrival.
+        let ingested_at = granules
+            .iter()
+            .filter_map(|(_, g)| g.ingested_at.clone())
+            .max_by_key(Datetime::to_unix_millis);
+        let primary = &granules[0].1;
+        let resolved: Vec<ResolvedGranule> = granules
+            .iter()
+            .map(|(node, g)| ResolvedGranule {
+                node: node.clone(),
+                id: g.id.to_string(),
+                datetime: g.datetime.clone(),
+                bbox: g.bbox,
+                ingested_at: g.ingested_at.clone(),
+            })
+            .collect();
+
         Ok(ResolvedLayer {
             layer: Layer {
                 id: entry.id.clone(),
@@ -438,10 +544,11 @@ impl<C: Catalog> CatalogLayers<C> {
                 tile_size: entry.tile_size,
                 budget: entry.budget.clone(),
             },
-            ingested_at: granule.ingested_at.clone(),
-            granule_id: Some(granule.id.to_string()),
-            granule_datetime: Some(granule.datetime.clone()),
-            granule_bbox: Some(granule.bbox),
+            ingested_at,
+            granule_id: Some(primary.id.to_string()),
+            granule_datetime: Some(primary.datetime.clone()),
+            granule_bbox: Some(primary.bbox),
+            granules: resolved,
         })
     }
 }
@@ -469,7 +576,7 @@ mod tests {
     };
     use swath_core::tile::TileCoord;
     use swath_render::ir::{BandInput, OutputSpec, PixelOp, RenderPlan, TileFormat};
-    use swath_render::{NodataPolicy, Resampling};
+    use swath_render::{NodataPolicy, Resampling, SourceWindow};
 
     use super::{CatalogLayer, CatalogLayers, LayerProvider};
 
@@ -582,8 +689,99 @@ mod tests {
                 tile_size: 256,
                 budget: swath_core::planner::Budget::default(),
                 window: TimeRange::default(),
+                sources: Vec::new(),
             }],
         )
+    }
+
+    /// A two-source layer (ADR 0022): one granule per branch under its
+    /// own window, plan inputs read from the branch they name, the
+    /// frame as fresh as its newest branch, and a 404 that names the
+    /// branch left without a granule.
+    #[tokio::test]
+    async fn two_source_layers_resolve_one_granule_per_branch() {
+        let two_source = |granules: Vec<Granule>| {
+            let plan = RenderPlan::new(
+                vec![BandInput::new("b04@after"), BandInput::new("b04@before")],
+                vec![PixelOp::BandMath(
+                    swath_render::ir::Expr::band("b04@after")
+                        - swath_render::ir::Expr::band("b04@before"),
+                )],
+                OutputSpec::new(TileFormat::Png),
+            );
+            let window = |start: &str, end: &str| TimeRange {
+                start: Some(Datetime::new(start).unwrap()),
+                end: Some(Datetime::new(end).unwrap()),
+            };
+            CatalogLayers::new(
+                StubCatalog {
+                    granules: Mutex::new(granules),
+                },
+                vec![CatalogLayer {
+                    id: "change".to_owned(),
+                    title: "Change".to_owned(),
+                    description: String::new(),
+                    dataset: DatasetId::new("hls-s30"),
+                    plan,
+                    resampling: Resampling::Bilinear(NodataPolicy::ExcludeRenormalize),
+                    tile_size: 256,
+                    budget: swath_core::planner::Budget::default(),
+                    window: window("2024-06-01T00:00:00Z", "2024-06-30T23:59:59.999Z"),
+                    sources: vec![
+                        SourceWindow {
+                            node: "after".to_owned(),
+                            window: window("2024-06-10T00:00:00Z", "2024-06-30T23:59:59.999Z"),
+                        },
+                        SourceWindow {
+                            node: "before".to_owned(),
+                            window: window("2024-06-01T00:00:00Z", "2024-06-09T23:59:59.999Z"),
+                        },
+                    ],
+                }],
+            )
+        };
+        let provider = two_source(vec![
+            granule(
+                "g-jun06",
+                "2024-06-06T17:54:00Z",
+                Some("2026-08-08T00:00:00Z"),
+            ),
+            granule(
+                "g-jun13",
+                "2024-06-13T17:54:00Z",
+                Some("2026-08-08T01:00:00Z"),
+            ),
+        ]);
+        let resolved = provider.resolve("change", None).await.unwrap();
+        assert_eq!(
+            resolved.layer.bands["b04@after"].as_str(),
+            "g-jun13-b04.tif"
+        );
+        assert_eq!(
+            resolved.layer.bands["b04@before"].as_str(),
+            "g-jun06-b04.tif"
+        );
+        let branches: Vec<(&str, &str)> = resolved
+            .granules
+            .iter()
+            .map(|g| (g.node.as_str(), g.id.as_str()))
+            .collect();
+        assert_eq!(branches, [("after", "g-jun13"), ("before", "g-jun06")]);
+        // The singular fields are the primary (first) branch.
+        assert_eq!(resolved.granule_id.as_deref(), Some("g-jun13"));
+        assert_eq!(
+            resolved.ingested_at.as_ref().map(Datetime::as_str),
+            Some("2026-08-08T01:00:00Z")
+        );
+        // A request instant that empties one branch names it.
+        let early = TimeRange {
+            start: None,
+            end: Some(Datetime::new("2024-06-08T00:00:00Z").unwrap()),
+        };
+        let err = provider.resolve("change", Some(&early)).await.unwrap_err();
+        let problem = err.to_string();
+        assert!(problem.contains("(branch `after`)"), "{problem}");
+        assert!(problem.contains("2024-06-10T00:00:00Z"), "{problem}");
     }
 
     #[tokio::test]

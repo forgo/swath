@@ -875,6 +875,7 @@ pub fn compile_service_layer(
         tile_size: layer.tile_size,
         budget: budget.clone(),
         window: product.window,
+        sources: product.sources,
     })
 }
 

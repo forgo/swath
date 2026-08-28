@@ -844,6 +844,16 @@ impl<'a> Compiler<'a> {
                 argument: "bands".into(),
                 detail: format!("band names must be strings, got {band}"),
             })?;
+            // `@` is the source qualifier of a multi-source plan (ADR
+            // 0022): a label carrying it could never be told apart.
+            if label.contains('@') {
+                return Err(CompileError::InvalidArgument {
+                    node: node.into(),
+                    process: "load_collection".into(),
+                    argument: "bands".into(),
+                    detail: format!("band name `{label}` contains `@`, the source qualifier"),
+                });
+            }
             let dataset = self
                 .ctx
                 .resolve(label)

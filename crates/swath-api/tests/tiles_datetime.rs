@@ -118,6 +118,7 @@ fn fire_app() -> Router {
             // Config-defined shape: no compiled graph window — only the
             // request's datetime= constrains resolution here.
             window: swath_core::catalog::TimeRange::default(),
+            sources: Vec::new(),
         }],
     );
     let store = LocalFileSystem::new_with_prefix(common::fixtures_dir()).expect("fixture dir");

@@ -146,10 +146,20 @@ impl fmt::Display for TileKey {
 /// the same canonical JSON [`TileKeyInputs::plan_json`] carries.
 #[must_use]
 pub fn layer_version(granule: Option<&str>, plan_json: &str) -> String {
+    layer_version_over(granule.as_slice(), plan_json)
+}
+
+/// [`layer_version`] over every granule a frame resolved to, in branch
+/// order (ADR 0022): a two-source layer keys under the **ordered pair**
+/// `a+b@<plan hash>` — a new granule on either branch is a new version,
+/// and the pair `(a, b)` never shares an entry with `(b, a)`. One granule
+/// is byte-for-byte [`layer_version`]'s `Some` form; none is its `None`.
+#[must_use]
+pub fn layer_version_over(granules: &[&str], plan_json: &str) -> String {
     let digest = Sha256::digest(plan_json.as_bytes());
     let mut version = String::new();
-    if let Some(granule) = granule {
-        version.push_str(granule);
+    if !granules.is_empty() {
+        version.push_str(&granules.join("+"));
         version.push('@');
     }
     for byte in digest {
@@ -261,7 +271,9 @@ impl TileCache for NoCache {
 mod tests {
     use core::future::Future;
 
-    use super::{CachedTile, NoCache, TileCache, TileKey, TileKeyInputs, layer_version};
+    use super::{
+        CachedTile, NoCache, TileCache, TileKey, TileKeyInputs, layer_version, layer_version_over,
+    };
     use crate::tile::TileCoord;
 
     fn inputs() -> TileKeyInputs<'static> {
@@ -433,5 +445,20 @@ mod tests {
         assert!(poll_ready(NoCache.put(&key, b"png", "image/png")).is_ok());
         let entry = CachedTile::new(vec![1, 2, 3], "image/png");
         assert_eq!(entry.content_type, "image/png");
+    }
+
+    #[test]
+    fn layer_version_over_binds_every_branch_in_order() {
+        let plan = r#"{"inputs":[]}"#;
+        assert_eq!(
+            layer_version_over(&["a"], plan),
+            layer_version(Some("a"), plan)
+        );
+        assert_eq!(layer_version_over(&[], plan), layer_version(None, plan));
+        let pair = layer_version_over(&["a", "b"], plan);
+        assert!(pair.starts_with("a+b@"));
+        assert_ne!(pair, layer_version_over(&["a", "c"], plan));
+        assert_ne!(pair, layer_version_over(&["b", "a"], plan));
+        assert_ne!(pair, layer_version_over(&["a"], plan));
     }
 }

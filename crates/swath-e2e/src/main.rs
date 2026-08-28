@@ -247,6 +247,7 @@ fn fire_time_dimension_checks() -> Result<(), Failure> {
         "same tile, two dates, different oracle-pinned pixels (the burn scar is visible)",
     );
     fire_sse_carries_temporal_decision(&mut subscriber)?;
+    fire_change_layer_serves_two_sources(&mut subscriber, &pre, &post)?;
     fire_datetime_error_taxonomy()?;
     fire_collection_serves_derived_temporal_extent()?;
     qgis_xyz_template_serves_png()?;
@@ -584,6 +585,136 @@ fn fire_frame_matches_golden(
         format_args!("datetime={instant} is byte-identical to the RdYlGn self-golden {golden}"),
     );
     Ok(resp.body)
+}
+
+/// The two-cube join against the live stack (ADR 0022, issue #296): a
+/// `merge_cubes` change layer — NDVI(August) − NDVI(July) over the fire
+/// collection — published through `/services` serves one tile from two
+/// granules (pixels unlike either single-date frame; the values are
+/// oracle-pinned in the swath-api suite), and its trace on the stream
+/// names both granules, the `after` branch first.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear e2e scenario: publish the join, serve, read the stream — \
+              the harness style throughout this file"
+)]
+fn fire_change_layer_serves_two_sources(
+    subscriber: &mut sse::Subscriber,
+    pre: &[u8],
+    post: &[u8],
+) -> Result<(), Failure> {
+    const CHECK: &str = "fire_change_layer_serves_two_sources";
+    let fail = |path: &str, expected: &str, got: String| -> Failure {
+        Failure::new(CHECK, path, expected, got)
+    };
+    let load = |extent: [&str; 2]| {
+        serde_json::json!({"process_id": "load_collection", "arguments": {
+            "id": "hls-s30-fire", "spatial_extent": null,
+            "temporal_extent": extent, "bands": ["b8a", "b04"]}})
+    };
+    let ndvi = |from: &str| {
+        serde_json::json!({"process_id": "ndvi", "arguments": {
+            "data": {"from_node": from}, "nir": "b8a", "red": "b04"}})
+    };
+    let service = serde_json::json!({
+        "type": "xyz", "title": "Fire change (August − July)",
+        "process": {"process_graph": {
+            "before": load(["2024-07-01T00:00:00Z", "2024-08-01T00:00:00Z"]),
+            "after": load(["2024-08-01T00:00:00Z", "2024-09-01T00:00:00Z"]),
+            "ndvi_before": ndvi("before"),
+            "ndvi_after": ndvi("after"),
+            "change": {"process_id": "merge_cubes", "arguments": {
+                "cube1": {"from_node": "ndvi_after"},
+                "cube2": {"from_node": "ndvi_before"},
+                "overlap_resolver": {"process_graph": {
+                    "diff": {"process_id": "subtract", "arguments": {
+                        "x": {"from_parameter": "x"}, "y": {"from_parameter": "y"}},
+                        "result": true}}}}},
+            "scale": {"process_id": "linear_scale_range", "arguments": {
+                "x": {"from_node": "change"},
+                "inputMin": -1, "inputMax": 1, "outputMin": 0, "outputMax": 255}},
+            "save": {"process_id": "save_result", "arguments": {
+                "data": {"from_node": "scale"}, "format": "png"}, "result": true},
+        }},
+    });
+    let resp = http::post_json("/services", &service)
+        .map_err(|e| fail("/services", "an HTTP response", e))?;
+    let sid = resp
+        .header("openeo-identifier")
+        .unwrap_or_default()
+        .to_owned();
+    if resp.status != 201 || sid.is_empty() {
+        return Err(fail(
+            "/services",
+            "201 with openeo-identifier",
+            format!("{}", resp.status),
+        ));
+    }
+    let path = format!("/tilesets/{sid}/tiles/13/3100/1326");
+    let resp = get(CHECK, &path)?;
+    if resp.status != 200 || !resp.body.starts_with(&[0x89, b'P', b'N', b'G']) {
+        return Err(fail(
+            &path,
+            "200 with PNG bytes",
+            format!("{}", resp.status),
+        ));
+    }
+    if resp.body == pre || resp.body == post {
+        return Err(fail(
+            &path,
+            "a change tile unlike either single-date frame",
+            "bytes identical to one of the dated frames".to_owned(),
+        ));
+    }
+    // The stream: one temporal record per branch.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let frame = subscriber
+            .next_frame(deadline)
+            .map_err(|e| fail("/traces", "the change tile's trace event within 15s", e))?;
+        if frame.is_keepalive() || frame.event.as_deref() == Some("lagged") {
+            continue;
+        }
+        let data = frame.data.join("\n");
+        let envelope: TraceEnvelope = serde_json::from_str(&data).map_err(|e| {
+            fail(
+                "/traces",
+                "trace data deserializes as the envelope around a core Trace",
+                format!("{e}; data: {data}"),
+            )
+        })?;
+        if envelope.layer != sid || envelope.tile != FIRE_TILE_XYZ {
+            continue;
+        }
+        let sources: Vec<(String, String)> = envelope
+            .trace
+            .temporal
+            .as_ref()
+            .map(|t| {
+                t.sources
+                    .iter()
+                    .map(|s| (s.node.clone(), s.granule_id.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let expected = vec![
+            ("after".to_owned(), FIRE_POST_GRANULE.to_owned()),
+            ("before".to_owned(), FIRE_PRE_GRANULE.to_owned()),
+        ];
+        if sources != expected {
+            return Err(fail(
+                "/traces",
+                "temporal.sources = [(after, 2024229), (before, 2024204)]",
+                format!("{sources:?}"),
+            ));
+        }
+        break;
+    }
+    pass(
+        CHECK,
+        "a merge_cubes change layer serves one tile from two granules; the trace names both",
+    );
+    Ok(())
 }
 
 /// The temporal decision is on the trace stream: both dated frames'
