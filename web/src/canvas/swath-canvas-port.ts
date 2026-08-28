@@ -86,10 +86,15 @@ export class SwathCanvasPort extends SwathElement {
       event.preventDefault();
       this.emit("swath-port-connect-start", this.ref);
     });
-    // Tap / Enter: arm or complete (the canvas holds the armed port).
+    // Enter / a synthetic click (detail 0): arm or complete (the canvas
+    // holds the armed port). A pointer's click (detail ≥ 1) is not a tap
+    // here — the canvas already handled its pointerup, and Chromium does
+    // not always deliver a click after a touch pan anyway.
     control.addEventListener("click", (event) => {
       event.stopPropagation();
-      this.emit("swath-port-tap", this.ref);
+      if (event.detail === 0) {
+        this.emit("swath-port-tap", this.ref);
+      }
     });
     this.#control = control;
     this.renderRoot.replaceChildren(control);

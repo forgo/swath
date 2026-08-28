@@ -300,20 +300,31 @@ export class SwathCanvas extends SwathElement {
 
   readonly #onPortTap = (event: Event): void => {
     const port = (event.target as Element).closest("swath-canvas-port") as SwathCanvasPort | null;
-    if (!port) {
-      return;
+    if (port) {
+      this.#tap(port.ref);
     }
-    const ref = port.ref;
+  };
+
+  /** Tap-to-connect: the first tap arms a port, the second completes to
+   * the tapped one. Reached from a press that never moved (pointerup —
+   * touch or mouse) and from the port's non-pointer activations (Enter,
+   * a synthetic click). Never from a pointer `click`: after a touch pan
+   * Chromium on Linux swallows the next tap's click while its pointer
+   * events still arrive, which left the first port unarmed in CI. */
+  #tap(ref: PortRef): void {
     if (!this.#armed) {
       this.#armed = ref;
-      port.armed = true;
+      const port = this.#port(ref);
+      if (port) {
+        port.armed = true;
+      }
       this.emit("swath-port-connect-start", ref);
     } else {
       const from = this.#armed;
       this.cancelConnect();
       this.emit("swath-port-connect-end", { from, to: ref });
     }
-  };
+  }
 
   readonly #onPointerDown = (event: PointerEvent): void => {
     const at = this.#screenPoint(event);
@@ -498,9 +509,9 @@ export class SwathCanvas extends SwathElement {
       case "connect": {
         const from = g.from;
         this.requestUpdate();
-        // A press that never moved is a tap (touch, or a click): the port's
-        // click handler arms / completes tap-to-connect instead.
+        // A press that never moved is a tap (touch, or a click).
         if (!g.moved) {
+          this.#tap(from);
           break;
         }
         const under = document
