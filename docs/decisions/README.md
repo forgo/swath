@@ -32,3 +32,4 @@ that produced the evidence).
 | 0019 | 2026-08-18 | Add-data goes through the engine; client-side COG rendering rejected | Accepted |
 | 0020 | 2026-08-19 | Publish the UDF guest kit: `swath-udf-guest` is the fifth crate | Accepted |
 | 0021 | 2026-08-26 | The UI system: shadow-DOM primitives on design tokens, one shell, modes in the URL (builds ADR 0005's reactive layer) | Accepted |
+| 0022 | 2026-08-28 | The two-cube join: `merge_cubes` at the bounded profile (gray × gray, same collection, resolver required; `datetime=` intersects every branch) | Proposed |

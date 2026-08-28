@@ -66,6 +66,11 @@ with a named revisit condition* — not forgotten.
 | 16 | **Header/metadata fetch-provenance port extension** | `crates/swath-render/src/tiler.rs` | `RasterSource` reports provenance for pixel reads; header accounting would widen the port for a number nobody reads yet | Header I/O accounting is actually wanted in the Trace |
 | 17 | **UDF module-store GC** (ADR 0018 §v2) | `crates/swath-core/src/udf.rs`, `crates/adapters/swath-modulestore-objectstore/src/lib.rs` | Content-addressed modules never go stale; a deleted service's module costs bytes, nothing else | Measured module-store growth |
 | 18 | **In-browser UDF authoring (Rust playground)** | `web/src/swath-authoring-panel.ts` (#208) | The canvas uploads compiled `.wasm`; the guest kit (ADR 0020) already closes the edit loop locally, and a browser toolchain is a product of its own | Authors ask for it in numbers |
+| 19 | **`mask` as a second join** | [ADR 0022](decisions/0022-two-cube-join-merge-cubes.md) | A gated special case; the IR has no nodata/replacement vocabulary | A product needs masking the IR can express honestly |
+| 20 | **Band-wise `merge_cubes`** | [ADR 0022](decisions/0022-two-cube-join-merge-cubes.md) | v1 joins gray × gray; cross-cube band namespaces are undecided | A cross-collection composite is needed |
+| 21 | **Cross-CRS / cross-grid join branches** | [ADR 0022](decisions/0022-two-cube-join-merge-cubes.md) | Same collection = same grid; no resampling node in the graph yet | A second collection must join the first |
+| 22 | **N > 2 joins** | [ADR 0022](decisions/0022-two-cube-join-merge-cubes.md) | Two `merge_cubes` in series cover the foreseeable products | The first three-input product |
+| 23 | **Per-branch `datetime=`** | [ADR 0022](decisions/0022-two-cube-join-merge-cubes.md) | Intersecting every branch keeps "which frames changed" in one parameter | The device pass finds it too restrictive, with trace evidence |
 
 **ADR-governed deferrals** carry their reopen conditions in the ADR, listed only for
 completeness: WASM plug-ins and sidecar-RPC adapters (ADR 0013); openEO

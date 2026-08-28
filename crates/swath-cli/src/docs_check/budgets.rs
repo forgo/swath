@@ -54,7 +54,11 @@ const BUDGETS: [(&str, usize); 17] = [
     // linking its committed evidence) and §3 item 8 its recorded
     // amendment — acceptance criteria, not prose regrowth; re-measured
     // at 1619 + the usual headroom.
-    ("docs/ROADMAP.md", 1775),
+    // Raised 1775 → 1950 with ADR 0022 (#294): the canonical deferral
+    // inventory grew by five reopen-condition rows (19–23, ~110 words,
+    // written tight) — table growth, not prose regrowth — plus ~4%
+    // headroom for the next row.
+    ("docs/ROADMAP.md", 1950),
 ];
 
 /// The word count of `text` under the committed measurement method:
