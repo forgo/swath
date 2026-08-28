@@ -1,0 +1,40 @@
+<!doctype html>
+<!--
+  SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+  SPDX-License-Identifier: Apache-2.0
+
+  Dev-only fixture for the DAG canvas primitives (issue #290): not part of
+  the build (vite's root is demo/ but only index.html is an input), served
+  by `vite dev` at /demo/canvas.html for the Playwright smoke and hand
+  testing on a trackpad / touch device.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Swath — canvas fixture</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: var(--swath-color-bg); color: var(--swath-color-fg); font-family: var(--swath-font-ui); }
+      swath-canvas { height: 100%; }
+      #log { position: fixed; inset: auto 0 0 0; max-height: 30%; overflow: auto; margin: 0; padding: var(--swath-space-2); font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); background: var(--swath-color-bg-hud); }
+    </style>
+    <script type="module" src="./canvas.ts"></script>
+  </head>
+  <body>
+    <swath-canvas id="canvas">
+      <swath-canvas-node node-id="load" title="Load imagery" x="60" y="80">
+        <p>hls-s30 · b04, b8a</p>
+        <swath-canvas-port slot="outputs" side="output" name="data" label="data"></swath-canvas-port>
+      </swath-canvas-node>
+      <swath-canvas-node node-id="ndvi" title="NDVI" x="420" y="160">
+        <p>(b8a − b04) / (b8a + b04)</p>
+        <swath-canvas-port slot="inputs" side="input" name="data" label="data"></swath-canvas-port>
+        <swath-canvas-port slot="outputs" side="output" name="out" label="out"></swath-canvas-port>
+      </swath-canvas-node>
+      <swath-canvas-node node-id="save" title="Save PNG" x="780" y="80">
+        <swath-canvas-port slot="inputs" side="input" name="data" label="data"></swath-canvas-port>
+      </swath-canvas-node>
+    </swath-canvas>
+    <pre id="log" aria-live="polite"></pre>
+  </body>
+</html>

@@ -63,6 +63,28 @@ export interface SwathEventMap {
   "swath-drawer-close": { reason: "esc" | "scrim" | "swipe" | "select" | "outside" };
   /** The rail's mode switcher picked a mode (`<swath-rail>`). */
   "swath-mode-change": { mode: string };
+  // --- The DAG canvas (issue #290): interaction only, no graph semantics ---
+  /** The viewport changed (pan, zoom, fit). */
+  "swath-canvas-change": { x: number; y: number; k: number };
+  /** The selection changed (click, marquee, keyboard). */
+  "swath-canvas-select": { nodes: string[]; edges: string[] };
+  /** A node was dragged to a new canvas position (on release). */
+  "swath-node-move": { id: string; x: number; y: number };
+  /** A node was activated (Enter / double-click / tap). */
+  "swath-node-activate": { id: string };
+  /** The user asked to delete the selection (Delete / context). */
+  "swath-delete-request": { nodes: string[]; edges: string[] };
+  /** A connection gesture began at a port. */
+  "swath-port-connect-start": { node: string; port: string; side: "input" | "output" };
+  /** A connection gesture ended: the consumer decides whether it is allowed. */
+  "swath-port-connect-end": {
+    from: { node: string; port: string; side: "input" | "output" };
+    to: { node: string; port: string; side: "input" | "output" } | null;
+  };
+  /** A port was tapped / Enter-ed: the canvas arms or completes a connection. */
+  "swath-port-tap": { node: string; port: string; side: "input" | "output" };
+  /** Long-press / right-click on the canvas or a node: a context request. */
+  "swath-canvas-context": { node: string | null; x: number; y: number };
   /** An interactive card was activated; `long` for a long-press / context. */
   "swath-activate": { id: string; long: boolean };
 }
