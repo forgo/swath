@@ -166,7 +166,7 @@ extent remains a whole-world placeholder (derivation deferred —
 The supported subset of openeo-processes 1.2.0 — pinned official
 definitions with a **Swath profile** note where v0 narrows the spec:
 `add`, `array_element`, `divide`, `filter_temporal`,
-`linear_scale_range`, `load_collection`, `multiply`, `ndvi`,
+`linear_scale_range`, `load_collection`, `merge_cubes`, `multiply`, `ndvi`,
 `reduce_dimension`, `save_result`, `subtract` — plus `run_udf` (ADR 0018)
 exactly where `--udf-store` wires a module store: the module (inline
 `data:` or an `http(s)` URL fetched once) is validated at publish time
@@ -174,7 +174,10 @@ and persisted by content hash. Temporal arguments are
 real since ADR 0015: they compile into the layer's granule-resolution
 window (frame selection, never how pixels combine); a window excluding
 every granule 404s at `POST /result`, one that can never select
-anything is 400 `ProcessParameterInvalid`.
+anything is 400 `ProcessParameterInvalid`. `merge_cubes` (ADR 0022) joins
+two gray branches of one collection — two `load_collection` nodes, one
+granule each — through a required `overlap_resolver`; the arithmetic
+processes are admitted inside a reducer or a resolver.
 
 ### `POST /result`
 
@@ -183,8 +186,8 @@ The preview: the openEO synchronous-execute endpoint as a
 #170). The spec-shaped body compiles through the exact `POST /services`
 path — same narrowing, same diagnostics — and answers **one** small
 overview-backed `image/png` render covering the graph's
-`spatial_extent` (null: the rendered granule's footprint); nothing is
-persisted. Debug headers: `x-swath-trace`, and `x-swath-preview-tile`
+`spatial_extent` (null: the rendered granule's footprint — every branch's,
+joined, for a two-source graph); nothing is persisted. Debug headers: `x-swath-trace`, and `x-swath-preview-tile`
 naming the tile a published service serves the identical bytes under.
 Compile failures answer the same registry codes as `POST /services`; a
 live estimate over the bounded budget with no overview to serve it is

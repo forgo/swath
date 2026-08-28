@@ -190,7 +190,7 @@ seam.
 | OGC API - EDR | 3 | not started |
 | OGC API - Features | 3 | not started |
 
-_Last verified against sources `5593dee56424`._
+_Last verified against sources `896bd65a4ea3`._
 
 ## 8. Data flows
 

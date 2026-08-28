@@ -414,7 +414,7 @@ async fn processes_list_run_udf_only_where_wired() {
         "{description}"
     );
     assert!(description.contains("content hash"), "{description}");
-    assert_eq!(processes.len(), 12);
+    assert_eq!(processes.len(), 13);
 
     let (plain, _) = common::openeo_app();
     let response = common::request_on(&plain, "GET", "/processes", None).await;

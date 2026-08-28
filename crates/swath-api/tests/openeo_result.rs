@@ -168,6 +168,78 @@ async fn preview_is_byte_identical_to_the_published_service_tile() {
     assert_eq!(common::body_bytes(response).await, published);
 }
 
+/// The two-cube join previews like anything else (ADR 0022): `POST
+/// /result` over a change graph — two frame-selected branches of the
+/// Park Fire pair — frames the union of both granules' footprints and
+/// answers bytes identical to the published service's tile at the
+/// address the preview names.
+#[tokio::test]
+async fn two_source_preview_is_byte_identical_to_the_published_tile() {
+    let (dataset, granules) = common::park_fire(&[
+        ("2024204", "2024-07-22T19:03:00Z"),
+        ("2024229", "2024-08-16T19:03:00Z"),
+    ]);
+    let (app, _) = common::openeo_app_seeded(dataset, granules);
+    let load = |extent: [&str; 2]| {
+        json!({ "process_id": "load_collection", "arguments": {
+            "id": "park-fire", "spatial_extent": null,
+            "temporal_extent": extent, "bands": ["b8a", "b04"],
+        }})
+    };
+    let ndvi = |from: &str| {
+        json!({ "process_id": "ndvi", "arguments": {
+            "data": { "from_node": from }, "nir": "b8a", "red": "b04",
+        }})
+    };
+    let change = json!({ "process_graph": {
+        "before": load(["2024-07-01T00:00:00Z", "2024-08-01T00:00:00Z"]),
+        "after": load(["2024-08-01T00:00:00Z", "2024-09-01T00:00:00Z"]),
+        "ndvi_before": ndvi("before"),
+        "ndvi_after": ndvi("after"),
+        "change": { "process_id": "merge_cubes", "arguments": {
+            "cube1": { "from_node": "ndvi_after" },
+            "cube2": { "from_node": "ndvi_before" },
+            "overlap_resolver": { "process_graph": {
+                "diff": { "process_id": "subtract", "arguments": {
+                    "x": { "from_parameter": "x" }, "y": { "from_parameter": "y" },
+                }, "result": true },
+            }},
+        }},
+        "scale": { "process_id": "linear_scale_range", "arguments": {
+            "x": { "from_node": "change" },
+            "inputMin": -1, "inputMax": 1, "outputMin": 0, "outputMax": 255,
+        }},
+        "save": { "process_id": "save_result", "arguments": {
+            "data": { "from_node": "scale" }, "format": "png",
+            "options": { "colormap": "rdylgn" },
+        }, "result": true },
+    }});
+    let response = common::request_on(&app, "POST", "/result", Some(result_request(&change))).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "image/png");
+    let tile = response.headers()["x-swath-preview-tile"]
+        .to_str()
+        .expect("preview tile header")
+        .to_owned();
+    let preview = common::body_bytes(response).await;
+    assert!(!preview.is_empty());
+    let service = json!({ "type": "xyz", "process": change });
+    let response = common::request_on(&app, "POST", "/services", Some(service)).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let id = response.headers()["openeo-identifier"]
+        .to_str()
+        .expect("identifier")
+        .to_owned();
+    let response =
+        common::request_on(&app, "GET", &format!("/tilesets/{id}/tiles/{tile}"), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let published = common::body_bytes(response).await;
+    assert_eq!(
+        preview, published,
+        "the two-source preview must be byte-identical to the published-service tile"
+    );
+}
+
 /// A `spatial_extent` narrows the preview window: the tiny box selects a
 /// deeper tile than the collection extent, and — with no overview
 /// eligible at that depth — the small live read is admitted under the

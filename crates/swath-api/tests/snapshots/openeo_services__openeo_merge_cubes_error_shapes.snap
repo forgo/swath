@@ -1,0 +1,34 @@
+---
+source: crates/swath-api/tests/openeo_services.rs
+expression: shapes
+---
+{
+  "merge_cubes over multi-band cubes": {
+    "status": 400,
+    "error": {
+      "code": "ProcessParameterInvalid",
+      "message": "node `change` (merge_cubes): invalid argument `cube1`: expected a gray (reduced) data cube, got a data cube with 2 bands — reduce to one value per pixel first (ndvi or reduce_dimension)"
+    }
+  },
+  "merge_cubes over a scaled cube": {
+    "status": 400,
+    "error": {
+      "code": "ProcessParameterInvalid",
+      "message": "node `change` (merge_cubes): invalid argument `cube2`: expected an unscaled data cube, got an already-scaled one — apply linear_scale_range to the merged result instead"
+    }
+  },
+  "merge_cubes without a resolver": {
+    "status": 400,
+    "error": {
+      "code": "ProcessParameterRequired",
+      "message": "node `change` (merge_cubes): overlap_resolver is required — a child graph over x (from cube1) and y (from cube2) producing one value per pixel pair, e.g. subtract"
+    }
+  },
+  "merge_cubes resolver returning a cube": {
+    "status": 400,
+    "error": {
+      "code": "ProcessGraphInvalid",
+      "message": "node `change` (merge_cubes): type mismatch — expected an overlap_resolver producing a scalar per pixel pair, got a multi-band data cube"
+    }
+  }
+}
