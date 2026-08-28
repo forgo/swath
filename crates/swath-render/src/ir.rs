@@ -76,13 +76,32 @@ use crate::warp::WarpedBuffer;
 #[non_exhaustive]
 pub struct BandInput {
     /// The name expressions and composites use to reference this band.
+    /// In a plan over more than one source (ADR 0022) it is qualified as
+    /// `band@node`, unique per `load_collection` node.
     pub name: String,
+    /// The `load_collection` node this band is read through — `Some` only
+    /// in a plan over more than one source, so single-source plans
+    /// serialize exactly as before. Serving resolves one granule per
+    /// source and reads [`BandInput::band`] from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 impl BandInput {
-    /// A required input band named `name`.
+    /// A required input band named `name`; a `band@node` name records
+    /// its source.
     pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
+        let name = name.into();
+        let source = name.rsplit_once('@').map(|(_, node)| node.to_owned());
+        Self { name, source }
+    }
+
+    /// The dataset band to read: `name` without its `@node` qualifier.
+    #[must_use]
+    pub fn band(&self) -> &str {
+        self.name
+            .rsplit_once('@')
+            .map_or(&self.name, |(band, _)| band)
     }
 }
 

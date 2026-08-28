@@ -1,0 +1,99 @@
+---
+source: crates/swath-render/tests/process_compiler.rs
+expression: product.plan
+---
+{
+  "inputs": [
+    {
+      "name": "b8a@after",
+      "source": "after"
+    },
+    {
+      "name": "b04@after",
+      "source": "after"
+    },
+    {
+      "name": "b8a@before",
+      "source": "before"
+    },
+    {
+      "name": "b04@before",
+      "source": "before"
+    }
+  ],
+  "ops": [
+    {
+      "BandMath": {
+        "Binary": {
+          "op": "Sub",
+          "lhs": {
+            "Binary": {
+              "op": "Div",
+              "lhs": {
+                "Binary": {
+                  "op": "Sub",
+                  "lhs": {
+                    "Band": "b8a@after"
+                  },
+                  "rhs": {
+                    "Band": "b04@after"
+                  }
+                }
+              },
+              "rhs": {
+                "Binary": {
+                  "op": "Add",
+                  "lhs": {
+                    "Band": "b8a@after"
+                  },
+                  "rhs": {
+                    "Band": "b04@after"
+                  }
+                }
+              }
+            }
+          },
+          "rhs": {
+            "Binary": {
+              "op": "Div",
+              "lhs": {
+                "Binary": {
+                  "op": "Sub",
+                  "lhs": {
+                    "Band": "b8a@before"
+                  },
+                  "rhs": {
+                    "Band": "b04@before"
+                  }
+                }
+              },
+              "rhs": {
+                "Binary": {
+                  "op": "Add",
+                  "lhs": {
+                    "Band": "b8a@before"
+                  },
+                  "rhs": {
+                    "Band": "b04@before"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "Rescale": {
+        "min": -1.0,
+        "max": 1.0
+      }
+    },
+    {
+      "Colormap": "RdYlGn"
+    }
+  ],
+  "output": {
+    "format": "Png"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "process_graph": {
+    "before": {
+      "process_id": "load_collection",
+      "arguments": {
+        "id": "hls-s30",
+        "spatial_extent": null,
+        "temporal_extent": ["2024-05-01T00:00:00Z", "2024-06-01T00:00:00Z"],
+        "bands": ["red", "nir"]
+      }
+    },
+    "after": {
+      "process_id": "load_collection",
+      "arguments": {
+        "id": "hls-s30",
+        "spatial_extent": null,
+        "temporal_extent": ["2024-06-01T00:00:00Z", "2024-07-01T00:00:00Z"],
+        "bands": ["red", "nir"]
+      }
+    },
+    "ndvi_before": {
+      "process_id": "ndvi",
+      "arguments": { "data": { "from_node": "before" } }
+    },
+    "ndvi_after": {
+      "process_id": "ndvi",
+      "arguments": { "data": { "from_node": "after" } }
+    },
+    "change": {
+      "process_id": "merge_cubes",
+      "arguments": {
+        "cube1": { "from_node": "ndvi_after" },
+        "cube2": { "from_node": "ndvi_before" },
+        "overlap_resolver": {
+          "process_graph": {
+            "diff": {
+              "process_id": "subtract",
+              "arguments": { "x": { "from_parameter": "x" }, "y": { "from_parameter": "y" } },
+              "result": true
+            }
+          }
+        }
+      }
+    },
+    "scale": {
+      "process_id": "linear_scale_range",
+      "arguments": {
+        "x": { "from_node": "change" },
+        "inputMin": -1,
+        "inputMax": 1,
+        "outputMin": 0,
+        "outputMax": 255
+      }
+    },
+    "save": {
+      "process_id": "save_result",
+      "arguments": {
+        "data": { "from_node": "scale" },
+        "format": "png",
+        "options": { "colormap": "rdylgn" }
+      },
+      "result": true
+    }
+  }
+}
