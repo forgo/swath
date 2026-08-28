@@ -4,6 +4,7 @@
 import {
   type AppState,
   appStatesEqual,
+  inspectorOpen,
   isViewMode,
   parseAppState,
   resolveInitialAppState,
@@ -44,6 +45,7 @@ import { defineSwathLayerList, SwathLayerList } from "../src/swath-layer-list.js
 import { defineSwathMap, SwathMap } from "../src/swath-map.js";
 import { defineSwathShell, SwathShell } from "../src/swath-shell.js";
 import { SwathButton } from "../src/ui/button.js";
+import { SwathDrawer } from "../src/ui/drawer.js";
 import { SwathHudDock } from "../src/ui/hud-dock.js";
 import { SwathRail } from "../src/ui/rail.js";
 import { SwathStatusBar, SwathStatusCell } from "../src/ui/status-bar.js";
@@ -71,6 +73,7 @@ const authoringElement = document.querySelector("swath-authoring-panel");
 SwathButton.define();
 SwathRail.define();
 SwathHudDock.define();
+SwathDrawer.define();
 SwathStatusBar.define();
 SwathStatusCell.define();
 defineSwathShell();
@@ -295,6 +298,30 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
   // device preference: storage only, never the URL (honoured from a
   // `rail=collapsed` link without rewriting it).
   const MODE_TITLES = { layers: "Layers", data: "Data", author: "Author", xray: "X-ray" } as const;
+  const authorDock = document.querySelector("#swath-author-dock");
+  const authorStrip = document.querySelector("#swath-author-strip");
+  const authorInspector = document.querySelector("#swath-author-inspector");
+  if (
+    authoringElement instanceof SwathAuthoringPanel &&
+    authorStrip instanceof HTMLElement &&
+    authorInspector instanceof HTMLElement
+  ) {
+    authoringElement.regions = { strip: authorStrip, inspector: authorInspector };
+    if (appState.sel !== undefined) {
+      authoringElement.sel = appState.sel;
+    }
+    authoringElement.addEventListener("swath-author-select", (event) => {
+      if (appState.view !== "author") {
+        return;
+      }
+      appState = { ...appState, sel: event.detail.sel };
+      if (shellElement instanceof SwathShell) {
+        shellElement.inspector = inspectorOpen(appState);
+      }
+      interact();
+      syncUrl();
+    });
+  }
   const xrayRail = document.querySelector("#swath-xray-rail");
   // The x-ray's display modes + analytics summary live in the rail under
   // view=xray (issue #286); the map re-homes a live overlay on assignment.
@@ -335,6 +362,26 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     }
     if (xrayRail instanceof HTMLElement) {
       xrayRail.hidden = mode !== "xray";
+    }
+    // Author mode (issue #291): the strip drawer opens over the map and the
+    // inspector column shows once a step is selected.
+    if (authorDock instanceof SwathDrawer) {
+      authorDock.open = mode === "author";
+    }
+    // Entering author mode with no `sel=`: the panel's own selection (its
+    // first step) becomes the state, so the inspector opens on it.
+    if (
+      mode === "author" &&
+      appState.sel === undefined &&
+      authoringElement instanceof SwathAuthoringPanel
+    ) {
+      const sel = authoringElement.sel;
+      if (sel !== undefined && sel !== "") {
+        appState = { ...appState, sel };
+      }
+    }
+    if (shellElement instanceof SwathShell) {
+      shellElement.inspector = inspectorOpen(appState);
     }
   };
   const savePreference = (): void => {

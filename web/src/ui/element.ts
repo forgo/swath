@@ -13,7 +13,7 @@
  * theming API beyond tokens + `::part`. Rendering is imperative (`dom.ts`).
  */
 import { createSwathEvent, type SwathEventMap } from "./events.js";
-import { adoptTokens, base } from "./styles.js";
+import { adoptSheet, adoptTokens, base } from "./styles.js";
 
 export type PropType = "string" | "number" | "boolean";
 
@@ -51,7 +51,11 @@ export abstract class SwathElement extends HTMLElement {
   static tagName: string;
   static styles: readonly CSSStyleSheet[] = [];
   static properties: Record<string, PropSpec> = {};
-  static shadowOptions: ShadowRootInit = { mode: "open" };
+  /** `null` renders into LIGHT DOM (`renderRoot === this`, styles adopted
+   * at document level): the escape for an organism whose ids and tests
+   * live in the light tree (the authoring panel, #291). Everything else
+   * keeps a shadow root. */
+  static shadowOptions: ShadowRootInit | null = { mode: "open" };
 
   // `this` in these statics is the SUBCLASS (its table, its tag): the whole
   // point. Biome's noThisInStatic would rewrite it to the base class.
@@ -93,7 +97,7 @@ export abstract class SwathElement extends HTMLElement {
   }
   // biome-ignore-end lint/complexity/noThisInStatic: polymorphic statics
 
-  protected readonly renderRoot: ShadowRoot;
+  protected readonly renderRoot: ShadowRoot | HTMLElement;
   readonly #props = new Map<string, PropValue>();
   #abort = new AbortController();
   #update: Promise<void> | undefined;
@@ -102,8 +106,16 @@ export abstract class SwathElement extends HTMLElement {
     super();
     const ctor = this.constructor as typeof SwathElement;
     adoptTokens(this.ownerDocument);
-    this.renderRoot = this.attachShadow(ctor.shadowOptions);
-    this.renderRoot.adoptedStyleSheets = [base, ...ctor.styles];
+    if (ctor.shadowOptions === null) {
+      this.renderRoot = this;
+      for (const sheet of ctor.styles) {
+        adoptSheet(sheet, this.ownerDocument);
+      }
+    } else {
+      const root = this.attachShadow(ctor.shadowOptions);
+      root.adoptedStyleSheets = [base, ...ctor.styles];
+      this.renderRoot = root;
+    }
     // A property set before upgrade is an own data property shadowing the
     // prototype accessor; re-route it through the setter.
     for (const name of Object.keys(ctor.properties)) {
@@ -113,6 +125,13 @@ export abstract class SwathElement extends HTMLElement {
         (this as Record<string, unknown>)[name] = value;
       }
     }
+  }
+
+  /** The focused element inside this element's render root (shadow or light). */
+  protected get focused(): Element | null {
+    return this.renderRoot instanceof ShadowRoot
+      ? this.renderRoot.activeElement
+      : this.ownerDocument.activeElement;
   }
 
   /** Aborts on disconnect — for listeners on `window` / `document` / other

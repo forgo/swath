@@ -34,16 +34,48 @@ const NDVI_WASM = readFileSync(
  * byte-identity test uses (crates/swath-api/tests/openeo_services.rs). */
 const TILE = "12/1561/848";
 
+/** Author mode shows ONE step's fields at a time in the inspector (#291):
+ * click the step's chip in the strip before addressing its fields. */
+/** The rail's layer list shows in Layers mode; author mode shows the
+ * authoring pieces instead (#291). */
+async function showLayers(page: Page): Promise<void> {
+  await page.locator('swath-rail [part="item"][data-mode="layers"]').click();
+}
+
+async function ensureStep(page: Page, key: string): Promise<void> {
+  const chip = page.locator(`.swath-authoring-chip[data-chip="${key}"]`);
+  if ((await chip.count()) > 0 && (await chip.getAttribute("aria-pressed")) !== "true") {
+    await chip.click();
+  }
+}
+
 function fieldById(page: Page, id: string) {
-  return page.locator(`#swath-authoring-${id}`);
+  const key = /^(s\d+)-/.exec(id)?.[1];
+  const locator = page.locator(`#swath-authoring-${id}`);
+  if (key === undefined) {
+    return locator;
+  }
+  // Selecting the chip is a side effect of addressing the field: a locator
+  // proxy that switches steps before the first action on it.
+  return new Proxy(locator, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== "function") {
+        return value;
+      }
+      return async (...args: unknown[]) => {
+        await ensureStep(page, key);
+        return (value as (...a: unknown[]) => unknown).apply(target, args);
+      };
+    },
+  });
 }
 
 /** The stage-typed insert chip for `processId` at `gap` (0 = right
  * after the Load card). */
 function chip(page: Page, gap: number, processId: string) {
   return page.locator(
-    `swath-authoring-panel .swath-authoring-insert[data-gap="${gap}"] ` +
-      `button[data-process="${processId}"]`,
+    `.swath-authoring-insert[data-gap="${gap}"] ` + `button[data-process="${processId}"]`,
   );
 }
 
@@ -51,12 +83,17 @@ function chip(page: Page, gap: number, processId: string) {
  * the dataset browser): every flow starts by toggling it open. The
  * permanent Load card (s1) rendering means the canvas is ready. */
 async function openPanel(page: Page): Promise<void> {
+  // Author mode (issue #291): the steps live in the strip drawer over the
+  // map and the selected step's fields in the inspector; the toggle stays
+  // in the rail.
+  await page.locator('swath-rail [part="item"][data-mode="author"]').click();
   await page.locator("swath-authoring-panel .swath-authoring-toggle").click();
-  await expect(page.locator('swath-authoring-panel [data-step="s1"]')).toBeVisible();
+  await ensureStep(page, "s1");
+  await expect(page.locator('[data-step="s1"]')).toBeVisible();
 }
 
 function submitButton(page: Page) {
-  return page.locator("swath-authoring-panel .swath-authoring-submit");
+  return page.locator(".swath-authoring-submit");
 }
 
 /** Ticks a Load-card band checkbox (tick order = loaded order). */
@@ -83,6 +120,7 @@ async function authorNdvi(page: Page, outputMax: string, colormap: string): Prom
   await fieldById(page, "s4-options").selectOption(colormap);
   // Only a non-default output range needs the s3 advanced section.
   if (outputMax !== "255") {
+    await ensureStep(page, "s3");
     await page.locator('[data-step="s3"] .swath-authoring-advanced-toggle').click();
     await fieldById(page, "s3-outputMax").fill(outputMax);
   }
@@ -237,6 +275,7 @@ test("UI-authored NDVI serves tiles byte-identical to the built-in layer, no rel
 
   // The authored layer appears in the layer browser immediately — same
   // page, no reload — and becomes the viewed layer.
+  await showLayers(page);
   const layerButton = page.locator(`swath-layer-item[data-layer="${id}"] [part="row"]`);
   await expect(layerButton).toBeVisible();
   await expect(layerButton).toContainText("NDVI (authored)");
@@ -270,11 +309,11 @@ test("the formula builder's reducer child graph compiles to the same NDVI bytes"
   await fieldById(page, "s2-row1-left").selectOption("band:b8a");
   await fieldById(page, "s2-row1-op").selectOption("subtract");
   await fieldById(page, "s2-row1-right").selectOption("band:b04");
-  await page.locator("swath-authoring-panel .swath-authoring-formula-add").click();
+  await page.locator(".swath-authoring-formula-add").click();
   await fieldById(page, "s2-row2-left").selectOption("band:b8a");
   await fieldById(page, "s2-row2-op").selectOption("add");
   await fieldById(page, "s2-row2-right").selectOption("band:b04");
-  await page.locator("swath-authoring-panel .swath-authoring-formula-add").click();
+  await page.locator(".swath-authoring-formula-add").click();
   await fieldById(page, "s2-row3-left").selectOption("row:0");
   await fieldById(page, "s2-row3-op").selectOption("divide");
   await fieldById(page, "s2-row3-right").selectOption("row:1");
@@ -333,15 +372,12 @@ test("the canvas keeps the pipeline valid: permanent frame, typed chips, plain r
   // The empty canvas is already the whole frame: Load (s1) → Output
   // (s2), neither removable — "the graph must end in save_result" (B1)
   // is unconstructible, and no chip anywhere offers arithmetic (B2).
-  await expect(page.locator('swath-authoring-panel [data-process="save_result"]')).toBeVisible();
-  await expect(
-    page.locator('swath-authoring-panel [data-step="s2"] [aria-label^="Remove step"]'),
-  ).toHaveCount(0);
+  await ensureStep(page, "s2"); // the save step's card lives in the inspector when selected
+  await expect(page.locator('[data-process="save_result"]')).toBeVisible();
+  await expect(page.locator('[data-step="s2"] [aria-label^="Remove step"]')).toHaveCount(0);
   for (const forbidden of ["divide", "add", "subtract", "multiply", "array_element"]) {
     await expect(
-      page.locator(
-        `swath-authoring-panel .swath-authoring-insert button[data-process="${forbidden}"]`,
-      ),
+      page.locator(`.swath-authoring-insert button[data-process="${forbidden}"]`),
     ).toHaveCount(0);
   }
 
@@ -378,7 +414,7 @@ test("the canvas keeps the pipeline valid: permanent frame, typed chips, plain r
   await chip(page, 1, "linear_scale_range").click();
   await fieldById(page, "s3-inputMin").fill("-1");
   await fieldById(page, "s3-inputMax").fill("1");
-  await expect(page.locator("swath-authoring-panel .swath-authoring-insert")).toHaveCount(0);
+  await expect(page.locator(".swath-authoring-insert")).toHaveCount(0);
 });
 
 test("a graph the server rejects renders its diagnostic on the offending field", async ({
@@ -396,7 +432,7 @@ test("a graph the server rejects renders its diagnostic on the offending field",
   await submitButton(page).click();
   const note = page.locator("#swath-authoring-s3-outputMin-note");
   await expect(note).toContainText("the output range must be exactly 0..255");
-  await expect(page.locator("swath-authoring-panel .swath-authoring-error")).toHaveCount(0);
+  await expect(page.locator(".swath-authoring-error")).toHaveCount(0);
 });
 
 test("a complete draft shows its live preview image before anything is published", async ({
@@ -417,7 +453,7 @@ test("a complete draft shows its live preview image before anything is published
   const preview = page.waitForResponse(
     (response) => response.url().includes("/result") && response.request().method() === "POST",
   );
-  await page.locator("swath-authoring-panel .swath-authoring-template").click();
+  await page.locator(".swath-authoring-template").click();
   const response = await preview;
   expect(response.status()).toBe(200);
   expect(response.headers()["content-type"]).toBe("image/png");
@@ -437,7 +473,7 @@ test("a complete draft shows its live preview image before anything is published
 test("the NDVI template publishes a working layer from one click", async ({ page }) => {
   await page.goto(DEMO_PATH);
   await openPanel(page);
-  const template = page.locator("swath-authoring-panel .swath-authoring-template");
+  const template = page.locator(".swath-authoring-template");
   await expect(template).toBeVisible();
   await template.click();
 
@@ -462,6 +498,7 @@ test("deleting a published service 404s its tile URL and drops it from the brows
   await authorNdvi(page, "255", "grayscale");
   await fieldById(page, "title").fill("NDVI (deletable)");
   const id = await publish(page);
+  await showLayers(page);
   await expect(page.locator(`swath-layer-item[data-layer="${id}"] [part="row"]`)).toBeVisible();
   const live = await page.request.get(`/tilesets/${id}/tiles/${TILE}`);
   expect(live.status()).toBe(200);
@@ -488,6 +525,7 @@ test("the layer row's kebab deletes a published service (issue #282)", async ({ 
   await fieldById(page, "title").fill("NDVI (kebab-deletable)");
   const id = await publish(page);
   const item = page.locator(`swath-layer-item[data-layer="${id}"]`);
+  await showLayers(page);
   await expect(item).toBeVisible();
 
   // The delete action exists only on rows the server lists as services.
@@ -645,7 +683,7 @@ test("UDF stage: a fuel bomb's refusal reads in plain words on the module and ne
   );
   await expect(page.locator("#swath-authoring-preview-image")).toBeHidden();
   await expect(submitButton(page)).toBeEnabled();
-  await expect(page.locator("swath-authoring-panel .swath-authoring-error")).toHaveCount(0);
+  await expect(page.locator(".swath-authoring-error")).toHaveCount(0);
 
   // A different, valid draft on the same canvas publishes and serves:
   // drop the module, author NDVI in its place.

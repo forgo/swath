@@ -84,6 +84,7 @@ or bring the stack up yourself and `pnpm exec vite dev`.
       #swath-status-lonlat {
         cursor: copy;
       }
+      #swath-author-inspector { padding: var(--swath-space-3); }
       #swath-xray-rail {
         display: flex;
         flex-direction: column;
@@ -151,6 +152,14 @@ or bring the stack up yourself and `pnpm exec vite dev`.
            even with the x-ray off (issue #287). -->
       <swath-map slot="map" switcher="off" traces></swath-map>
       <swath-hud-dock slot="hud"></swath-hud-dock>
+      <!-- Author mode (issue #291): the step strip over the map, the
+           selected step's fields in the inspector column. M11 swaps the
+           strip for the DAG editor — a content change, not a layout one. -->
+      <swath-drawer slot="main" id="swath-author-dock" edge="bottom" size="38%" label="Pipeline">
+        <span slot="header">Pipeline</span>
+        <div id="swath-author-strip"></div>
+      </swath-drawer>
+      <div slot="inspector" id="swath-author-inspector"></div>
       <swath-status-bar slot="statusbar">
         <swath-status-cell id="swath-status-lonlat" label="lon/lat" mono title="Click to copy"></swath-status-cell>
         <swath-status-cell id="swath-status-zoom" label="zoom" mono></swath-status-cell>
