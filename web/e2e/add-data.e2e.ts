@@ -145,8 +145,9 @@ test("the /?stac= deep link pre-fills the flow and registers nothing", async ({ 
   await page.goto(entry);
 
   // Open, pre-filled from the fetched item — registering stays a click.
+  // The toggle is a pressed <swath-button> (#289): open = pressed.
   await expect(page.locator("swath-add-data-panel .swath-add-data-toggle button")).toHaveAttribute(
-    "aria-expanded",
+    "aria-pressed",
     "true",
   );
   await expect(field(page, "link")).toHaveValue(itemUrl);
