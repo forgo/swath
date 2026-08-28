@@ -14,7 +14,7 @@
 //
 // Specs read SWATH_DEMO_PATH for the page path; it defaults per mode here
 // (the config module is evaluated in every worker, so specs see it too).
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 
 const binaryMode = process.env.SWATH_E2E_MODE === "binary";
 process.env.SWATH_DEMO_PATH ??= binaryMode ? "/" : "/demo/";
@@ -36,6 +36,14 @@ export default defineConfig({
   projects: [
     { name: "suites", grepInvert: RESTART_TEST },
     { name: "restart", grep: RESTART_TEST, dependencies: ["suites"] },
+    // Touch parity (issue #290): the canvas smoke on an emulated phone —
+    // coarse pointer, touch events, a narrow viewport. Only the canvas
+    // suite opts in (everything else is desktop-only until #293).
+    {
+      name: "mobile",
+      testMatch: /canvas\.e2e\.ts/,
+      use: { ...devices["Pixel 7"] },
+    },
   ],
   use: {
     baseURL: binaryMode ? "http://localhost:8080" : "http://localhost:5173",
