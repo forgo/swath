@@ -235,6 +235,16 @@ async fn a_change_layer_serves_the_two_date_oracle_golden() {
     assert_eq!(temporal.granule_id, POST, "the primary branch is cube1's");
     assert_eq!(temporal.rule, TemporalRule::Latest);
     assert_eq!(branches(&trace), pair(POST, PRE));
+    // The tileset metadata says so too (#301): two branches, and the
+    // hull of their windows as the frames a client may offer.
+    let metadata = common::request_on(&app, "GET", &format!("/tilesets/{service}"), None).await;
+    assert_eq!(metadata.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&common::body_bytes(metadata).await).expect("json");
+    assert_eq!(body["swath:sources"], json!(2));
+    assert_eq!(
+        body["swath:window"],
+        json!(["2024-07-01T00:00:00Z", "2024-08-31T23:59:59.999Z"])
+    );
 }
 
 // --- `datetime=` composes with every branch ------------------------------

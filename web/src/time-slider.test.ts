@@ -10,6 +10,7 @@
 // web/e2e/time-slider.e2e.ts.
 import { afterEach, expect, test, vi } from "vitest";
 import {
+  boundDomain,
   frameIndexForTime,
   PLAY_INTERVAL_MS,
   parseGranuleDatetimes,
@@ -67,6 +68,26 @@ test("parseGranuleDatetimes: duplicates collapse, junk is skipped, never fatal",
   expect(parseGranuleDatetimes({})).toEqual([]);
   expect(parseGranuleDatetimes(null)).toEqual([]);
   expect(parseGranuleDatetimes("junk")).toEqual([]);
+});
+
+test("boundDomain keeps only the frames inside the layer's window (ADR 0015/0022)", () => {
+  const frames = [
+    "2024-06-07T19:03:00Z",
+    "2024-07-22T19:03:00Z",
+    "2024-08-16T19:03:00Z",
+    "2024-10-15T19:03:00Z",
+  ];
+  expect(boundDomain(frames, undefined)).toEqual(frames);
+  expect(boundDomain(frames, [null, null])).toEqual(frames);
+  expect(boundDomain(frames, ["2024-07-01T00:00:00Z", "2024-08-31T23:59:59.999Z"])).toEqual([
+    "2024-07-22T19:03:00Z",
+    "2024-08-16T19:03:00Z",
+  ]);
+  expect(boundDomain(frames, ["2024-08-16T19:03:00Z", null])).toEqual([
+    "2024-08-16T19:03:00Z",
+    "2024-10-15T19:03:00Z",
+  ]);
+  expect(boundDomain(frames, [null, "2024-06-01T00:00:00Z"])).toEqual([]);
 });
 
 test("frameIndexForTime mirrors the server's latest-at-or-before rule", () => {

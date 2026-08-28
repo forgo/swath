@@ -114,6 +114,18 @@ export interface TraceTemporal {
   /** The resolution rule that ran (`latest`, `latest_at_or_before`,
    * `latest_in_interval`). */
   rule: string;
+  /** One record per branch of a two-source frame (ADR 0022, #301):
+   * which granule each `load_collection` resolved to. Absent or empty
+   * on one-source frames. */
+  sources?: TraceTemporalSource[];
+}
+
+/** One branch's granule of a two-source frame. */
+export interface TraceTemporalSource {
+  /** The `load_collection` node id of the branch. */
+  node: string;
+  granule_id: string;
+  granule_datetime: string;
 }
 
 /** The core `Trace` JSON (pinned in swath-core `trace` module). */
@@ -1307,6 +1319,11 @@ export class XRayOverlay {
         "frame",
         `${trace.temporal.granule_datetime} (${trace.temporal.granule_id}, ${trace.temporal.rule})`,
       );
+      // A joined frame (ADR 0022, #301): one line per branch, so the
+      // badge explains both granules a pixel came from.
+      for (const source of trace.temporal.sources ?? []) {
+        fact(`branch ${source.node}`, `${source.granule_datetime} (${source.granule_id})`);
+      }
     }
     fact("sources", trace.sources.join(", "));
     if (trace.ingest_to_pixel_ms !== null) {

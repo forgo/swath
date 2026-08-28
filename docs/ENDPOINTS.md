@@ -77,8 +77,11 @@ from the layer's *resolved* assets, so a catalog-backed layer with no
 granules yet is 404 here while its identity still appears in the list.
 Catalog-backed layers also carry a `granules` link — the listing whose
 acquisition datetimes are exactly the frames `datetime=` can select
-(ADR 0015; how the time slider, #182, discovers a layer's temporal domain);
-static layers are a single timeless frame with no such link.
+(ADR 0015; how the time slider, #182, discovers a layer's temporal domain),
+plus `swath:window` — the compiled frame-selection window, the hull of the
+branch windows for a two-source layer (ADR 0022) — and `swath:sources`, the
+branch count; the slider offers only frames inside the window. Static
+layers are a single timeless frame with none of these.
 
 ### `GET /tilesets/{layerId}/tiles/{tileMatrix}/{tileRow}/{tileCol}`
 

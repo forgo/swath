@@ -65,6 +65,29 @@ export function parseGranuleDatetimes(body: unknown): string[] {
 }
 
 /**
+ * `frames` inside a layer's frame-selection window (ADR 0015; the hull
+ * of the branch windows for a two-source layer, ADR 0022) — a frame the
+ * server would answer with a 404 is never offered. Either side `null`
+ * (or an absent window) leaves that side open. Bounds are inclusive,
+ * the catalog's comparison.
+ */
+export function boundDomain(
+  frames: readonly string[],
+  window: readonly [string | null, string | null] | undefined,
+): string[] {
+  if (window === undefined) {
+    return [...frames];
+  }
+  const [start, end] = window;
+  const lo = start === null ? Number.NEGATIVE_INFINITY : Date.parse(start);
+  const hi = end === null ? Number.POSITIVE_INFINITY : Date.parse(end);
+  return frames.filter((frame) => {
+    const t = Date.parse(frame);
+    return t >= lo && t <= hi;
+  });
+}
+
+/**
  * The frame a `datetime=` instant displays: the latest frame at or
  * before `t` — exactly the server's resolution rule (ADR 0015,
  * latest-at-or-before), so the slider's thumb always points at the

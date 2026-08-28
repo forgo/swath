@@ -944,6 +944,36 @@ test("malformed payloads never reach the analytics", () => {
   expect(panel?.textContent).toContain("p50 — · p95 — ms");
 });
 
+test("a two-source frame's inspector lists every branch's granule (ADR 0022, #301)", () => {
+  const { host, overlay, source } = mountOverlay();
+  const temporal = {
+    granule_id: "hlss30-t10tfk-2024229",
+    granule_datetime: "2024-08-16T19:03:00Z",
+    requested: null,
+    rule: "latest",
+    sources: [
+      {
+        node: "after",
+        granule_id: "hlss30-t10tfk-2024229",
+        granule_datetime: "2024-08-16T19:03:00Z",
+      },
+      {
+        node: "before",
+        granule_id: "hlss30-t10tfk-2024204",
+        granule_datetime: "2024-07-22T19:03:00Z",
+      },
+    ],
+  };
+  source.emit("trace", envelope("truecolor", "2/1/1", { temporal }));
+  overlay.refresh();
+  badges(host)[0]?.click();
+  const inspector = host.querySelector<HTMLElement>(".swath-xray-inspector");
+  expect(inspector?.textContent).toContain("branch after");
+  expect(inspector?.textContent).toContain("2024-08-16T19:03:00Z (hlss30-t10tfk-2024229)");
+  expect(inspector?.textContent).toContain("branch before");
+  expect(inspector?.textContent).toContain("2024-07-22T19:03:00Z (hlss30-t10tfk-2024204)");
+});
+
 test("temporal traces reach the per-frame analytics line and the inspector (issue #182)", () => {
   const { host, overlay, source } = mountOverlay();
   const temporal = {
