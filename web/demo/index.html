@@ -85,6 +85,7 @@ or bring the stack up yourself and `pnpm exec vite dev`.
         cursor: copy;
       }
       #swath-author-inspector { padding: var(--swath-space-3); }
+      #swath-search { margin-inline-start: auto; }
       #swath-xray-rail {
         display: flex;
         flex-direction: column;
@@ -147,6 +148,8 @@ or bring the stack up yourself and `pnpm exec vite dev`.
         <span slot="footer" class="swath-rail-footer">granule → pixel</span>
       </swath-rail>
       <span slot="topbar" id="swath-mode-title">Layers</span>
+      <!-- Every action by name (issue #292): ⌘K / Ctrl-K or this button. -->
+      <swath-button slot="topbar" id="swath-search" icon="search" size="sm" label="Commands (⌘K)">commands</swath-button>
       <!-- switcher="off": the layer list IS the switcher on this page. -->
       <!-- traces: the status bar's ingest→pixel cell wants the trace stream
            even with the x-ray off (issue #287). -->
@@ -167,5 +170,6 @@ or bring the stack up yourself and `pnpm exec vite dev`.
         <swath-status-cell id="swath-status-ingest" label="ingest→pixel" mono></swath-status-cell>
       </swath-status-bar>
     </swath-shell>
+    <swath-command-palette label="Commands"></swath-command-palette>
   </body>
 </html>

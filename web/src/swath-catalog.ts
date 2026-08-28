@@ -141,6 +141,11 @@ export class SwathCatalog extends SwathElement {
     return this.#datasets;
   }
 
+  /** The open dataset's id ("" when none). */
+  get selected(): string {
+    return this.#selected;
+  }
+
   get granules(): readonly CatalogGranule[] {
     return this.#granules;
   }
