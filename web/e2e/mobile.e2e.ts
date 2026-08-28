@@ -65,3 +65,23 @@ test("data + x-ray + author entry from the tab bar and the dock", async ({ page 
   await expect(page.locator("#swath-author-dock")).toHaveAttribute("open", "");
   await expect(page).toHaveURL(/[?&]view=author/);
 });
+
+test("author: the pipeline is a canvas — a tap on a node's chip selects its step (#299)", async ({
+  page,
+}) => {
+  // The panel's toggle lives in the rail sheet, which the author dock
+  // covers on a phone: open the panel from Layers mode, then switch.
+  await page.goto(DEMO_PATH);
+  await landed(page);
+  await page.locator("swath-authoring-panel .swath-authoring-toggle").tap();
+  await tab(page, "author").tap();
+  await expect(page.locator("#swath-author-dock")).toHaveAttribute("open", "");
+  const canvas = page.locator("#swath-author-dock swath-canvas.swath-authoring-canvas");
+  await expect(canvas).toBeVisible();
+  await expect(canvas.locator("swath-canvas-node")).toHaveCount(2); // Load, Output
+  const output = canvas.locator('.swath-authoring-chip[data-chip="s2"]');
+  await output.tap();
+  await expect(output).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('#swath-author-inspector [data-step="s2"]')).toBeAttached();
+  await expect(page).toHaveURL(/[?&]sel=s2/);
+});
