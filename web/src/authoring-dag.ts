@@ -20,7 +20,7 @@
  * owning node so a server diagnostic maps back to one canvas node.
  */
 
-import { LOAD_STAGE, type Stage, transition } from "./authoring-model";
+import { FORMULA_OPS, LOAD_STAGE, type Stage, transition } from "./authoring-model";
 
 /** A port's type: the stage flowing through it. */
 export type PortType = Stage;
@@ -360,6 +360,12 @@ export function insertableOn(
     if (!served.has(process) || process === "merge_cubes") {
       return false;
     }
+    if (
+      process === "reduce_dimension" &&
+      (!served.has("array_element") || !FORMULA_OPS.some((op) => served.has(op)))
+    ) {
+      return false; // the formula builder needs its child-graph vocabulary served
+    }
     const spliced = splice(dag, edge, { id: nextId, process, params: defaultParams(process) });
     return spliced !== undefined && wellTyped(spliced);
   });
@@ -486,7 +492,7 @@ export function resultIssue(dag: Dag): string | undefined {
 }
 
 /** The `load_collection` at the head of `id`'s first-input chain. */
-function loadHead(dag: Dag, id: string): string | undefined {
+export function loadHead(dag: Dag, id: string): string | undefined {
   const seen = new Set<string>();
   let current: string | undefined = id;
   while (current !== undefined && !seen.has(current)) {

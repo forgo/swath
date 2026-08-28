@@ -410,11 +410,17 @@ test("the canvas keeps the pipeline valid: permanent frame, typed chips, plain r
   await expect(submitButton(page)).toBeEnabled();
   await expect(reason).toBeEmpty();
   // After the scale step, the saturated NDVI pipeline offers no further
-  // insertions anywhere (B4 and friends: nothing else fits).
+  // computing step anywhere (B4 and friends: nothing else fits) — only
+  // a date filter, which changes no pixels, and the join after NDVI
+  // (ADR 0022) remain on offer.
   await chip(page, 1, "linear_scale_range").click();
   await fieldById(page, "s4-inputMin").fill("-1");
   await fieldById(page, "s4-inputMax").fill("1");
-  await expect(page.locator(".swath-authoring-insert")).toHaveCount(0);
+  await expect(
+    page.locator(
+      '.swath-authoring-insert button:not([data-process="filter_temporal"]):not([data-process="merge_cubes"])',
+    ),
+  ).toHaveCount(0);
 });
 
 test("a graph the server rejects renders its diagnostic on the offending field", async ({
@@ -486,6 +492,138 @@ test("the NDVI template publishes a working layer from one click", async ({ page
   const id = await publish(page);
   const tile = await page.request.get(`/tilesets/${id}/tiles/${TILE}`);
   expect(tile.status()).toBe(200);
+});
+
+/** The proven fire tile (z/row/col) the Park Fire series serves, and the
+ * oracle's two-date change golden over its July/August pair. */
+const FIRE_TILE = "13/3100/1326";
+const CHANGE_GOLDEN = readFileSync(
+  fileURLToPath(
+    new URL(
+      "../../crates/swath-render/tests/data/fire-change-13-1326-3100-2024204-2024229.png",
+      import.meta.url,
+    ),
+  ),
+);
+
+/** A perceptual diff in the page (the testkit's default policy: at most
+ * 2/255 per channel, at most 0.5% of pixels worse than that). */
+async function pixelDiff(
+  page: Page,
+  served: Buffer,
+  golden: Buffer,
+): Promise<{ maxDiff: number; badFrac: number }> {
+  return page.evaluate(
+    async ([a, b]) => {
+      const decode = async (base64: string): Promise<Uint8ClampedArray> => {
+        const image = new Image();
+        image.src = `data:image/png;base64,${base64}`;
+        await image.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = image.width;
+        canvas.height = image.height;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          throw new Error("no 2d context");
+        }
+        context.drawImage(image, 0, 0);
+        return context.getImageData(0, 0, canvas.width, canvas.height).data;
+      };
+      const [x, y] = await Promise.all([decode(a ?? ""), decode(b ?? "")]);
+      if (x.length !== y.length) {
+        throw new Error(`dimensions differ: ${x.length} vs ${y.length}`);
+      }
+      let bad = 0;
+      let maxDiff = 0;
+      for (let i = 0; i < x.length; i += 4) {
+        let d = 0;
+        for (let k = 0; k < 4; k += 1) {
+          d = Math.max(d, Math.abs((x[i + k] ?? 0) - (y[i + k] ?? 0)));
+        }
+        maxDiff = Math.max(maxDiff, d);
+        if (d > 2) {
+          bad += 1;
+        }
+      }
+      return { maxDiff, badFrac: bad / (x.length / 4) };
+    },
+    [served.toString("base64"), golden.toString("base64")],
+  );
+}
+
+/** Sets a date filter step's window through its two pickers. */
+async function setWindow(page: Page, key: string, from: string, until: string): Promise<void> {
+  await fieldById(page, `${key}-extent-from`).fill(from);
+  await fieldById(page, `${key}-extent-until`).fill(until);
+}
+
+test("change detection (ADR 0022): template → preview → publish → tile matches the oracle golden → delete 404s", async ({
+  page,
+}) => {
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+  // The template builds on the chosen collection: the fire series.
+  await fieldById(page, "s1-id").selectOption("hls-s30-fire");
+  await page.locator(".swath-authoring-template-change").click();
+  await expect(page.locator("#swath-authoring-narrative")).toContainText(
+    "subtract the second branch from the first",
+  );
+  // The oracle golden is NDVI(August) − NDVI(July), grayscale: pin the
+  // two branches' windows to those months and drop the palette.
+  const filters = await page
+    .locator('.swath-authoring-steps [data-step][data-process="filter_temporal"]')
+    .evaluateAll((steps) => steps.map((step) => (step as HTMLElement).dataset["step"] ?? ""));
+  expect(filters).toHaveLength(2);
+  await setWindow(page, filters[0] ?? "", "2024-07-01", "2024-08-01");
+  await setWindow(page, filters[1] ?? "", "2024-08-01", "2024-09-01");
+  await fieldById(page, "s2-options").selectOption("");
+  // The preview renders the pair (both branches resolved) before anything
+  // is published.
+  const preview = page.waitForResponse(
+    (response) => response.url().includes("/result") && response.request().method() === "POST",
+  );
+  await page.locator("#swath-authoring-narrative").click(); // any settle; the debounce fires
+  expect((await preview).status()).toBe(200);
+  await expect(page.locator("#swath-authoring-preview-image")).toBeVisible();
+  await expect(submitButton(page)).toBeEnabled();
+  const id = await publish(page);
+  const tile = await page.request.get(`/tilesets/${id}/tiles/${FIRE_TILE}`);
+  expect(tile.status()).toBe(200);
+  const diff = await pixelDiff(page, await tile.body(), CHANGE_GOLDEN);
+  expect(diff.badFrac, `max |diff| ${diff.maxDiff}`).toBeLessThanOrEqual(0.005);
+  // Delete: the honest 404.
+  const deleted = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/services/${id}`) && response.request().method() === "DELETE",
+  );
+  await page.getByRole("button", { name: `Delete ${id}` }).click();
+  expect((await deleted).status()).toBe(204);
+  await expect
+    .poll(async () => (await page.request.get(`/tilesets/${id}/tiles/${FIRE_TILE}`)).status())
+    .toBe(404);
+});
+
+test("deleting the join orphans both branches: the canvas greys them, the gate says so, nothing is dropped", async ({
+  page,
+}) => {
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+  await fieldById(page, "s1-id").selectOption("hls-s30-fire");
+  await page.locator(".swath-authoring-template-change").click();
+  await expect(submitButton(page)).toBeEnabled();
+  const [merge] = await page
+    .locator('.swath-authoring-steps [data-step][data-process="merge_cubes"]')
+    .evaluateAll((steps) => steps.map((step) => (step as HTMLElement).dataset["step"] ?? ""));
+  await ensureStep(page, merge ?? "");
+  await page.getByRole("button", { name: `Remove step ${merge}` }).click();
+  await expect(submitButton(page)).toBeDisabled();
+  await expect(page.locator("#swath-authoring-submit-reason")).toContainText("goes nowhere");
+  await expect(
+    page.locator('swath-canvas.swath-authoring-canvas swath-canvas-node[data-orphan="true"]'),
+  ).toHaveCount(6); // both branches: load, dates, NDVI × 2
+  await expect(page.locator("swath-canvas.swath-authoring-canvas swath-canvas-node")).toHaveCount(
+    8,
+  );
 });
 
 test("deleting a published service 404s its tile URL and drops it from the browser", async ({
@@ -589,9 +727,14 @@ test("UDF stage: upload → preview → publish → x-ray shows fuel → delete 
   await expect(image).toBeVisible();
   await expect(image).toHaveAttribute("src", /^blob:/);
 
-  // Stage-typed: only the stretch step fits, after the module; the
-  // colormap greys out with the UDF reason (its output renders directly).
-  await expect(page.locator('.swath-authoring-insert[data-gap="0"]')).toHaveCount(0);
+  // Stage-typed: only the stretch step fits, after the module (before it,
+  // nothing but a date filter); the colormap greys out with the UDF
+  // reason (its output renders directly).
+  await expect(
+    page.locator(
+      '.swath-authoring-insert[data-gap="0"] button:not([data-process="filter_temporal"])',
+    ),
+  ).toHaveCount(0);
   await chip(page, 1, "linear_scale_range").click();
   await fieldById(page, "s4-inputMin").fill("-1");
   await fieldById(page, "s4-inputMax").fill("1");

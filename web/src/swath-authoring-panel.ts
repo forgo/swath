@@ -103,7 +103,23 @@
  */
 
 import { ApiProblem, SwathApi } from "./api.js";
-import { CUBE_PORTS, type Dag, type DagNode, lower, OUT, orphans } from "./authoring-dag.js";
+import {
+  CUBE_PORTS,
+  changeTemplate,
+  type Dag,
+  type DagNode,
+  type Edge,
+  feeding,
+  halves,
+  insertableOn,
+  loadHead,
+  lower,
+  OUT,
+  orphans,
+  resolverGraph,
+  topological,
+  typer,
+} from "./authoring-dag.js";
 import {
   buildReducerGraph,
   CUBE_PARAM,
@@ -112,11 +128,9 @@ import {
   FORMULA_OPS,
   type FormulaOp,
   type FormulaRow,
-  finalStage,
   formatMib,
   formulaIssues,
   formulaPhrase,
-  insertableAt,
   locateServerError,
   type Operand,
   type ProcessDefinition,
@@ -157,6 +171,29 @@ const PREVIEW_DEBOUNCE_MS = 300;
  * shortcut over the canvas, not a parallel form source. */
 const NDVI_TEMPLATE = ["load_collection", "ndvi", "linear_scale_range", "save_result"] as const;
 
+/** The change-detection template's processes (ADR 0022, #300): offered
+ * only when the server serves the join. */
+const CHANGE_TEMPLATE = [
+  "load_collection",
+  "filter_temporal",
+  "ndvi",
+  "merge_cubes",
+  "linear_scale_range",
+  "save_result",
+] as const;
+
+/** The resolver a join may apply per pixel pair — the scalar processes
+ * the compiler admits inside `overlap_resolver`, as a select (B14: a
+ * join always has one). */
+const RESOLVER_OPS = ["subtract", "add", "multiply", "divide"] as const;
+type ResolverOp = (typeof RESOLVER_OPS)[number];
+const RESOLVER_LABELS: Record<ResolverOp, string> = {
+  subtract: "subtract (first − second)",
+  add: "add",
+  multiply: "multiply",
+  divide: "divide (first ÷ second)",
+};
+
 /** Where the canvas layout (node positions) is remembered (#299) — the
  * same key discipline as `view-state`. */
 const LAYOUT_KEY = "swath.author.layout";
@@ -190,6 +227,8 @@ const STEP_TITLES: Record<string, string> = {
   reduce_dimension: "Combine bands with a formula",
   run_udf: "Run your own code (WASM module)",
   linear_scale_range: "Stretch values for display",
+  filter_temporal: "Pick dates",
+  merge_cubes: "Compare two dates",
   save_result: "Output",
 };
 
@@ -199,6 +238,8 @@ const INSERT_LABELS: Record<string, string> = {
   reduce_dimension: "combine bands with a formula",
   run_udf: "run your own code (.wasm)",
   linear_scale_range: "stretch values for display",
+  filter_temporal: "pick dates",
+  merge_cubes: "compare with another date",
 };
 
 /** The `run_udf` runtime vocabulary the profile admits (ADR 0018:
@@ -243,6 +284,14 @@ const FIELD_HELP: Record<string, string> = {
     "leave empty if it needs none.",
   "run_udf.runtime": "Leave as is: modules run as sandboxed WebAssembly.",
   "run_udf.version": "Leave as is: the module speaks Swath UDF ABI version 1.",
+  "filter_temporal.extent":
+    "The dates this branch shows — the newest image inside the range serves " +
+    "(the end date itself is not included).",
+  "filter_temporal.dimension": "Leave as is: time is the only dimension a date range applies to.",
+  "merge_cubes.overlap_resolver":
+    "How the two branches combine, pixel by pixel: the first input (top) is x, the second " +
+    "(bottom) is y.",
+  "merge_cubes.context": "Not used here — the resolver sees only the two values.",
 };
 
 function fieldHelp(processId: string, name: string): string {
@@ -257,6 +306,7 @@ function fieldHelp(processId: string, name: string): string {
  * themselves still come from the schemas.
  */
 const PROFILE_DEFAULTS: Record<string, string> = {
+  "merge_cubes.overlap_resolver": "subtract",
   "linear_scale_range.outputMax": "255",
   "save_result.format": "png",
   "run_udf.runtime": "wasm",
@@ -278,6 +328,10 @@ function isAdvancedParam(processId: string, param: ProcessParameter): boolean {
     // The UDF card's module settings (#208): optional, but the one thing
     // a module author actually tunes — a newcomer's choice, on the card.
     (processId === "run_udf" && param.name === "context") ||
+    // The join's resolver (ADR 0022): the one choice a join has.
+    (processId === "merge_cubes" && param.name === "overlap_resolver") ||
+    // A branch's dates: the whole point of a filter step.
+    (processId === "filter_temporal" && param.name === "extent") ||
     isBandName(param.schema)
   ) {
     return false;
@@ -329,6 +383,18 @@ function narrativePhrase(
       return formula === ""
         ? "combine the bands with a formula"
         : `combine the bands with a formula (${formula})`;
+    case "filter_temporal":
+      return `keep ${temporalPhrase(value("extent"))}`;
+    case "merge_cubes": {
+      const op = value("overlap_resolver") === "" ? "subtract" : value("overlap_resolver");
+      const words: Record<string, string> = {
+        subtract: "subtract the second branch from the first",
+        add: "add the two branches",
+        multiply: "multiply the two branches",
+        divide: "divide the first branch by the second",
+      };
+      return words[op] ?? `${op} the two branches`;
+    }
     case "run_udf": {
       // `udf` reads as the module's file name here (the narrative never
       // retells 8 MiB of base64); the arity is the module's answer.
@@ -820,6 +886,10 @@ export interface ServiceItem {
 export interface CollectionItem {
   id: string;
   bands: string[];
+  /** The collection's temporal extent (`[start, end]`, either side
+   * `null` when unknown) — what the change template's two windows are
+   * pre-filled from (#300). */
+  interval?: [string | null, string | null];
 }
 
 /** One pipeline card: a served process plus the user's raw field state.
@@ -840,6 +910,10 @@ interface Card {
    * card and the narrative (the `udf` value itself is the data URL),
    * `refused` when it was over the server's bound and never encoded. */
   udf?: { name: string; size: number; refused: boolean };
+  /** A Load card's ticked bands, in tick order (the loaded-band order —
+   * for a composite that order is R, G, B). Each load head has its own
+   * (#300: a join has two). */
+  bands?: string[];
 }
 
 /** A schema (or one-of list of schemas) as its list of alternatives. */
@@ -1085,14 +1159,16 @@ export class SwathAuthoringPanel extends SwathElement {
    * from the served definition — absent only when the server does not
    * serve one. */
   #loadCard: Card | undefined;
-  /** The steps between Load and Output, in pipeline order. */
-  #middle: Card[] = [];
+  /** Every card that is neither the first Load head nor the Output —
+   * middle steps, and (#300) a join's second branch, its own Load head
+   * included. Order is creation order; the graph orders them. */
+  #extra: Card[] = [];
+  /** The cube connections between cards (#300): edges into the cards'
+   * cube ports, the single source of structure. */
+  #edges: Edge[] = [];
   /** The permanent tail: the Output card (`save_result`) — B1's
    * "graph must end in save_result" made structural. */
   #saveCard: Card | undefined;
-  /** The bands ticked on the Load card, in the order they were ticked
-   * (the loaded-band order — for a composite that order is R, G, B). */
-  #loadBands: string[] = [];
   #title = "";
   #error = "";
   #unavailable = false;
@@ -1216,7 +1292,18 @@ export class SwathAuthoringPanel extends SwathElement {
         loadDef === undefined ? undefined : (this.#loadCard ?? this.#newCard(loadDef));
       this.#saveCard =
         saveDef === undefined ? undefined : (this.#saveCard ?? this.#newCard(saveDef));
-      this.#middle = this.#middle.filter((card) => definition(card.process.id) !== undefined);
+      this.#extra = this.#extra.filter((card) => definition(card.process.id) !== undefined);
+      const alive = new Set(this.#cards().map((card) => card.id));
+      this.#edges = this.#edges.filter((e) => alive.has(e.from.node) && alive.has(e.to.node));
+      if (this.#edges.length === 0 && this.#loadCard && this.#saveCard) {
+        // The empty pipeline: the head feeds the tail.
+        this.#edges = [
+          {
+            from: { node: this.#loadCard.id, port: OUT },
+            to: { node: this.#saveCard.id, port: "data" },
+          },
+        ];
+      }
     } catch {
       // A failed load re-arms the lazy fetch: the next open retries
       // instead of showing the unreachable note forever (the add-data
@@ -1257,9 +1344,16 @@ export class SwathAuthoringPanel extends SwathElement {
           | Record<string, { type?: string; values?: unknown[] }>
           | undefined;
         const values = Object.values(cube ?? {}).find((d) => d.type === "bands")?.values ?? [];
+        const extent = doc["extent"] as { temporal?: { interval?: unknown[][] } } | undefined;
+        const [first] = extent?.temporal?.interval ?? [];
+        const bound = (v: unknown): string | null => (typeof v === "string" ? v : null);
+        const interval: [string | null, string | null] | undefined = Array.isArray(first)
+          ? [bound(first[0]), bound(first[1])]
+          : undefined;
         return [
           {
             id: doc["id"],
+            ...(interval === undefined ? {} : { interval }),
             bands: values.filter((band): band is string => typeof band === "string"),
           },
         ];
@@ -1318,42 +1412,112 @@ export class SwathAuthoringPanel extends SwathElement {
     };
   }
 
-  /** The full pipeline, head to tail, in order — the single source of
-   * step keys: the card at index `i` is `s${i + 1}`. */
+  /** Every card, in the graph's topological order (heads first, the
+   * Output last). Creation order breaks ties. */
   #cards(): Card[] {
-    const cards: Card[] = [];
+    const all: Card[] = [];
     if (this.#loadCard) {
-      cards.push(this.#loadCard);
+      all.push(this.#loadCard);
     }
-    cards.push(...this.#middle);
+    all.push(...this.#extra);
     if (this.#saveCard) {
-      cards.push(this.#saveCard);
+      all.push(this.#saveCard);
     }
-    return cards;
+    const byId = new Map(all.map((card) => [card.id, card]));
+    const ordered = topological(this.#dagLite(all))
+      .map((node) => byId.get(node.id))
+      .filter((card): card is Card => card !== undefined);
+    // A cycle never forms (edgeAllowed), but never lose a card either.
+    for (const card of all) {
+      if (!ordered.includes(card)) {
+        ordered.push(card);
+      }
+    }
+    return ordered;
   }
 
   #keyOf(card: Card): string {
     return card.id;
   }
 
-  /** The middle chain's process ids, for the stage table. */
-  #middleIds(): string[] {
-    return this.#middle.map((card) => card.process.id);
+  /** The graph's structure without arguments — for typing, ordering and
+   * reachability, which must never build arguments (those ask the
+   * result stage, which asks the structure). */
+  #dagLite(cards?: readonly Card[]): Dag {
+    const all = cards ?? [
+      ...(this.#loadCard ? [this.#loadCard] : []),
+      ...this.#extra,
+      ...(this.#saveCard ? [this.#saveCard] : []),
+    ];
+    return {
+      nodes: all.map((card) => ({ id: card.id, process: card.process.id, params: {} })),
+      edges: this.#edges,
+    };
   }
 
-  /** The pipeline's result stage (what reaches the Output card). */
+  #card(id: string): Card | undefined {
+    return this.#cards().find((card) => card.id === id);
+  }
+
+  /** The Load heads: the permanent first one plus any branch's. */
+  #loads(): Card[] {
+    return this.#cards().filter((card) => card.process.id === "load_collection");
+  }
+
+  /** The Load head a card's cube traces back to (its band vocabulary). */
+  #headOf(card: Card): Card | undefined {
+    if (card.process.id === "load_collection") {
+      return card;
+    }
+    const head = loadHead(this.#dagLite(), card.id);
+    return (head === undefined ? undefined : this.#card(head)) ?? this.#loadCard;
+  }
+
+  /** The bands a card can name: its own ticks for a Load head, its
+   * head's for everything downstream. */
+  #bandsOf(card: Card | undefined): string[] {
+    const head = card === undefined ? this.#loadCard : this.#headOf(card);
+    return head?.bands ?? [];
+  }
+
+  /** The stage reaching the Output (the typer's answer; a loaded cube
+   * while nothing reaches it yet). */
   #resultStage(): Stage {
-    return finalStage(this.#middleIds()) ?? { kind: "multi", scaled: false };
+    const dag = this.#dagLite();
+    const out = this.#saveCard;
+    const edge = out === undefined ? undefined : feeding(dag, out.id, "data");
+    const stage = edge === undefined ? null : typer(dag)(edge.from.node);
+    return stage ?? { kind: "multi", scaled: false };
   }
 
-  /** Inserts a served middle process at `gap` (0 = right after Load),
-   * with newcomer prefills where the vocabulary suggests them (NDVI's
-   * nir/red from the loaded bands, a first formula line). */
+  /** The edges in pipeline order (by the source card's position, then
+   * port order) — gap `g` of the insert chips is the g-th of these. */
+  #chainEdges(): Edge[] {
+    const order = new Map(this.#cards().map((card, index) => [card.id, index]));
+    return [...this.#edges].sort((a, b) => {
+      const byFrom = (order.get(a.from.node) ?? 0) - (order.get(b.from.node) ?? 0);
+      return byFrom !== 0 ? byFrom : a.to.port.localeCompare(b.to.port);
+    });
+  }
+
+  /** Inserts a served process on the `gap`-th edge (0 = right after the
+   * first Load head), with newcomer prefills where the vocabulary
+   * suggests them (NDVI's nir/red from the branch's bands, a first
+   * formula line, a join's resolver). */
   #insertAt(gap: number, process: ProcessDefinition): void {
+    const edge = this.#chainEdges()[gap];
+    if (edge !== undefined) {
+      this.#insertOn(edge, process);
+    }
+  }
+
+  #insertOn(edge: Edge, process: ProcessDefinition): void {
     const card = this.#newCard(process);
+    const from = this.#card(edge.from.node);
     if (process.id === "ndvi") {
-      const nir = pickBand(this.#loadBands, [/nir/i, /8a$/i], "");
-      const red = pickBand(this.#loadBands, [/red/i, /04$/i], "");
+      const bands = this.#bandsOf(from);
+      const nir = pickBand(bands, [/nir/i, /8a$/i], "");
+      const red = pickBand(bands, [/red/i, /04$/i], "");
       if (nir !== "" && red !== "" && nir !== red) {
         card.values.set("nir", nir);
         card.values.set("red", red);
@@ -1362,16 +1526,70 @@ export class SwathAuthoringPanel extends SwathElement {
     if (process.id === "reduce_dimension") {
       card.rows.push({ op: "subtract", left: { ...EMPTY_OPERAND }, right: { ...EMPTY_OPERAND } });
     }
-    this.#middle.splice(gap, 0, card);
-    this.#serverNotes.clear(); // keys shift; stale notes would mislead
+    const [port] = CUBE_PORTS[process.id]?.inputs ?? [];
+    if (port === undefined) {
+      return;
+    }
+    // Splice: the edge's source feeds the new card's first input, the
+    // new card feeds the edge's old target. A join keeps its second
+    // input free — the branch starter offers to fill it.
+    this.#edges = this.#edges.filter((e) => e !== edge);
+    this.#edges.push(
+      { from: edge.from, to: { node: card.id, port } },
+      { from: { node: card.id, port: OUT }, to: edge.to },
+    );
+    this.#extra.push(card);
+    this.#render();
+  }
+
+  /** Removes a middle card. One input and one output: the neighbours
+   * join up. Anything else (a join, a branch head): the edges go, and
+   * what is left without a path to the Output is an orphan — explained
+   * and gated (B10), never dropped silently. */
+  #removeCard(card: Card): void {
+    const incoming = this.#edges.filter((e) => e.to.node === card.id);
+    const outgoing = this.#edges.filter((e) => e.from.node === card.id);
+    this.#edges = this.#edges.filter((e) => e.to.node !== card.id && e.from.node !== card.id);
+    const [into] = incoming;
+    const [out] = outgoing;
+    if (incoming.length === 1 && outgoing.length === 1 && into !== undefined && out !== undefined) {
+      this.#edges.push({ from: into.from, to: out.to });
+    }
+    this.#extra = this.#extra.filter((c) => c !== card);
+    this.#serverNotes.clear();
     this.#previewNoteKeys.clear();
     this.#render();
   }
 
-  #removeMiddle(card: Card): void {
-    this.#middle = this.#middle.filter((c) => c !== card);
-    this.#serverNotes.clear();
-    this.#previewNoteKeys.clear();
+  /** Starts a branch into a free cube port (#300): a Load head like the
+   * first one (same collection and bands, its own dates) feeding an
+   * NDVI, wired into `port` of `nodeId` — the join's second input.
+   * Never used on a node whose port is fed. */
+  #startBranch(nodeId: string, port: string): void {
+    const definition = (id: string): ProcessDefinition | undefined =>
+      this.#processes.find((process) => process.id === id);
+    const loadDef = definition("load_collection");
+    const ndviDef = definition("ndvi");
+    const primary = this.#loadCard;
+    if (!loadDef || !ndviDef || !primary) {
+      return;
+    }
+    const load = this.#newCard(loadDef);
+    load.values.set("id", primary.values.get("id") ?? "");
+    load.bands = [...(primary.bands ?? [])];
+    const ndvi = this.#newCard(ndviDef);
+    const nir = pickBand(load.bands, [/nir/i, /8a$/i], "");
+    const red = pickBand(load.bands, [/red/i, /04$/i], "");
+    if (nir !== "" && red !== "" && nir !== red) {
+      ndvi.values.set("nir", nir);
+      ndvi.values.set("red", red);
+    }
+    this.#extra.push(load, ndvi);
+    this.#edges.push(
+      { from: { node: load.id, port: OUT }, to: { node: ndvi.id, port: "data" } },
+      { from: { node: ndvi.id, port: OUT }, to: { node: nodeId, port } },
+    );
+    this.selectStep(load.id);
     this.#render();
   }
 
@@ -1381,7 +1599,7 @@ export class SwathAuthoringPanel extends SwathElement {
   #applyTemplate(): void {
     const definition = (id: string): ProcessDefinition | undefined =>
       this.#processes.find((process) => process.id === id);
-    const collection = this.#collections[0];
+    const collection = this.#templateCollection();
     const ndviDef = definition("ndvi");
     const scaleDef = definition("linear_scale_range");
     if (!collection || !this.#loadCard || !this.#saveCard || !ndviDef || !scaleDef) {
@@ -1390,7 +1608,7 @@ export class SwathAuthoringPanel extends SwathElement {
     const nir = pickBand(collection.bands, [/nir/i, /8a$/i], "nir");
     const red = pickBand(collection.bands, [/red/i, /04$/i], "red");
     this.#loadCard.values.set("id", collection.id);
-    this.#loadBands = [nir, red];
+    this.#loadCard.bands = [nir, red];
     const ndvi = this.#newCard(ndviDef);
     ndvi.values.set("nir", nir);
     ndvi.values.set("red", red);
@@ -1399,26 +1617,116 @@ export class SwathAuthoringPanel extends SwathElement {
     scale.values.set("inputMax", "1");
     scale.values.set("outputMin", "0");
     scale.values.set("outputMax", "255");
-    this.#middle = [ndvi, scale];
+    this.#extra = [ndvi, scale];
+    this.#edges = [
+      { from: { node: this.#loadCard.id, port: OUT }, to: { node: ndvi.id, port: "data" } },
+      { from: { node: ndvi.id, port: OUT }, to: { node: scale.id, port: "x" } },
+      { from: { node: scale.id, port: OUT }, to: { node: this.#saveCard.id, port: "data" } },
+    ];
     this.#saveCard.values.set("format", "png");
     this.#saveCard.values.set("options", "rdylgn");
     this.#render();
   }
 
-  // --- Validation (schema- and stage-driven, before any request) ---
+  /** The change-detection template (ADR 0022, #300): the DAG model's
+   * `changeTemplate` — two `load → pick dates → NDVI` branches of the
+   * first collection over the halves of its extent, joined by a
+   * `subtract` resolver, scaled −1..1, RdYlGn — as cards and edges. The
+   * first Load and the Output are the permanent cards; the rest are new.
+   * Offered only when every process it needs is served. */
+  #applyChangeTemplate(): void {
+    const definition = (id: string): ProcessDefinition | undefined =>
+      this.#processes.find((process) => process.id === id);
+    const collection = this.#templateCollection();
+    if (
+      !collection ||
+      !this.#loadCard ||
+      !this.#saveCard ||
+      !CHANGE_TEMPLATE.every((id) => definition(id) !== undefined)
+    ) {
+      return;
+    }
+    const nir = pickBand(collection.bands, [/nir/i, /8a$/i], "nir");
+    const red = pickBand(collection.bands, [/red/i, /04$/i], "red");
+    const [start, end] = collection.interval ?? [null, null];
+    const windows =
+      start !== null && end !== null
+        ? halves([start, end])
+        : { before: ["", ""] as [string, string], after: ["", ""] as [string, string] };
+    const template = changeTemplate(collection.id, nir, red, windows);
+    const ids = new Map<string, string>();
+    this.#extra = [];
+    for (const node of template.nodes) {
+      const def = definition(node.process);
+      if (!def) {
+        return;
+      }
+      let card: Card;
+      if (node.id === "s1") {
+        card = this.#loadCard;
+      } else if (node.process === "save_result") {
+        card = this.#saveCard;
+      } else {
+        card = this.#newCard(def);
+        this.#extra.push(card);
+      }
+      ids.set(node.id, card.id);
+      for (const [name, value] of Object.entries(node.params)) {
+        if (name === "bands" && Array.isArray(value)) {
+          card.bands = value.filter((band): band is string => typeof band === "string");
+        } else if (name === "overlap_resolver") {
+          card.values.set(name, "subtract");
+        } else if (name === "options" && typeof value === "object" && value !== null) {
+          const colormap = (value as { colormap?: unknown }).colormap;
+          card.values.set(name, typeof colormap === "string" ? colormap : "");
+        } else if (Array.isArray(value)) {
+          const [from, until] = value as [unknown, unknown];
+          card.values.set(
+            name,
+            temporalValue(
+              typeof from === "string" ? from.slice(0, 10) : "",
+              typeof until === "string" ? until.slice(0, 10) : "",
+            ),
+          );
+        } else if (value !== null && value !== undefined) {
+          card.values.set(name, String(value));
+        }
+      }
+    }
+    this.#edges = template.edges.map((edge) => ({
+      from: { node: ids.get(edge.from.node) ?? edge.from.node, port: edge.from.port },
+      to: { node: ids.get(edge.to.node) ?? edge.to.node, port: edge.to.port },
+    }));
+    this.#serverNotes.clear();
+    this.#previewNoteKeys.clear();
+    this.#render();
+  }
 
-  /** The chosen collection's band vocabulary (empty until chosen). */
-  #collectionBands(): string[] {
+  /** The collection a template builds on: the one chosen on the first
+   * Load card when there is one, else the first served. */
+  #templateCollection(): CollectionItem | undefined {
     const chosen = (this.#loadCard?.values.get("id") ?? "").trim();
+    return this.#collections.find((c) => c.id === chosen) ?? this.#collections[0];
+  }
+
+  /** The chosen collection's band vocabulary for a Load head (empty
+   * until chosen). */
+  #collectionBandsOf(card: Card | undefined): string[] {
+    const chosen = (card?.values.get("id") ?? "").trim();
     return this.#collections.find((c) => c.id === chosen)?.bands ?? [];
   }
+
+  // --- Validation (schema- and stage-driven, before any request) ---
 
   /** What blocks this literal field, or `""`: required-but-empty (when
    * the schema offers no null alternative), non-numeric input into a
    * number-typed parameter, and the degenerate stretch range (B8). */
   #fieldIssue(card: Card, param: ProcessParameter): string {
-    if (param.name === CUBE_PARAM[card.process.id]) {
-      return ""; // wired to the previous card, never a field
+    if (CUBE_PORTS[card.process.id]?.inputs.includes(param.name)) {
+      return ""; // wired by the graph, never a field
+    }
+    if (card.process.id === "merge_cubes") {
+      return ""; // the resolver select always holds a value; context is never sent
     }
     if (card.process.id === "reduce_dimension") {
       // The formula card owns its parameters: `dimension` is pinned to
@@ -1454,7 +1762,7 @@ export class SwathAuthoringPanel extends SwathElement {
       if (raw === "") {
         return "pick a band";
       }
-      return this.#loadBands.includes(raw) ? "" : `${raw} is not loaded any more`;
+      return this.#bandsOf(card).includes(raw) ? "" : `${raw} is not loaded any more`;
     }
     if (raw === "") {
       if (param.optional === true || allowsNull(param.schema)) {
@@ -1488,7 +1796,7 @@ export class SwathAuthoringPanel extends SwathElement {
         }
       }
       if (card.process.id === "reduce_dimension") {
-        blockedFields += formulaIssues(card.rows, this.#loadBands).length;
+        blockedFields += formulaIssues(card.rows, this.#bandsOf(card)).length;
       }
     }
     if (blockedFields > 0) {
@@ -1496,22 +1804,37 @@ export class SwathAuthoringPanel extends SwathElement {
         blockedFields === 1 ? "1 field needs a value" : `${blockedFields} fields need values`,
       );
     }
-    if ((this.#loadCard?.values.get("id") ?? "").trim() === "") {
-      issues.push("no collection chosen yet");
-    } else if (this.#loadBands.length === 0) {
-      issues.push("no bands ticked yet");
+    const loads = this.#loads();
+    for (const load of loads) {
+      const where = loads.length > 1 ? ` (step ${load.id})` : "";
+      if ((load.values.get("id") ?? "").trim() === "") {
+        issues.push(`no collection chosen yet${where}`);
+      } else if ((load.bands ?? []).length === 0) {
+        issues.push(`no bands ticked yet${where}`);
+      }
+    }
+    // A join with a free input (#300): say which, before the compiler
+    // would (its "missing argument" names the same port).
+    const dag = this.#dagLite();
+    for (const card of this.#cards()) {
+      for (const port of CUBE_PORTS[card.process.id]?.inputs ?? []) {
+        if (feeding(dag, card.id, port) === undefined) {
+          issues.push(`step ${card.id} needs its ${port} input connected`);
+        }
+      }
     }
     // B5, explained pre-submit: a multi-band result must be an RGB
     // composite; "which fix" (reduce, or load exactly 3) is the user's
     // call, so it gates rather than auto-corrects.
     // B10 (a graph, not a line): a step with no path to the Output is
     // explained and gates — never silently dropped.
-    for (const id of orphans(this.#dag())) {
+    for (const id of orphans(dag)) {
       issues.push(`step ${id} goes nowhere — connect it or remove it`);
     }
     const stage = this.#resultStage();
-    if (stage.kind === "multi" && this.#loadBands.length > 0 && this.#loadBands.length !== 3) {
-      const n = this.#loadBands.length;
+    const outputBands = this.#bandsOf(this.#saveCard);
+    if (stage.kind === "multi" && outputBands.length > 0 && outputBands.length !== 3) {
+      const n = outputBands.length;
       issues.push(
         `this pipeline produces ${n} channel${n === 1 ? "" : "s"}; a picture needs ` +
           "1 (add NDVI or a formula) or 3 (red, green, blue)",
@@ -1533,7 +1856,7 @@ export class SwathAuthoringPanel extends SwathElement {
       if (card.process.id === "reduce_dimension") {
         const list = this.#find(`#swath-authoring-${key}-formula-issues`);
         if (list) {
-          list.textContent = formulaIssues(card.rows, this.#loadBands).join("; ");
+          list.textContent = formulaIssues(card.rows, this.#bandsOf(card)).join("; ");
         }
       }
       for (const param of card.process.parameters ?? []) {
@@ -1739,14 +2062,14 @@ export class SwathAuthoringPanel extends SwathElement {
       narrativePhrase(
         card.process.id,
         (name) =>
-          name === "bands" && card === this.#loadCard
-            ? this.#loadBands.join(",")
+          name === "bands" && card.process.id === "load_collection"
+            ? (card.bands ?? []).join(",")
             : name === "udf" && card.process.id === "run_udf"
               ? card.udf?.refused === false
                 ? card.udf.name
                 : ""
               : (card.values.get(name) ?? "").trim(),
-        card.process.id === "reduce_dimension" ? formulaPhrase(card.rows, this.#loadBands) : "",
+        card.process.id === "reduce_dimension" ? formulaPhrase(card.rows, this.#bandsOf(card)) : "",
       ),
     );
     const sentence = phrases.join(" → ");
@@ -1772,16 +2095,7 @@ export class SwathAuthoringPanel extends SwathElement {
       process: card.process.id,
       params: this.#nodeParams(card),
     }));
-    const edges: Dag["edges"] = [];
-    for (let index = 1; index < cards.length; index += 1) {
-      const from = cards[index - 1];
-      const to = cards[index];
-      const [port] = to === undefined ? [] : (CUBE_PORTS[to.process.id]?.inputs ?? []);
-      if (from !== undefined && to !== undefined && port !== undefined) {
-        edges.push({ from: { node: from.id, port: OUT }, to: { node: to.id, port } });
-      }
-    }
-    return { nodes, edges };
+    return { nodes, edges: [...this.#edges] };
   }
 
   /** A card's openEO arguments other than its cube input(s): literals
@@ -1795,14 +2109,21 @@ export class SwathAuthoringPanel extends SwathElement {
       args["reducer"] = { process_graph: buildReducerGraph(card.rows) };
       return args;
     }
+    if (card.process.id === "merge_cubes") {
+      // The join (ADR 0022): its resolver child graph from the select;
+      // `context` is never sent (not admitted).
+      const op = (card.values.get("overlap_resolver") ?? "subtract") as ResolverOp;
+      args["overlap_resolver"] = resolverGraph(RESOLVER_OPS.includes(op) ? op : "subtract");
+      return args;
+    }
     const cube = new Set(CUBE_PORTS[card.process.id]?.inputs ?? []);
     for (const param of card.process.parameters ?? []) {
       if (cube.has(param.name)) {
         continue; // wired by the graph, never a field
       }
-      if (card === this.#loadCard && isBandArray(param.schema)) {
-        if (this.#loadBands.length > 0) {
-          args[param.name] = [...this.#loadBands];
+      if (card.process.id === "load_collection" && isBandArray(param.schema)) {
+        if ((card.bands ?? []).length > 0) {
+          args[param.name] = [...(card.bands ?? [])];
         }
         continue;
       }
@@ -2014,6 +2335,35 @@ export class SwathAuthoringPanel extends SwathElement {
     // greyed. Positions are editor state, remembered per node id.
     const dag = this.#dag();
     const dead = new Set(orphans(dag));
+    // Layered layout: a node's column is its depth from a Load head, its
+    // row the branch it descends from (a join and everything after it
+    // sit between the rows).
+    const depth = new Map<string, number>();
+    for (const node of topological(dag)) {
+      const into = dag.edges.filter((e) => e.to.node === node.id);
+      depth.set(
+        node.id,
+        into.length === 0 ? 0 : Math.max(...into.map((e) => (depth.get(e.from.node) ?? 0) + 1)),
+      );
+    }
+    const heads = dag.nodes.filter((node) => node.process === "load_collection").map((n) => n.id);
+    const rowOf = (id: string): number => {
+      // Upstream along first inputs: a join on the way (or the node
+      // itself) sits between the branches, and so does all that follows.
+      const seen = new Set<string>();
+      let current: string | undefined = id;
+      while (current !== undefined && !seen.has(current)) {
+        seen.add(current);
+        const into = dag.edges.filter((e) => e.to.node === current);
+        if (into.length > 1) {
+          return 0.5;
+        }
+        current = into[0]?.from.node;
+      }
+      const head = loadHead(dag, id);
+      const index = head === undefined ? 0 : heads.indexOf(head);
+      return index < 0 ? 0 : Math.min(index, 1);
+    };
     const canvas = document.createElement("swath-canvas") as SwathCanvas;
     canvas.className = "swath-authoring-canvas";
     canvas.setAttribute("aria-label", "Pipeline");
@@ -2023,7 +2373,11 @@ export class SwathAuthoringPanel extends SwathElement {
       const node = document.createElement("swath-canvas-node") as SwathCanvasNode;
       node.nodeId = key;
       node.title = STEP_TITLES[process] ?? process;
-      const at = this.#positions.get(key) ?? { x: 24 + index * 300, y: 24 };
+      const column = depth.get(key) ?? index;
+      const at = this.#positions.get(key) ?? {
+        x: 24 + column * 300,
+        y: 24 + (heads.length > 1 ? rowOf(key) * 150 : 0),
+      };
       node.x = at.x;
       node.y = at.y;
       node.selected = key === this.sel;
@@ -2084,26 +2438,33 @@ export class SwathAuthoringPanel extends SwathElement {
       // Delete on a middle step's node removes it (the permanent head
       // and tail refuse, as their cards do).
       const [id] = event.detail.nodes;
-      const card = this.#middle.find((c) => c.id === id);
+      const card = this.#extra.find((c) => c.id === id);
       if (card !== undefined) {
-        this.#removeMiddle(card);
+        this.#removeCard(card);
       }
     });
     // Insert-on-edge chips: the same `.swath-authoring-insert[data-gap]`
     // groups, gap g = the g-th edge of the chain, labelled by its ends.
     const inserts = document.createElement("div");
     inserts.className = "swath-authoring-inserts";
+    const chain = this.#chainEdges();
     for (const step of steps) {
-      const insert = step.nextElementSibling;
-      if (insert?.classList.contains("swath-authoring-insert")) {
-        const gap = Number(insert.getAttribute("data-gap") ?? "0");
-        const edge = dag.edges[gap];
+      let insert = step.nextElementSibling;
+      while (insert?.classList.contains("swath-authoring-insert")) {
+        const next = insert.nextElementSibling;
         const label = document.createElement("span");
         label.className = "swath-authoring-insert-label";
-        label.textContent =
-          edge === undefined ? "add a step" : `between ${edge.from.node} and ${edge.to.node}`;
+        const port = insert.getAttribute("data-port");
+        if (port !== null) {
+          label.textContent = `into ${port.replace(":", "'s ")}`;
+        } else {
+          const edge = chain[Number(insert.getAttribute("data-gap") ?? "0")];
+          label.textContent =
+            edge === undefined ? "add a step" : `between ${edge.from.node} and ${edge.to.node}`;
+        }
         insert.prepend(label);
         inserts.append(insert);
+        insert = next;
       }
     }
     requestAnimationFrame(() => canvas.fit());
@@ -2137,7 +2498,7 @@ export class SwathAuthoringPanel extends SwathElement {
       void this.#publish();
     });
 
-    if (this.#middle.length === 0) {
+    if (this.#extra.length === 0) {
       const hint = document.createElement("p");
       hint.className = "swath-authoring-hint";
       hint.textContent =
@@ -2158,6 +2519,24 @@ export class SwathAuthoringPanel extends SwathElement {
           this.#applyTemplate();
         });
         form.append(template);
+      }
+      if (
+        CHANGE_TEMPLATE.every((id) => this.#processes.some((process) => process.id === id)) &&
+        this.#collections.length > 0
+      ) {
+        // The first DAG product (ADR 0022, #300): offered only where the
+        // server serves the join.
+        const change = document.createElement("button");
+        change.type = "button";
+        change.className = "swath-authoring-template-change";
+        change.textContent = "Start from the change-detection template";
+        change.title =
+          "Two dates of the same collection compared: NDVI of the later minus NDVI of the " +
+          "earlier, on a diverging palette.";
+        change.addEventListener("click", () => {
+          this.#applyChangeTemplate();
+        });
+        form.append(change);
       }
     }
 
@@ -2190,16 +2569,37 @@ export class SwathAuthoringPanel extends SwathElement {
     list.className = "swath-authoring-steps";
     const cards = this.#cards();
     const served = new Set(this.#processes.map((process) => process.id));
-    for (const [index, card] of cards.entries()) {
+    const dag = this.#dag();
+    const chain = this.#chainEdges();
+    const typeOf = typer(dag);
+    for (const card of cards) {
       list.append(this.#renderStep(card, card.id));
-      // An insert gap after every card except the Output tail, showing
-      // only the chips the stage table admits there (B2/B3/B4: what
-      // does not fit is not offered, anywhere).
-      if (card !== this.#saveCard) {
-        const gap = index; // gap g = insert at middle position g
-        const fits = insertableAt(this.#middleIds(), gap, served);
+      // An insert group per edge leaving this card, showing only the
+      // chips the graph still types with (B2/B3/B4: what does not fit is
+      // not offered, anywhere) — plus the join where the server serves it
+      // and the cube is gray (ADR 0022).
+      for (const [gap, edge] of chain.entries()) {
+        if (edge.from.node !== card.id) {
+          continue;
+        }
+        const fits: string[] = insertableOn(dag, edge, served, `s${this.#nextId + 1}`);
+        const target = this.#card(edge.to.node);
+        if (
+          served.has("merge_cubes") &&
+          typeOf(card.id)?.kind === "gray" &&
+          !typeOf(card.id)?.scaled &&
+          target?.process.id !== "merge_cubes"
+        ) {
+          fits.push("merge_cubes");
+        }
         if (fits.length > 0) {
           list.append(this.#renderInsert(gap, fits));
+        }
+      }
+      // A free cube input (a join's second branch): the branch starter.
+      for (const port of CUBE_PORTS[card.process.id]?.inputs ?? []) {
+        if (feeding(dag, card.id, port) === undefined && served.has("ndvi")) {
+          list.append(this.#renderBranchStarter(card, port));
         }
       }
     }
@@ -2228,6 +2628,26 @@ export class SwathAuthoringPanel extends SwathElement {
 
     form.append(titleLabel, submit, reason);
     return form;
+  }
+
+  /** The branch starter on a free cube port (#300): one chip that adds
+   * `load → NDVI` of the first head's collection into the port. */
+  #renderBranchStarter(card: Card, port: string): Element {
+    const item = document.createElement("li");
+    item.className = "swath-authoring-insert";
+    item.dataset["port"] = `${card.id}:${port}`;
+    item.setAttribute("role", "group");
+    item.setAttribute("aria-label", `Start a branch into ${card.id}'s ${port}`);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "+ start a branch (load → NDVI)";
+    button.dataset["process"] = "load_collection";
+    button.title = "A second Load of the same collection with its own dates, reduced to NDVI.";
+    button.addEventListener("click", () => {
+      this.#startBranch(card.id, port);
+    });
+    item.append(button);
+    return item;
   }
 
   /** One insert gap: a chip per process the stage table admits here. */
@@ -2284,7 +2704,7 @@ export class SwathAuthoringPanel extends SwathElement {
       remove.textContent = "✕";
       remove.setAttribute("aria-label", `Remove step ${key}`);
       remove.addEventListener("click", () => {
-        this.#removeMiddle(card);
+        this.#removeCard(card);
       });
       header.append(remove);
     }
@@ -2320,7 +2740,7 @@ export class SwathAuthoringPanel extends SwathElement {
     for (const param of basic) {
       item.append(...this.#renderField(card, key, param));
     }
-    if (card === this.#loadCard) {
+    if (card.process.id === "load_collection") {
       // The plain-worded where/when line (design note §4): area stays an
       // expert field under advanced; time is the card's own "when"
       // control (ADR 0015) — the line says what the current choice
@@ -2347,7 +2767,7 @@ export class SwathAuthoringPanel extends SwathElement {
         resultKind === "udf"
           ? "Your module's output renders directly — 1 value per pixel as gray, 3 as red, " +
             "green, and blue — so a colormap does not apply here."
-          : this.#loadBands.length === 3
+          : this.#bandsOf(this.#saveCard).length === 3
             ? "The three loaded bands become the picture's red, green, and blue. " +
               "A colormap maps one gray value per pixel, so it does not apply here."
             : "A colormap maps one gray value per pixel — add NDVI or a formula to " +
@@ -2410,10 +2830,12 @@ export class SwathAuthoringPanel extends SwathElement {
       this.#updateValidity();
     };
 
-    if (card === this.#loadCard && isBandArray(param.schema)) {
+    const isLoad = card.process.id === "load_collection";
+    if (isLoad && isBandArray(param.schema)) {
       label.htmlFor = "";
-      label.append(this.#renderBandChecks(fieldId, touch));
-    } else if (card === this.#loadCard && hasSubtype(param.schema, "temporal-interval")) {
+      label.append(this.#renderBandChecks(card, fieldId, touch));
+    } else if (hasSubtype(param.schema, "temporal-interval")) {
+      // Load's `temporal_extent` and a filter step's `extent` alike.
       label.htmlFor = "";
       label.append(this.#renderWhenControl(fieldId, card, param.name, touch));
     } else {
@@ -2431,13 +2853,13 @@ export class SwathAuthoringPanel extends SwathElement {
    * collection — the vocabulary hint of #148 promoted into the widget
    * itself, so an unknown band is unconstructible (B7). Tick order is
    * loaded order. */
-  #renderBandChecks(fieldId: string, touch: () => void): Element {
+  #renderBandChecks(card: Card, fieldId: string, touch: () => void): Element {
     const group = document.createElement("span");
     group.className = "swath-authoring-bands";
     group.id = fieldId;
     group.setAttribute("role", "group");
     group.setAttribute("aria-label", "Bands to load");
-    const vocabulary = this.#collectionBands();
+    const vocabulary = this.#collectionBandsOf(card);
     if (vocabulary.length === 0) {
       const hint = document.createElement("small");
       hint.className = "swath-authoring-plain";
@@ -2451,13 +2873,10 @@ export class SwathAuthoringPanel extends SwathElement {
       box.type = "checkbox";
       box.id = `${fieldId}-${band}`;
       box.dataset["band"] = band;
-      box.checked = this.#loadBands.includes(band);
+      box.checked = (card.bands ?? []).includes(band);
       box.addEventListener("change", () => {
-        if (box.checked) {
-          this.#loadBands.push(band);
-        } else {
-          this.#loadBands = this.#loadBands.filter((b) => b !== band);
-        }
+        const bands = card.bands ?? [];
+        card.bands = box.checked ? [...bands, band] : bands.filter((b) => b !== band);
         touch();
         this.#render(); // the loaded-band vocabulary feeds other widgets
       });
@@ -2629,9 +3048,8 @@ export class SwathAuthoringPanel extends SwathElement {
         select.addEventListener("change", () => {
           // A new collection means a new band vocabulary: drop picks that
           // no longer exist, then re-render the dependent widgets.
-          this.#loadBands = this.#loadBands.filter((band) =>
-            this.#collectionBands().includes(band),
-          );
+          const vocabulary = this.#collectionBandsOf(card);
+          card.bands = (card.bands ?? []).filter((band) => vocabulary.includes(band));
           this.#render();
         });
         return select;
@@ -2696,7 +3114,16 @@ export class SwathAuthoringPanel extends SwathElement {
     if (isBandName(param.schema)) {
       // Band parameters are selects over the LOADED bands (B7): the
       // compiler resolves them against load_collection's band list.
-      return dropdown(this.#loadBands, "(pick a band)", false);
+      return dropdown(this.#bandsOf(card), "(pick a band)", false);
+    }
+    if (card.process.id === "merge_cubes" && param.name === "overlap_resolver") {
+      // The join's resolver (ADR 0022): a select over the admitted
+      // scalar processes — a join is never without one (B14).
+      const select = dropdown(RESOLVER_OPS, undefined, false);
+      for (const option of select.options) {
+        option.textContent = RESOLVER_LABELS[option.value as ResolverOp] ?? option.value;
+      }
+      return select;
     }
     const enumerated = enumValues(param.schema);
     if (enumerated.length > 0) {
@@ -2712,7 +3139,7 @@ export class SwathAuthoringPanel extends SwathElement {
     input.addEventListener("input", () => {
       card.values.set(param.name, input.value);
       touch();
-      if (card === this.#loadCard) {
+      if (card.process.id === "load_collection") {
         this.#updateExtentSummary(key);
       }
     });
@@ -2722,7 +3149,7 @@ export class SwathAuthoringPanel extends SwathElement {
   /** Keeps the Load card's plain area/time line honest while the expert
    * extent fields are edited (no re-render, no lost focus). */
   #updateExtentSummary(key: string): void {
-    const card = this.#loadCard;
+    const card = this.#card(key);
     const line = this.#find(`#swath-authoring-${key}-extent-summary`);
     if (!card || !line) {
       return;
@@ -2870,7 +3297,7 @@ export class SwathAuthoringPanel extends SwathElement {
     none.value = "";
     none.textContent = "(pick)";
     select.append(none);
-    for (const band of this.#loadBands) {
+    for (const band of this.#bandsOf(card)) {
       const option = document.createElement("option");
       option.value = `band:${band}`;
       option.textContent = band;

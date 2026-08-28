@@ -7,8 +7,8 @@ show a painted map (`pdiff --content`: the map region is never near-uniform), an
 capture run must reproduce each shot within its perceptual-diff policy
 (tests/screenshots/verify_stable.py + swath-testkit pdiff) before the recipe passes.
 
-- capture sha: `5f1c88639e84984976db56c8fa2435ce6633f2b3`
-- captured: 2026-08-28T17:44:47.380Z
+- capture sha: `a0d62f39907d1fefc2c4ae2951075ce8792e7d48`
+- captured: 2026-08-28T18:15:55.984Z
 - machine-readable manifest (per-shot sha256 + pdiff policy): [`shots.json`](shots.json)
 
 | shot | evidences |
@@ -23,6 +23,7 @@ capture run must reproduce each shot within its perceptual-diff policy
 | [`08-authoring-form.png`](08-authoring-form.png) | openEO authoring canvas (Model B): cards generated from the server's own GET /processes, bands from the vocabulary, plain-language field help. |
 | [`09-authoring-narrative-advanced.png`](09-authoring-narrative-advanced.png) | NDVI template loaded: the plain-words narrative of the graph, with a step's advanced (defaulted) fields opened. |
 | [`10-authoring-published.png`](10-authoring-published.png) | Publish flow result: the authored NDVI service appears in the layer rail and serves on the map immediately — no reload. |
+| [`15-change-detection.png`](15-change-detection.png) | Change detection (ADR 0022): two dated branches of one collection joined by a subtract resolver — NDVI(later) − NDVI(earlier), previewed before publishing. |
 | [`11-dataset-footprints.png`](11-dataset-footprints.png) | Data mode: the catalog's granule cards with engine-rendered thumbnails in the rail, footprints outlined live on the map. |
 | [`12-analytics-under-load.png`](12-analytics-under-load.png) | Trace analytics under load: rolling p50/p95 render latency, plan mix, and cache hit rate over the session's tiles. |
 | [`13-time-slider-live.png`](13-time-slider-live.png) | Time slider over the Park Fire season, first pass: the scrubbed frame is rendered live — every badge says so, and the analytics card narrates the frame's own plan mix. |

@@ -1428,3 +1428,181 @@ test("with regions, the steps become chips in the strip and the selected step's 
   expect(panel.querySelector('[data-step="s1"]')).not.toBeNull();
   expect(strip.childElementCount).toBe(1); // stale copy is the host's to clear
 });
+
+// --- The join and the change-detection template (ADR 0022, #300) ------------
+
+/** The served definitions plus the join and the date filter — what a
+ * server that serves `merge_cubes` lists. */
+const JOIN_DEFINITIONS: ProcessDefinition[] = [
+  ...DEFINITIONS,
+  {
+    id: "filter_temporal",
+    summary: "Temporal filter based on temporal intervals",
+    parameters: [
+      { name: "data", schema: { type: "object", subtype: "raster-cube" } },
+      { name: "extent", schema: { type: "array", subtype: "temporal-interval" } },
+      {
+        name: "dimension",
+        optional: true,
+        default: null,
+        schema: [{ type: "string" }, { type: "null" }],
+      },
+    ],
+  },
+  {
+    id: "merge_cubes",
+    summary: "Merge two data cubes",
+    parameters: [
+      { name: "cube1", schema: { type: "object", subtype: "raster-cube" } },
+      { name: "cube2", schema: { type: "object", subtype: "raster-cube" } },
+      {
+        name: "overlap_resolver",
+        optional: true,
+        default: null,
+        schema: [{ type: "object", subtype: "process-graph" }, { type: "null" }],
+      },
+      {
+        name: "context",
+        optional: true,
+        default: null,
+        schema: { description: "Additional data" },
+      },
+    ],
+  },
+];
+
+const FIRE_COLLECTIONS = [
+  {
+    id: "hls-s30-fire",
+    "cube:dimensions": {
+      x: { type: "spatial" },
+      bands: { type: "bands", values: ["b04", "b8a"] },
+    },
+    extent: { temporal: { interval: [["2024-06-07T19:03:00Z", "2024-10-15T19:03:00Z"]] } },
+  },
+];
+
+function joinStub() {
+  return fetchStub({ processes: JOIN_DEFINITIONS, collections: FIRE_COLLECTIONS });
+}
+
+/** The card ids of the given process, in pipeline order. */
+function idsOf(panel: SwathAuthoringPanel, processId: string): string[] {
+  return [...panel.querySelectorAll<HTMLElement>(`[data-step][data-process="${processId}"]`)].map(
+    (step) => step.dataset["step"] ?? "",
+  );
+}
+
+test("the change-detection template is offered only where merge_cubes is served, and composes the join", async () => {
+  const plain = await mount(fetchStub({ collections: FIRE_COLLECTIONS }));
+  expect(plain.querySelector(".swath-authoring-template-change")).toBeNull();
+
+  const panel = await mount(joinStub());
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-template-change")?.click();
+  // Two Load heads, two date filters, two NDVIs, a join, a scale, the Output.
+  expect(stepProcesses(panel)).toEqual([
+    "load_collection",
+    "load_collection",
+    "filter_temporal",
+    "filter_temporal",
+    "ndvi",
+    "ndvi",
+    "merge_cubes",
+    "linear_scale_range",
+    "save_result",
+  ]);
+  const [merge] = idsOf(panel, "merge_cubes");
+  const graph = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
+  const [ndviA, ndviB] = idsOf(panel, "ndvi");
+  expect(graph[merge ?? ""]?.arguments).toEqual({
+    overlap_resolver: {
+      process_graph: {
+        [`${merge}.r1`]: {
+          process_id: "subtract",
+          arguments: { x: { from_parameter: "x" }, y: { from_parameter: "y" } },
+          result: true,
+        },
+      },
+    },
+    cube1: { from_node: ndviB }, // the later window is the first operand
+    cube2: { from_node: ndviA },
+  });
+  // The windows are the halves of the collection's extent, on each
+  // branch's date filter; the narrative retells the join.
+  const [before, after] = idsOf(panel, "filter_temporal");
+  expect(graph[before ?? ""]?.arguments["extent"]).toEqual(["2024-06-07", "2024-08-11"]);
+  expect(graph[after ?? ""]?.arguments["extent"]).toEqual(["2024-08-11", "2024-10-15"]);
+  expect(panel.querySelector("#swath-authoring-narrative")?.textContent).toContain(
+    "subtract the second branch from the first",
+  );
+  expect(submitButton(panel).disabled).toBe(false);
+  expect(submitReason(panel)).toBe("");
+});
+
+test("the join's resolver is a select over the admitted operations and lowers to that child graph", async () => {
+  const panel = await mount(joinStub());
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-template-change")?.click();
+  const [merge] = idsOf(panel, "merge_cubes");
+  const select = field<HTMLSelectElement>(panel, `${merge}-overlap_resolver`);
+  expect(select.tagName).toBe("SELECT");
+  expect([...select.options].map((option) => option.value)).toEqual([
+    "subtract",
+    "add",
+    "multiply",
+    "divide",
+  ]);
+  choose(panel, `${merge}-overlap_resolver`, "divide");
+  const graph = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
+  const resolver = graph[merge ?? ""]?.arguments["overlap_resolver"] as {
+    process_graph: Record<string, { process_id: string }>;
+  };
+  expect(resolver.process_graph[`${merge}.r1`]?.process_id).toBe("divide");
+  // Never a `context` argument (not admitted) and no free-text field for it.
+  expect(graph[merge ?? ""]?.arguments["context"]).toBeUndefined();
+});
+
+test("B10 in a graph: deleting the join orphans both branches — explained and gated, nothing dropped", async () => {
+  const panel = await mount(joinStub());
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-template-change")?.click();
+  const [merge] = idsOf(panel, "merge_cubes");
+  const [ndviA, ndviB] = idsOf(panel, "ndvi");
+  panel.querySelector<HTMLButtonElement>(`[aria-label="Remove step ${merge}"]`)?.click();
+  expect(submitButton(panel).disabled).toBe(true);
+  const reason = submitReason(panel);
+  expect(reason).toContain(`step ${ndviA} goes nowhere`);
+  expect(reason).toContain(`step ${ndviB} goes nowhere`);
+  // The scale lost its input too: it says so, and every card is still there.
+  const [scale] = idsOf(panel, "linear_scale_range");
+  expect(reason).toContain(`step ${scale} needs its x input connected`);
+  expect(stepProcesses(panel)).toHaveLength(8);
+  expect(Object.keys(panel.buildGraph())).toHaveLength(8);
+});
+
+test("a join inserted on a gray edge leaves its second input free; the branch starter fills it", async () => {
+  const panel = await mount(joinStub());
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-template")?.click(); // the NDVI chain
+  // The gap after NDVI (gray, unscaled) offers the join; the gap after
+  // Load (a loaded cube) and after the scale do not.
+  expect(chipsAt(panel, 1)).toContain("merge_cubes");
+  expect(chipsAt(panel, 0)).not.toContain("merge_cubes");
+  expect(chipsAt(panel, 2)).not.toContain("merge_cubes");
+  insertAt(panel, 1, "merge_cubes");
+  const [merge] = idsOf(panel, "merge_cubes");
+  expect(submitButton(panel).disabled).toBe(true);
+  expect(submitReason(panel)).toContain(`step ${merge} needs its cube2 input connected`);
+  const starter = panel.querySelector<HTMLButtonElement>(
+    `.swath-authoring-insert[data-port="${merge}:cube2"] button`,
+  );
+  expect(starter).not.toBeNull();
+  starter?.click();
+  // A second Load head (same collection and bands) → NDVI, wired in.
+  expect(idsOf(panel, "load_collection")).toHaveLength(2);
+  expect(idsOf(panel, "ndvi")).toHaveLength(2);
+  expect(submitReason(panel)).toBe("");
+  expect(submitButton(panel).disabled).toBe(false);
+  const graph = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
+  const [, ndviB] = idsOf(panel, "ndvi");
+  expect(graph[merge ?? ""]?.arguments["cube2"]).toEqual({ from_node: ndviB });
+  const [, loadB] = idsOf(panel, "load_collection");
+  expect(graph[loadB ?? ""]?.arguments["bands"]).toEqual(["b8a", "b04"]);
+});

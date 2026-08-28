@@ -1,7 +1,7 @@
 {
   "schema": "swath-screenshots/1",
-  "git_sha": "5f1c88639e84984976db56c8fa2435ce6633f2b3",
-  "captured": "2026-08-28T17:44:47.380Z",
+  "git_sha": "a0d62f39907d1fefc2c4ae2951075ce8792e7d48",
+  "captured": "2026-08-28T18:15:55.984Z",
   "viewport": {
     "width": 1528,
     "height": 928,
@@ -15,7 +15,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "b6f4cfe826b2724157ac09bd475a5b98b212d78c6e986f48330e455ac40b6e03"
+      "sha256": "753b4eb07de25f53b7b4d51239b2d3817f027b69769a8ac4d89d0c6c794e6ee5"
     },
     {
       "file": "02-ndvi-colormapped.png",
@@ -23,7 +23,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "4d3ca9434ef6f6ce660fec7fe8e37d64534d731f00fea1fefecb889246cd2a90"
+      "sha256": "147606efa7c12872ffc638f44f16ec51735cc0a476a19414dd59261b2ea9c1d9"
     },
     {
       "file": "03-truecolor-live.png",
@@ -31,7 +31,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "8bf2a34f63e9c76a68d7bcec1ec97e3f8c97b057364f1abe5bb5f1c1f40f5646"
+      "sha256": "e6218f5affee3e08b3c1617b1a7e51c82520e2f3827c174690434c06cf58c6d5"
     },
     {
       "file": "04-xray-decisions.png",
@@ -39,7 +39,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "7a8d192800303ad6b44d7a05ead2faea4a07a11e7f7c2a625e60769b89a0ec88"
+      "sha256": "be00c9692bec4d1e11197b4238776282667fdbe2abed60b13e9da087fa0912c2"
     },
     {
       "file": "05-xray-why-view.png",
@@ -47,7 +47,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "7d992e9eda34585682d1b07d91c38348bab854c3a23ada3302166670ee4ce955"
+      "sha256": "6598de48bf7df8e62880e29a9567cd4dff19fb9f2d4dd4b29dc93a4331229684"
     },
     {
       "file": "06-xray-heatmap.png",
@@ -55,7 +55,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "ba010d3d33e04fb92b5b08b479a26bbced51dcd9bdb098dde3a7746824f3a096"
+      "sha256": "b6afe881dd00acea53aacb41635fa3329bfc9384754d70b0e6e5cf59e5496543"
     },
     {
       "file": "07-xray-trace-feed.png",
@@ -63,7 +63,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.06,
       "railWidth": 248,
-      "sha256": "2d15027bba8a10afcc352c07d0c0354d498631d8e9b222698a557aea8ad70ea2"
+      "sha256": "b6581447d851e1853c629eeeab7f74071a8064532635defcd68d4cd65d00557f"
     },
     {
       "file": "08-authoring-form.png",
@@ -71,7 +71,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "4ce97ef6cf1b8a1ad94fc56247a31d173e1fc43598ca01ec3c10ad165a0ea103"
+      "sha256": "cc7f494ebe937249fc1374610f55dacc31c137c0cf16946b879456354af425ac"
     },
     {
       "file": "09-authoring-narrative-advanced.png",
@@ -79,7 +79,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "910317e4752e3486ec0ab1b5254db81d10dc52375fefb817a3d3d37429aabee3"
+      "sha256": "0a31353693154ff0beaccde5900affa87539e822fdaccd7b843fdfebe8a17840"
     },
     {
       "file": "10-authoring-published.png",
@@ -87,7 +87,15 @@
       "tolerance": 2,
       "maxBadFrac": 0.02,
       "railWidth": 248,
-      "sha256": "bd8bdaab89af98b819cc4a3066a7f398e9427a938d3ffa9211174dc6b1299fa7"
+      "sha256": "90c232ce13924bc208f6085476ee385dc0dcd2294de94223d073911810d01fdc"
+    },
+    {
+      "file": "15-change-detection.png",
+      "caption": "Change detection (ADR 0022): two dated branches of one collection joined by a subtract resolver — NDVI(later) − NDVI(earlier), previewed before publishing.",
+      "tolerance": 2,
+      "maxBadFrac": 0.03,
+      "railWidth": 248,
+      "sha256": "dba0e380d7a0364f671d2940acf150284b1afb078e49608268a27767ef0de4a6"
     },
     {
       "file": "11-dataset-footprints.png",
@@ -103,7 +111,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "ad0970f77ec43ed6c4dcf1c67000b81d87b10a021f8d28b9d7d3c193eaf1e5fd"
+      "sha256": "b0a45034f5bee6f39a7162d5d5220ede6f7e0157cfacf9d620c0c4ea06698889"
     },
     {
       "file": "13-time-slider-live.png",
@@ -111,7 +119,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.04,
       "railWidth": 248,
-      "sha256": "24a8610545e08eb0a58961c4807d8c4948e43972a28a7b832945baaca247606b"
+      "sha256": "ec30e6ce74cf384f4f0a6982cf91173f6a576a7f5624a200426761f7b773694e"
     },
     {
       "file": "14-time-slider-cached.png",
@@ -119,7 +127,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "80e8f1de9f3f550abec36fe48656232f0f657cb11501e107f21b0ec399906627"
+      "sha256": "f8def109626107e8e0e9e34b9574af3331d5a0ed526627f13d5d9ab826f59df4"
     },
     {
       "file": "m01-phone-landing.png",
@@ -127,7 +135,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 0,
-      "sha256": "9505aab4e9d94aa75cbad51877b920e5f4e2afcbda0d2691cb5027248311a07c"
+      "sha256": "277b23854e8bce157eb913fd7e02eb6d05c37c2e98274594282a28eb39ad922c"
     },
     {
       "file": "m02-phone-layers-sheet.png",
@@ -151,7 +159,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 0,
-      "sha256": "dac8ba75d5317203d7c43a15f8166482c810ea1d5f9eac8bde22a9a30c3c0c4f"
+      "sha256": "291aa6052059652b321dfafe41f57dc4d57b322a689a6cf90375c2d592ef40a6"
     }
   ]
 }
