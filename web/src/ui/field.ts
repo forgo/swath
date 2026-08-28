@@ -82,6 +82,7 @@ export class SwathField extends SwathElement {
     placeholder: { type: "string" },
     required: { type: "boolean", reflect: true },
     disabled: { type: "boolean", reflect: true },
+    readonly: { type: "boolean", reflect: true },
   } as const;
 
   declare label: string | undefined;
@@ -93,6 +94,7 @@ export class SwathField extends SwathElement {
   declare placeholder: string | undefined;
   declare required: boolean;
   declare disabled: boolean;
+  declare readonly: boolean;
 
   readonly #internals: ElementInternals;
   #options: readonly FieldOption[] = [];
@@ -259,6 +261,9 @@ export class SwathField extends SwathElement {
     control.setAttribute("aria-describedby", this.error ? "error help" : "help");
     control.disabled = this.disabled;
     control.required = this.required;
+    if (!(control instanceof HTMLSelectElement)) {
+      control.readOnly = this.readonly;
+    }
     if (control instanceof HTMLSelectElement) {
       control.replaceChildren(
         ...this.#options.map((option) => el("option", { value: option.value }, option.label)),

@@ -26,8 +26,10 @@ async function openPanel(page: Page): Promise<void> {
   await page.locator("swath-add-data-panel .swath-add-data-toggle").click();
 }
 
+/** Fields are <swath-field>s in the panel's shadow root (#289): the
+ * native control is one level deeper (Playwright pierces both). */
 function field(page: Page, id: string) {
-  return page.locator(`#swath-add-data-${id}`);
+  return page.locator(`#swath-add-data-${id} input`);
 }
 
 /** Pastes a link and blurs so the panel inspects it. */
@@ -110,7 +112,9 @@ test("a file the server cannot read renders its refusal under the link", async (
 
   // The problem lands under the field that caused it, in plain words —
   // and the quick look never fires.
-  await expect(page.locator("#swath-add-data-link-note")).toContainText("could not read that file");
+  await expect(page.locator('#swath-add-data-link [part="error"]')).toContainText(
+    "could not read that file",
+  );
   expect(services).toEqual([]);
 });
 
@@ -141,7 +145,7 @@ test("the /?stac= deep link pre-fills the flow and registers nothing", async ({ 
   await page.goto(entry);
 
   // Open, pre-filled from the fetched item — registering stays a click.
-  await expect(page.locator("swath-add-data-panel .swath-add-data-toggle")).toHaveAttribute(
+  await expect(page.locator("swath-add-data-panel .swath-add-data-toggle button")).toHaveAttribute(
     "aria-expanded",
     "true",
   );
