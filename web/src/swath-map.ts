@@ -1647,6 +1647,7 @@ export class SwathMap extends HTMLElement {
     // `server` change, while layer switches just re-filter the badges.
     this.#xray?.connect(`${this.server}/traces`);
     this.#syncTraces();
+    this.#scheduleCursor(); // the status bar reads the centre before any move (#287)
     this.#xray?.setLayer(layerId);
     this.#switcher?.update(available, layerId);
     // `layers` rides along (issue #108) so page chrome — the entry page's
