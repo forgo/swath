@@ -19,6 +19,7 @@
 import type { GranuleBbox } from "../granule-footprints.js";
 import type { GranuleListItem } from "../swath-dataset-panel.js";
 import type { LonLatBounds, SwathLayer } from "../swath-map.js";
+import type { TraceEnvelope } from "../swath-xray.js";
 
 export interface SwathEventMap {
   /** The viewed layer changed (`<swath-map>`). */
@@ -39,6 +40,11 @@ export interface SwathEventMap {
     swipe: string | null;
   };
   "swath-framedata": { bounds: LonLatBounds };
+  /** Where the map's cursor is (rAF-throttled): the pointer while a mouse
+   * is over the map, the map centre otherwise (touch, or the mouse left). */
+  "swath-cursor": { lng: number; lat: number; zoom: number; source: "pointer" | "center" };
+  /** One trace envelope off the SSE stream — with or without badges. */
+  "swath-trace": { envelope: TraceEnvelope };
   "swath-error": { error: unknown };
   "swath-dataset-granules": { dataset: string; granules: GranuleListItem[] };
   "swath-granule-zoom": { dataset: string; id: string; bbox: GranuleBbox };

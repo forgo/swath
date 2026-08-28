@@ -935,3 +935,94 @@ test("bare <swath-map>: the chrome floats in-map and its colours resolve from to
   expect(getComputedStyle(time).position).toBe("absolute");
   expect(getComputedStyle(time).backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
 });
+
+// --- The status bar's feeds (issue #287): traces without badges, the cursor ---
+
+test("traces attribute: swath-trace fires per envelope with the x-ray off; the overlay shares its stream", async () => {
+  const opened: { url: string; emit(type: string, data: string): void }[] = [];
+  const el = mount({ server: SERVER, layer: "truecolor", traces: "" });
+  el.xrayEventSource = (url) => {
+    const listeners = new Map<string, ((event: MessageEvent<string>) => void)[]>();
+    let closed = false;
+    const source = {
+      url,
+      addEventListener: (type: string, listener: (event: MessageEvent<string>) => void) => {
+        listeners.set(type, [...(listeners.get(type) ?? []), listener]);
+      },
+      close: () => {
+        closed = true; // a real EventSource emits nothing after close()
+      },
+      emit: (type: string, data: string) => {
+        if (closed) {
+          return;
+        }
+        for (const listener of listeners.get(type) ?? []) {
+          listener(new MessageEvent(type, { data }));
+        }
+      },
+    };
+    opened.push(source);
+    return source;
+  };
+  await el.ready;
+  expect(opened.map((s) => s.url)).toEqual([`${SERVER}/traces`]);
+  const seen: string[] = [];
+  el.addEventListener("swath-trace", (event) => seen.push(event.detail.envelope.tile));
+  const envelope = JSON.stringify({
+    tile: "2/1/1",
+    layer: "truecolor",
+    trace: {
+      decision: "live",
+      source: "s",
+      sources: [],
+      crs_from: 4326,
+      crs_to: 3857,
+      bytes_read: 10,
+      timings: { read_ms: 1, warp_ms: 1, pixel_ops_ms: 1, encode_ms: 1, total_ms: 4 },
+      ingest_to_pixel_ms: 1234,
+    },
+  });
+  opened[0]?.emit("trace", envelope);
+  expect(seen).toEqual(["2/1/1"]);
+
+  // Turning the overlay on: its stream takes over (one connection), and
+  // envelopes still reach swath-trace through it.
+  el.setAttribute("xray", "");
+  await el.ready;
+  expect(opened).toHaveLength(2);
+  opened[1]?.emit("trace", envelope);
+  expect(seen).toEqual(["2/1/1", "2/1/1"]);
+  el.removeAttribute("traces");
+  el.removeAttribute("xray");
+  await el.ready;
+  opened[0]?.emit("trace", envelope); // closed when the overlay took over: no relay
+  opened[1]?.emit("trace", envelope); // closed with the overlay: no relay
+  expect(seen).toHaveLength(2);
+});
+
+test("swath-cursor: the centre on a move, the pointer under the mouse, one event per frame", async () => {
+  const el = mount({ server: SERVER, layer: "truecolor" });
+  await el.ready;
+  const seen: { lng: number; lat: number; source: string }[] = [];
+  el.addEventListener("swath-cursor", (event) => seen.push(event.detail));
+  el.map?.jumpTo({ center: [10, 20], zoom: 3 });
+  el.map?.jumpTo({ center: [11, 21], zoom: 3 });
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  expect(seen).toHaveLength(1); // two moves, one frame, one event
+  expect(seen[0]?.source).toBe("center");
+  expect(seen[0]?.lng).toBeCloseTo(11, 4);
+  expect(seen[0]?.lat).toBeCloseTo(21, 4);
+  const canvas = el.querySelector("canvas") as HTMLCanvasElement;
+  const box = canvas.getBoundingClientRect();
+  canvas.dispatchEvent(
+    new MouseEvent("mousemove", {
+      clientX: box.left + box.width / 2,
+      clientY: box.top + box.height / 2,
+      bubbles: true,
+    }),
+  );
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  expect(seen).toHaveLength(2);
+  expect(seen[1]?.source).toBe("pointer");
+  expect(seen[1]?.lng).toBeCloseTo(11, 1);
+});

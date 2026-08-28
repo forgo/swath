@@ -634,6 +634,7 @@ export class XRayOverlay {
   readonly #decisions = decisionColors();
   #readouts: HTMLElement | undefined;
   #chrome: XRayChrome | undefined;
+  #onEnvelope: ((envelope: TraceEnvelope) => void) | undefined;
   readonly #capacity: number;
   readonly #onMove: () => void;
 
@@ -675,8 +676,12 @@ export class XRayOverlay {
       createEventSource?: EventSourceFactory | undefined;
       capacity?: number;
       chrome?: XRayChrome | undefined;
+      /** Every parsed envelope, before the store (#287: the host relays
+       * it as `swath-trace`). */
+      onEnvelope?: ((envelope: TraceEnvelope) => void) | undefined;
     } = {},
   ) {
+    this.#onEnvelope = options.onEnvelope;
     this.#map = map;
     this.#createEventSource = options.createEventSource ?? ((url) => new EventSource(url));
     this.#capacity = options.capacity ?? DEFAULT_CAPACITY;
@@ -937,6 +942,7 @@ export class XRayOverlay {
     if (!envelope) {
       return; // malformed data is dropped, not fatal — the stream goes on
     }
+    this.#onEnvelope?.(envelope);
     const { z, x, y } = envelope;
     // While comparing (issue #210), a trace that belongs to a side is
     // keyed BY that side, so both sides of one tile coexist in the store
@@ -1389,5 +1395,52 @@ export class XRayOverlay {
   #closeInspector(): void {
     this.#inspector?.remove();
     this.#inspector = undefined;
+  }
+}
+
+/**
+ * The trace stream without badges (#287): the status bar's ingest→pixel
+ * cell needs envelopes whether or not the x-ray is on. Same parser, same
+ * idempotent `connect(url)`; the host shares the overlay's stream while
+ * one exists and opens this one otherwise.
+ */
+export class TraceStream {
+  readonly #createEventSource: EventSourceFactory;
+  readonly #onEnvelope: (envelope: TraceEnvelope) => void;
+  #source: EventSourceLike | undefined;
+  #url = "";
+
+  constructor(
+    createEventSource: EventSourceFactory,
+    onEnvelope: (envelope: TraceEnvelope) => void,
+  ) {
+    this.#createEventSource = createEventSource;
+    this.#onEnvelope = onEnvelope;
+  }
+
+  get url(): string {
+    return this.#url;
+  }
+
+  connect(url: string): void {
+    if (url === this.#url) {
+      return;
+    }
+    this.#source?.close();
+    this.#url = url;
+    const source = this.#createEventSource(url);
+    source.addEventListener("trace", (event) => {
+      const envelope = parseTraceEnvelope(event.data);
+      if (envelope) {
+        this.#onEnvelope(envelope);
+      }
+    });
+    this.#source = source;
+  }
+
+  dispose(): void {
+    this.#source?.close();
+    this.#source = undefined;
+    this.#url = "";
   }
 }
