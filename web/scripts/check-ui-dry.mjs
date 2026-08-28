@@ -23,7 +23,16 @@ const EXTENSIONS = new Set([".ts", ".css", ".html"]);
 
 /** Patterns of files that must be clean even under --warn: the UI system
  * itself (#280) and each organism as it migrates. */
-const STRICT = [/^src\/ui\//, /^src\/swath-badge\.ts$/];
+const STRICT = [
+  /^src\/ui\//,
+  /^src\/swath-badge\.ts$/,
+  /^src\/swath-shell\.ts$/,
+  /^src\/swath-layer-list\.ts$/,
+  /^src\/swath-map\.ts$/,
+  /^src\/swath-compare\.ts$/,
+  /^src\/time-slider\.ts$/,
+  /^src\/granule-footprints\.ts$/,
+];
 
 /**
  * Rules: `home` is the one file allowed to match. `tests: false` skips

@@ -45,6 +45,16 @@ export class SwathHudDock extends SwathElement {
         block-size: 100%;
         padding: var(--swath-space-2);
       }
+      /* Explicit cells: eight corners auto-placed into a 3 × 3 grid skip the
+       * centre and slide the second row over (left → centre, …). */
+      [data-slot="top-left"] { grid-area: 1 / 1; }
+      [data-slot="top-center"] { grid-area: 1 / 2; }
+      [data-slot="top-right"] { grid-area: 1 / 3; }
+      [data-slot="left"] { grid-area: 2 / 1; }
+      [data-slot="right"] { grid-area: 2 / 3; }
+      [data-slot="bottom-left"] { grid-area: 3 / 1; }
+      [data-slot="bottom-center"] { grid-area: 3 / 2; }
+      [data-slot="bottom-right"] { grid-area: 3 / 3; }
       [part="corner"] {
         display: flex;
         flex-direction: column;

@@ -111,13 +111,13 @@ async function granuleFrames(page: Page): Promise<string[]> {
   return [...new Set(datetimes)].sort((a, b) => Date.parse(a) - Date.parse(b));
 }
 
-const slider = (page: Page) => page.locator("swath-map .swath-map-time");
+const slider = (page: Page) => page.locator(".swath-map-time");
 
 /** Scrubs to frame `index` through the control's own range input (the
  * user path: set + input event, exactly what dragging emits). */
 async function scrubTo(page: Page, index: number): Promise<void> {
   await page
-    .locator('swath-map .swath-map-time input[type="range"]')
+    .locator('.swath-map-time input[type="range"]')
     .evaluate((el: HTMLInputElement, value) => {
       el.value = String(value);
       el.dispatchEvent(new Event("input", { bubbles: true }));

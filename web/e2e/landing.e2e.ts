@@ -27,9 +27,9 @@ const STORAGE_KEY = "swath.view-state.v1";
 /** The landing's layer: the first playable series (six Park Fire dates). */
 const FIRE = "park-fire-ndvi";
 
-const landingCard = (page: Page) => page.locator("swath-map .swath-map-landing");
-const playButton = (page: Page) => page.locator("swath-map .swath-map-time-play");
-const slider = (page: Page) => page.locator("swath-map .swath-map-time");
+const landingCard = (page: Page) => page.locator(".swath-map-landing");
+const playButton = (page: Page) => page.locator(".swath-map-time-play");
+const slider = (page: Page) => page.locator(".swath-map-time");
 // `#swath-share` is a <swath-button> host: enabled/disabled and clicks
 // belong to the native <button> in its shadow root (Playwright's CSS
 // pierces it); the copy feedback (`data-state`, `data-url`) sits on the host.
@@ -50,7 +50,7 @@ async function waitForFrameChange(page: Page, from: string | null): Promise<stri
 /** Scrubs through the control's own range input (the user path). */
 async function scrubTo(page: Page, index: number): Promise<void> {
   await page
-    .locator('swath-map .swath-map-time input[type="range"]')
+    .locator('.swath-map-time input[type="range"]')
     .evaluate((el: HTMLInputElement, value) => {
       el.value = String(value);
       el.dispatchEvent(new Event("input", { bubbles: true }));

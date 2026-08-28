@@ -1,7 +1,7 @@
 {
   "schema": "swath-screenshots/1",
-  "git_sha": "493ef40b009931958f043b1b54cfbd716d5ae7cf",
-  "captured": "2026-08-27T18:45:41.390Z",
+  "git_sha": "e97d95b7bee5f4e34a60d83613257a27a5c25f68",
+  "captured": "2026-08-27T19:04:17.605Z",
   "viewport": {
     "width": 1528,
     "height": 928,
@@ -14,7 +14,7 @@
       "caption": "Zero-config landing page: the Park Fire series auto-framed and playable (held on its latest frame here — the reduced-motion state, with its play affordance), the x-ray invitation top-center, the Share button in the rail.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "c9684b6036e679704c7a6de9a2152f9dfa955ef6de7515f00c3b763fffdb8757"
+      "sha256": "c46f295e7e01c8fdb2aa22b62e60347240a2501c10e01bdfc2e4892eef6b3627"
     },
     {
       "file": "02-ndvi-colormapped.png",
@@ -35,28 +35,28 @@
       "caption": "X-ray decision overlay: every tile badged with its render decision and timing; ingest→pixel readout top-left.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "70d67d71fbb0233a3ab38c987668dd5381ef53635ada18ae22d918fe27a2e7b0"
+      "sha256": "73963c3153dd3e9ab350dcf9c9f505d794d50eda630d366ed28fcb2948868b54"
     },
     {
       "file": "05-xray-why-view.png",
       "caption": "Why-view for one tile: the planner's candidate table — chosen plan, rejected candidates, and the reason for each.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "b59a276439f07d9fb9f3e3cf06855bbaa2c2cc8bad668e109438eec8cce138d6"
+      "sha256": "979b763567b4b8be89834d08aef349b932971574461f6164a8cb61714f32885f"
     },
     {
       "file": "06-xray-heatmap.png",
       "caption": "Bytes-read heatmap mode: badges bucketed on a log scale, with the legend the overlay itself publishes.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "c9c7ef0919fa2b0afb180472c892870a5b358d160a621d79a0611fe096453557"
+      "sha256": "8ced86130bc81d09d68246e064429db9f3dcf5fa7512d636dd250f024090cdb7"
     },
     {
       "file": "07-xray-trace-feed.png",
       "caption": "Trace feed: the /traces SSE stream as scrollback — every line a render decision, clickable back to its tile.",
       "tolerance": 2,
       "maxBadFrac": 0.06,
-      "sha256": "b153cb509b874c5d2e3f9702e6f4588acc1b461f115c497c415e5f25fad7fe7f"
+      "sha256": "d02cf19554ccd86770e2ef917fe622ce242e8d64d1b9d44919899b0b6d52803e"
     },
     {
       "file": "08-authoring-form.png",
@@ -70,7 +70,7 @@
       "caption": "NDVI template loaded: the plain-words narrative of the graph, with a step's advanced (defaulted) fields opened.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "04d1689904b1a454d78e0eb7438853d48ad5c6edc49a937c7d9cfee123463a85"
+      "sha256": "02e8862c488c9b9cd198a48cf2aebf2095acb0406caa8f2459bcf12d0feabbf9"
     },
     {
       "file": "10-authoring-published.png",
@@ -91,21 +91,21 @@
       "caption": "Trace analytics under load: rolling p50/p95 render latency, plan mix, and cache hit rate over the session's tiles.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "ea71a111036c03fc3671f4bedeee4f8b479b9b4405cd6edefa101f3200dcc21e"
+      "sha256": "92ee0c685956d3b2a95cf3ac5f9ff3325bb16cc88a5392226deffce36c653bbb"
     },
     {
       "file": "13-time-slider-live.png",
       "caption": "Time slider over the Park Fire season, first pass: the scrubbed frame is rendered live — every badge says so, and the analytics card narrates the frame's own plan mix.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "c84f17ff45de30e0bb97306e1518e7482df3a61c4fbf32ef88c5763cba08c1f6"
+      "sha256": "63d72421a9053d8236f4534fa586911c849a3657f89083049dc0ea2535317672"
     },
     {
       "file": "14-time-slider-cached.png",
       "caption": "The same frame revisited: every tile is a cache hit (same granule, same cache entry — ADR 0015 frame identity), which is why the loop replays smoothly.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "0a4f89ba6a12e00a54207e28142dc0cdd394622fefaa5c608f8a6b6061308620"
+      "sha256": "fc54239f84e4d8f02b8e4f73282519ccc177ff99f153e15c193ec0c5f8d90942"
     }
   ]
 }

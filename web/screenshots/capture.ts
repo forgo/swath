@@ -217,10 +217,7 @@ test.describe("landing", () => {
 
   test("landing page: the fire-season loop, held for reduced motion", async ({ page }) => {
     await gotoAndWaitForTiles(page, DEMO_PATH, "park-fire-ndvi");
-    await expect(page.locator("swath-map .swath-map-landing")).toHaveAttribute(
-      "data-state",
-      "reduced",
-    );
+    await expect(page.locator(".swath-map-landing")).toHaveAttribute("data-state", "reduced");
     await expect(page.locator("#swath-share button")).toBeEnabled();
     await capture(
       page,
@@ -494,7 +491,7 @@ test("time slider: first pass live, second pass cached (issue #182)", async ({ p
     "park-fire-ndvi",
   );
   await waitForXRay(page);
-  const slider = page.locator("swath-map .swath-map-time");
+  const slider = page.locator(".swath-map-time");
   await expect(slider).toHaveAttribute("data-frames", String(frames.length));
 
   /** Scrubs via the control's own range input and waits until every
@@ -504,7 +501,7 @@ test("time slider: first pass live, second pass cached (issue #182)", async ({ p
     // a scrub inside a still-loading style would race the re-point.
     await waitForMapIdle(page);
     await page
-      .locator('swath-map .swath-map-time input[type="range"]')
+      .locator('.swath-map-time input[type="range"]')
       .evaluate((el: HTMLInputElement, value) => {
         el.value = String(value);
         el.dispatchEvent(new Event("input", { bubbles: true }));

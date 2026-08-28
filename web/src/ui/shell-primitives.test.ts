@@ -50,6 +50,28 @@ test("hud-dock: eight named slots assign children to their corners; the dock ign
   expect(getComputedStyle(dock.querySelector("#c-top-left") as Element).pointerEvents).toBe("auto");
 });
 
+test("hud-dock geometry: centre slots centre their card, sides hug their edges (the 3 × 3 placement)", async () => {
+  const dock = await mount(
+    '<swath-hud-dock><div slot="top-center" style="width:200px;height:20px"></div><div slot="bottom-center" style="width:200px;height:20px"></div><div slot="left" style="width:100px;height:40px"></div><div slot="bottom-right" style="width:100px;height:20px"></div></swath-hud-dock>',
+    "swath-hud-dock",
+  );
+  const box = (slot: string) => {
+    const b = (dock.querySelector(`[slot="${slot}"]`) as HTMLElement).getBoundingClientRect();
+    const d = dock.getBoundingClientRect();
+    return {
+      cx: Math.round(b.left + b.width / 2 - d.left),
+      top: Math.round(b.top - d.top),
+      right: Math.round(d.right - b.right),
+    };
+  };
+  expect(box("top-center").cx).toBe(400); // centred in the 800 px host
+  expect(box("top-center").top).toBe(8);
+  expect(box("bottom-center").cx).toBe(400);
+  expect(box("bottom-center").top).toBe(600 - 8 - 20);
+  expect(box("left").top).toBeGreaterThan(200); // the middle row, vertically centred
+  expect(box("bottom-right").right).toBe(8);
+});
+
 test("hud-card: title + actions; collapsible folds the body and emits swath-toggle", async () => {
   const card = await mount(
     '<swath-hud-card title="Ingest" collapsible><button slot="actions">x</button><p>body</p></swath-hud-card>',

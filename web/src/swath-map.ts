@@ -85,6 +85,7 @@ import { type EventSourceFactory, XRayOverlay } from "./swath-xray.js";
 import { parseGranuleDatetimes, TimeSlider } from "./time-slider.js";
 import { centerTile } from "./tms.js";
 import { createSwathEvent } from "./ui/events.js";
+import { adoptTokens } from "./ui/styles.js";
 import { formatSwipe, parseCenter, parseNumber, parseSwipe, parseTime } from "./view-state.js";
 
 /** One entry of the server's tilesets list, as `layers()` returns it. */
@@ -199,34 +200,39 @@ swath-map { display: block; position: relative; }
  * demo to a 400px strip). :where() keeps it losing to any consumer CSS. */
 :where(swath-map) { height: 400px; }
 swath-map .swath-map-container { width: 100%; height: 100%; }
-swath-map .swath-map-switcher button {
+/* MapLibre control skins: the library's white buttons, our type. Every
+ * colour is a token (issue #285); translucent variants mix a token with
+ * transparent so M12 retunes them from tokens.css alone. */
+swath-map .swath-map-switcher button,
+swath-map .swath-map-xray-toggle button,
+swath-map .swath-map-zoomdata button,
+swath-map .swath-map-compare-toggle button {
   width: auto;
   padding: 0 8px;
-  font: 12px/29px system-ui, sans-serif;
+  font-family: var(--swath-font-ui);
+  font-size: var(--swath-text-sm);
+  line-height: 29px;
 }
 swath-map .swath-map-switcher button[aria-pressed="true"] {
   font-weight: 700;
-  background: rgb(0 0 0 / 8%);
-}
-swath-map .swath-map-xray-toggle button {
-  width: auto;
-  padding: 0 8px;
-  font: 12px/29px system-ui, sans-serif;
+  background: color-mix(in srgb, var(--swath-color-bg) 8%, transparent);
 }
 swath-map .swath-map-xray-toggle button[aria-pressed="true"] {
   font-weight: 700;
-  background: rgb(22 163 74 / 15%);
-}
-swath-map .swath-map-zoomdata button {
-  width: auto;
-  padding: 0 8px;
-  font: 12px/29px system-ui, sans-serif;
+  background: color-mix(in srgb, var(--swath-color-decision-live) 15%, transparent);
 }
 swath-map .swath-map-zoomdata[hidden] { display: none; }
-/* The time slider (issue #182): bottom-center, between the x-ray
- * readouts (bottom-left) and the trace feed (bottom-right), styled like
- * the overlay's dark-telemetry cards. */
-swath-map .swath-map-time {
+swath-map .swath-map-compare-toggle button[aria-pressed="true"] {
+  font-weight: 700;
+  background: color-mix(in srgb, var(--swath-color-info) 15%, transparent);
+}
+swath-map .swath-map-compare-toggle[hidden] { display: none; }
+/* The time slider (issue #182) and the landing card (issue #211) are the
+ * map's own chrome, class-scoped (not \`swath-map .…\`) because a shell
+ * hosts them in its HUD dock (issue #285): docked, they sit in the dock's
+ * flex corners; bare, they float over the map as before. Same dark
+ * telemetry card either way. */
+.swath-map-time {
   position: absolute;
   left: 50%;
   bottom: 8px;
@@ -234,33 +240,36 @@ swath-map .swath-map-time {
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  border-radius: 4px;
-  background: rgb(0 0 0 / 75%);
-  color: #e2e8f0;
-  font: 11px/1.5 ui-monospace, monospace;
+  gap: var(--swath-space-2);
+  padding: var(--swath-space-1) var(--swath-space-3);
+  border-radius: var(--swath-radius-sm);
+  background: var(--swath-color-bg-hud);
+  color: var(--swath-color-fg);
+  font-family: var(--swath-font-mono);
+  font-size: var(--swath-text-xs);
+  line-height: var(--swath-leading-normal);
 }
-swath-map .swath-map-time[hidden] { display: none; }
-swath-map .swath-map-time-play {
+swath-hud-dock > .swath-map-time { position: static; transform: none; }
+.swath-map-time[hidden] { display: none; }
+.swath-map-time-play {
   border: 0;
   margin: 0;
   padding: 1px 6px;
-  border-radius: 3px;
-  background: rgb(255 255 255 / 12%);
+  border-radius: var(--swath-radius-sm);
+  background: color-mix(in srgb, var(--swath-color-fg) 12%, transparent);
   color: inherit;
   font: inherit;
   cursor: pointer;
 }
-swath-map .swath-map-time-play[aria-pressed="true"] {
-  color: #4ade80;
+.swath-map-time-play[aria-pressed="true"] {
+  color: var(--swath-color-accent);
   font-weight: 700;
 }
-swath-map .swath-map-time input[type="range"] {
+.swath-map-time input[type="range"] {
   width: 180px;
-  accent-color: #4ade80;
+  accent-color: var(--swath-color-accent);
 }
-swath-map .swath-map-time-label { white-space: nowrap; }
+.swath-map-time-label { white-space: nowrap; }
 /* The compare swipe (issue #210): the right-side map stacks by DOM
  * ORDER, not z-index — CompareView inserts it immediately after the
  * primary map container, so at z auto it paints over the primary canvas
@@ -296,11 +305,11 @@ swath-map .swath-map-compare-handle::before {
   bottom: 0;
   left: 5px;
   width: 2px;
-  background: #fff;
-  box-shadow: 0 0 4px rgb(0 0 0 / 50%);
+  background: var(--swath-color-fg);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--swath-color-bg) 50%, transparent);
 }
 swath-map .swath-map-compare-handle:focus-visible {
-  outline: 2px solid #4ade80;
+  outline: var(--swath-border-focus);
   outline-offset: 2px;
 }
 swath-map .swath-map-compare-grip {
@@ -313,38 +322,33 @@ swath-map .swath-map-compare-grip {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background: #fff;
-  color: #0f172a;
-  font: 700 13px/1 ui-monospace, monospace;
-  box-shadow: 0 0 6px rgb(0 0 0 / 40%);
+  border-radius: var(--swath-radius-pill);
+  background: var(--swath-color-fg);
+  color: var(--swath-color-bg);
+  font-family: var(--swath-font-mono);
+  font-size: var(--swath-text-md);
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 0 6px color-mix(in srgb, var(--swath-color-bg) 40%, transparent);
 }
 swath-map .swath-map-compare-label {
   position: absolute;
   top: 8px;
   padding: 2px 8px;
-  border-radius: 4px;
-  background: rgb(0 0 0 / 75%);
-  color: #e2e8f0;
-  font: 11px/1.5 ui-monospace, monospace;
+  border-radius: var(--swath-radius-sm);
+  background: var(--swath-color-bg-hud);
+  color: var(--swath-color-fg);
+  font-family: var(--swath-font-mono);
+  font-size: var(--swath-text-xs);
+  line-height: var(--swath-leading-normal);
   white-space: nowrap;
 }
 swath-map .swath-map-compare-label[data-side="left"] { right: 10px; }
 swath-map .swath-map-compare-label[data-side="right"] { left: 10px; }
-swath-map .swath-map-compare-toggle button {
-  width: auto;
-  padding: 0 8px;
-  font: 12px/29px system-ui, sans-serif;
-}
-swath-map .swath-map-compare-toggle button[aria-pressed="true"] {
-  font-weight: 700;
-  background: rgb(37 99 235 / 15%);
-}
-swath-map .swath-map-compare-toggle[hidden] { display: none; }
 /* The cinematic landing card (issue #211): top-center, the same dark
  * telemetry card as the slider — one status line, the x-ray invitation
  * as the single accent-colored action. Hidden once x-ray is on. */
-swath-map .swath-map-landing {
+.swath-map-landing {
   position: absolute;
   top: 8px;
   /* Centered by auto margins, not left:50%: an absolutely positioned
@@ -357,42 +361,45 @@ swath-map .swath-map-landing {
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--swath-space-3);
   max-width: calc(100% - 260px);
   padding: 5px 6px 5px 10px;
-  border-radius: 4px;
-  background: rgb(0 0 0 / 75%);
-  color: #e2e8f0;
-  font: 11px/1.5 ui-monospace, monospace;
+  border-radius: var(--swath-radius-sm);
+  background: var(--swath-color-bg-hud);
+  color: var(--swath-color-fg);
+  font-family: var(--swath-font-mono);
+  font-size: var(--swath-text-xs);
+  line-height: var(--swath-leading-normal);
 }
-swath-map .swath-map-landing[hidden] { display: none; }
-swath-map .swath-map-landing-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-swath-map .swath-map-landing-status[hidden] { display: none; }
-swath-map .swath-map-landing button {
+swath-hud-dock > .swath-map-landing { position: static; margin: 0; }
+.swath-map-landing[hidden] { display: none; }
+.swath-map-landing-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swath-map-landing-status[hidden] { display: none; }
+.swath-map-landing button {
   flex: none;
   margin: 0;
   padding: 1px 8px;
   border: 1px solid transparent;
-  border-radius: 3px;
-  background: rgb(255 255 255 / 12%);
+  border-radius: var(--swath-radius-sm);
+  background: color-mix(in srgb, var(--swath-color-fg) 12%, transparent);
   color: inherit;
   font: inherit;
   cursor: pointer;
 }
-swath-map .swath-map-landing button[hidden] { display: none; }
-swath-map .swath-map-landing button:focus-visible { outline: 2px solid #4ade80; outline-offset: 1px; }
-swath-map .swath-map-landing-play { color: #4ade80; font-weight: 700; }
-swath-map .swath-map-landing-invite {
-  border-color: rgb(74 222 128 / 45%);
-  background: rgb(74 222 128 / 10%);
-  color: #4ade80;
+.swath-map-landing button[hidden] { display: none; }
+.swath-map-landing button:focus-visible { outline: var(--swath-border-focus); outline-offset: 1px; }
+.swath-map-landing-play { color: var(--swath-color-accent); font-weight: 700; }
+.swath-map-landing-invite {
+  border-color: var(--swath-color-accent-border);
+  background: var(--swath-color-accent-bg);
+  color: var(--swath-color-accent);
   font-weight: 700;
 }
-swath-map .swath-map-landing-invite:hover { background: rgb(74 222 128 / 22%); }
-swath-map .swath-map-landing-dismiss {
+.swath-map-landing-invite:hover { background: color-mix(in srgb, var(--swath-color-accent) 22%, transparent); }
+.swath-map-landing-dismiss {
   padding: 1px 5px;
   background: none;
-  color: #94a3b8;
+  color: var(--swath-color-fg-muted);
 }
 `;
 
@@ -842,6 +849,7 @@ export class SwathMap extends HTMLElement {
 
   connectedCallback(): void {
     injectStyles(this.ownerDocument);
+    adoptTokens(this.ownerDocument); // the chrome's colours are tokens (#285)
     const container = document.createElement("div");
     container.className = "swath-map-container";
     this.replaceChildren(container);
@@ -888,7 +896,17 @@ export class SwathMap extends HTMLElement {
       },
     });
     this.#landing.setXray(this.hasAttribute("xray"));
-    this.append(this.#time.element, this.#landing.element);
+    // A shell hosts the chrome in its HUD dock (issue #285): the slider at
+    // bottom-center, the landing card at top-center. Without a shell (a
+    // bare <swath-map>, every vitest mount) they float over the map.
+    const dock = this.closest("swath-shell")?.querySelector(":scope > swath-hud-dock");
+    if (dock) {
+      this.#time.element.slot = "bottom-center";
+      this.#landing.element.slot = "top-center";
+      dock.append(this.#time.element, this.#landing.element);
+    } else {
+      this.append(this.#time.element, this.#landing.element);
+    }
     this.#cinematicArmed = false;
     this.#hoverPaused = false;
     // Hover pauses the cinematic loop, leaving resumes it — on the host,
@@ -1015,6 +1033,8 @@ export class SwathMap extends HTMLElement {
     this.#compareSides = undefined;
     this.#compareTemplate = "";
     this.#time?.dispose();
+    this.#time?.element.remove(); // docked chrome lives outside this element (#285)
+    this.#landing?.element.remove();
     this.#time = undefined;
     this.#landing = undefined;
     this.removeEventListener("pointerenter", this.#onPointerEnter);
