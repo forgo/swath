@@ -168,16 +168,17 @@ function fieldById(page: Page, id: string) {
  * convention as web/e2e/authoring.e2e.ts. */
 function chip(page: Page, gap: number, processId: string) {
   return page.locator(
-    `swath-authoring-panel .swath-authoring-insert[data-gap="${gap}"] ` +
-      `button[data-process="${processId}"]`,
+    `.swath-authoring-insert[data-gap="${gap}"] ` + `button[data-process="${processId}"]`,
   );
 }
 
 /** The panel is collapsed and lazy; the permanent Load card (s1)
  * rendering means the canvas is ready (Model B, issue #168). */
 async function openAuthoringPanel(page: Page): Promise<void> {
+  // Author mode (#291): the strip drawer over the map + the inspector.
+  await page.locator('swath-rail [part="item"][data-mode="author"]').click();
   await page.locator("swath-authoring-panel .swath-authoring-toggle").click();
-  await expect(page.locator('swath-authoring-panel [data-step="s1"]')).toBeVisible();
+  await expect(page.locator('[data-step="s1"]')).toBeVisible();
 }
 
 /** Waits until the canvas's live preview (POST /result, debounced) has
@@ -343,7 +344,7 @@ test("authoring panel: template narrative + advanced fields open", async ({ page
   await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`, "ndvi");
   await openAuthoringPanel(page);
 
-  await page.locator("swath-authoring-panel .swath-authoring-template").click();
+  await page.locator(".swath-authoring-template").click();
   await expect(page.locator("#swath-authoring-narrative")).toContainText("compute NDVI");
   await page.locator('[data-step="s1"] .swath-authoring-advanced-toggle').click();
   await expect(fieldById(page, "s1-spatial_extent")).toBeVisible();
@@ -358,13 +359,13 @@ test("authoring panel: template narrative + advanced fields open", async ({ page
 test("authoring publish: the authored layer serves immediately", async ({ page }) => {
   await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`, "ndvi");
   await openAuthoringPanel(page);
-  await page.locator("swath-authoring-panel .swath-authoring-template").click();
-  await expect(page.locator("swath-authoring-panel .swath-authoring-submit")).toBeEnabled();
+  await page.locator(".swath-authoring-template").click();
+  await expect(page.locator(".swath-authoring-submit")).toBeEnabled();
 
   const created = page.waitForResponse(
     (response) => response.url().includes("/services") && response.request().method() === "POST",
   );
-  await page.locator("swath-authoring-panel .swath-authoring-submit").click();
+  await page.locator(".swath-authoring-submit").click();
   const response = await created;
   expect(response.status()).toBe(201);
   const id = response.headers()["openeo-identifier"];

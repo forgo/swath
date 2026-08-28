@@ -63,6 +63,8 @@ export interface SwathEventMap {
   "swath-drawer-close": { reason: "esc" | "scrim" | "swipe" | "select" | "outside" };
   /** The rail's mode switcher picked a mode (`<swath-rail>`). */
   "swath-mode-change": { mode: string };
+  /** The authoring panel's selected step changed (the `sel=` link, #291). */
+  "swath-author-select": { sel: string };
   // --- The DAG canvas (issue #290): interaction only, no graph semantics ---
   /** The viewport changed (pan, zoom, fit). */
   "swath-canvas-change": { x: number; y: number; k: number };

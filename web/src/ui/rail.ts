@@ -156,7 +156,7 @@ export class SwathRail extends SwathElement {
 
   #onKey(event: KeyboardEvent): void {
     const buttons = this.#buttons();
-    const current = buttons.indexOf(this.renderRoot.activeElement as HTMLButtonElement);
+    const current = buttons.indexOf(this.focused as HTMLButtonElement);
     let next: number | undefined;
     if (event.key === "ArrowDown") {
       next = (current + 1) % buttons.length;

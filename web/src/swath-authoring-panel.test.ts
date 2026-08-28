@@ -1389,3 +1389,42 @@ test("UDF stage: a registration diagnostic from the preview lands on the module 
   await expect.poll(() => fieldNote(panel, "s2-udf")).toContain("module rejected at registration");
   expect(submitButton(panel).disabled).toBe(false);
 });
+
+// --- Shell regions (issue #291): the strip over the map, the inspector column ---
+
+test("with regions, the steps become chips in the strip and the selected step's fields sit in the inspector; sel follows chips", async () => {
+  const panel = await mount(fetchStub({}));
+  const strip = document.createElement("div");
+  const inspector = document.createElement("div");
+  document.body.append(strip, inspector);
+  const selections: string[] = [];
+  panel.addEventListener("swath-author-select", (event) => selections.push(event.detail.sel));
+  panel.regions = { strip, inspector };
+  // Load and Save are the permanent steps: two chips, the first selected.
+  const chips = [...strip.querySelectorAll<HTMLButtonElement>(".swath-authoring-chip")];
+  expect(chips.map((c) => c.dataset["chip"])).toEqual(["s1", "s2"]);
+  expect(chips.map((c) => c.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
+  expect(panel.sel).toBe("s1");
+  // The selected step's element (its ids intact) moved into the inspector.
+  expect(inspector.querySelector('[data-step="s1"]')).not.toBeNull();
+  expect(inspector.querySelector("#swath-authoring-s1-id")).not.toBeNull();
+  expect(inspector.querySelector(".swath-authoring-submit")?.getAttribute("form")).toBe(
+    "swath-authoring-form",
+  );
+  expect(strip.querySelector("#swath-authoring-narrative")).not.toBeNull();
+  // The template button and the (hidden) full list stay in the rail.
+  expect(panel.querySelector(".swath-authoring-template")).not.toBeNull();
+  expect(panel.querySelector(".swath-authoring-steps")?.hasAttribute("hidden")).toBe(true);
+  // A chip click selects: the inspector swaps steps and the event fires once.
+  chips[1]?.click();
+  expect(panel.sel).toBe("s2");
+  expect(selections).toEqual(["s1", "s2"]); // the auto-selected first step announced itself too
+  expect(inspector.querySelector('[data-step="s2"]')).not.toBeNull();
+  expect(inspector.querySelector('[data-step="s1"]')).toBeNull();
+  // Editing still validates: the publish reason reads from the same form.
+  expect(inspector.querySelector("#swath-authoring-submit-reason")).not.toBeNull();
+  // Without regions everything comes back inline (the rail / every other test).
+  panel.regions = undefined;
+  expect(panel.querySelector('[data-step="s1"]')).not.toBeNull();
+  expect(strip.childElementCount).toBe(1); // stale copy is the host's to clear
+});

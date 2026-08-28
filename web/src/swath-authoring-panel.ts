@@ -126,11 +126,11 @@ import {
   udfDiagnostic,
   wasmDataUrl,
 } from "./authoring-model.js";
+import { SwathElement } from "./ui/element.js";
 import { createSwathEvent } from "./ui/events.js";
+import { adoptSheet, css } from "./ui/styles.js";
 
 export type { ProcessDefinition, ProcessParameter } from "./authoring-model.js";
-
-const STYLE_ELEMENT_ID = "swath-authoring-panel-styles";
 
 /** The render profile's colormap vocabulary, offered for the
  * `output-format-options` schema subtype (`save_result`'s `options`).
@@ -312,7 +312,7 @@ function narrativePhrase(
 }
 
 /** Panel chrome, matching the layer panel's dark-telemetry look. */
-const PANEL_CSS = `
+const PANEL_SHEET = css`
 swath-authoring-panel { display: block; }
 swath-authoring-panel .swath-authoring-toggle {
   display: block;
@@ -323,24 +323,24 @@ swath-authoring-panel .swath-authoring-toggle {
   background: none;
   text-align: left;
   cursor: pointer;
-  font: 700 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.6; font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgb(148 163 184 / 90%);
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 90%, transparent);
 }
 swath-authoring-panel .swath-authoring-toggle::before { content: "▸ "; }
 swath-authoring-panel .swath-authoring-toggle[aria-expanded="true"]::before { content: "▾ "; }
 swath-authoring-panel .swath-authoring-toggle[aria-expanded="true"] { margin-bottom: 8px; }
 swath-authoring-panel .swath-authoring-toggle:focus-visible {
-  outline: 2px solid #4ade80;
+  outline: 2px solid var(--swath-color-accent);
   outline-offset: 1px;
 }
 swath-authoring-panel .swath-authoring-heading {
   margin: 0 0 8px;
-  font: 700 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.6; font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgb(148 163 184 / 90%);
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 90%, transparent);
 }
 swath-authoring-panel .swath-authoring-steps {
   margin: 0;
@@ -351,37 +351,37 @@ swath-authoring-panel .swath-authoring-steps {
   gap: 8px;
 }
 swath-authoring-panel .swath-authoring-step {
-  border: 1px solid rgb(148 163 184 / 20%);
+  border: 1px solid color-mix(in srgb, var(--swath-color-fg-muted) 20%, transparent);
   border-radius: 6px;
   padding: 8px;
 }
 swath-authoring-panel .swath-authoring-step[data-permanent] {
-  border-color: rgb(74 222 128 / 25%);
+  border-color: color-mix(in srgb, var(--swath-color-accent) 25%, transparent);
 }
 swath-authoring-panel .swath-authoring-step-header {
   display: flex;
   align-items: baseline;
   gap: 6px;
   margin: 0;
-  font: 700 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.6; font-weight: 700;
 }
 swath-authoring-panel .swath-authoring-step-header .swath-authoring-step-key {
-  color: #4ade80;
+  color: var(--swath-color-accent);
 }
 swath-authoring-panel .swath-authoring-step-header button {
   margin-left: auto;
   border: none;
   background: none;
   cursor: pointer;
-  color: rgb(148 163 184 / 80%);
-  font: 12px/1 system-ui, sans-serif;
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 80%, transparent);
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-sm); line-height: 1;
 }
-swath-authoring-panel .swath-authoring-step-header button:hover { color: #f87171; }
+swath-authoring-panel .swath-authoring-step-header button:hover { color: var(--swath-color-danger); }
 swath-authoring-panel .swath-authoring-step-summary {
   display: block;
   margin: 0 0 6px;
-  font: italic 11px/1.5 system-ui, sans-serif;
-  color: rgb(148 163 184 / 75%);
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5; font-style: italic;
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 75%, transparent);
 }
 swath-authoring-panel .swath-authoring-insert {
   display: flex;
@@ -393,21 +393,21 @@ swath-authoring-panel .swath-authoring-insert {
 }
 swath-authoring-panel .swath-authoring-insert button {
   padding: 2px 8px;
-  border: 1px dashed rgb(148 163 184 / 40%);
+  border: 1px dashed color-mix(in srgb, var(--swath-color-fg-muted) 40%, transparent);
   border-radius: 999px;
   background: none;
   cursor: pointer;
-  color: rgb(148 163 184 / 90%);
-  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 90%, transparent);
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.5;
 }
 swath-authoring-panel .swath-authoring-insert button:hover {
-  background: rgb(148 163 184 / 12%);
+  background: color-mix(in srgb, var(--swath-color-fg-muted) 12%, transparent);
 }
 swath-authoring-panel label {
   display: block;
   margin: 0 0 6px;
-  font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: rgb(148 163 184 / 90%);
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.6;
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 90%, transparent);
 }
 swath-authoring-panel input,
 swath-authoring-panel select {
@@ -416,16 +416,16 @@ swath-authoring-panel select {
   box-sizing: border-box;
   margin-top: 1px;
   padding: 3px 6px;
-  border: 1px solid rgb(148 163 184 / 30%);
+  border: 1px solid color-mix(in srgb, var(--swath-color-fg-muted) 30%, transparent);
   border-radius: 4px;
-  background: rgb(15 23 42 / 60%);
+  background: color-mix(in srgb, var(--swath-color-bg) 60%, transparent);
   color: inherit;
-  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-sm); line-height: 1.5;
 }
 swath-authoring-panel input:focus-visible,
 swath-authoring-panel select:focus-visible,
 swath-authoring-panel button:focus-visible {
-  outline: 2px solid #4ade80;
+  outline: 2px solid var(--swath-color-accent);
   outline-offset: 1px;
 }
 swath-authoring-panel input:disabled,
@@ -447,7 +447,7 @@ swath-authoring-panel .swath-authoring-when label {
   align-items: center;
   gap: 4px;
   margin: 0;
-  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-sm); line-height: 1.6;
 }
 swath-authoring-panel .swath-authoring-when input {
   display: inline-block;
@@ -459,7 +459,7 @@ swath-authoring-panel .swath-authoring-bands label {
   align-items: center;
   gap: 4px;
   margin: 0;
-  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-sm); line-height: 1.6;
   cursor: pointer;
 }
 swath-authoring-panel .swath-authoring-bands input {
@@ -470,24 +470,24 @@ swath-authoring-panel .swath-authoring-bands input {
 swath-authoring-panel .swath-authoring-field-help {
   display: block;
   margin: 0 0 2px;
-  font: 11px/1.4 system-ui, sans-serif;
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.4;
   font-weight: 400;
   letter-spacing: normal;
   text-transform: none;
-  color: rgb(148 163 184 / 75%);
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 75%, transparent);
 }
 swath-authoring-panel .swath-authoring-plain {
   display: block;
   margin: 0 0 6px;
-  font: 11px/1.5 system-ui, sans-serif;
-  color: rgb(148 163 184 / 75%);
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5;
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 75%, transparent);
 }
 swath-authoring-panel .swath-authoring-narrative {
   margin: 0 0 10px;
   padding: 6px 8px;
-  border-left: 2px solid rgb(74 222 128 / 45%);
-  font: italic 12px/1.5 system-ui, sans-serif;
-  color: rgb(226 232 240 / 90%);
+  border-left: 2px solid color-mix(in srgb, var(--swath-color-accent) 45%, transparent);
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-sm); line-height: 1.5; font-style: italic;
+  color: color-mix(in srgb, var(--swath-color-fg) 90%, transparent);
   overflow-wrap: anywhere;
 }
 swath-authoring-panel .swath-authoring-narrative:empty { display: none; }
@@ -499,17 +499,17 @@ swath-authoring-panel .swath-authoring-preview img {
   display: block;
   width: 128px;
   height: 128px;
-  border: 1px solid rgb(148 163 184 / 30%);
+  border: 1px solid color-mix(in srgb, var(--swath-color-fg-muted) 30%, transparent);
   border-radius: 6px;
   background:
-    repeating-conic-gradient(rgb(148 163 184 / 12%) 0% 25%, rgb(15 23 42 / 60%) 0% 50%)
+    repeating-conic-gradient(color-mix(in srgb, var(--swath-color-fg-muted) 12%, transparent) 0% 25%, color-mix(in srgb, var(--swath-color-bg) 60%, transparent) 0% 50%)
     0 0 / 16px 16px;
 }
 swath-authoring-panel .swath-authoring-preview img[hidden] { display: none; }
 swath-authoring-panel .swath-authoring-preview figcaption {
   margin: 2px 0 0;
-  font: 11px/1.5 system-ui, sans-serif;
-  color: rgb(148 163 184 / 75%);
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5;
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 75%, transparent);
   overflow-wrap: anywhere;
 }
 swath-authoring-panel .swath-authoring-advanced-toggle {
@@ -519,8 +519,8 @@ swath-authoring-panel .swath-authoring-advanced-toggle {
   border: 0;
   background: none;
   cursor: pointer;
-  font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: rgb(148 163 184 / 70%);
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.6;
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 70%, transparent);
 }
 swath-authoring-panel .swath-authoring-advanced-toggle::before { content: "▸ "; }
 swath-authoring-panel .swath-authoring-advanced-toggle[aria-expanded="true"]::before {
@@ -529,15 +529,15 @@ swath-authoring-panel .swath-authoring-advanced-toggle[aria-expanded="true"]::be
 swath-authoring-panel .swath-authoring-field-note {
   display: block;
   margin: 1px 0 0;
-  font: 11px/1.5 system-ui, sans-serif;
-  color: #fca5a5;
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5;
+  color: var(--swath-color-danger);
   overflow-wrap: anywhere;
 }
 swath-authoring-panel .swath-authoring-field-note:empty { display: none; }
 swath-authoring-panel .swath-authoring-step-error {
   margin: 0 0 6px;
-  font: 11px/1.5 system-ui, sans-serif;
-  color: #fca5a5;
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5;
+  color: var(--swath-color-danger);
   overflow-wrap: anywhere;
 }
 swath-authoring-panel .swath-authoring-step-error:empty { display: none; }
@@ -545,14 +545,14 @@ swath-authoring-panel .swath-authoring-udf-drop {
   display: block;
   margin: 2px 0 0;
   padding: 8px;
-  border: 1px dashed rgb(148 163 184 / 40%);
+  border: 1px dashed color-mix(in srgb, var(--swath-color-fg-muted) 40%, transparent);
   border-radius: 6px;
-  font: 11px/1.5 system-ui, sans-serif;
-  color: rgb(148 163 184 / 85%);
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5;
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 85%, transparent);
 }
 swath-authoring-panel .swath-authoring-udf-drop[data-active] {
-  border-color: #4ade80;
-  background: rgb(74 222 128 / 8%);
+  border-color: var(--swath-color-accent);
+  background: color-mix(in srgb, var(--swath-color-accent) 8%, transparent);
 }
 swath-authoring-panel .swath-authoring-udf-drop input[type="file"] {
   margin-top: 4px;
@@ -563,8 +563,8 @@ swath-authoring-panel .swath-authoring-udf-drop input[type="file"] {
 swath-authoring-panel .swath-authoring-udf-module {
   display: block;
   margin: 2px 0 0;
-  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: #4ade80;
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.5;
+  color: var(--swath-color-accent);
   overflow-wrap: anywhere;
 }
 swath-authoring-panel .swath-authoring-udf-module:empty { display: none; }
@@ -575,11 +575,11 @@ swath-authoring-panel textarea {
   min-height: 3em;
   margin-top: 1px;
   padding: 3px 6px;
-  border: 1px solid rgb(148 163 184 / 30%);
+  border: 1px solid color-mix(in srgb, var(--swath-color-fg-muted) 30%, transparent);
   border-radius: 4px;
-  background: rgb(15 23 42 / 60%);
+  background: color-mix(in srgb, var(--swath-color-bg) 60%, transparent);
   color: inherit;
-  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-sm); line-height: 1.5;
   resize: vertical;
 }
 swath-authoring-panel .swath-authoring-formula-row {
@@ -589,8 +589,8 @@ swath-authoring-panel .swath-authoring-formula-row {
   margin: 0 0 4px;
 }
 swath-authoring-panel .swath-authoring-formula-row .swath-authoring-formula-line {
-  font: 700 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: #4ade80;
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.6; font-weight: 700;
+  color: var(--swath-color-accent);
   white-space: nowrap;
 }
 swath-authoring-panel .swath-authoring-formula-row select,
@@ -606,37 +606,37 @@ swath-authoring-panel .swath-authoring-formula-row button {
   border: none;
   background: none;
   cursor: pointer;
-  color: rgb(148 163 184 / 80%);
-  font: 12px/1 system-ui, sans-serif;
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 80%, transparent);
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-sm); line-height: 1;
 }
-swath-authoring-panel .swath-authoring-formula-row button:hover { color: #f87171; }
+swath-authoring-panel .swath-authoring-formula-row button:hover { color: var(--swath-color-danger); }
 swath-authoring-panel .swath-authoring-formula-add {
   display: block;
   margin: 0 0 6px;
   padding: 2px 8px;
-  border: 1px dashed rgb(148 163 184 / 40%);
+  border: 1px dashed color-mix(in srgb, var(--swath-color-fg-muted) 40%, transparent);
   border-radius: 999px;
   background: none;
   cursor: pointer;
-  color: rgb(148 163 184 / 90%);
-  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 90%, transparent);
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.5;
 }
 swath-authoring-panel .swath-authoring-formula-add:hover {
-  background: rgb(148 163 184 / 12%);
+  background: color-mix(in srgb, var(--swath-color-fg-muted) 12%, transparent);
 }
 swath-authoring-panel .swath-authoring-submit {
   margin-top: 10px;
   width: 100%;
   padding: 7px 10px;
-  border: 1px solid rgb(74 222 128 / 45%);
+  border: 1px solid color-mix(in srgb, var(--swath-color-accent) 45%, transparent);
   border-radius: 6px;
-  background: rgb(74 222 128 / 10%);
+  background: color-mix(in srgb, var(--swath-color-accent) 10%, transparent);
   cursor: pointer;
   color: inherit;
-  font: 600 12px/1.5 system-ui, sans-serif;
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-sm); line-height: 1.5; font-weight: 600;
 }
 swath-authoring-panel .swath-authoring-submit:hover:not(:disabled) {
-  background: rgb(74 222 128 / 20%);
+  background: color-mix(in srgb, var(--swath-color-accent) 20%, transparent);
 }
 swath-authoring-panel .swath-authoring-submit:disabled {
   cursor: not-allowed;
@@ -644,40 +644,40 @@ swath-authoring-panel .swath-authoring-submit:disabled {
 }
 swath-authoring-panel .swath-authoring-submit-reason {
   margin: 4px 0 0;
-  font: 11px/1.5 system-ui, sans-serif;
-  color: rgb(148 163 184 / 80%);
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5;
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 80%, transparent);
 }
 swath-authoring-panel .swath-authoring-submit-reason:empty { display: none; }
 swath-authoring-panel .swath-authoring-error {
   margin: 8px 0 0;
   padding: 6px 8px;
-  border: 1px solid rgb(248 113 113 / 45%);
+  border: 1px solid color-mix(in srgb, var(--swath-color-danger) 45%, transparent);
   border-radius: 6px;
-  background: rgb(248 113 113 / 10%);
-  color: #fca5a5;
-  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: color-mix(in srgb, var(--swath-color-danger) 10%, transparent);
+  color: var(--swath-color-danger);
+  font-family: var(--swath-font-mono); font-size: var(--swath-text-sm); line-height: 1.5;
   overflow-wrap: anywhere;
 }
 swath-authoring-panel .swath-authoring-empty,
 swath-authoring-panel .swath-authoring-hint {
   margin: 0 0 8px;
-  font: 12px/1.5 system-ui, sans-serif;
-  color: rgb(148 163 184 / 80%);
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-sm); line-height: 1.5;
+  color: color-mix(in srgb, var(--swath-color-fg-muted) 80%, transparent);
 }
 swath-authoring-panel .swath-authoring-template {
   display: block;
   width: 100%;
   margin: 0 0 8px;
   padding: 6px 10px;
-  border: 1px dashed rgb(148 163 184 / 40%);
+  border: 1px dashed color-mix(in srgb, var(--swath-color-fg-muted) 40%, transparent);
   border-radius: 6px;
   background: none;
   cursor: pointer;
   color: inherit;
-  font: 12px/1.5 system-ui, sans-serif;
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-sm); line-height: 1.5;
 }
 swath-authoring-panel .swath-authoring-template:hover {
-  background: rgb(148 163 184 / 12%);
+  background: color-mix(in srgb, var(--swath-color-fg-muted) 12%, transparent);
 }
 swath-authoring-panel .swath-authoring-services {
   margin: 10px 0 0;
@@ -697,31 +697,60 @@ swath-authoring-panel .swath-authoring-service-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: 12px/1.5 system-ui, sans-serif;
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-sm); line-height: 1.5;
 }
 swath-authoring-panel .swath-authoring-services button {
   margin-left: auto;
   padding: 2px 7px;
-  border: 1px solid rgb(248 113 113 / 40%);
+  border: 1px solid color-mix(in srgb, var(--swath-color-danger) 40%, transparent);
   border-radius: 4px;
   background: none;
   cursor: pointer;
-  color: #fca5a5;
-  font: 11px/1.5 system-ui, sans-serif;
+  color: var(--swath-color-danger);
+  font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5;
 }
 swath-authoring-panel .swath-authoring-services button:hover {
-  background: rgb(248 113 113 / 12%);
+  background: color-mix(in srgb, var(--swath-color-danger) 12%, transparent);
 }
+/* Shell regions (#291): the strip over the map, the inspector column. */
+.swath-authoring-strip { display: grid; gap: var(--swath-space-2); }
+.swath-authoring-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--swath-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.swath-authoring-chip {
+  min-block-size: var(--swath-space-7);
+  padding: 0 var(--swath-space-3);
+  border: var(--swath-border-hairline);
+  border-radius: var(--swath-radius-pill);
+  background: var(--swath-color-bg-raised);
+  color: var(--swath-color-fg);
+  font-family: var(--swath-font-mono);
+  font-size: var(--swath-text-xs);
+  cursor: pointer;
+}
+.swath-authoring-chip[aria-pressed="true"] {
+  border-color: var(--swath-color-accent-border);
+  background: var(--swath-color-accent-bg);
+  color: var(--swath-color-accent);
+}
+.swath-authoring-chip[data-invalid="true"] { border-color: var(--swath-color-danger); }
+.swath-authoring-chip-gap { display: inline-flex; }
+.swath-authoring-inspector { display: grid; gap: var(--swath-space-2); }
+.swath-authoring-inspector .swath-authoring-step { margin: 0; }
 `;
 
-function injectStyles(doc: Document): void {
-  if (doc.getElementById(STYLE_ELEMENT_ID)) {
-    return;
-  }
-  const style = doc.createElement("style");
-  style.id = STYLE_ELEMENT_ID;
-  style.textContent = PANEL_CSS;
-  doc.head.append(style);
+/** The shell's regions for the authoring pieces (#291). */
+export interface AuthoringRegions {
+  /** The step strip + narrative + preview: a bottom drawer over the map. */
+  strip: HTMLElement;
+  /** The selected step's fields, title and publish: the inspector column. */
+  inspector: HTMLElement;
 }
 
 /** The slice of a `GET /services` entry the panel reads. */
@@ -922,8 +951,61 @@ function defaultText(param: ProcessParameter): string {
   return "";
 }
 
-export class SwathAuthoringPanel extends HTMLElement {
-  static readonly tagName = "swath-authoring-panel";
+export class SwathAuthoringPanel extends SwathElement {
+  static override tagName = "swath-authoring-panel";
+  /** Light DOM (#291): the `#swath-authoring-*` ids, `[data-step]` and the
+   * 34 vitests address the light tree; the sheet is adopted by the document. */
+  static override shadowOptions = null;
+  static override styles = [PANEL_SHEET];
+  static override properties = {
+    /** The selected step key (`s1`…), the `sel=` deep link (#291). */
+    sel: { type: "string", reflect: true },
+  } as const;
+
+  declare sel: string | undefined;
+
+  /** Where a shell puts the pieces (#291): the step strip (a bottom drawer
+   * over the map) and the selected step's fields (the inspector). Without
+   * regions everything renders inline — the rail today, every vitest. */
+  #regions: AuthoringRegions | undefined;
+
+  get regions(): AuthoringRegions | undefined {
+    return this.#regions;
+  }
+
+  set regions(regions: AuthoringRegions | undefined) {
+    this.#regions = regions;
+    this.#render();
+  }
+
+  /** A query over the panel AND its regions (#291): the strip and the
+   * inspector hold pieces of the same form once a shell relocates them. */
+  #find<T extends Element = Element>(selector: string): T | null {
+    return (
+      this.querySelector<T>(selector) ??
+      this.#regions?.inspector.querySelector<T>(selector) ??
+      this.#regions?.strip.querySelector<T>(selector) ??
+      null
+    );
+  }
+
+  #findAll<T extends Element = Element>(selector: string): T[] {
+    return [
+      ...this.querySelectorAll<T>(selector),
+      ...(this.#regions?.inspector.querySelectorAll<T>(selector) ?? []),
+      ...(this.#regions?.strip.querySelectorAll<T>(selector) ?? []),
+    ];
+  }
+
+  /** Select a step (a chip click, a `sel=` link); emits `swath-author-select`. */
+  selectStep(key: string): void {
+    if (this.sel === key) {
+      return;
+    }
+    this.sel = key;
+    this.#render();
+    this.emit("swath-author-select", { sel: key });
+  }
 
   /** Collapsed by default and LAZY, like the dataset browser beside it:
    * the closed panel fetches nothing — the first open (or `reload()`)
@@ -1001,8 +1083,8 @@ export class SwathAuthoringPanel extends HTMLElement {
     this.#api = api;
   }
 
-  connectedCallback(): void {
-    injectStyles(this.ownerDocument);
+  override connectedCallback(): void {
+    super.connectedCallback();
     this.setAttribute("role", "group");
     if (!this.hasAttribute("aria-label")) {
       this.setAttribute("aria-label", "Author a layer");
@@ -1010,7 +1092,8 @@ export class SwathAuthoringPanel extends HTMLElement {
     this.#render();
   }
 
-  disconnectedCallback(): void {
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
     clearTimeout(this.#previewTimer);
     this.#previewTimer = undefined;
     this.#clearPreview();
@@ -1363,19 +1446,19 @@ export class SwathAuthoringPanel extends HTMLElement {
   #updateValidity(): void {
     for (const card of this.#cards()) {
       const key = this.#keyOf(card);
-      const stepNote = this.querySelector(`#swath-authoring-${key}-error`);
+      const stepNote = this.#find(`#swath-authoring-${key}-error`);
       if (stepNote) {
         stepNote.textContent = this.#serverNotes.get(key) ?? "";
       }
       if (card.process.id === "reduce_dimension") {
-        const list = this.querySelector(`#swath-authoring-${key}-formula-issues`);
+        const list = this.#find(`#swath-authoring-${key}-formula-issues`);
         if (list) {
           list.textContent = formulaIssues(card.rows, this.#loadBands).join("; ");
         }
       }
       for (const param of card.process.parameters ?? []) {
         const fieldKey = `${key}-${param.name}`;
-        const note = this.querySelector(`#swath-authoring-${fieldKey}-note`);
+        const note = this.#find(`#swath-authoring-${fieldKey}-note`);
         if (!note) {
           continue;
         }
@@ -1392,14 +1475,14 @@ export class SwathAuthoringPanel extends HTMLElement {
         note.textContent = this.#touched.has(fieldKey) || filled ? issue : "";
       }
     }
-    const submit = this.querySelector<HTMLButtonElement>(".swath-authoring-submit");
-    const reason = this.querySelector(".swath-authoring-submit-reason");
+    const submit = this.#find<HTMLButtonElement>(".swath-authoring-submit");
+    const reason = this.#find(".swath-authoring-submit-reason");
     if (submit && reason) {
       const issues = this.#submitIssues();
       submit.disabled = issues.length > 0;
       reason.textContent = issues.length > 0 ? `To publish: ${issues.join("; ")}.` : "";
     }
-    const narrative = this.querySelector("#swath-authoring-narrative");
+    const narrative = this.#find("#swath-authoring-narrative");
     if (narrative) {
       narrative.textContent = this.#narrative();
     }
@@ -1413,7 +1496,7 @@ export class SwathAuthoringPanel extends HTMLElement {
    * debounced into the preview-bounded `POST /result`; anything less
    * shows no preview and makes no request. */
   #schedulePreview(): void {
-    if (!this.querySelector("#swath-authoring-preview")) {
+    if (!this.#find("#swath-authoring-preview")) {
       return; // the canvas is not rendered (collapsed / unavailable)
     }
     if (this.#submitIssues().length > 0) {
@@ -1550,9 +1633,9 @@ export class SwathAuthoringPanel extends HTMLElement {
   /** Applies the preview state to the DOM in place (the elements are
    * re-created on every render; the state lives on the panel). */
   #reflectPreview(): void {
-    const container = this.querySelector<HTMLElement>("#swath-authoring-preview");
-    const image = this.querySelector<HTMLImageElement>("#swath-authoring-preview-image");
-    const note = this.querySelector("#swath-authoring-preview-note");
+    const container = this.#find<HTMLElement>("#swath-authoring-preview");
+    const image = this.#find<HTMLImageElement>("#swath-authoring-preview-image");
+    const note = this.#find("#swath-authoring-preview-note");
     if (!container || !image || !note) {
       return;
     }
@@ -1672,7 +1755,7 @@ export class SwathAuthoringPanel extends HTMLElement {
       }
       this.#error = "";
       this.#render();
-      this.querySelector(`[data-step="${key}"]`)?.scrollIntoView({ block: "nearest" });
+      this.#find(`[data-step="${key}"]`)?.scrollIntoView({ block: "nearest" });
     } else {
       this.#error = message;
       this.#render();
@@ -1738,6 +1821,10 @@ export class SwathAuthoringPanel extends HTMLElement {
 
   // --- Rendering ---------------------------------------------------------
 
+  protected render(): void {
+    this.#render();
+  }
+
   #render(): void {
     const toggle = document.createElement("button");
     toggle.type = "button";
@@ -1800,11 +1887,81 @@ export class SwathAuthoringPanel extends HTMLElement {
     }
     children.push(...this.#renderServices());
     this.replaceChildren(...children);
+    this.#relocate();
     this.#updateValidity();
+  }
+
+  /** With regions (a shell), split the rendered form: the steps list,
+   * narrative and preview go to the strip as chips + a pipeline line, the
+   * selected step's fields plus title/publish go to the inspector; the
+   * template button and the services list stay here in the rail. The
+   * ids and `[data-step]` hosts are the same elements, just moved. */
+  #relocate(): void {
+    const regions = this.#regions;
+    const form = this.#find<HTMLFormElement>("form");
+    if (!regions || !form) {
+      return;
+    }
+    const steps = [...form.querySelectorAll<HTMLElement>(".swath-authoring-step")];
+    const keys = steps.map((step) => step.dataset["step"] ?? "");
+    if (this.sel === undefined || !keys.includes(this.sel)) {
+      this.sel = keys[0];
+      if (this.sel !== undefined) {
+        this.emit("swath-author-select", { sel: this.sel });
+      }
+    }
+    const strip = document.createElement("div");
+    strip.className = "swath-authoring-strip";
+    const chips = document.createElement("ol");
+    chips.className = "swath-authoring-chips";
+    chips.setAttribute("aria-label", "Pipeline steps");
+    for (const step of steps) {
+      const key = step.dataset["step"] ?? "";
+      const chip = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "swath-authoring-chip";
+      button.dataset["chip"] = key;
+      button.setAttribute("aria-pressed", String(key === this.sel));
+      const invalid = step.querySelector(".swath-authoring-step-error")?.textContent !== "";
+      button.dataset["invalid"] = String(invalid);
+      button.textContent = `${key} ${step.querySelector(".swath-authoring-step-header span:nth-child(2)")?.textContent ?? ""}`;
+      button.addEventListener("click", () => this.selectStep(key));
+      chip.append(button);
+      chips.append(chip);
+      const insert = step.nextElementSibling;
+      if (insert?.classList.contains("swath-authoring-insert")) {
+        const gap = document.createElement("li");
+        gap.className = "swath-authoring-chip-gap";
+        gap.append(insert);
+        chips.append(gap);
+      }
+    }
+    const narrative = form.querySelector("#swath-authoring-narrative");
+    const preview = form.querySelector("#swath-authoring-preview");
+    strip.append(chips, ...[narrative, preview].filter((n): n is Element => n !== null));
+    regions.strip.replaceChildren(strip);
+    const selected = steps.find((step) => step.dataset["step"] === this.sel);
+    const inspector = document.createElement("div");
+    inspector.className = "swath-authoring-inspector";
+    if (selected) {
+      inspector.append(selected);
+    }
+    const title = form.querySelector('label[for="swath-authoring-title"]');
+    const submit = form.querySelector(".swath-authoring-submit");
+    const reason = form.querySelector("#swath-authoring-submit-reason");
+    inspector.append(...[title, submit, reason].filter((n): n is Element => n !== null));
+    // The moved controls still belong to the form: keep the submit wired.
+    submit?.setAttribute("form", form.id);
+    regions.inspector.replaceChildren(inspector);
+    // Unselected steps stay in the (hidden) list, so their ids and state
+    // remain addressable and the form still serialises every step.
+    form.querySelector(".swath-authoring-steps")?.setAttribute("hidden", "");
   }
 
   #renderForm(): Element {
     const form = document.createElement("form");
+    form.id = "swath-authoring-form";
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       void this.#publish();
@@ -2396,7 +2553,7 @@ export class SwathAuthoringPanel extends HTMLElement {
    * extent fields are edited (no re-render, no lost focus). */
   #updateExtentSummary(key: string): void {
     const card = this.#loadCard;
-    const line = this.querySelector(`#swath-authoring-${key}-extent-summary`);
+    const line = this.#find(`#swath-authoring-${key}-extent-summary`);
     if (!card || !line) {
       return;
     }
@@ -2683,7 +2840,5 @@ async function readOpenEoError(response: Response): Promise<string> {
 
 /** Registers `<swath-authoring-panel>`; safe to call more than once. */
 export function defineSwathAuthoringPanel(): void {
-  if (!customElements.get(SwathAuthoringPanel.tagName)) {
-    customElements.define(SwathAuthoringPanel.tagName, SwathAuthoringPanel);
-  }
+  SwathAuthoringPanel.define();
 }

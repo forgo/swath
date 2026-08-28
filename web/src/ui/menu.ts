@@ -190,7 +190,7 @@ export class SwathMenu extends SwathElement {
 
   #onKey(event: KeyboardEvent): void {
     const buttons = this.#buttons();
-    const current = buttons.indexOf(this.renderRoot.activeElement as HTMLButtonElement);
+    const current = buttons.indexOf(this.focused as HTMLButtonElement);
     switch (event.key) {
       case "ArrowDown":
         this.#focusAt(current + 1);

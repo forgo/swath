@@ -212,3 +212,27 @@ test("a re-parented element keeps its own shadow listeners; only disconnected-bo
   expect(clicks).toHaveBeenCalledTimes(1);
   expect(external).toHaveBeenCalledTimes(0);
 });
+
+test("shadowOptions: null renders into light DOM with the sheet adopted by the document", async () => {
+  class SwathLightProbe extends SwathElement {
+    static override tagName = "swath-light-probe";
+    static override shadowOptions = null;
+    static override styles = [
+      css`swath-light-probe { display: block; padding: var(--swath-space-2); }`,
+    ];
+    static override properties = { label: { type: "string" } } as const;
+    declare label: string | undefined;
+    protected render(): void {
+      this.renderRoot.textContent = this.label ?? "light";
+    }
+  }
+  SwathLightProbe.define();
+  const probe = document.createElement("swath-light-probe") as SwathLightProbe;
+  probe.setAttribute("label", "hello");
+  document.body.append(probe);
+  await probe.updateComplete;
+  expect(probe.shadowRoot).toBeNull();
+  expect(probe.textContent).toBe("hello");
+  expect(document.querySelector("swath-light-probe")?.textContent).toBe("hello");
+  expect(getComputedStyle(probe).paddingTop).toBe("8px");
+});
