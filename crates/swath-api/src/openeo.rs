@@ -225,7 +225,7 @@ impl From<CompileError> for OpenEoError {
                 (StatusCode::BAD_REQUEST, "ProcessUnsupported")
             }
             CompileError::UnknownCollection { .. } => (StatusCode::NOT_FOUND, "CollectionNotFound"),
-            CompileError::MissingArgument { .. } => {
+            CompileError::MissingArgument { .. } | CompileError::MissingResolver { .. } => {
                 (StatusCode::BAD_REQUEST, "ProcessParameterRequired")
             }
             // A rejected or mis-typed module is a bad `udf` parameter on
@@ -556,7 +556,8 @@ async fn fetch_dataset<S, R, C: Catalog>(
 const PROCESS_DEFINITIONS: &[(&str, &str)] = &[
     (
         include_str!("../data/openeo-processes/add.json"),
-        "supported inside a `reduce_dimension` reducer, over band elements, numbers, and other results.",
+        "supported inside a `reduce_dimension` reducer or a `merge_cubes` overlap_resolver, over \
+         band elements, numbers, resolver operands, and other results.",
     ),
     (
         include_str!("../data/openeo-processes/array_element.json"),
@@ -565,7 +566,8 @@ const PROCESS_DEFINITIONS: &[(&str, &str)] = &[
     ),
     (
         include_str!("../data/openeo-processes/divide.json"),
-        "supported inside a `reduce_dimension` reducer; division by zero makes the pixel no-data.",
+        "supported inside a `reduce_dimension` reducer or a `merge_cubes` overlap_resolver; \
+         division by zero makes the pixel no-data.",
     ),
     (
         include_str!("../data/openeo-processes/filter_temporal.json"),
@@ -591,8 +593,22 @@ const PROCESS_DEFINITIONS: &[(&str, &str)] = &[
          `properties` are accepted and ignored (tile serving decides the spatial window).",
     ),
     (
+        include_str!("../data/openeo-processes/merge_cubes.json"),
+        "the two-cube join at the bounded profile (ADR 0022): `cube1` and `cube2` must be gray \
+         (one value per pixel — an `ndvi` or `reduce_dimension` result), unscaled, and load \
+         this same collection through two different `load_collection` nodes, each with its \
+         own `temporal_extent` (one granule per branch, frame-selected per ADR 0015; a tile's \
+         `datetime=` is intersected with every branch's window); `overlap_resolver` is \
+         required — a child graph over `x` (from `cube1`) and `y` (from `cube2`) producing one \
+         value per pixel pair, e.g. `subtract` — since the spec's default (fail on overlap) \
+         would reject every pixel; `context` is not accepted; the result is gray, over both \
+         sources; band-wise merges, `mask`, cross-collection joins, and UDF results as inputs \
+         are outside the profile.",
+    ),
+    (
         include_str!("../data/openeo-processes/multiply.json"),
-        "supported inside a `reduce_dimension` reducer, over band elements, numbers, and other results.",
+        "supported inside a `reduce_dimension` reducer or a `merge_cubes` overlap_resolver, over \
+         band elements, numbers, resolver operands, and other results.",
     ),
     (
         include_str!("../data/openeo-processes/ndvi.json"),
@@ -629,7 +645,8 @@ const PROCESS_DEFINITIONS: &[(&str, &str)] = &[
     ),
     (
         include_str!("../data/openeo-processes/subtract.json"),
-        "supported inside a `reduce_dimension` reducer, over band elements, numbers, and other results.",
+        "supported inside a `reduce_dimension` reducer or a `merge_cubes` overlap_resolver, over \
+         band elements, numbers, resolver operands, and other results.",
     ),
 ];
 
@@ -1245,10 +1262,17 @@ where
         .await
         .map_err(preview_resolution_error)?;
     // A named extent is shown whole; with none named, the frame fits the
-    // granule this preview renders — the collection's real coverage at
-    // preview time — and the advertised extent stands in only for a
-    // resolution that carries no footprint.
-    let coord = match (extent, resolved.granule_bbox) {
+    // granule(s) this preview renders — every branch's footprint, joined
+    // (ADR 0022) — the collection's real coverage at preview time; the
+    // advertised extent stands in only for a resolution that carries no
+    // footprint.
+    let footprint = resolved
+        .granules
+        .iter()
+        .map(|granule| granule.bbox)
+        .reduce(union_bbox)
+        .or(resolved.granule_bbox);
+    let coord = match (extent, footprint) {
         (Some(bbox), _) => preview_tile(&bbox),
         (None, Some(footprint)) => preview_footprint_tile(&footprint),
         (None, None) => preview_tile(&dataset.extent.bbox),
@@ -1467,6 +1491,16 @@ fn preview_tile(bbox: &Bbox) -> TileCoord {
 /// (issue #270: the fixture granule is a sliver of z7, invisible at
 /// thumbnail size); with nothing named, the author asked to see the
 /// data, so the frame fits the data and a straddling edge is cropped.
+/// The smallest box holding both — what a two-source preview frames.
+fn union_bbox(a: Bbox, b: Bbox) -> Bbox {
+    Bbox {
+        west: a.west.min(b.west),
+        south: a.south.min(b.south),
+        east: a.east.max(b.east),
+        north: a.north.max(b.north),
+    }
+}
+
 fn preview_footprint_tile(bbox: &Bbox) -> TileCoord {
     let (min_x, min_y) = mercator_fraction(bbox.west, bbox.north); // NW corner
     let (max_x, max_y) = mercator_fraction(bbox.east, bbox.south); // SE corner

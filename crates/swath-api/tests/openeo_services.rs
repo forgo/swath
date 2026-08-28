@@ -252,6 +252,42 @@ async fn error_shape(app: &axum::Router, body: Value) -> Value {
     json!({ "status": status, "error": error })
 }
 
+/// The change graph (ADR 0022) with `cube1`/`cube2` wired to the named
+/// nodes and an optional resolver — the join's rejection cases each pick
+/// a wrong input or drop the resolver.
+fn merge_cubes_graph(cube1: &str, cube2: &str, resolver: Option<Value>) -> Value {
+    let mut change = json!({ "process_id": "merge_cubes", "arguments": {
+        "cube1": { "from_node": cube1 }, "cube2": { "from_node": cube2 },
+    }});
+    if let Some(resolver) = resolver {
+        change["arguments"]["overlap_resolver"] = resolver;
+    }
+    let load = |extent: [&str; 2]| {
+        json!({ "process_id": "load_collection", "arguments": {
+            "id": "hls-s30", "bands": ["b8a", "b04"], "temporal_extent": extent,
+        }})
+    };
+    let ndvi = |from: &str| {
+        json!({ "process_id": "ndvi", "arguments": {
+            "data": { "from_node": from }, "nir": "b8a", "red": "b04",
+        }})
+    };
+    json!({
+        "before": load(["2024-05-01T00:00:00Z", "2024-06-01T00:00:00Z"]),
+        "after": load(["2024-06-01T00:00:00Z", "2024-07-01T00:00:00Z"]),
+        "ndvi_before": ndvi("before"),
+        "ndvi_after": ndvi("after"),
+        "scaled_before": { "process_id": "linear_scale_range", "arguments": {
+            "x": { "from_node": "ndvi_before" },
+            "inputMin": -1, "inputMax": 1, "outputMin": 0, "outputMax": 255,
+        }},
+        "change": change,
+        "save": { "process_id": "save_result", "arguments": {
+            "data": { "from_node": "change" }, "format": "png",
+        }, "result": true },
+    })
+}
+
 /// Wraps a process graph in a store-service request.
 fn service_request(process_graph: &Value) -> Value {
     json!({ "type": "xyz", "process": { "process_graph": process_graph } })
@@ -356,6 +392,63 @@ async fn error_paths_speak_the_openeo_error_format() {
         common::assert_openeo_valid(&error_schema, name, &shape["error"]);
     }
     insta::assert_json_snapshot!("openeo_error_shapes", shapes);
+}
+
+/// The join's rejections (ADR 0022) speak the registry's codes: the
+/// input kinds are `ProcessParameterInvalid` on the argument they name,
+/// a missing resolver is `ProcessParameterRequired`, a resolver that
+/// yields a cube is `ProcessGraphInvalid`. Shapes pinned by snapshot.
+#[tokio::test]
+async fn merge_cubes_rejections_speak_the_openeo_error_format() {
+    let (app, _) = common::openeo_app();
+    let error_schema = common::openeo_schema("/components/schemas/error");
+    let subtract = json!({ "process_graph": { "diff": { "process_id": "subtract", "arguments": {
+        "x": { "from_parameter": "x" }, "y": { "from_parameter": "y" },
+    }, "result": true }}});
+    let cube_resolver = json!({ "process_graph": { "again": { "process_id": "load_collection",
+        "arguments": { "id": "hls-s30", "bands": ["b04"] }, "result": true }}});
+    let merge_multi = error_shape(
+        &app,
+        service_request(&merge_cubes_graph(
+            "after",
+            "before",
+            Some(subtract.clone()),
+        )),
+    )
+    .await;
+    let merge_scaled = error_shape(
+        &app,
+        service_request(&merge_cubes_graph(
+            "ndvi_after",
+            "scaled_before",
+            Some(subtract.clone()),
+        )),
+    )
+    .await;
+    let merge_no_resolver = error_shape(
+        &app,
+        service_request(&merge_cubes_graph("ndvi_after", "ndvi_before", None)),
+    )
+    .await;
+    let merge_cube_resolver = error_shape(
+        &app,
+        service_request(&merge_cubes_graph(
+            "ndvi_after",
+            "ndvi_before",
+            Some(cube_resolver),
+        )),
+    )
+    .await;
+    let shapes = json!({
+        "merge_cubes over multi-band cubes": merge_multi,
+        "merge_cubes over a scaled cube": merge_scaled,
+        "merge_cubes without a resolver": merge_no_resolver,
+        "merge_cubes resolver returning a cube": merge_cube_resolver,
+    });
+    for (name, shape) in shapes.as_object().expect("object") {
+        common::assert_openeo_valid(&error_schema, name, &shape["error"]);
+    }
+    insta::assert_json_snapshot!("openeo_merge_cubes_error_shapes", shapes);
 }
 
 /// Unknown service id: 404 `ServiceNotFound` on describe and delete.

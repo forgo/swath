@@ -210,6 +210,7 @@ async fn processes_are_schema_valid_and_exactly_the_compiler_subset() {
             "filter_temporal",
             "linear_scale_range",
             "load_collection",
+            "merge_cubes",
             "multiply",
             "ndvi",
             "reduce_dimension",
@@ -224,6 +225,40 @@ async fn processes_are_schema_valid_and_exactly_the_compiler_subset() {
             description.contains("**Swath profile:**"),
             "{} lacks its profile note",
             process["id"]
+        );
+    }
+    // The join (ADR 0022) states its narrowing, and the scalar processes
+    // say where they are admitted: a reducer or a resolver.
+    let note = |id: &str| -> String {
+        processes
+            .iter()
+            .find(|p| p["id"] == id)
+            .and_then(|p| p["description"].as_str())
+            .map(|d| {
+                d.rsplit("**Swath profile:**")
+                    .next()
+                    .unwrap_or("")
+                    .to_owned()
+            })
+            .expect("served process")
+    };
+    let merge = note("merge_cubes");
+    for phrase in [
+        "gray",
+        "two different `load_collection` nodes",
+        "`overlap_resolver` is required",
+        "`context` is not accepted",
+    ] {
+        assert!(
+            merge.contains(phrase),
+            "merge_cubes note lacks {phrase:?}: {merge}"
+        );
+    }
+    for id in ["add", "subtract", "multiply", "divide"] {
+        let note = note(id);
+        assert!(
+            note.contains("reducer") && note.contains("overlap_resolver"),
+            "{id} note must admit both a reducer and a resolver: {note}"
         );
     }
 }

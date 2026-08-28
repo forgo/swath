@@ -515,6 +515,54 @@ pub(crate) fn openeo_app_seeded(
     (app, catalog)
 }
 
+/// The Park Fire dataset (`park-fire`, NDVI bands, no config layers) with
+/// one committed T10TFK granule per `(day, datetime)` — the fixture the
+/// temporal and two-source suites share.
+pub(crate) fn park_fire(days: &[(&str, &str)]) -> (Dataset, Vec<Granule>) {
+    use swath_core::catalog::{Bbox, Extent, GranuleAsset, GranuleId, TimeRange};
+    let bbox = Bbox {
+        west: -121.7388,
+        south: 39.9866,
+        east: -121.6474,
+        north: 40.0549,
+    };
+    let dataset = Dataset {
+        id: DatasetId::new("park-fire"),
+        title: "HLS S30 Park Fire series".to_owned(),
+        description: "T10TFK acquisitions across the 2024 Park Fire.".to_owned(),
+        license: "CC0-1.0".to_owned(),
+        extent: Extent {
+            bbox,
+            interval: TimeRange {
+                start: Some(Datetime::new("2024-06-07T19:03:00Z").expect("datetime")),
+                end: Some(Datetime::new("2024-10-15T19:03:00Z").expect("datetime")),
+            },
+        },
+        bands: ["b04", "b8a"].map(str::to_owned).into_iter().collect(),
+        layers: Vec::new(),
+    };
+    let granules = days
+        .iter()
+        .map(|&(day, datetime)| {
+            let asset =
+                |band: &str| GranuleAsset::raster(format!("hlss30-t10tfk-{day}-{band}.tif"));
+            Granule {
+                id: GranuleId::new(format!("hlss30-t10tfk-{day}")),
+                dataset: DatasetId::new("park-fire"),
+                bbox,
+                datetime: Datetime::new(datetime).expect("datetime"),
+                assets: [
+                    ("b04".to_owned(), asset("b04")),
+                    ("b8a".to_owned(), asset("b8a")),
+                ]
+                .into(),
+                ingested_at: Some(Datetime::new("2024-11-01T00:00:00Z").expect("datetime")),
+            }
+        })
+        .collect();
+    (dataset, granules)
+}
+
 /// [`openeo_app_seeded`] plus an in-memory write-through tile cache — the
 /// cache-identity tests over published layers (ADR 0022's granule pair).
 pub(crate) fn openeo_app_seeded_cached(
