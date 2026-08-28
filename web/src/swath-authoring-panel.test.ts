@@ -409,7 +409,7 @@ test("B4: scale-before-reduce is unconstructible — chips only appear where the
   // a scaled cube, so the row is not rendered at all.
   expect(panel.querySelector('.swath-authoring-insert[data-gap="1"]')).toBeNull();
   // A complete NDVI pipeline is saturated: no insert rows anywhere.
-  panel.querySelector<HTMLButtonElement>('[aria-label="Remove step s2"]')?.click();
+  panel.querySelector<HTMLButtonElement>('[aria-label="Remove step s3"]')?.click();
   insertAt(panel, 0, "ndvi");
   insertAt(panel, 1, "linear_scale_range");
   expect(allChips(panel)).toEqual([]);
@@ -445,11 +445,11 @@ test("B6: the colormap greys out on a multi-band result, says why, and never pub
   );
   // Adding NDVI reduces to gray: the colormap becomes available.
   insertAt(panel, 0, "ndvi");
-  expect(field<HTMLSelectElement>(panel, "s3-options").disabled).toBe(false);
-  choose(panel, "s3-options", "viridis");
+  expect(field<HTMLSelectElement>(panel, "s2-options").disabled).toBe(false);
+  choose(panel, "s2-options", "viridis");
   // Removing the reduce step again: the stored colormap cannot ride the
   // composite — buildGraph omits it (unconstructible, not just noted).
-  panel.querySelector<HTMLButtonElement>('[aria-label="Remove step s2"]')?.click();
+  panel.querySelector<HTMLButtonElement>('[aria-label="Remove step s3"]')?.click();
   expect(field<HTMLSelectElement>(panel, "s2-options").disabled).toBe(true);
   const graph = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
   expect(graph["s2"]?.arguments["options"]).toBeUndefined();
@@ -469,29 +469,29 @@ test("B7: bands are vocabulary widgets — checkboxes on Load, selects for NDVI 
   tickBand(panel, "b8a");
   tickBand(panel, "b04");
   insertAt(panel, 0, "ndvi");
-  const nir = field<HTMLSelectElement>(panel, "s2-nir");
+  const nir = field<HTMLSelectElement>(panel, "s3-nir");
   expect(nir.tagName).toBe("SELECT");
   expect([...nir.options].map((option) => option.value)).toEqual(["", "b8a", "b04"]);
   // The prefill heuristics picked the right bands already.
   expect(nir.value).toBe("b8a");
-  expect(field<HTMLSelectElement>(panel, "s2-red").value).toBe("b04");
+  expect(field<HTMLSelectElement>(panel, "s3-red").value).toBe("b04");
   // Unticking a band a step still uses flags it in plain words.
   tickBand(panel, "b04");
-  expect(field(panel, "s2-red-note").textContent).toContain("b04 is not loaded any more");
+  expect(field(panel, "s3-red-note").textContent).toContain("b04 is not loaded any more");
   expect(submitButton(panel).disabled).toBe(true);
 });
 
 test("B8: a degenerate stretch range flags inline before any request", async () => {
   const panel = await mount(fetchStub({}));
   panel.querySelector<HTMLButtonElement>(".swath-authoring-template")?.click();
-  fill(panel, "s3-inputMin", "2");
-  fill(panel, "s3-inputMax", "1");
-  expect(field(panel, "s3-inputMin-note").textContent).toBe(
+  fill(panel, "s4-inputMin", "2");
+  fill(panel, "s4-inputMax", "1");
+  expect(field(panel, "s4-inputMin-note").textContent).toBe(
     "the smallest value must be below the largest",
   );
   expect(submitButton(panel).disabled).toBe(true);
-  fill(panel, "s3-inputMax", "3");
-  expect(field(panel, "s3-inputMin-note").textContent).toBe("");
+  fill(panel, "s4-inputMax", "3");
+  expect(field(panel, "s4-inputMin-note").textContent).toBe("");
   expect(submitButton(panel).disabled).toBe(false);
 });
 
@@ -519,15 +519,15 @@ test("B10: the canvas is a linear chain — every step feeds the next, nothing d
       ) as { from_node?: string } | undefined;
       return reference?.from_node ?? "";
     });
-  // s1 ← nothing, s2 ← s1, s3 ← s2, s4 ← s3: a chain by construction.
-  expect(wired(panel.buildGraph() as never)).toEqual(["", "s1", "s2", "s3"]);
+  // s1 ← nothing, s3 ← s1, s4 ← s3, s2 ← s4: a chain by construction (persistent ids, #299).
+  expect(wired(panel.buildGraph() as never)).toEqual(["", "s1", "s3", "s4"]);
   // Removing a middle step REWIRES rather than dangles: the neighbors
-  // join up and the keys stay positional.
-  panel.querySelector<HTMLButtonElement>('[aria-label="Remove step s2"]')?.click();
+  // join up and every surviving id stays what it was.
+  panel.querySelector<HTMLButtonElement>('[aria-label="Remove step s3"]')?.click();
   const after = panel.buildGraph() as Record<string, { process_id: string }>;
-  expect(Object.keys(after)).toEqual(["s1", "s2", "s3"]);
-  expect(after["s2"]?.process_id).toBe("linear_scale_range");
-  expect(wired(after as never)).toEqual(["", "s1", "s2"]);
+  expect(Object.keys(after)).toEqual(["s1", "s4", "s2"]);
+  expect(after["s4"]?.process_id).toBe("linear_scale_range");
+  expect(wired(after as never)).toEqual(["", "s1", "s4"]);
 });
 
 test("B11: the narrative retells the exact pipeline live — the words show a swap the schema cannot catch", async () => {
@@ -542,11 +542,11 @@ test("B11: the narrative retells the exact pipeline live — the words show a sw
     "Load hls-s30 (bands b8a,b04) → compute NDVI ((b8a − b04) / (b8a + b04)) → " +
       "rescale -1..1 to 0..255 → save as png, colored with rdylgn.",
   );
-  choose(panel, "s2-nir", "b04");
-  choose(panel, "s2-red", "b8a");
+  choose(panel, "s3-nir", "b04");
+  choose(panel, "s3-red", "b8a");
   expect(narrative()).toContain("compute NDVI ((b04 − b8a) / (b04 + b8a))");
   // Live: changing the colormap re-narrates without a re-render cycle.
-  choose(panel, "s4-options", "viridis");
+  choose(panel, "s2-options", "viridis");
   expect(narrative()).toContain("colored with viridis");
 });
 
@@ -654,8 +654,8 @@ test("submit stays disabled with spelled-out reasons until the pipeline is compl
   // fields flag and count.
   expect(submitReason(panel)).toContain("fields need values");
   tickBand(panel, "b04");
-  choose(panel, "s2-nir", "b8a");
-  choose(panel, "s2-red", "b04");
+  choose(panel, "s3-nir", "b8a");
+  choose(panel, "s3-red", "b04");
   expect(submitButton(panel).disabled).toBe(false);
   expect(submitReason(panel)).toBe("");
 });
@@ -670,9 +670,9 @@ function authorNdvi(panel: SwathAuthoringPanel): void {
   tickBand(panel, "b04");
   insertAt(panel, 0, "ndvi");
   insertAt(panel, 1, "linear_scale_range");
-  fill(panel, "s3-inputMin", "-1");
-  fill(panel, "s3-inputMax", "1");
-  choose(panel, "s4-options", "rdylgn");
+  fill(panel, "s4-inputMin", "-1");
+  fill(panel, "s4-inputMax", "1");
+  choose(panel, "s2-options", "rdylgn");
 }
 
 /** The graph [`authorNdvi`] composes — also what the NDVI template must
@@ -689,24 +689,24 @@ const NDVI_GRAPH = {
       bands: ["b8a", "b04"],
     },
   },
-  s2: {
+  s3: {
     process_id: "ndvi",
     arguments: { data: { from_node: "s1" }, nir: "b8a", red: "b04" },
   },
-  s3: {
+  s4: {
     process_id: "linear_scale_range",
     arguments: {
-      x: { from_node: "s2" },
+      x: { from_node: "s3" },
       inputMin: -1,
       inputMax: 1,
       outputMin: 0,
       outputMax: 255,
     },
   },
-  s4: {
+  s2: {
     process_id: "save_result",
     arguments: {
-      data: { from_node: "s3" },
+      data: { from_node: "s4" },
       format: "png",
       options: { colormap: "rdylgn" },
     },
@@ -781,7 +781,7 @@ test("the NDVI template composes a valid, submittable pipeline", async () => {
   // nir/red picked from its band vocabulary, the built-in NDVI scale
   // and colormap — identical to the hand-authored pipeline.
   expect(field<HTMLSelectElement>(panel, "s1-id").value).toBe("hls-s30");
-  expect(field<HTMLSelectElement>(panel, "s4-options").value).toBe("rdylgn");
+  expect(field<HTMLSelectElement>(panel, "s2-options").value).toBe("rdylgn");
   expect(submitButton(panel).disabled).toBe(false);
   expect(submitReason(panel)).toBe("");
   expect(panel.buildGraph()).toEqual(NDVI_GRAPH);
@@ -795,21 +795,21 @@ test("the formula builder composes the reduce_dimension reducer child graph", as
   insertAt(panel, 0, "reduce_dimension");
   // The card starts with one incomplete line and explains what is
   // missing (self-explaining, never silently wrong).
-  expect(field(panel, "s2-formula-issues").textContent).toContain("line 1: pick the left value");
+  expect(field(panel, "s3-formula-issues").textContent).toContain("line 1: pick the left value");
   expect(submitButton(panel).disabled).toBe(true);
   // NDVI by hand: line1 = b8a − b04; line2 = b8a + b04; line3 = l1 ÷ l2.
-  choose(panel, "s2-row1-left", "band:b8a");
-  choose(panel, "s2-row1-op", "subtract");
-  choose(panel, "s2-row1-right", "band:b04");
+  choose(panel, "s3-row1-left", "band:b8a");
+  choose(panel, "s3-row1-op", "subtract");
+  choose(panel, "s3-row1-right", "band:b04");
   panel.querySelector<HTMLButtonElement>(".swath-authoring-formula-add")?.click();
-  choose(panel, "s2-row2-left", "band:b8a");
-  choose(panel, "s2-row2-op", "add");
-  choose(panel, "s2-row2-right", "band:b04");
+  choose(panel, "s3-row2-left", "band:b8a");
+  choose(panel, "s3-row2-op", "add");
+  choose(panel, "s3-row2-right", "band:b04");
   panel.querySelector<HTMLButtonElement>(".swath-authoring-formula-add")?.click();
-  choose(panel, "s2-row3-left", "row:0");
-  choose(panel, "s2-row3-op", "divide");
-  choose(panel, "s2-row3-right", "row:1");
-  expect(field(panel, "s2-formula-issues").textContent).toBe("");
+  choose(panel, "s3-row3-left", "row:0");
+  choose(panel, "s3-row3-op", "divide");
+  choose(panel, "s3-row3-right", "row:1");
+  expect(field(panel, "s3-formula-issues").textContent).toBe("");
   // A complete formula unblocks submit: the card's pinned dimension and
   // composed reducer never count as missing fields.
   expect(submitButton(panel).disabled).toBe(false);
@@ -818,32 +818,32 @@ test("the formula builder composes the reduce_dimension reducer child graph", as
     "combine the bands with a formula ((b8a − b04) ÷ (b8a + b04))",
   );
   const graph = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
-  expect(graph["s2"]).toEqual({
+  expect(graph["s3"]).toEqual({
     process_id: "reduce_dimension",
     arguments: {
       data: { from_node: "s1" },
       dimension: "bands",
       reducer: {
         process_graph: {
-          b1: {
+          "s3.b1": {
             process_id: "array_element",
             arguments: { data: { from_parameter: "data" }, label: "b8a" },
           },
-          b2: {
+          "s3.b2": {
             process_id: "array_element",
             arguments: { data: { from_parameter: "data" }, label: "b04" },
           },
-          r1: {
+          "s3.r1": {
             process_id: "subtract",
-            arguments: { x: { from_node: "b1" }, y: { from_node: "b2" } },
+            arguments: { x: { from_node: "s3.b1" }, y: { from_node: "s3.b2" } },
           },
-          r2: {
+          "s3.r2": {
             process_id: "add",
-            arguments: { x: { from_node: "b1" }, y: { from_node: "b2" } },
+            arguments: { x: { from_node: "s3.b1" }, y: { from_node: "s3.b2" } },
           },
-          r3: {
+          "s3.r3": {
             process_id: "divide",
-            arguments: { x: { from_node: "r1" }, y: { from_node: "r2" } },
+            arguments: { x: { from_node: "s3.r1" }, y: { from_node: "s3.r2" } },
             result: true,
           },
         },
@@ -851,12 +851,12 @@ test("the formula builder composes the reduce_dimension reducer child graph", as
     },
   });
   // Gray result: the colormap select is live again (B6's flip side).
-  expect(field<HTMLSelectElement>(panel, "s3-options").disabled).toBe(false);
+  expect(field<HTMLSelectElement>(panel, "s2-options").disabled).toBe(false);
 });
 
 test("a server error naming a node and argument lands on that field (the safety net)", async () => {
   const message =
-    "node `s3` (linear_scale_range): invalid argument `outputMin`: the Render IR quantizes " +
+    "node `s4` (linear_scale_range): invalid argument `outputMin`: the Render IR quantizes " +
     "to 8-bit; the output range must be exactly 0..255, got 0..1";
   const stub = fetchStub({
     post: { status: 400, body: { code: "ProcessParameterInvalid", message } },
@@ -864,17 +864,17 @@ test("a server error naming a node and argument lands on that field (the safety 
   const panel = await mount(stub);
   authorNdvi(panel);
   // Force the semantically wrong output range through the advanced fold.
-  openAdvanced(panel, "s3");
-  fill(panel, "s3-outputMax", "1");
+  openAdvanced(panel, "s4");
+  fill(panel, "s4-outputMax", "1");
   submitButton(panel).click();
   await expect
-    .poll(() => panel.querySelector("#swath-authoring-s3-outputMin-note")?.textContent)
+    .poll(() => panel.querySelector("#swath-authoring-s4-outputMin-note")?.textContent)
     .toContain("the output range must be exactly 0..255");
   // Mapped errors do not double up as the general inline error.
   expect(panel.querySelector(".swath-authoring-error")).toBeNull();
   // Editing the field clears the stale server note.
-  fill(panel, "s3-outputMin", "0");
-  expect(panel.querySelector("#swath-authoring-s3-outputMin-note")?.textContent).toBe("");
+  fill(panel, "s4-outputMin", "0");
+  expect(panel.querySelector("#swath-authoring-s4-outputMin-note")?.textContent).toBe("");
 });
 
 test("a rejected graph the panel cannot locate renders the general error inline", async () => {
@@ -950,13 +950,13 @@ test("B11 preview: a complete draft renders the POST /result image inline, debou
   expect(previewPosts(stub)).toHaveLength(1);
   // …while a real edit re-previews: the swapped-band draft (B11's
   // canonical valid-and-wrong graph) gets its own ground-truth image.
-  choose(panel, "s2-nir", "b04");
-  choose(panel, "s2-red", "b8a");
+  choose(panel, "s3-nir", "b04");
+  choose(panel, "s3-red", "b8a");
   await expect.poll(() => previewPosts(stub).length).toBe(2);
   const swapped = previewPosts(stub)[1]?.body as {
     process: { process_graph: Record<string, { arguments: Record<string, unknown> }> };
   };
-  expect(swapped.process.process_graph["s2"]?.arguments["nir"]).toBe("b04");
+  expect(swapped.process.process_graph["s3"]?.arguments["nir"]).toBe("b04");
 });
 
 test("B11 preview: the budget refusal explains itself in plain words and never gates publish", async () => {
@@ -1178,8 +1178,8 @@ async function authorUdf(panel: SwathAuthoringPanel, name = "ndvi.wasm"): Promis
   tickBand(panel, "b8a");
   tickBand(panel, "b04");
   insertAt(panel, 0, "run_udf");
-  pickModule(panel, "s2-udf", new File([WASM_MAGIC], name, { type: "application/wasm" }));
-  await expect.poll(() => field(panel, "s2-udf-module").textContent ?? "").toContain(name);
+  pickModule(panel, "s3-udf", new File([WASM_MAGIC], name, { type: "application/wasm" }));
+  await expect.poll(() => field(panel, "s3-udf-module").textContent ?? "").toContain(name);
 }
 
 function fieldNote(panel: SwathAuthoringPanel, id: string): string {
@@ -1204,7 +1204,7 @@ test("UDF stage: upload → base64 data: URL in the run_udf node, runtime/versio
   // The composed node: the module inline as the data: URL, the ADR 0018
   // runtime pair, no context while the field is empty.
   const graph = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
-  expect(graph["s2"]).toEqual({
+  expect(graph["s3"]).toEqual({
     process_id: "run_udf",
     arguments: {
       data: { from_node: "s1" },
@@ -1213,25 +1213,25 @@ test("UDF stage: upload → base64 data: URL in the run_udf node, runtime/versio
       version: "1",
     },
   });
-  fill(panel, "s2-context", '{"threshold": 0.3}');
+  fill(panel, "s3-context", '{"threshold": 0.3}');
   expect(
-    (panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>)["s2"]?.arguments[
+    (panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>)["s3"]?.arguments[
       "context"
     ],
   ).toEqual({ threshold: 0.3 });
   // A non-object context flags inline (the module reads it verbatim).
-  fill(panel, "s2-context", "[1]");
-  expect(fieldNote(panel, "s2-context")).toContain("must be a JSON object");
+  fill(panel, "s3-context", "[1]");
+  expect(fieldNote(panel, "s3-context")).toContain("must be a JSON object");
   expect(submitButton(panel).disabled).toBe(true);
-  fill(panel, "s2-context", "");
+  fill(panel, "s3-context", "");
 
   // Runtime and version are vocabulary selects under advanced — one
   // option each, never free text (InvalidRuntime unconstructible).
-  openAdvanced(panel, "s2");
-  const runtime = field<HTMLSelectElement>(panel, "s2-runtime");
+  openAdvanced(panel, "s3");
+  const runtime = field<HTMLSelectElement>(panel, "s3-runtime");
   expect(runtime.tagName).toBe("SELECT");
   expect([...runtime.options].map((option) => option.value)).toEqual(["wasm"]);
-  expect(field<HTMLSelectElement>(panel, "s2-version").value).toBe("1");
+  expect(field<HTMLSelectElement>(panel, "s3-version").value).toBe("1");
 
   // Stage-typed: nothing fits before the module, only the stretch step
   // after it, and no second module anywhere (one run_udf per graph).
@@ -1245,10 +1245,10 @@ test("UDF stage: upload → base64 data: URL in the run_udf node, runtime/versio
   );
   // B6 for UDF results: the colormap greys out with the plain-words
   // reason and never rides the graph (the compiler rejects it).
-  expect(field<HTMLSelectElement>(panel, "s3-options").disabled).toBe(true);
-  expect(field(panel, "s3-composite-note").textContent).toContain("renders directly");
+  expect(field<HTMLSelectElement>(panel, "s2-options").disabled).toBe(true);
+  expect(field(panel, "s2-composite-note").textContent).toContain("renders directly");
   expect(
-    (panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>)["s3"]?.arguments[
+    (panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>)["s2"]?.arguments[
       "options"
     ],
   ).toBeUndefined();
@@ -1257,7 +1257,7 @@ test("UDF stage: upload → base64 data: URL in the run_udf node, runtime/versio
   const posted = previewPosts(stub)[0]?.body as {
     process: { process_graph: Record<string, { arguments: Record<string, unknown> }> };
   };
-  expect(posted.process.process_graph["s2"]?.arguments["udf"]).toBe(WASM_MAGIC_DATA_URL);
+  expect(posted.process.process_graph["s3"]?.arguments["udf"]).toBe(WASM_MAGIC_DATA_URL);
 });
 
 test("UDF stage: a module over 8 MiB is refused client-side in plain words, never encoded", async () => {
@@ -1268,18 +1268,18 @@ test("UDF stage: a module over 8 MiB is refused client-side in plain words, neve
   tickBand(panel, "b04");
   insertAt(panel, 0, "run_udf");
   const huge = new File([new Uint8Array(8 * 1024 * 1024 + 1)], "huge.wasm");
-  pickModule(panel, "s2-udf", huge);
-  await expect.poll(() => fieldNote(panel, "s2-udf")).toContain("up to 8 MiB");
-  expect(fieldNote(panel, "s2-udf")).toContain("huge.wasm is 8.0 MiB");
+  pickModule(panel, "s3-udf", huge);
+  await expect.poll(() => fieldNote(panel, "s3-udf")).toContain("up to 8 MiB");
+  expect(fieldNote(panel, "s3-udf")).toContain("huge.wasm is 8.0 MiB");
   // Nothing encoded, nothing previewed, submit gated with the reason.
   const graph = panel.buildGraph() as Record<string, { arguments: Record<string, unknown> }>;
-  expect(graph["s2"]?.arguments["udf"]).toBeUndefined();
+  expect(graph["s3"]?.arguments["udf"]).toBeUndefined();
   expect(submitButton(panel).disabled).toBe(true);
   await new Promise((resolve) => setTimeout(resolve, 450));
   expect(previewPosts(stub)).toHaveLength(0);
   // A module within the bound replaces the refusal.
-  pickModule(panel, "s2-udf", new File([WASM_MAGIC], "small.wasm"));
-  await expect.poll(() => fieldNote(panel, "s2-udf")).toBe("");
+  pickModule(panel, "s3-udf", new File([WASM_MAGIC], "small.wasm"));
+  await expect.poll(() => fieldNote(panel, "s3-udf")).toBe("");
   expect(submitButton(panel).disabled).toBe(false);
 });
 
@@ -1299,9 +1299,9 @@ test("UDF stage: the preview's fuel refusal lands on the module field in plain w
   const panel = await mount(stub);
   await authorUdf(panel, "bomb.wasm");
   await expect
-    .poll(() => fieldNote(panel, "s2-udf"))
+    .poll(() => fieldNote(panel, "s3-udf"))
     .toContain("ran out of its per-tile budget (100000000 fuel)");
-  expect(previewNote(panel)).toContain("see the note on step s2");
+  expect(previewNote(panel)).toContain("see the note on step s3");
   expect(previewImage(panel)?.hidden).toBe(true);
   // The refusal bounds the preview, not the layer: publish stays
   // enabled, no general inline error.
@@ -1310,11 +1310,11 @@ test("UDF stage: the preview's fuel refusal lands on the module field in plain w
 
   // A different, valid draft on the same canvas publishes: drop the
   // module, author NDVI instead — the stale note is gone with its card.
-  panel.querySelector<HTMLButtonElement>('[aria-label="Remove step s2"]')?.click();
+  panel.querySelector<HTMLButtonElement>('[aria-label="Remove step s3"]')?.click();
   insertAt(panel, 0, "ndvi");
   insertAt(panel, 1, "linear_scale_range");
-  fill(panel, "s3-inputMin", "-1");
-  fill(panel, "s3-inputMax", "1");
+  fill(panel, "s5-inputMin", "-1");
+  fill(panel, "s5-inputMax", "1");
   expect(submitButton(panel).disabled).toBe(false);
   const created = new Promise<string>((resolve) => {
     panel.addEventListener(
@@ -1360,15 +1360,15 @@ test("UDF stage: a trap diagnostic names the module's failure; a later good prev
   const panel = await mount({ impl });
   await authorUdf(panel, "trap.wasm");
   await expect
-    .poll(() => fieldNote(panel, "s2-udf"))
+    .poll(() => fieldNote(panel, "s3-udf"))
     .toContain("The module failed while running: UDF trapped");
-  expect(fieldNote(panel, "s2-udf")).toContain("upload it again");
+  expect(fieldNote(panel, "s3-udf")).toContain("upload it again");
   expect(submitButton(panel).disabled).toBe(false);
   // The fixed module previews fine: the note goes with the failure.
   failing = false;
-  pickModule(panel, "s2-udf", new File([WASM_MAGIC, "\0"], "fixed.wasm"));
+  pickModule(panel, "s3-udf", new File([WASM_MAGIC, "\0"], "fixed.wasm"));
   await expect.poll(() => previewImage(panel)?.getAttribute("src") ?? "").toMatch(/^blob:/);
-  expect(fieldNote(panel, "s2-udf")).toBe("");
+  expect(fieldNote(panel, "s3-udf")).toBe("");
   expect(previewNote(panel)).toContain("Preview");
 });
 
@@ -1379,14 +1379,14 @@ test("UDF stage: a registration diagnostic from the preview lands on the module 
       body: {
         code: "ProcessParameterInvalid",
         message:
-          "node `s2` (run_udf): invalid argument `udf`: module rejected at registration: " +
+          "node `s3` (run_udf): invalid argument `udf`: module rejected at registration: " +
           "the module imports `env.abort`; UDF modules must import nothing",
       },
     },
   });
   const panel = await mount(stub);
   await authorUdf(panel, "imports.wasm");
-  await expect.poll(() => fieldNote(panel, "s2-udf")).toContain("module rejected at registration");
+  await expect.poll(() => fieldNote(panel, "s3-udf")).toContain("module rejected at registration");
   expect(submitButton(panel).disabled).toBe(false);
 });
 

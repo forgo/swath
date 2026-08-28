@@ -341,8 +341,10 @@ test("authoring panel: the always-valid canvas with field help", async ({ page }
   await fieldById(page, "s1-bands-b8a").check();
   await fieldById(page, "s1-bands-b04").check();
   await chip(page, 0, "ndvi").click();
-  await expect(fieldById(page, "s2-nir")).toHaveValue("b8a");
-  await expect(page.locator(".swath-authoring-field-help").first()).toBeVisible();
+  await expect(fieldById(page, "s3-nir")).toHaveValue("b8a");
+  await expect(
+    page.locator("#swath-author-inspector .swath-authoring-field-help").first(),
+  ).toBeVisible();
   await waitForAuthoringPreview(page);
   await capture(
     page,

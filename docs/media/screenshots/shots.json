@@ -1,7 +1,7 @@
 {
   "schema": "swath-screenshots/1",
-  "git_sha": "eb92a657f0724f1bcc5ad65dc4be931a1aae5fdf",
-  "captured": "2026-08-28T06:23:19.941Z",
+  "git_sha": "5f1c88639e84984976db56c8fa2435ce6633f2b3",
+  "captured": "2026-08-28T17:44:47.380Z",
   "viewport": {
     "width": 1528,
     "height": 928,
@@ -15,7 +15,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "7932bd41570d14fec0c0ef466c18c4887d0dc5ea8f0be24159702966f87a7d4e"
+      "sha256": "b6f4cfe826b2724157ac09bd475a5b98b212d78c6e986f48330e455ac40b6e03"
     },
     {
       "file": "02-ndvi-colormapped.png",
@@ -23,7 +23,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "b69cc829c07fce9fdfce33a03ea4ac0ef99ac2f947393816ac99868046345f72"
+      "sha256": "4d3ca9434ef6f6ce660fec7fe8e37d64534d731f00fea1fefecb889246cd2a90"
     },
     {
       "file": "03-truecolor-live.png",
@@ -31,7 +31,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "14dff6451425df71e535222a9983e02cc7896fd03c0b9293ecb4706142007fce"
+      "sha256": "8bf2a34f63e9c76a68d7bcec1ec97e3f8c97b057364f1abe5bb5f1c1f40f5646"
     },
     {
       "file": "04-xray-decisions.png",
@@ -39,7 +39,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "f168c4069d6fc279c4a612ff63f454ca7af280e834e9f010d86a8650d1c0339e"
+      "sha256": "7a8d192800303ad6b44d7a05ead2faea4a07a11e7f7c2a625e60769b89a0ec88"
     },
     {
       "file": "05-xray-why-view.png",
@@ -47,7 +47,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "ae4f82c713a0384bc32efcf12fa947f5d66026f114f42974899cbb2eed4cc666"
+      "sha256": "7d992e9eda34585682d1b07d91c38348bab854c3a23ada3302166670ee4ce955"
     },
     {
       "file": "06-xray-heatmap.png",
@@ -55,7 +55,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "75e0fec5f76ae9352ef71c30ed7b7a7e13c28e90847d2e3e62ecceb78e9dd6f5"
+      "sha256": "ba010d3d33e04fb92b5b08b479a26bbced51dcd9bdb098dde3a7746824f3a096"
     },
     {
       "file": "07-xray-trace-feed.png",
@@ -63,7 +63,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.06,
       "railWidth": 248,
-      "sha256": "bd14c55f500fdfc906144264621b20b07e5d2f9402faf28c7f4269c59e94f77c"
+      "sha256": "2d15027bba8a10afcc352c07d0c0354d498631d8e9b222698a557aea8ad70ea2"
     },
     {
       "file": "08-authoring-form.png",
@@ -71,7 +71,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "691f23daa66ff466d3de4467f99ababf23bfd28210e6dc8d44c78e9e4f3ec065"
+      "sha256": "4ce97ef6cf1b8a1ad94fc56247a31d173e1fc43598ca01ec3c10ad165a0ea103"
     },
     {
       "file": "09-authoring-narrative-advanced.png",
@@ -79,7 +79,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "f8003a50cc2be5bf0da998c401d862e0f26d64ce6dbf46dd2b72c3a147043643"
+      "sha256": "910317e4752e3486ec0ab1b5254db81d10dc52375fefb817a3d3d37429aabee3"
     },
     {
       "file": "10-authoring-published.png",
@@ -87,7 +87,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.02,
       "railWidth": 248,
-      "sha256": "a9c76bdad538bd376dde103137288b6930dbe50d813bb7882cf283e07bb6c745"
+      "sha256": "bd8bdaab89af98b819cc4a3066a7f398e9427a938d3ffa9211174dc6b1299fa7"
     },
     {
       "file": "11-dataset-footprints.png",
@@ -103,7 +103,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "088ec88dcfd524deeb029cace06cc89084f92fe8224520a6d80a8f20bdcd9069"
+      "sha256": "ad0970f77ec43ed6c4dcf1c67000b81d87b10a021f8d28b9d7d3c193eaf1e5fd"
     },
     {
       "file": "13-time-slider-live.png",
@@ -111,7 +111,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.04,
       "railWidth": 248,
-      "sha256": "cdfde8bb0a3646339b6e7ac688aae976fef1b9ba7bb3257b7901fe2b20b438fc"
+      "sha256": "24a8610545e08eb0a58961c4807d8c4948e43972a28a7b832945baaca247606b"
     },
     {
       "file": "14-time-slider-cached.png",
@@ -119,7 +119,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "ee2b4a9ba08a4deee37f989b90144b862b53d03bc816fd60dabacb24e557768c"
+      "sha256": "80e8f1de9f3f550abec36fe48656232f0f657cb11501e107f21b0ec399906627"
     },
     {
       "file": "m01-phone-landing.png",
@@ -127,7 +127,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 0,
-      "sha256": "03bc3a6f1edaae661a57af2dfd247b0a12a006b769c1638f04be53083a686e88"
+      "sha256": "9505aab4e9d94aa75cbad51877b920e5f4e2afcbda0d2691cb5027248311a07c"
     },
     {
       "file": "m02-phone-layers-sheet.png",
@@ -151,7 +151,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 0,
-      "sha256": "7f5d47a4ff4dd890994e87737c337c20276168ab9bdf40036ec28b9879f9f36d"
+      "sha256": "dac8ba75d5317203d7c43a15f8166482c810ea1d5f9eac8bde22a9a30c3c0c4f"
     }
   ]
 }

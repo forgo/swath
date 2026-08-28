@@ -103,6 +103,7 @@
  */
 
 import { ApiProblem, SwathApi } from "./api.js";
+import { CUBE_PORTS, type Dag, type DagNode, lower, OUT, orphans } from "./authoring-dag.js";
 import {
   buildReducerGraph,
   CUBE_PARAM,
@@ -126,6 +127,9 @@ import {
   udfDiagnostic,
   wasmDataUrl,
 } from "./authoring-model.js";
+import { SwathCanvas } from "./canvas/swath-canvas.js";
+import { SwathCanvasNode } from "./canvas/swath-canvas-node.js";
+import { SwathCanvasPort } from "./canvas/swath-canvas-port.js";
 import { SwathElement } from "./ui/element.js";
 import { createSwathEvent } from "./ui/events.js";
 import { adoptSheet, css } from "./ui/styles.js";
@@ -152,6 +156,31 @@ const PREVIEW_DEBOUNCE_MS = 300;
  * while every one of these is present in the served definitions — a
  * shortcut over the canvas, not a parallel form source. */
 const NDVI_TEMPLATE = ["load_collection", "ndvi", "linear_scale_range", "save_result"] as const;
+
+/** Where the canvas layout (node positions) is remembered (#299) — the
+ * same key discipline as `view-state`. */
+const LAYOUT_KEY = "swath.author.layout";
+
+/** The remembered node positions, `[]` when storage is unavailable or
+ * holds nothing usable. */
+function loadLayout(): [string, { x: number; y: number }][] {
+  try {
+    const raw = globalThis.localStorage?.getItem(LAYOUT_KEY);
+    const parsed: unknown = raw === null || raw === undefined ? [] : JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((entry): entry is [string, { x: number; y: number }] => {
+      if (!Array.isArray(entry) || typeof entry[0] !== "string") {
+        return false;
+      }
+      const at = entry[1] as { x?: unknown; y?: unknown } | undefined;
+      return typeof at?.x === "number" && typeof at.y === "number";
+    });
+  } catch {
+    return [];
+  }
+}
 
 /** Plain step titles over the served vocabulary (curated wording, like
  * [`FIELD_HELP`]); unknown processes fall back to their id. */
@@ -313,8 +342,8 @@ function narrativePhrase(
 
 /** Panel chrome, matching the layer panel's dark-telemetry look. */
 const PANEL_SHEET = css`
-swath-authoring-panel { display: block; }
-swath-authoring-panel .swath-authoring-toggle {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) { display: block; }
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-toggle {
   display: block;
   width: 100%;
   margin: 0;
@@ -328,21 +357,21 @@ swath-authoring-panel .swath-authoring-toggle {
   text-transform: uppercase;
   color: color-mix(in srgb, var(--swath-color-fg-muted) 90%, transparent);
 }
-swath-authoring-panel .swath-authoring-toggle::before { content: "▸ "; }
-swath-authoring-panel .swath-authoring-toggle[aria-expanded="true"]::before { content: "▾ "; }
-swath-authoring-panel .swath-authoring-toggle[aria-expanded="true"] { margin-bottom: 8px; }
-swath-authoring-panel .swath-authoring-toggle:focus-visible {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-toggle::before { content: "▸ "; }
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-toggle[aria-expanded="true"]::before { content: "▾ "; }
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-toggle[aria-expanded="true"] { margin-bottom: 8px; }
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-toggle:focus-visible {
   outline: 2px solid var(--swath-color-accent);
   outline-offset: 1px;
 }
-swath-authoring-panel .swath-authoring-heading {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-heading {
   margin: 0 0 8px;
   font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.6; font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--swath-color-fg-muted) 90%, transparent);
 }
-swath-authoring-panel .swath-authoring-steps {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-steps {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -350,25 +379,25 @@ swath-authoring-panel .swath-authoring-steps {
   flex-direction: column;
   gap: 8px;
 }
-swath-authoring-panel .swath-authoring-step {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-step {
   border: 1px solid color-mix(in srgb, var(--swath-color-fg-muted) 20%, transparent);
   border-radius: 6px;
   padding: 8px;
 }
-swath-authoring-panel .swath-authoring-step[data-permanent] {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-step[data-permanent] {
   border-color: color-mix(in srgb, var(--swath-color-accent) 25%, transparent);
 }
-swath-authoring-panel .swath-authoring-step-header {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-step-header {
   display: flex;
   align-items: baseline;
   gap: 6px;
   margin: 0;
   font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.6; font-weight: 700;
 }
-swath-authoring-panel .swath-authoring-step-header .swath-authoring-step-key {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-step-header .swath-authoring-step-key {
   color: var(--swath-color-accent);
 }
-swath-authoring-panel .swath-authoring-step-header button {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-step-header button {
   margin-left: auto;
   border: none;
   background: none;
@@ -376,14 +405,14 @@ swath-authoring-panel .swath-authoring-step-header button {
   color: color-mix(in srgb, var(--swath-color-fg-muted) 80%, transparent);
   font-family: var(--swath-font-ui); font-size: var(--swath-text-sm); line-height: 1;
 }
-swath-authoring-panel .swath-authoring-step-header button:hover { color: var(--swath-color-danger); }
-swath-authoring-panel .swath-authoring-step-summary {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-step-header button:hover { color: var(--swath-color-danger); }
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-step-summary {
   display: block;
   margin: 0 0 6px;
   font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5; font-style: italic;
   color: color-mix(in srgb, var(--swath-color-fg-muted) 75%, transparent);
 }
-swath-authoring-panel .swath-authoring-insert {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-insert {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -391,7 +420,7 @@ swath-authoring-panel .swath-authoring-insert {
   margin: 0;
   padding: 0 8px;
 }
-swath-authoring-panel .swath-authoring-insert button {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-insert button {
   padding: 2px 8px;
   border: 1px dashed color-mix(in srgb, var(--swath-color-fg-muted) 40%, transparent);
   border-radius: 999px;
@@ -400,17 +429,17 @@ swath-authoring-panel .swath-authoring-insert button {
   color: color-mix(in srgb, var(--swath-color-fg-muted) 90%, transparent);
   font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.5;
 }
-swath-authoring-panel .swath-authoring-insert button:hover {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-insert button:hover {
   background: color-mix(in srgb, var(--swath-color-fg-muted) 12%, transparent);
 }
-swath-authoring-panel label {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) label {
   display: block;
   margin: 0 0 6px;
   font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.6;
   color: color-mix(in srgb, var(--swath-color-fg-muted) 90%, transparent);
 }
-swath-authoring-panel input,
-swath-authoring-panel select {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) input,
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) select {
   display: block;
   width: 100%;
   box-sizing: border-box;
@@ -422,39 +451,39 @@ swath-authoring-panel select {
   color: inherit;
   font-family: var(--swath-font-mono); font-size: var(--swath-text-sm); line-height: 1.5;
 }
-swath-authoring-panel input:focus-visible,
-swath-authoring-panel select:focus-visible,
-swath-authoring-panel button:focus-visible {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) input:focus-visible,
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) select:focus-visible,
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) button:focus-visible {
   outline: 2px solid var(--swath-color-accent);
   outline-offset: 1px;
 }
-swath-authoring-panel input:disabled,
-swath-authoring-panel select:disabled { opacity: 0.4; cursor: not-allowed; }
-swath-authoring-panel .swath-authoring-bands {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) input:disabled,
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) select:disabled { opacity: 0.4; cursor: not-allowed; }
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-bands {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 10px;
   margin: 2px 0 0;
 }
-swath-authoring-panel .swath-authoring-when {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-when {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 10px;
   margin: 2px 0 0;
 }
-swath-authoring-panel .swath-authoring-when label {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-when label {
   display: flex;
   align-items: center;
   gap: 4px;
   margin: 0;
   font-family: var(--swath-font-mono); font-size: var(--swath-text-sm); line-height: 1.6;
 }
-swath-authoring-panel .swath-authoring-when input {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-when input {
   display: inline-block;
   width: auto;
   margin: 0;
 }
-swath-authoring-panel .swath-authoring-bands label {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-bands label {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -462,12 +491,12 @@ swath-authoring-panel .swath-authoring-bands label {
   font-family: var(--swath-font-mono); font-size: var(--swath-text-sm); line-height: 1.6;
   cursor: pointer;
 }
-swath-authoring-panel .swath-authoring-bands input {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-bands input {
   display: inline-block;
   width: auto;
   margin: 0;
 }
-swath-authoring-panel .swath-authoring-field-help {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-field-help {
   display: block;
   margin: 0 0 2px;
   font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.4;
@@ -476,13 +505,13 @@ swath-authoring-panel .swath-authoring-field-help {
   text-transform: none;
   color: color-mix(in srgb, var(--swath-color-fg-muted) 75%, transparent);
 }
-swath-authoring-panel .swath-authoring-plain {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-plain {
   display: block;
   margin: 0 0 6px;
   font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5;
   color: color-mix(in srgb, var(--swath-color-fg-muted) 75%, transparent);
 }
-swath-authoring-panel .swath-authoring-narrative {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-narrative {
   margin: 0 0 10px;
   padding: 6px 8px;
   border-left: 2px solid color-mix(in srgb, var(--swath-color-accent) 45%, transparent);
@@ -490,12 +519,12 @@ swath-authoring-panel .swath-authoring-narrative {
   color: color-mix(in srgb, var(--swath-color-fg) 90%, transparent);
   overflow-wrap: anywhere;
 }
-swath-authoring-panel .swath-authoring-narrative:empty { display: none; }
-swath-authoring-panel .swath-authoring-preview {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-narrative:empty { display: none; }
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-preview {
   margin: 0 0 10px;
   padding: 0;
 }
-swath-authoring-panel .swath-authoring-preview img {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-preview img {
   display: block;
   width: 128px;
   height: 128px;
@@ -505,14 +534,14 @@ swath-authoring-panel .swath-authoring-preview img {
     repeating-conic-gradient(color-mix(in srgb, var(--swath-color-fg-muted) 12%, transparent) 0% 25%, color-mix(in srgb, var(--swath-color-bg) 60%, transparent) 0% 50%)
     0 0 / 16px 16px;
 }
-swath-authoring-panel .swath-authoring-preview img[hidden] { display: none; }
-swath-authoring-panel .swath-authoring-preview figcaption {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-preview img[hidden] { display: none; }
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-preview figcaption {
   margin: 2px 0 0;
   font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5;
   color: color-mix(in srgb, var(--swath-color-fg-muted) 75%, transparent);
   overflow-wrap: anywhere;
 }
-swath-authoring-panel .swath-authoring-advanced-toggle {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-advanced-toggle {
   display: block;
   margin: 2px 0 6px;
   padding: 0;
@@ -522,26 +551,26 @@ swath-authoring-panel .swath-authoring-advanced-toggle {
   font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.6;
   color: color-mix(in srgb, var(--swath-color-fg-muted) 70%, transparent);
 }
-swath-authoring-panel .swath-authoring-advanced-toggle::before { content: "▸ "; }
-swath-authoring-panel .swath-authoring-advanced-toggle[aria-expanded="true"]::before {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-advanced-toggle::before { content: "▸ "; }
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-advanced-toggle[aria-expanded="true"]::before {
   content: "▾ ";
 }
-swath-authoring-panel .swath-authoring-field-note {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-field-note {
   display: block;
   margin: 1px 0 0;
   font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5;
   color: var(--swath-color-danger);
   overflow-wrap: anywhere;
 }
-swath-authoring-panel .swath-authoring-field-note:empty { display: none; }
-swath-authoring-panel .swath-authoring-step-error {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-field-note:empty { display: none; }
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-step-error {
   margin: 0 0 6px;
   font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5;
   color: var(--swath-color-danger);
   overflow-wrap: anywhere;
 }
-swath-authoring-panel .swath-authoring-step-error:empty { display: none; }
-swath-authoring-panel .swath-authoring-udf-drop {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-step-error:empty { display: none; }
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-udf-drop {
   display: block;
   margin: 2px 0 0;
   padding: 8px;
@@ -550,25 +579,25 @@ swath-authoring-panel .swath-authoring-udf-drop {
   font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5;
   color: color-mix(in srgb, var(--swath-color-fg-muted) 85%, transparent);
 }
-swath-authoring-panel .swath-authoring-udf-drop[data-active] {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-udf-drop[data-active] {
   border-color: var(--swath-color-accent);
   background: color-mix(in srgb, var(--swath-color-accent) 8%, transparent);
 }
-swath-authoring-panel .swath-authoring-udf-drop input[type="file"] {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-udf-drop input[type="file"] {
   margin-top: 4px;
   padding: 2px 0;
   border: 0;
   background: none;
 }
-swath-authoring-panel .swath-authoring-udf-module {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-udf-module {
   display: block;
   margin: 2px 0 0;
   font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.5;
   color: var(--swath-color-accent);
   overflow-wrap: anywhere;
 }
-swath-authoring-panel .swath-authoring-udf-module:empty { display: none; }
-swath-authoring-panel textarea {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-udf-module:empty { display: none; }
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) textarea {
   display: block;
   width: 100%;
   box-sizing: border-box;
@@ -582,26 +611,26 @@ swath-authoring-panel textarea {
   font-family: var(--swath-font-mono); font-size: var(--swath-text-sm); line-height: 1.5;
   resize: vertical;
 }
-swath-authoring-panel .swath-authoring-formula-row {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-formula-row {
   display: flex;
   align-items: center;
   gap: 4px;
   margin: 0 0 4px;
 }
-swath-authoring-panel .swath-authoring-formula-row .swath-authoring-formula-line {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-formula-row .swath-authoring-formula-line {
   font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.6; font-weight: 700;
   color: var(--swath-color-accent);
   white-space: nowrap;
 }
-swath-authoring-panel .swath-authoring-formula-row select,
-swath-authoring-panel .swath-authoring-formula-row input {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-formula-row select,
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-formula-row input {
   margin-top: 0;
   min-width: 0;
 }
-swath-authoring-panel .swath-authoring-formula-row .swath-authoring-formula-op {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-formula-row .swath-authoring-formula-op {
   flex: 0 0 52px;
 }
-swath-authoring-panel .swath-authoring-formula-row button {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-formula-row button {
   flex: none;
   border: none;
   background: none;
@@ -609,8 +638,8 @@ swath-authoring-panel .swath-authoring-formula-row button {
   color: color-mix(in srgb, var(--swath-color-fg-muted) 80%, transparent);
   font-family: var(--swath-font-ui); font-size: var(--swath-text-sm); line-height: 1;
 }
-swath-authoring-panel .swath-authoring-formula-row button:hover { color: var(--swath-color-danger); }
-swath-authoring-panel .swath-authoring-formula-add {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-formula-row button:hover { color: var(--swath-color-danger); }
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-formula-add {
   display: block;
   margin: 0 0 6px;
   padding: 2px 8px;
@@ -621,10 +650,10 @@ swath-authoring-panel .swath-authoring-formula-add {
   color: color-mix(in srgb, var(--swath-color-fg-muted) 90%, transparent);
   font-family: var(--swath-font-mono); font-size: var(--swath-text-xs); line-height: 1.5;
 }
-swath-authoring-panel .swath-authoring-formula-add:hover {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-formula-add:hover {
   background: color-mix(in srgb, var(--swath-color-fg-muted) 12%, transparent);
 }
-swath-authoring-panel .swath-authoring-submit {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-submit {
   margin-top: 10px;
   width: 100%;
   padding: 7px 10px;
@@ -635,20 +664,20 @@ swath-authoring-panel .swath-authoring-submit {
   color: inherit;
   font-family: var(--swath-font-ui); font-size: var(--swath-text-sm); line-height: 1.5; font-weight: 600;
 }
-swath-authoring-panel .swath-authoring-submit:hover:not(:disabled) {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-submit:hover:not(:disabled) {
   background: color-mix(in srgb, var(--swath-color-accent) 20%, transparent);
 }
-swath-authoring-panel .swath-authoring-submit:disabled {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-submit:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
-swath-authoring-panel .swath-authoring-submit-reason {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-submit-reason {
   margin: 4px 0 0;
   font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5;
   color: color-mix(in srgb, var(--swath-color-fg-muted) 80%, transparent);
 }
-swath-authoring-panel .swath-authoring-submit-reason:empty { display: none; }
-swath-authoring-panel .swath-authoring-error {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-submit-reason:empty { display: none; }
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-error {
   margin: 8px 0 0;
   padding: 6px 8px;
   border: 1px solid color-mix(in srgb, var(--swath-color-danger) 45%, transparent);
@@ -658,13 +687,13 @@ swath-authoring-panel .swath-authoring-error {
   font-family: var(--swath-font-mono); font-size: var(--swath-text-sm); line-height: 1.5;
   overflow-wrap: anywhere;
 }
-swath-authoring-panel .swath-authoring-empty,
-swath-authoring-panel .swath-authoring-hint {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-empty,
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-hint {
   margin: 0 0 8px;
   font-family: var(--swath-font-ui); font-size: var(--swath-text-sm); line-height: 1.5;
   color: color-mix(in srgb, var(--swath-color-fg-muted) 80%, transparent);
 }
-swath-authoring-panel .swath-authoring-template {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-template {
   display: block;
   width: 100%;
   margin: 0 0 8px;
@@ -676,10 +705,10 @@ swath-authoring-panel .swath-authoring-template {
   color: inherit;
   font-family: var(--swath-font-ui); font-size: var(--swath-text-sm); line-height: 1.5;
 }
-swath-authoring-panel .swath-authoring-template:hover {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-template:hover {
   background: color-mix(in srgb, var(--swath-color-fg-muted) 12%, transparent);
 }
-swath-authoring-panel .swath-authoring-services {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-services {
   margin: 10px 0 0;
   padding: 0;
   list-style: none;
@@ -687,19 +716,19 @@ swath-authoring-panel .swath-authoring-services {
   flex-direction: column;
   gap: 4px;
 }
-swath-authoring-panel .swath-authoring-services li {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-services li {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-swath-authoring-panel .swath-authoring-service-title {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-service-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--swath-font-ui); font-size: var(--swath-text-sm); line-height: 1.5;
 }
-swath-authoring-panel .swath-authoring-services button {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-services button {
   margin-left: auto;
   padding: 2px 7px;
   border: 1px solid color-mix(in srgb, var(--swath-color-danger) 40%, transparent);
@@ -709,7 +738,7 @@ swath-authoring-panel .swath-authoring-services button {
   color: var(--swath-color-danger);
   font-family: var(--swath-font-ui); font-size: var(--swath-text-xs); line-height: 1.5;
 }
-swath-authoring-panel .swath-authoring-services button:hover {
+:is(swath-authoring-panel, .swath-authoring-inspector, .swath-authoring-strip) .swath-authoring-services button:hover {
   background: color-mix(in srgb, var(--swath-color-danger) 12%, transparent);
 }
 /* Shell regions (#291): the strip over the map, the inspector column. */
@@ -741,8 +770,34 @@ swath-authoring-panel .swath-authoring-services button:hover {
 }
 .swath-authoring-chip[data-invalid="true"] { border-color: var(--swath-color-danger); }
 .swath-authoring-chip-gap { display: inline-flex; }
+.swath-authoring-canvas {
+  block-size: calc(var(--swath-space-8) * 5);
+  border: var(--swath-border-hairline);
+  border-radius: var(--swath-radius-md);
+}
+.swath-authoring-canvas swath-canvas-node { max-inline-size: calc(var(--swath-space-8) * 7); }
+.swath-authoring-canvas .swath-authoring-chip { white-space: normal; text-align: start; }
+.swath-authoring-canvas swath-canvas-node[data-orphan="true"] { opacity: 0.5; }
+.swath-authoring-chip[data-orphan="true"] { text-decoration: line-through; }
+.swath-authoring-inserts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--swath-space-2);
+  align-items: center;
+}
+.swath-authoring-inserts .swath-authoring-insert {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--swath-space-1);
+}
+.swath-authoring-insert-label {
+  font-family: var(--swath-font-mono);
+  font-size: var(--swath-text-xs);
+  color: var(--swath-color-fg-muted);
+}
 .swath-authoring-inspector { display: grid; gap: var(--swath-space-2); }
 .swath-authoring-inspector .swath-authoring-step { margin: 0; }
+:is(swath-authoring-panel) .swath-authoring-steps[hidden] { display: none; }
 `;
 
 /** The shell's regions for the authoring pieces (#291). */
@@ -773,6 +828,9 @@ export interface CollectionItem {
  * reducer value. Data flow needs no per-card state: the canvas is a
  * linear chain, each cube input wired to the previous card. */
 interface Card {
+  /** The persistent node id (`s1`…): the graph key it lowers to, the
+   * `sel=` value, the field-id prefix — never renumbered (#299). */
+  id: string;
   process: ProcessDefinition;
   values: Map<string, string>;
   rows: FormulaRow[];
@@ -997,6 +1055,14 @@ export class SwathAuthoringPanel extends SwathElement {
     ];
   }
 
+  #saveLayout(): void {
+    try {
+      globalThis.localStorage?.setItem(LAYOUT_KEY, JSON.stringify([...this.#positions]));
+    } catch {
+      // Storage unavailable: positions live for the session only.
+    }
+  }
+
   /** Select a step (a chip click, a `sel=` link); emits `swath-author-select`. */
   selectStep(key: string): void {
     if (this.sel === key) {
@@ -1037,6 +1103,9 @@ export class SwathAuthoringPanel extends SwathElement {
    * next open retries (the add-data panel's #254 contract). */
   #catalogPending = false;
   #catalogFailed = false;
+  /** Canvas positions per node id — editor state, never in the graph;
+   * remembered across renders and in localStorage (#299). */
+  #positions = new Map<string, { x: number; y: number }>(loadLayout());
   /** Field keys (`s1-id`) the user has interacted with — inline
    * required/type messages only show for these, so a freshly inserted
    * card is not a wall of red; the disabled submit still counts them. */
@@ -1226,8 +1295,14 @@ export class SwathAuthoringPanel extends SwathElement {
     }
   }
 
+  /** Node ids are handed out once and never reused: the Load head is
+   * `s1`, the Output tail `s2`, every later step the next number. */
+  #nextId = 0;
+
   #newCard(process: ProcessDefinition): Card {
+    this.#nextId += 1;
     return {
+      id: `s${this.#nextId}`,
       process,
       values: new Map(
         (process.parameters ?? [])
@@ -1258,7 +1333,7 @@ export class SwathAuthoringPanel extends SwathElement {
   }
 
   #keyOf(card: Card): string {
-    return `s${this.#cards().indexOf(card) + 1}`;
+    return card.id;
   }
 
   /** The middle chain's process ids, for the stage table. */
@@ -1429,6 +1504,11 @@ export class SwathAuthoringPanel extends SwathElement {
     // B5, explained pre-submit: a multi-band result must be an RGB
     // composite; "which fix" (reduce, or load exactly 3) is the user's
     // call, so it gates rather than auto-corrects.
+    // B10 (a graph, not a line): a step with no path to the Output is
+    // explained and gates — never silently dropped.
+    for (const id of orphans(this.#dag())) {
+      issues.push(`step ${id} goes nowhere — connect it or remove it`);
+    }
     const stage = this.#resultStage();
     if (stage.kind === "multi" && this.#loadBands.length > 0 && this.#loadBands.length !== 3) {
       const n = this.#loadBands.length;
@@ -1593,11 +1673,10 @@ export class SwathAuthoringPanel extends SwathElement {
       text = diagnostic;
     } else {
       const { node, argument } = locateServerError(failure.message);
-      const index = node === undefined ? -1 : cards.findIndex((_, i) => `s${i + 1}` === node);
-      const card = cards[index];
+      const card = cards.find((c) => c.id === node);
       if (card !== undefined) {
         const param = (card.process.parameters ?? []).find((p) => p.name === argument);
-        noteKey = param ? `s${index + 1}-${param.name}` : `s${index + 1}`;
+        noteKey = param ? `${card.id}-${param.name}` : card.id;
         text = `${failure.code}: ${failure.message}`;
         if (param && isAdvancedParam(card.process.id, param)) {
           card.advanced = true;
@@ -1679,61 +1758,79 @@ export class SwathAuthoringPanel extends SwathElement {
    * marked as the result — a graph that always ends in `save_result`
    * with nothing dangling, by construction (B1/B10). */
   buildGraph(): Record<string, unknown> {
+    return lower(this.#dag());
+  }
+
+  /** The pipeline as the DAG model's graph (#298/#299): one node per
+   * card with its persistent id and non-cube arguments, one edge per
+   * consecutive pair into the next step's cube port. Linear today; the
+   * join arrives with #300. */
+  #dag(): Dag {
     const cards = this.#cards();
+    const nodes: DagNode[] = cards.map((card) => ({
+      id: card.id,
+      process: card.process.id,
+      params: this.#nodeParams(card),
+    }));
+    const edges: Dag["edges"] = [];
+    for (let index = 1; index < cards.length; index += 1) {
+      const from = cards[index - 1];
+      const to = cards[index];
+      const [port] = to === undefined ? [] : (CUBE_PORTS[to.process.id]?.inputs ?? []);
+      if (from !== undefined && to !== undefined && port !== undefined) {
+        edges.push({ from: { node: from.id, port: OUT }, to: { node: to.id, port } });
+      }
+    }
+    return { nodes, edges };
+  }
+
+  /** A card's openEO arguments other than its cube input(s): literals
+   * parsed against the served schema, the reducer child graph for a
+   * formula, band picks for Load, the colormap only on a gray result. */
+  #nodeParams(card: Card): Record<string, unknown> {
     const stage = this.#resultStage();
-    const graph: Record<string, unknown> = {};
-    cards.forEach((card, index) => {
-      const key = `s${index + 1}`;
-      const previous = index > 0 ? `s${index}` : "";
-      const args: Record<string, unknown> = {};
-      if (card.process.id === "reduce_dimension") {
-        args["data"] = { from_node: previous };
-        args["dimension"] = "bands";
-        args["reducer"] = { process_graph: buildReducerGraph(card.rows) };
-      } else {
-        for (const param of card.process.parameters ?? []) {
-          if (param.name === CUBE_PARAM[card.process.id] && previous !== "") {
-            args[param.name] = { from_node: previous };
-            continue;
-          }
-          if (card === this.#loadCard && isBandArray(param.schema)) {
-            if (this.#loadBands.length > 0) {
-              args[param.name] = [...this.#loadBands];
-            }
-            continue;
-          }
-          if (
-            card === this.#saveCard &&
-            hasSubtype(param.schema, "output-format-options") &&
-            stage.kind !== "gray"
-          ) {
-            // B6 made structural: a colormap never rides a composite —
-            // nor a UDF result, which renders directly (ADR 0018).
-            continue;
-          }
-          const raw = (card.values.get(param.name) ?? "").trim();
-          if (raw === "") {
-            if (param.optional === true) {
-              continue; // optional and empty: omitted, the default applies
-            }
-            if (allowsNull(param.schema)) {
-              args[param.name] = null; // required but nullable: explicit null
-            }
-            // Required without a null alternative and left empty: omitted.
-            // Unreachable through submit (validation disables it), kept for
-            // direct buildGraph() callers.
-            continue;
-          }
-          args[param.name] = parseLiteral(raw, param.schema);
+    const args: Record<string, unknown> = {};
+    if (card.process.id === "reduce_dimension") {
+      args["dimension"] = "bands";
+      args["reducer"] = { process_graph: buildReducerGraph(card.rows) };
+      return args;
+    }
+    const cube = new Set(CUBE_PORTS[card.process.id]?.inputs ?? []);
+    for (const param of card.process.parameters ?? []) {
+      if (cube.has(param.name)) {
+        continue; // wired by the graph, never a field
+      }
+      if (card === this.#loadCard && isBandArray(param.schema)) {
+        if (this.#loadBands.length > 0) {
+          args[param.name] = [...this.#loadBands];
         }
+        continue;
       }
-      const node: Record<string, unknown> = { process_id: card.process.id, arguments: args };
-      if (index === cards.length - 1) {
-        node["result"] = true;
+      if (
+        card === this.#saveCard &&
+        hasSubtype(param.schema, "output-format-options") &&
+        stage.kind !== "gray"
+      ) {
+        // B6 made structural: a colormap never rides a composite —
+        // nor a UDF result, which renders directly (ADR 0018).
+        continue;
       }
-      graph[key] = node;
-    });
-    return graph;
+      const raw = (card.values.get(param.name) ?? "").trim();
+      if (raw === "") {
+        if (param.optional === true) {
+          continue; // optional and empty: omitted, the default applies
+        }
+        if (allowsNull(param.schema)) {
+          args[param.name] = null; // required but nullable: explicit null
+        }
+        // Required without a null alternative and left empty: omitted.
+        // Unreachable through submit (validation disables it), kept for
+        // direct buildGraph() callers.
+        continue;
+      }
+      args[param.name] = parseLiteral(raw, param.schema);
+    }
+    return args;
   }
 
   /** Files a server diagnostic where it belongs: on the named field
@@ -1743,10 +1840,9 @@ export class SwathAuthoringPanel extends SwathElement {
   #reportServerError(message: string): void {
     const { node, argument } = locateServerError(message);
     const cards = this.#cards();
-    const index = node === undefined ? -1 : cards.findIndex((_, i) => `s${i + 1}` === node);
-    const card = cards[index];
+    const card = cards.find((c) => c.id === node);
     if (card !== undefined) {
-      const key = `s${index + 1}`;
+      const key = card.id;
       const param = (card.process.parameters ?? []).find((p) => p.name === argument);
       const noteKey = param ? `${key}-${param.name}` : key;
       this.#serverNotes.set(noteKey, message);
@@ -1912,12 +2008,46 @@ export class SwathAuthoringPanel extends SwathElement {
     }
     const strip = document.createElement("div");
     strip.className = "swath-authoring-strip";
-    const chips = document.createElement("ol");
-    chips.className = "swath-authoring-chips";
-    chips.setAttribute("aria-label", "Pipeline steps");
-    for (const step of steps) {
+    // The pipeline on the canvas primitives (#290/#299): one node per
+    // step, its chip as the node body (the same `.swath-authoring-chip`
+    // every selector addresses), an edge per cube connection, orphans
+    // greyed. Positions are editor state, remembered per node id.
+    const dag = this.#dag();
+    const dead = new Set(orphans(dag));
+    const canvas = document.createElement("swath-canvas") as SwathCanvas;
+    canvas.className = "swath-authoring-canvas";
+    canvas.setAttribute("aria-label", "Pipeline");
+    for (const [index, step] of steps.entries()) {
       const key = step.dataset["step"] ?? "";
-      const chip = document.createElement("li");
+      const process = step.dataset["process"] ?? "";
+      const node = document.createElement("swath-canvas-node") as SwathCanvasNode;
+      node.nodeId = key;
+      node.title = STEP_TITLES[process] ?? process;
+      const at = this.#positions.get(key) ?? { x: 24 + index * 300, y: 24 };
+      node.x = at.x;
+      node.y = at.y;
+      node.selected = key === this.sel;
+      if (dead.has(key)) {
+        node.dataset["orphan"] = "true";
+        node.title = `${node.title} — goes nowhere`;
+      }
+      const ports = CUBE_PORTS[process];
+      for (const input of ports?.inputs ?? []) {
+        const port = document.createElement("swath-canvas-port") as SwathCanvasPort;
+        port.slot = "inputs";
+        port.side = "input";
+        port.name = input;
+        port.label = input;
+        node.append(port);
+      }
+      if (ports?.output === true) {
+        const port = document.createElement("swath-canvas-port") as SwathCanvasPort;
+        port.slot = "outputs";
+        port.side = "output";
+        port.name = OUT;
+        port.label = "";
+        node.append(port);
+      }
       const button = document.createElement("button");
       button.type = "button";
       button.className = "swath-authoring-chip";
@@ -1925,21 +2055,61 @@ export class SwathAuthoringPanel extends SwathElement {
       button.setAttribute("aria-pressed", String(key === this.sel));
       const invalid = step.querySelector(".swath-authoring-step-error")?.textContent !== "";
       button.dataset["invalid"] = String(invalid);
+      if (dead.has(key)) {
+        button.dataset["orphan"] = "true";
+      }
       button.textContent = `${key} ${step.querySelector(".swath-authoring-step-header span:nth-child(2)")?.textContent ?? ""}`;
       button.addEventListener("click", () => this.selectStep(key));
-      chip.append(button);
-      chips.append(chip);
+      node.append(button);
+      canvas.append(node);
+    }
+    canvas.edges = dag.edges.map((edge, index) => ({ id: `e${index + 1}`, ...edge }));
+    canvas.addEventListener("swath-node-activate", (event) => {
+      this.selectStep(event.detail.id);
+    });
+    canvas.addEventListener("swath-canvas-select", (event) => {
+      const [first] = event.detail.nodes;
+      if (first !== undefined) {
+        this.selectStep(first);
+      }
+    });
+    canvas.addEventListener("swath-node-move", (event) => {
+      this.#positions.set(event.detail.id, { x: event.detail.x, y: event.detail.y });
+      this.#saveLayout();
+    });
+    // Scope fence (#299): no new connections yet — the join arrives with
+    // #300, and with it `edgeAllowed` answering the gesture.
+    canvas.addEventListener("swath-port-connect-end", () => canvas.cancelConnect());
+    canvas.addEventListener("swath-delete-request", (event) => {
+      // Delete on a middle step's node removes it (the permanent head
+      // and tail refuse, as their cards do).
+      const [id] = event.detail.nodes;
+      const card = this.#middle.find((c) => c.id === id);
+      if (card !== undefined) {
+        this.#removeMiddle(card);
+      }
+    });
+    // Insert-on-edge chips: the same `.swath-authoring-insert[data-gap]`
+    // groups, gap g = the g-th edge of the chain, labelled by its ends.
+    const inserts = document.createElement("div");
+    inserts.className = "swath-authoring-inserts";
+    for (const step of steps) {
       const insert = step.nextElementSibling;
       if (insert?.classList.contains("swath-authoring-insert")) {
-        const gap = document.createElement("li");
-        gap.className = "swath-authoring-chip-gap";
-        gap.append(insert);
-        chips.append(gap);
+        const gap = Number(insert.getAttribute("data-gap") ?? "0");
+        const edge = dag.edges[gap];
+        const label = document.createElement("span");
+        label.className = "swath-authoring-insert-label";
+        label.textContent =
+          edge === undefined ? "add a step" : `between ${edge.from.node} and ${edge.to.node}`;
+        insert.prepend(label);
+        inserts.append(insert);
       }
     }
+    requestAnimationFrame(() => canvas.fit());
     const narrative = form.querySelector("#swath-authoring-narrative");
     const preview = form.querySelector("#swath-authoring-preview");
-    strip.append(chips, ...[narrative, preview].filter((n): n is Element => n !== null));
+    strip.append(canvas, inserts, ...[narrative, preview].filter((n): n is Element => n !== null));
     regions.strip.replaceChildren(strip);
     const selected = steps.find((step) => step.dataset["step"] === this.sel);
     const inspector = document.createElement("div");
@@ -2021,7 +2191,7 @@ export class SwathAuthoringPanel extends SwathElement {
     const cards = this.#cards();
     const served = new Set(this.#processes.map((process) => process.id));
     for (const [index, card] of cards.entries()) {
-      list.append(this.#renderStep(card, `s${index + 1}`));
+      list.append(this.#renderStep(card, card.id));
       // An insert gap after every card except the Output tail, showing
       // only the chips the stage table admits there (B2/B3/B4: what
       // does not fit is not offered, anywhere).
@@ -2840,5 +3010,8 @@ async function readOpenEoError(response: Response): Promise<string> {
 
 /** Registers `<swath-authoring-panel>`; safe to call more than once. */
 export function defineSwathAuthoringPanel(): void {
+  SwathCanvas.define();
+  SwathCanvasNode.define();
+  SwathCanvasPort.define();
   SwathAuthoringPanel.define();
 }

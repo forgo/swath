@@ -112,17 +112,17 @@ async function authorNdvi(page: Page, outputMax: string, colormap: string): Prom
   await tickBand(page, "b04");
   await chip(page, 0, "ndvi").click();
   // The band selects (vocabulary-only, B7) prefilled nir/red correctly.
-  await expect(fieldById(page, "s2-nir")).toHaveValue("b8a");
-  await expect(fieldById(page, "s2-red")).toHaveValue("b04");
+  await expect(fieldById(page, "s3-nir")).toHaveValue("b8a");
+  await expect(fieldById(page, "s3-red")).toHaveValue("b04");
   await chip(page, 1, "linear_scale_range").click();
-  await fieldById(page, "s3-inputMin").fill("-1");
-  await fieldById(page, "s3-inputMax").fill("1");
-  await fieldById(page, "s4-options").selectOption(colormap);
+  await fieldById(page, "s4-inputMin").fill("-1");
+  await fieldById(page, "s4-inputMax").fill("1");
+  await fieldById(page, "s2-options").selectOption(colormap);
   // Only a non-default output range needs the s3 advanced section.
   if (outputMax !== "255") {
-    await ensureStep(page, "s3");
-    await page.locator('[data-step="s3"] .swath-authoring-advanced-toggle').click();
-    await fieldById(page, "s3-outputMax").fill(outputMax);
+    await ensureStep(page, "s4");
+    await page.locator('[data-step="s4"] .swath-authoring-advanced-toggle').click();
+    await fieldById(page, "s4-outputMax").fill(outputMax);
   }
 }
 
@@ -306,25 +306,25 @@ test("the formula builder's reducer child graph compiles to the same NDVI bytes"
   await tickBand(page, "b8a");
   await tickBand(page, "b04");
   await chip(page, 0, "reduce_dimension").click();
-  await fieldById(page, "s2-row1-left").selectOption("band:b8a");
-  await fieldById(page, "s2-row1-op").selectOption("subtract");
-  await fieldById(page, "s2-row1-right").selectOption("band:b04");
+  await fieldById(page, "s3-row1-left").selectOption("band:b8a");
+  await fieldById(page, "s3-row1-op").selectOption("subtract");
+  await fieldById(page, "s3-row1-right").selectOption("band:b04");
   await page.locator(".swath-authoring-formula-add").click();
-  await fieldById(page, "s2-row2-left").selectOption("band:b8a");
-  await fieldById(page, "s2-row2-op").selectOption("add");
-  await fieldById(page, "s2-row2-right").selectOption("band:b04");
+  await fieldById(page, "s3-row2-left").selectOption("band:b8a");
+  await fieldById(page, "s3-row2-op").selectOption("add");
+  await fieldById(page, "s3-row2-right").selectOption("band:b04");
   await page.locator(".swath-authoring-formula-add").click();
-  await fieldById(page, "s2-row3-left").selectOption("row:0");
-  await fieldById(page, "s2-row3-op").selectOption("divide");
-  await fieldById(page, "s2-row3-right").selectOption("row:1");
+  await fieldById(page, "s3-row3-left").selectOption("row:0");
+  await fieldById(page, "s3-row3-op").selectOption("divide");
+  await fieldById(page, "s3-row3-right").selectOption("row:1");
   // The narrative reads the formula back as plain math.
   await expect(page.locator("#swath-authoring-narrative")).toContainText(
     "(b8a − b04) ÷ (b8a + b04)",
   );
   await chip(page, 1, "linear_scale_range").click();
-  await fieldById(page, "s3-inputMin").fill("-1");
-  await fieldById(page, "s3-inputMax").fill("1");
-  await fieldById(page, "s4-options").selectOption("rdylgn");
+  await fieldById(page, "s4-inputMin").fill("-1");
+  await fieldById(page, "s4-inputMax").fill("1");
+  await fieldById(page, "s2-options").selectOption("rdylgn");
   await fieldById(page, "title").fill("NDVI (formula)");
   const id = await publish(page);
 
@@ -355,8 +355,8 @@ test("an RGB composite (3 ticked bands, stretch, no reduce) publishes and serves
   await expect(fieldById(page, "s2-options")).toBeDisabled();
   await expect(fieldById(page, "s2-composite-note")).toContainText("one gray value per pixel");
   await chip(page, 0, "linear_scale_range").click();
-  await fieldById(page, "s2-inputMin").fill("0");
-  await fieldById(page, "s2-inputMax").fill("3000");
+  await fieldById(page, "s3-inputMin").fill("0");
+  await fieldById(page, "s3-inputMax").fill("3000");
   await fieldById(page, "title").fill("True color (authored)");
   const id = await publish(page);
   const tile = await page.request.get(`/tilesets/${id}/tiles/${TILE}`);
@@ -412,8 +412,8 @@ test("the canvas keeps the pipeline valid: permanent frame, typed chips, plain r
   // After the scale step, the saturated NDVI pipeline offers no further
   // insertions anywhere (B4 and friends: nothing else fits).
   await chip(page, 1, "linear_scale_range").click();
-  await fieldById(page, "s3-inputMin").fill("-1");
-  await fieldById(page, "s3-inputMax").fill("1");
+  await fieldById(page, "s4-inputMin").fill("-1");
+  await fieldById(page, "s4-inputMax").fill("1");
   await expect(page.locator(".swath-authoring-insert")).toHaveCount(0);
 });
 
@@ -430,7 +430,7 @@ test("a graph the server rejects renders its diagnostic on the offending field",
   await authorNdvi(page, "1", "rdylgn");
   await expect(submitButton(page)).toBeEnabled();
   await submitButton(page).click();
-  const note = page.locator("#swath-authoring-s3-outputMin-note");
+  const note = page.locator("#swath-authoring-s4-outputMin-note");
   await expect(note).toContainText("the output range must be exactly 0..255");
   await expect(page.locator(".swath-authoring-error")).toHaveCount(0);
 });
@@ -571,14 +571,14 @@ test("UDF stage: upload → preview → publish → x-ray shows fuel → delete 
   // cache — `just e2e-web` runs both modes against ONE stack, and a
   // cache hit never runs the module (no fuel to show). The reference
   // module ignores it; the JSON field itself is exercised on the way.
-  await fieldById(page, "s2-context").fill(
+  await fieldById(page, "s3-context").fill(
     JSON.stringify({ run: `${process.env.SWATH_E2E_MODE ?? "vite"}-${Date.now()}` }),
   );
   const preview = page.waitForResponse(
     (response) => response.url().includes("/result") && response.request().method() === "POST",
   );
-  await uploadModule(page, "s2-udf", "ndvi.wasm", NDVI_WASM);
-  await expect(page.locator("#swath-authoring-s2-udf-module")).toContainText("ndvi.wasm");
+  await uploadModule(page, "s3-udf", "ndvi.wasm", NDVI_WASM);
+  await expect(page.locator("#swath-authoring-s3-udf-module")).toContainText("ndvi.wasm");
   // The preview renders the module through POST /result — the ADR 0014
   // loop as the UDF validation loop (#206) — and meters its fuel.
   const previewed = await preview;
@@ -593,10 +593,10 @@ test("UDF stage: upload → preview → publish → x-ray shows fuel → delete 
   // colormap greys out with the UDF reason (its output renders directly).
   await expect(page.locator('.swath-authoring-insert[data-gap="0"]')).toHaveCount(0);
   await chip(page, 1, "linear_scale_range").click();
-  await fieldById(page, "s3-inputMin").fill("-1");
-  await fieldById(page, "s3-inputMax").fill("1");
-  await expect(fieldById(page, "s4-options")).toBeDisabled();
-  await expect(fieldById(page, "s4-composite-note")).toContainText("renders directly");
+  await fieldById(page, "s4-inputMin").fill("-1");
+  await fieldById(page, "s4-inputMax").fill("1");
+  await expect(fieldById(page, "s2-options")).toBeDisabled();
+  await expect(fieldById(page, "s2-composite-note")).toContainText("renders directly");
   await expect(page.locator("#swath-authoring-narrative")).toContainText(
     "run ndvi.wasm on the bands",
   );
@@ -668,18 +668,18 @@ test("UDF stage: a fuel bomb's refusal reads in plain words on the module and ne
   const preview = page.waitForResponse(
     (response) => response.url().includes("/result") && response.request().method() === "POST",
   );
-  await uploadModule(page, "s2-udf", "bomb.wasm", FUEL_BOMB);
+  await uploadModule(page, "s3-udf", "bomb.wasm", FUEL_BOMB);
   // The server refuses under the same per-tile budget publishing would
   // enforce: ProcessGraphComplexity (#206), mapped onto the module field
   // in the user's words — the fuel meter, or its wall-clock backstop.
   const refused = await preview;
   expect(refused.status()).toBe(400);
   expect(((await refused.json()) as { code: string }).code).toBe("ProcessGraphComplexity");
-  const note = page.locator("#swath-authoring-s2-udf-note");
+  const note = page.locator("#swath-authoring-s3-udf-note");
   await expect(note).toContainText("per-tile budget");
   await expect(note).toContainText("Publishing is not blocked");
   await expect(page.locator("#swath-authoring-preview-note")).toContainText(
-    "see the note on step s2",
+    "see the note on step s3",
   );
   await expect(page.locator("#swath-authoring-preview-image")).toBeHidden();
   await expect(submitButton(page)).toBeEnabled();
@@ -687,11 +687,11 @@ test("UDF stage: a fuel bomb's refusal reads in plain words on the module and ne
 
   // A different, valid draft on the same canvas publishes and serves:
   // drop the module, author NDVI in its place.
-  await page.getByRole("button", { name: "Remove step s2" }).click();
+  await page.getByRole("button", { name: "Remove step s3" }).click();
   await chip(page, 0, "ndvi").click();
   await chip(page, 1, "linear_scale_range").click();
-  await fieldById(page, "s3-inputMin").fill("-1");
-  await fieldById(page, "s3-inputMax").fill("1");
+  await fieldById(page, "s5-inputMin").fill("-1");
+  await fieldById(page, "s5-inputMax").fill("1");
   await fieldById(page, "title").fill("NDVI (after the bomb)");
   const id = await publish(page);
   const tile = await page.request.get(`/tilesets/${id}/tiles/${TILE}`);
