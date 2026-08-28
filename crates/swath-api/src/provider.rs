@@ -62,6 +62,14 @@ pub struct LayerIdentity {
     /// `datetime=` frames it can ask for (ADR 0015; the web time slider
     /// reads exactly this).
     pub dataset: Option<String>,
+    /// The compiled frame-selection window (ADR 0015) — the hull of the
+    /// branch windows for a two-source layer (ADR 0022); `None` for
+    /// static layers. Advertised on the tileset metadata so a client
+    /// bounds the frames it offers.
+    pub window: Option<TimeRange>,
+    /// The number of `load_collection` branches (ADR 0022): 1 for a
+    /// chain or a config layer, 2 for a join, 0 for static layers.
+    pub sources: usize,
 }
 
 /// A layer resolved to renderable form: the static template plus, for
@@ -160,6 +168,8 @@ impl LayerProvider for LayerRegistry {
                 title: layer.title.clone(),
                 description: layer.description.clone(),
                 dataset: None,
+                window: None,
+                sources: 0,
             })
             .collect()
     }
@@ -170,6 +180,8 @@ impl LayerProvider for LayerRegistry {
             title: layer.title.clone(),
             description: layer.description.clone(),
             dataset: None,
+            window: None,
+            sources: 0,
         })
     }
 
@@ -336,6 +348,8 @@ impl<C: Catalog> LayerProvider for CatalogLayers<C> {
                 title: layer.title.clone(),
                 description: layer.description.clone(),
                 dataset: Some(layer.dataset.to_string()),
+                window: Some(layer.window.clone()),
+                sources: layer.sources.len().max(1),
             })
             .collect()
     }
@@ -346,6 +360,8 @@ impl<C: Catalog> LayerProvider for CatalogLayers<C> {
             title: layer.title.clone(),
             description: layer.description.clone(),
             dataset: Some(layer.dataset.to_string()),
+            window: Some(layer.window.clone()),
+            sources: layer.sources.len().max(1),
         })
     }
 

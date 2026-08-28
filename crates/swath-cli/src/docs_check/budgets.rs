@@ -33,8 +33,9 @@ const BUDGETS: [(&str, usize); 17] = [
     ("docs/CONFIG.md", 1775),
     ("docs/DEMO.md", 775),
     // 1700 → 1760 on 2026-08-28: the merge_cubes join and its preview framing
-    // (ADR 0022) — three sentences the process list could not carry.
-    ("docs/ENDPOINTS.md", 1760),
+    // (ADR 0022) — three sentences the process list could not carry; → 1800
+    // the same day for the tileset metadata's window and branch count (#301).
+    ("docs/ENDPOINTS.md", 1800),
     ("docs/ENGINEERING.md", 1000),
     ("docs/EXTENDING.md", 1525),
     ("docs/OPERATIONS.md", 975),

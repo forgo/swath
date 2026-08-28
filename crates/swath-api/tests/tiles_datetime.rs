@@ -355,11 +355,16 @@ async fn tileset_metadata_links_the_backing_datasets_granules() {
         format!("{}/datasets/hls-s30-fire/granules", common::BASE_URL)
     );
     assert_eq!(granules["type"], "application/json");
+    // The frames a client may offer (#301): the compiled window (open on
+    // both sides for this config-defined layer) and one branch.
+    assert_eq!(body["swath:window"], serde_json::json!([null, null]));
+    assert_eq!(body["swath:sources"], serde_json::json!(1));
 
     // The static fixtures app: no dataset behind the layer, no link.
     let response = common::get("/tilesets/ndvi").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = common::body_json(response).await;
+    assert!(body.get("swath:window").is_none() && body.get("swath:sources").is_none());
     assert!(
         !body["links"]
             .as_array()

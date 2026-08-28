@@ -88,7 +88,7 @@ import {
   type XRayChrome,
   XRayOverlay,
 } from "./swath-xray.js";
-import { parseGranuleDatetimes, TimeSlider } from "./time-slider.js";
+import { boundDomain, parseGranuleDatetimes, TimeSlider } from "./time-slider.js";
 import { centerTile } from "./tms.js";
 import { SwathButton } from "./ui/button.js";
 import { createSwathEvent } from "./ui/events.js";
@@ -129,6 +129,9 @@ interface OgcLink {
 interface LayerMetadata {
   bounds?: LonLatBounds;
   dataset?: string;
+  /** The layer's frame-selection window from its tileset metadata
+   * (`swath:window`, #301): bounds the slider's domain. */
+  window?: [string | null, string | null];
 }
 
 /** Subset of a tilesets-list item the component reads. */
@@ -1703,8 +1706,19 @@ export class SwathMap extends HTMLElement {
     const body = (await response.json()) as {
       boundingBox?: { lowerLeft?: number[]; upperRight?: number[] };
       links?: OgcLink[];
+      "swath:window"?: [string | null, string | null];
+      "swath:sources"?: number;
     };
     const metadata: LayerMetadata = {};
+    // The frames the layer can serve (ADR 0015 / ADR 0022, #301): the
+    // slider never offers a granule date outside the window.
+    const window = body["swath:window"];
+    if (Array.isArray(window) && window.length === 2) {
+      metadata.window = [
+        typeof window[0] === "string" ? window[0] : null,
+        typeof window[1] === "string" ? window[1] : null,
+      ];
+    }
     const lower = body.boundingBox?.lowerLeft;
     const upper = body.boundingBox?.upperRight;
     const [west, south] = lower ?? [];
@@ -1801,9 +1815,10 @@ export class SwathMap extends HTMLElement {
       ? { west: union[0], south: union[1], east: union[2], north: union[3] }
       : metadata?.bounds;
     this.#toggles?.updateZoomData(this.#dataBounds !== undefined);
-    this.#frames = domain.frames;
-    this.#time?.setDomain(domain.frames, this.getAttribute("datetime"));
-    this.#armCinematic(title, domain.frames.length);
+    const frames = boundDomain(domain.frames, metadata?.window);
+    this.#frames = frames;
+    this.#time?.setDomain(frames, this.getAttribute("datetime"));
+    this.#armCinematic(title, frames.length);
   }
 
   /** The map style for one side: the swath raster (from `template`) on

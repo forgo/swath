@@ -153,6 +153,26 @@ pub struct TileSetMetadata {
     pub bounding_box: BoundingBox2D,
     /// Links: self, tiling scheme, and the templated `item` tile link.
     pub links: Vec<Link>,
+    /// The layer's frame-selection window (ADR 0015; the hull of the
+    /// branch windows for a two-source layer, ADR 0022) as
+    /// `[start, end]`, either side `null` when open — what bounds the
+    /// frames a client may ask for. Catalog-backed layers only.
+    #[serde(
+        rename = "swath:window",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub window: Option<[Option<String>; 2]>,
+    /// How many `load_collection` branches the layer reads (ADR 0022):
+    /// a two-source layer resolves one granule per branch, so its
+    /// frames are not one dataset's granule listing. Catalog-backed
+    /// layers only.
+    #[serde(
+        rename = "swath:sources",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub sources: Option<usize>,
 }
 
 #[cfg(test)]

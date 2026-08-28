@@ -506,6 +506,15 @@ where
             ordered_axes: ["Lon".to_owned(), "Lat".to_owned()],
         },
         links,
+        // The frames a client may ask for (ADR 0015 / ADR 0022): the
+        // compiled window, and how many branches resolve per frame.
+        window: identity.window.as_ref().map(|window| {
+            [
+                window.start.as_ref().map(ToString::to_string),
+                window.end.as_ref().map(ToString::to_string),
+            ]
+        }),
+        sources: identity.dataset.as_ref().map(|_| identity.sources),
     }))
 }
 
