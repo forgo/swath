@@ -114,7 +114,7 @@ export class SwathCanvas extends SwathElement {
     | { kind: "pinch"; distance: number; k: number }
     | { kind: "marquee"; origin: Point; current: Point }
     | { kind: "node"; node: SwathCanvasNode; origin: Point; start: Point; moved: boolean }
-    | { kind: "connect"; from: PortRef; current: Point }
+    | { kind: "connect"; from: PortRef; origin: Point; current: Point; moved: boolean }
     | undefined;
   #armed: PortRef | undefined;
   #longPress: number | undefined;
@@ -287,10 +287,13 @@ export class SwathCanvas extends SwathElement {
 
   readonly #onConnectStart = (event: CustomEvent<PortRef>): void => {
     this.#pointers.clear();
+    const anchor = this.portAnchor(event.detail.node, event.detail.port) ?? { x: 0, y: 0 };
     this.#gesture = {
       kind: "connect",
       from: event.detail,
-      current: this.portAnchor(event.detail.node, event.detail.port) ?? { x: 0, y: 0 },
+      origin: anchor,
+      current: anchor,
+      moved: false,
     };
     this.requestUpdate();
   };
@@ -425,6 +428,9 @@ export class SwathCanvas extends SwathElement {
       }
       case "connect":
         g.current = at;
+        if (Math.hypot(at.x - g.origin.x, at.y - g.origin.y) >= DRAG_THRESHOLD_PX) {
+          g.moved = true;
+        }
         this.requestUpdate();
         break;
     }
@@ -491,12 +497,21 @@ export class SwathCanvas extends SwathElement {
       }
       case "connect": {
         const from = g.from;
+        this.requestUpdate();
+        // A press that never moved is a tap (touch, or a click): the port's
+        // click handler arms / completes tap-to-connect instead.
+        if (!g.moved) {
+          break;
+        }
         const under = document
           .elementsFromPoint(event.clientX, event.clientY)
           .find((e) => e.closest("swath-canvas-port")) as Element | undefined;
         const portEl = under?.closest("swath-canvas-port") as SwathCanvasPort | null;
-        this.requestUpdate();
-        this.emit("swath-port-connect-end", { from, to: portEl ? portEl.ref : null });
+        const to = portEl ? portEl.ref : null;
+        if (to && to.node === from.node && to.port === from.port) {
+          break; // released on itself: nothing to connect
+        }
+        this.emit("swath-port-connect-end", { from, to });
         break;
       }
       default:

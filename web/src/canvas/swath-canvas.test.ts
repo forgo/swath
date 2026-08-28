@@ -233,6 +233,7 @@ test("drag-to-connect: pointer down on a port draws a pending edge; release over
   expect(ends).toEqual(["ndvi.data"]);
   const box = origin(canvas);
   pointer(from, "pointerdown", { x: a.left + 5, y: a.top + 5 });
+  pointer(canvas, "pointermove", { x: box.left + 700, y: box.top + 550 }); // a real drag, then let go on nothing
   pointer(canvas, "pointerup", { x: box.left + 700, y: box.top + 550 });
   expect(ends).toEqual(["ndvi.data", null]);
   await canvas.updateComplete;
@@ -329,4 +330,23 @@ test("touch: one finger pans, two fingers pinch around the midpoint, a long-pres
     id: 3,
     pointerType: "touch",
   });
+});
+
+test("a press-and-release on one port is a tap, not a self-connection (the mobile regression)", async () => {
+  const canvas = await mount();
+  const ends: string[] = [];
+  canvas.addEventListener("swath-port-connect-end", (e) =>
+    ends.push(`${e.detail.from.port}→${e.detail.to?.port ?? "null"}`),
+  );
+  const out = port(canvas, "ndvi", "out").shadowRoot?.querySelector("button") as HTMLElement;
+  const a = out.getBoundingClientRect();
+  pointer(out, "pointerdown", { x: a.left + 5, y: a.top + 5, pointerType: "touch" });
+  pointer(out, "pointermove", { x: a.left + 7, y: a.top + 6, pointerType: "touch" }); // < 8px: still a tap
+  pointer(canvas, "pointerup", { x: a.left + 7, y: a.top + 6, pointerType: "touch" });
+  out.click(); // the tap's click arms
+  expect(ends).toEqual([]);
+  expect(canvas.armedPort?.port).toBe("out");
+  const target = port(canvas, "ndvi", "data").shadowRoot?.querySelector("button") as HTMLElement;
+  target.click(); // the second tap completes
+  expect(ends).toEqual(["out→data"]);
 });
