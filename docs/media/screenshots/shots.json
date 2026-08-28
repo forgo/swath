@@ -1,7 +1,7 @@
 {
   "schema": "swath-screenshots/1",
-  "git_sha": "2ae1058b2309403e67c7cffb5f82b20ff878e439",
-  "captured": "2026-08-28T04:54:37.072Z",
+  "git_sha": "eb92a657f0724f1bcc5ad65dc4be931a1aae5fdf",
+  "captured": "2026-08-28T06:23:19.941Z",
   "viewport": {
     "width": 1528,
     "height": 928,
@@ -14,98 +14,144 @@
       "caption": "Zero-config landing page: the Park Fire series auto-framed and playable (held on its latest frame here — the reduced-motion state, with its play affordance), the x-ray invitation top-center, the Share button in the rail.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "2f94df90dcb88b3f5b09c82572839ade8d6ce2f166171dc6c1de4d6533827b98"
+      "railWidth": 248,
+      "sha256": "7932bd41570d14fec0c0ef466c18c4887d0dc5ea8f0be24159702966f87a7d4e"
     },
     {
       "file": "02-ndvi-colormapped.png",
       "caption": "Colormapped NDVI (rdylgn) rendered live at z12 from the fixture granule — nothing pre-baked.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "818a4f39fb39b0c6fd5be61e194dfb4ed6f225abc0a458bc914edc4490fcf4b5"
+      "railWidth": 248,
+      "sha256": "b69cc829c07fce9fdfce33a03ea4ac0ef99ac2f947393816ac99868046345f72"
     },
     {
       "file": "03-truecolor-live.png",
       "caption": "HLS true color at the same viewpoint: selecting a layer in the rail re-points the raster source.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "fd785703b0355e865b83d80ec0d62a3ec9082cd6cd07ff797a3c3955ac500537"
+      "railWidth": 248,
+      "sha256": "14dff6451425df71e535222a9983e02cc7896fd03c0b9293ecb4706142007fce"
     },
     {
       "file": "04-xray-decisions.png",
       "caption": "X-ray decision overlay: every tile badged with its render decision and timing; ingest→pixel readout top-left.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "e40e44c5fa16bef3443c2ac9095acf0035d2e95acb654a07a1a79a45dafc81e0"
+      "railWidth": 248,
+      "sha256": "f168c4069d6fc279c4a612ff63f454ca7af280e834e9f010d86a8650d1c0339e"
     },
     {
       "file": "05-xray-why-view.png",
       "caption": "Why-view for one tile: the planner's candidate table — chosen plan, rejected candidates, and the reason for each.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "e3248e173c35904b5203c76a717dce65bc6f26016748828f28746ca3a6ddc1ec"
+      "railWidth": 248,
+      "sha256": "ae4f82c713a0384bc32efcf12fa947f5d66026f114f42974899cbb2eed4cc666"
     },
     {
       "file": "06-xray-heatmap.png",
       "caption": "Bytes-read heatmap mode: badges bucketed on a log scale, with the legend the overlay itself publishes.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "009d9b6acfec7d70983e01f79bdbe3b218c9b8751a505444254f278c205c5115"
+      "railWidth": 248,
+      "sha256": "75e0fec5f76ae9352ef71c30ed7b7a7e13c28e90847d2e3e62ecceb78e9dd6f5"
     },
     {
       "file": "07-xray-trace-feed.png",
       "caption": "Trace feed: the /traces SSE stream as scrollback — every line a render decision, clickable back to its tile.",
       "tolerance": 2,
       "maxBadFrac": 0.06,
-      "sha256": "131f335bd1457094ed1d2d15f9a02a99761ddd829770770b373a4a73ec66126e"
+      "railWidth": 248,
+      "sha256": "bd14c55f500fdfc906144264621b20b07e5d2f9402faf28c7f4269c59e94f77c"
     },
     {
       "file": "08-authoring-form.png",
       "caption": "openEO authoring canvas (Model B): cards generated from the server's own GET /processes, bands from the vocabulary, plain-language field help.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "9b75d732c3c8c6f85ba040c1608af5d02f042123f6e698b0f0c9d8946398a9cc"
+      "railWidth": 248,
+      "sha256": "691f23daa66ff466d3de4467f99ababf23bfd28210e6dc8d44c78e9e4f3ec065"
     },
     {
       "file": "09-authoring-narrative-advanced.png",
       "caption": "NDVI template loaded: the plain-words narrative of the graph, with a step's advanced (defaulted) fields opened.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "2aeabf3997b249f620c3fc077a9245195b01f9ab4803b5b17fe386aeaaad9449"
+      "railWidth": 248,
+      "sha256": "f8003a50cc2be5bf0da998c401d862e0f26d64ce6dbf46dd2b72c3a147043643"
     },
     {
       "file": "10-authoring-published.png",
       "caption": "Publish flow result: the authored NDVI service appears in the layer rail and serves on the map immediately — no reload.",
       "tolerance": 2,
       "maxBadFrac": 0.02,
-      "sha256": "bbd80cf75725728d4c26a2891dc644cc08952838749be97d6c90de001b324acf"
+      "railWidth": 248,
+      "sha256": "a9c76bdad538bd376dde103137288b6930dbe50d813bb7882cf283e07bb6c745"
     },
     {
       "file": "11-dataset-footprints.png",
       "caption": "Data mode: the catalog's granule cards with engine-rendered thumbnails in the rail, footprints outlined live on the map.",
       "tolerance": 2,
       "maxBadFrac": 0.005,
-      "sha256": "97c924b257b3766cbdaf6134727be8e15a51577ed9c112198455f9427ba895fd"
+      "railWidth": 248,
+      "sha256": "1c9d8a274bbc2835fe84aa89965b7a9dac2b316936304f18cb3cbf7245ad4b91"
     },
     {
       "file": "12-analytics-under-load.png",
       "caption": "Trace analytics under load: rolling p50/p95 render latency, plan mix, and cache hit rate over the session's tiles.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "075a0f7a1a83662abdff2ac482115edb56b8052c4d054ba62694dde77a02f950"
+      "railWidth": 248,
+      "sha256": "088ec88dcfd524deeb029cace06cc89084f92fe8224520a6d80a8f20bdcd9069"
     },
     {
       "file": "13-time-slider-live.png",
       "caption": "Time slider over the Park Fire season, first pass: the scrubbed frame is rendered live — every badge says so, and the analytics card narrates the frame's own plan mix.",
       "tolerance": 2,
       "maxBadFrac": 0.04,
-      "sha256": "81535c20ee2f9af65751c649b1725c3fd71d1aa56be939b686060f711b794e02"
+      "railWidth": 248,
+      "sha256": "cdfde8bb0a3646339b6e7ac688aae976fef1b9ba7bb3257b7901fe2b20b438fc"
     },
     {
       "file": "14-time-slider-cached.png",
       "caption": "The same frame revisited: every tile is a cache hit (same granule, same cache entry — ADR 0015 frame identity), which is why the loop replays smoothly.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
-      "sha256": "df15870b468941ff3dcd88e8feca47fcf10b1f63cf07bc2f6544058d7fdedae0"
+      "railWidth": 248,
+      "sha256": "ee2b4a9ba08a4deee37f989b90144b862b53d03bc816fd60dabacb24e557768c"
+    },
+    {
+      "file": "m01-phone-landing.png",
+      "caption": "Phone tier: the map with the bottom tab bar, the toggles top-right in the dock, the status chip bottom-left.",
+      "tolerance": 2,
+      "maxBadFrac": 0.03,
+      "railWidth": 0,
+      "sha256": "03bc3a6f1edaae661a57af2dfd247b0a12a006b769c1638f04be53083a686e88"
+    },
+    {
+      "file": "m02-phone-layers-sheet.png",
+      "caption": "Phone tier: the layer list as a bottom sheet at its 40% snap over the map.",
+      "tolerance": 2,
+      "maxBadFrac": 0.03,
+      "railWidth": 0,
+      "sha256": "26a6ac8f1fbc2dd0adc2ce9ce173698e968c26265b42bc160185cdf35d2d74f1"
+    },
+    {
+      "file": "m03-phone-data-sheet.png",
+      "caption": "Phone tier: Data mode's catalog in the sheet, an engine thumbnail on the first card.",
+      "tolerance": 2,
+      "maxBadFrac": 0.03,
+      "railWidth": 0,
+      "sha256": "be7bcd387342f66840561bf24b011a95e162565598444e76ec67585cf33ca580"
+    },
+    {
+      "file": "m04-phone-xray.png",
+      "caption": "Phone tier: x-ray badges over the map, the readouts card in the dock strip, the toggles top-right.",
+      "tolerance": 2,
+      "maxBadFrac": 0.03,
+      "railWidth": 0,
+      "sha256": "7f5d47a4ff4dd890994e87737c337c20276168ab9bdf40036ec28b9879f9f36d"
     }
   ]
 }

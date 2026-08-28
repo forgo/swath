@@ -718,15 +718,24 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     });
   }
   if (railElement instanceof SwathRail && railDrawer instanceof SwathDrawer) {
-    railElement.addEventListener("click", (event) => {
-      const item = event
-        .composedPath()
-        .find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset["mode"] !== undefined);
-      if (item && item.dataset["mode"] === appState.view && tier !== "wide") {
-        railDrawer.open = !railDrawer.open;
-        syncInert();
-      }
-    });
+    // Capture phase: this must see the view *before* the rail's own click
+    // handler switches modes — otherwise tapping a new tab opens the sheet
+    // (mode change) and immediately toggles it closed (same-mode tap).
+    railElement.addEventListener(
+      "click",
+      (event) => {
+        const item = event
+          .composedPath()
+          .find(
+            (n): n is HTMLElement => n instanceof HTMLElement && n.dataset["mode"] !== undefined,
+          );
+        if (item && item.dataset["mode"] === appState.view && tier !== "wide") {
+          railDrawer.open = !railDrawer.open;
+          syncInert();
+        }
+      },
+      { capture: true },
+    );
     railElement.addEventListener("swath-mode-change", () => {
       if (tier !== "wide" && railDrawer instanceof SwathDrawer) {
         railDrawer.open = modeHasContent();

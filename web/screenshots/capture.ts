@@ -183,6 +183,11 @@ async function openAuthoringPanel(page: Page): Promise<void> {
   // Author mode (#291): the strip drawer over the map + the inspector.
   await page.locator('swath-rail [part="item"][data-mode="author"]').click();
   await page.locator("swath-authoring-panel .swath-authoring-toggle").click();
+  // The inspector (fields, preview, publish) shows the *selected* step.
+  const chip = page.locator('.swath-authoring-chip[data-chip="s1"]');
+  if ((await chip.count()) > 0 && (await chip.getAttribute("aria-pressed")) !== "true") {
+    await chip.click();
+  }
   await expect(page.locator('[data-step="s1"]')).toBeVisible();
 }
 
@@ -312,7 +317,8 @@ test("x-ray bytes heatmap + trace feed", async ({ page }) => {
     { maxBadFrac: 0.03 },
   );
 
-  await page.getByRole("button", { name: "trace feed" }).click();
+  // Exact: the feed card's header/pause controls are named "… trace feed" too.
+  await page.getByRole("button", { name: "trace feed", exact: true }).click();
   await expect(page.locator(".swath-xray-feed-lines")).toBeVisible();
   await expect(page.locator(".swath-xray-feed-lines li").first()).toBeVisible();
   await capture(
@@ -381,6 +387,8 @@ test("authoring publish: the authored layer serves immediately", async ({ page }
   try {
     // The authored layer lands in the rail and becomes the viewed layer;
     // wait for its tiles before freezing the frame.
+    // Author mode hides the layer list (issue #291): back to Layers to see the row.
+    await page.locator('swath-rail [part="item"][data-mode="layers"]').click();
     const layerButton = page.locator(`swath-layer-item[data-layer="${id}"] [part="row"]`);
     await expect(layerButton).toHaveAttribute("aria-pressed", "true");
     await page.waitForResponse(
@@ -394,11 +402,9 @@ test("authoring publish: the authored layer serves immediately", async ({ page }
       el.scrollTo({ top: 0 });
     });
     await expect(layerButton).toBeVisible();
-    // Publishing leaves the draft (and its preview) on the canvas: the
-    // post-publish re-render re-attaches the preview to a fresh <img>,
-    // so wait for it to decode exactly as shots 08/09 do (issue #270 —
-    // freezing before it lands framed an empty preview).
-    await waitForAuthoringPreview(page);
+    // The frame is Layers mode: the new rail entry (selected) over its
+    // tiles. The draft's preview lives in Author mode, which hides the
+    // layer list (#291) — shots 08/09 carry it.
     await capture(
       page,
       "10-authoring-published.png",
