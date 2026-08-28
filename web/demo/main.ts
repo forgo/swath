@@ -12,6 +12,7 @@ import {
   type ViewMode,
   withAppState,
 } from "../src/app-state.js";
+import { buildCommands } from "../src/commands.js";
 // The entry page's app shell (issue #108). Semantics live in
 // src/view-state.ts; this file only wires them to the DOM:
 //
@@ -45,7 +46,9 @@ import { defineSwathLayerList, SwathLayerList } from "../src/swath-layer-list.js
 import { defineSwathMap, SwathMap } from "../src/swath-map.js";
 import { defineSwathShell, SwathShell } from "../src/swath-shell.js";
 import { SwathButton } from "../src/ui/button.js";
+import { SwathCommandPalette } from "../src/ui/command-palette.js";
 import { SwathDrawer } from "../src/ui/drawer.js";
+import { createSwathEvent } from "../src/ui/events.js";
 import { SwathHudDock } from "../src/ui/hud-dock.js";
 import { SwathRail } from "../src/ui/rail.js";
 import { SwathStatusBar, SwathStatusCell } from "../src/ui/status-bar.js";
@@ -74,6 +77,7 @@ SwathButton.define();
 SwathRail.define();
 SwathHudDock.define();
 SwathDrawer.define();
+SwathCommandPalette.define();
 SwathStatusBar.define();
 SwathStatusCell.define();
 defineSwathShell();
@@ -630,6 +634,67 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
 
   if (shareElement) {
     wireShare(shareElement, snapshot);
+  }
+
+  // The command palette (issue #292): built from live state each time it
+  // opens — layers, the other modes, the map toggles, share, and in Data
+  // mode a jump to any listed granule. ⌘K / Ctrl-K anywhere, or the top
+  // bar's button; Esc restores focus to where it was.
+  const palette = document.querySelector("swath-command-palette");
+  if (palette instanceof SwathCommandPalette) {
+    const openPalette = (): void => {
+      palette.commands = buildCommands({
+        layers: panel.layers,
+        activeLayer: appliedLayer,
+        mode: appState.view,
+        xray: map.hasAttribute("xray"),
+        compareAvailable: map.querySelector(".swath-map-compare-toggle:not([hidden])") !== null,
+        granules:
+          datasetElement instanceof SwathCatalog && datasetElement.selected !== ""
+            ? datasetElement.granules.map((granule) => ({
+                dataset: datasetElement.selected,
+                granule,
+              }))
+            : undefined,
+        setLayer: (id) => {
+          map.setLayer(id).catch(() => undefined);
+        },
+        setMode,
+        toggleXray: () => {
+          if (map.hasAttribute("xray")) {
+            map.removeAttribute("xray");
+          } else {
+            map.setAttribute("xray", "");
+          }
+        },
+        toggleCompare: () => map.toggleCompare(),
+        zoomToData: () => map.zoomToData(),
+        share: () => shareElement?.click(),
+        zoomToGranule: (_dataset, granule) => {
+          if (datasetElement instanceof SwathCatalog) {
+            datasetElement.dispatchEvent(
+              createSwathEvent("swath-granule-zoom", {
+                dataset: _dataset,
+                id: granule.id,
+                bbox: granule.bbox,
+              }),
+            );
+          }
+        },
+      });
+      palette.show();
+    };
+    document.querySelector("#swath-search")?.addEventListener("click", openPalette);
+    window.addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        if (palette.open) {
+          palette.close();
+        } else {
+          openPalette();
+        }
+      }
+    });
   }
 }
 

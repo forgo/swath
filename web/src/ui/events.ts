@@ -63,6 +63,8 @@ export interface SwathEventMap {
   "swath-drawer-close": { reason: "esc" | "scrim" | "swipe" | "select" | "outside" };
   /** The rail's mode switcher picked a mode (`<swath-rail>`). */
   "swath-mode-change": { mode: string };
+  /** A palette command was chosen (`<swath-command-palette>`, #292). */
+  "swath-command": { id: string };
   /** The authoring panel's selected step changed (the `sel=` link, #291). */
   "swath-author-select": { sel: string };
   // --- The DAG canvas (issue #290): interaction only, no graph semantics ---
