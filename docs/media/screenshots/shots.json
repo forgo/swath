@@ -1,7 +1,7 @@
 {
   "schema": "swath-screenshots/1",
-  "git_sha": "a0d62f39907d1fefc2c4ae2951075ce8792e7d48",
-  "captured": "2026-08-28T18:15:55.984Z",
+  "git_sha": "53f0f87062c1218d06d0f58ce421d0ed9bec37d4",
+  "captured": "2026-08-29T08:36:23.851Z",
   "viewport": {
     "width": 1528,
     "height": 928,
@@ -15,7 +15,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "753b4eb07de25f53b7b4d51239b2d3817f027b69769a8ac4d89d0c6c794e6ee5"
+      "sha256": "06c6ea11f3392f646f49393395284acd8fd8da0f0bea84ed3da3e6581301820e"
     },
     {
       "file": "02-ndvi-colormapped.png",
@@ -23,7 +23,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "147606efa7c12872ffc638f44f16ec51735cc0a476a19414dd59261b2ea9c1d9"
+      "sha256": "8aae1499a6dd86fcde40672b75618c6be1d4166d6168ddbad0645a3c782df7de"
     },
     {
       "file": "03-truecolor-live.png",
@@ -31,7 +31,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "e6218f5affee3e08b3c1617b1a7e51c82520e2f3827c174690434c06cf58c6d5"
+      "sha256": "97c29b1c82fc54446a4e74cc2094135d85c335b8abbcb4ff220d99876aa562b6"
     },
     {
       "file": "04-xray-decisions.png",
@@ -39,7 +39,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "be00c9692bec4d1e11197b4238776282667fdbe2abed60b13e9da087fa0912c2"
+      "sha256": "0a221c8b76416dac154702fdc87380941ea771c34d93b28d4a9414a337621c5d"
     },
     {
       "file": "05-xray-why-view.png",
@@ -47,7 +47,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "6598de48bf7df8e62880e29a9567cd4dff19fb9f2d4dd4b29dc93a4331229684"
+      "sha256": "5ffed0e8ba07b3d74712540e95202bd52d51ed7f6983e4874b08bf03a9f16626"
     },
     {
       "file": "06-xray-heatmap.png",
@@ -55,7 +55,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "b6afe881dd00acea53aacb41635fa3329bfc9384754d70b0e6e5cf59e5496543"
+      "sha256": "3400a15543c8401a2c516ca0c4d388c2e7cc83aed42a58b49b7719db970c4b11"
     },
     {
       "file": "07-xray-trace-feed.png",
@@ -63,7 +63,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.06,
       "railWidth": 248,
-      "sha256": "b6581447d851e1853c629eeeab7f74071a8064532635defcd68d4cd65d00557f"
+      "sha256": "02f1e809eef7c7c0b279c4d132ef50b15530f049b6cc8066b14737cbf239e231"
     },
     {
       "file": "08-authoring-form.png",
@@ -87,15 +87,31 @@
       "tolerance": 2,
       "maxBadFrac": 0.02,
       "railWidth": 248,
-      "sha256": "90c232ce13924bc208f6085476ee385dc0dcd2294de94223d073911810d01fdc"
+      "sha256": "9dbdde7780b3f99d71cef14b38eee88c96ba5589528384c8e49212a6d1594b74"
     },
     {
       "file": "15-change-detection.png",
-      "caption": "Change detection (ADR 0022): two dated branches of one collection joined by a subtract resolver — NDVI(later) − NDVI(earlier), previewed before publishing.",
+      "caption": "Change detection: two dated branches of one collection joined by a subtract — NDVI(later) − NDVI(earlier), previewed before publishing.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
       "sha256": "dba0e380d7a0364f671d2940acf150284b1afb078e49608268a27767ef0de4a6"
+    },
+    {
+      "file": "16-compare-swipe.png",
+      "caption": "Compare swipe, layer against layer: NDVI left, true color right of one draggable handle — the same handle works date-vs-date on a time series, and its position rides in the share link.",
+      "tolerance": 2,
+      "maxBadFrac": 0.005,
+      "railWidth": 248,
+      "sha256": "e31277586aac52e3b835048d5cc6295086ef2c1f5a62d5b3ac665c7a3a608952"
+    },
+    {
+      "file": "17-command-palette.png",
+      "caption": "Command palette (⌘K / Ctrl-K): type a layer, mode, or action and jump — the whole shell is reachable from the keyboard.",
+      "tolerance": 2,
+      "maxBadFrac": 0.005,
+      "railWidth": 248,
+      "sha256": "199d2a84731cf90649f97cf8938ee164cf48003f6d5f13ef0f399a50188ca82e"
     },
     {
       "file": "11-dataset-footprints.png",
@@ -111,7 +127,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "b0a45034f5bee6f39a7162d5d5220ede6f7e0157cfacf9d620c0c4ea06698889"
+      "sha256": "7772ec8496dce4c1785ef378676eee9d6f5bab43735ad2e69b73e4a207fe9049"
     },
     {
       "file": "13-time-slider-live.png",
@@ -119,15 +135,15 @@
       "tolerance": 2,
       "maxBadFrac": 0.04,
       "railWidth": 248,
-      "sha256": "ec30e6ce74cf384f4f0a6982cf91173f6a576a7f5624a200426761f7b773694e"
+      "sha256": "df1ec4c2e6109dd81f5b54fb80b95edac5162ac0f4b44ba650cfc721fbc5c5fc"
     },
     {
       "file": "14-time-slider-cached.png",
-      "caption": "The same frame revisited: every tile is a cache hit (same granule, same cache entry — ADR 0015 frame identity), which is why the loop replays smoothly.",
+      "caption": "The same frame revisited: every tile is a cache hit (same granule, same cache entry), which is why the loop replays smoothly.",
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "f8def109626107e8e0e9e34b9574af3331d5a0ed526627f13d5d9ab826f59df4"
+      "sha256": "372050e4685ddbfa1960bfe3811bf69d70e6702f91e450ccd3c840a3b3ad26ba"
     },
     {
       "file": "m01-phone-landing.png",
@@ -135,7 +151,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 0,
-      "sha256": "277b23854e8bce157eb913fd7e02eb6d05c37c2e98274594282a28eb39ad922c"
+      "sha256": "952fcef92afda156968a8b3bad6db1657e5ee9f34f882ffae39ee6fe2add5b8d"
     },
     {
       "file": "m02-phone-layers-sheet.png",
@@ -159,7 +175,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 0,
-      "sha256": "291aa6052059652b321dfafe41f57dc4d57b322a689a6cf90375c2d592ef40a6"
+      "sha256": "3fdc8229babe4a7443ec012f1ed1fbfe6623b75ab1695aee976e3a9cf9796fe1"
     }
   ]
 }
