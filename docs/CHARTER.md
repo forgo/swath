@@ -1,17 +1,16 @@
 # Swath — Project Charter
 
-*Working document. v0.4 — August 2026. Vision, principles, phases; delivery status lives in
-`ROADMAP.md`, positioning in `PITCH.md`, the requirements in `REQUIREMENTS.md`. Where this
-charter and an ADR disagree, the ADR wins.*
+*Working document. v0.5 — August 2026. The narrative around the north star: why now, the
+wedge, who it's for, how we build, the phases, positioning. The mission sentence, the metric and
+the pillars live in `REQUIREMENTS.md` §§1, 3, 5 and are not restated here; delivery status lives
+in `ROADMAP.md`. Where this charter and an ADR disagree, the ADR wins.*
 
 ---
 
 ## 1. What Swath is, in one sentence
 
-An open-source, cloud-native geospatial platform where **satellite data comes in and is
-immediately available on a map**, and where data scientists **tap the live data flow, derive
-new products, and publish them the same way** — from a single pane of glass that hides the
-plumbing.
+The sentence is [`REQUIREMENTS.md`](REQUIREMENTS.md) §1; the README opens with it, and a docs
+gate keeps the two identical. Everything below is the story around that sentence.
 
 ## 2. Why this, why now
 
@@ -38,9 +37,9 @@ Swath; everything else we compose, bind, or keep as a validation oracle (§8).
 
 ## 4. North-star metric
 
-**Ingest-to-pixel latency:** seconds from *"a new granule arrives"* to *"a correct tile is
-visible on the map"* — measurable, stopwatch-demoable, unifying every subsystem under one
-number the glass box reports and the tests assert against.
+**Ingest-to-pixel latency**, defined in [`REQUIREMENTS.md`](REQUIREMENTS.md) §3 —
+stopwatch-demoable, unifying every subsystem under one number the glass box reports and the
+tests assert against.
 
 ## 5. Who it's for
 
@@ -61,26 +60,18 @@ assert against the same trace it renders.
 
 ## 7. The three pillars + a frontier
 
-**Pillar 1 — Ground-segment ingest spine.** Event-driven: a granule lands and is automatically
-processed, cataloged, tileable — no human in the loop; cloud-optimized data registers directly,
-and decades of NetCDF/HDF/GRIB archives are absorbed **without a rewrite** via virtual
-references. Measured by ingest-to-pixel latency.
-
-**Pillar 2 — Data-scientist product loop (the wedge, productized).** Author a product as an
-openEO graph; the **materialization engine** lowers it to Render IR and serves it live via
-OGC API - Tiles, the **cost-aware planner** (the novel heart) choosing live / overview / cache
-per layer × zoom under an explicit storage-vs-latency budget — showing its work in the x-ray
-overlay.
-
-**Pillar 3 — Single-pane control plane.** The "make STAC disappear" layer: manage **datasets**
-and **layers**; Swath writes the pgstac catalog underneath. The public contract is the OGC API
-family — a coherent single pane, instantly interoperable; format-plural by design (COG + Zarr +
-GeoParquet, raster *and* vector) — a platform, not a raster viewer.
-
-**Frontier — Geo-embeddings as a first-class product.** An embedding is *just another product
-the DS loop can generate*: run a foundation model over incoming granules and the platform gains
-semantic/similarity search over the same catalog. Architect for it now (a product type + a
-vector index); ship it later.
+[`REQUIREMENTS.md`](REQUIREMENTS.md) §5 names them; this section carries only what that list
+leaves out. **Pillar 1, the ingest spine:** cloud-optimized data registers directly, and decades
+of NetCDF/HDF/GRIB archives are absorbed **without a rewrite** via virtual references.
+**Pillar 2, the product loop — the wedge (§3) productized:** the **materialization engine**
+lowers an openEO graph to Render IR and serves it live over OGC API - Tiles; the **cost-aware
+planner** (the novel heart) chooses live / overview / cache per layer × zoom under an explicit
+storage-vs-latency budget, showing its work in the x-ray overlay. **Pillar 3, the control
+plane:** Swath writes the pgstac catalog underneath datasets and layers; format-plural by design
+(COG + Zarr + GeoParquet, raster *and* vector) — a platform, not a raster viewer. **The
+frontier, geo-embeddings:** an embedding is *just another product the loop can generate* — run
+a foundation model over incoming granules and the same catalog gains semantic search.
+Architect for it now (a product type + a vector index); ship it later.
 
 ## 8. Architecture — build vs. compose
 
@@ -131,8 +122,7 @@ embedding model — decide when Phase 4 nears.
 ## 12. Glossary
 
 **Materialization** — the live-vs-overview-vs-cache decision for how a tile gets produced.
-**Ingest-to-pixel** — the north-star metric: arrival of a granule → visible correct tile.
-**Geo-embeddings** — learned vectors from a foundation model over imagery, enabling
+**Ingest-to-pixel** — the north-star metric (§4). **Geo-embeddings** — learned vectors from a foundation model over imagery, enabling
 semantic/similarity search. (STAC, COG, Zarr, GeoParquet, and the OGC APIs are the ecosystem's
 standard vocabulary; their specs are the reference.)
 
@@ -144,3 +134,16 @@ https://geozarr.org/ · VirtualiZarr — https://virtualizarr.readthedocs.io/ ·
 Community Standard — https://www.ogc.org/announcement/openeo-api-ogc-community-standard/ ·
 NASA VEDA — https://developmentseed.org/projects/nasa-impact-veda/ · "Earth Embeddings as
 Products" — https://arxiv.org/html/2601.13134v1
+
+## 14. Positioning & monetization
+
+Open-core, as [`REQUIREMENTS.md`](REQUIREMENTS.md) §9 states; the commercial layer on top is
+managed/hosted Swath (the single pane + materialization SLAs), enterprise features (SSO/SAML,
+RBAC, audit, multi-tenancy), government readiness, premium connectors and support. The model
+mirrors Development Seed around eoAPI and Earthmover's Arraylake around Icechunk, but the
+commercial wedge is distinct: the **managed single pane + the materialization guarantees** —
+precisely the part hardest to operate well. For an EO-products government contractor, Swath is
+the productized platform layer it most needs, layering onto an existing pgstac/TiTiler
+deployment at near-zero migration cost and owning what "just orchestrate what exists" misses: a
+**standards-native**, **embedding-aware** loop plus the cost-aware materialization brain that
+turns "assemble the tilers" into an actual product.

@@ -29,11 +29,10 @@ use std::collections::BTreeMap;
 
 use super::read_repo;
 
-/// The measured documents and the marker keys each must carry. PITCH and
-/// ROADMAP quote no figure today but stay under the naked-literal scan —
-/// a headline number can only enter them through a marker.
-const DOCS: [(&str, &[&str]); 11] = [
-    ("docs/PITCH.md", &[]),
+/// The measured documents and the marker keys each must carry. ROADMAP
+/// quotes no figure today but stays under the naked-literal scan — a
+/// headline number can only enter it through a marker.
+const DOCS: [(&str, &[&str]); 10] = [
     ("docs/ROADMAP.md", &[]),
     (
         "README.md",
