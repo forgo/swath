@@ -1,44 +1,31 @@
 # Swath — Roadmap
 
-_Working document. August 2026. The canonical record of what has shipped, what is deliberately
-**deferred** (the single deferral inventory — every "future work" note points here), and what
-is **parked for M7+** (proposed order; a maintainer decision). The regression rule: zero
-TODO/FIXME in the tree — a deferral is a recorded decision here, never a code comment IOU.
-Where ADR-governed, the ADR's reopen condition wins ([`decisions/`](decisions/)); the phase
-plan is [`CHARTER.md`](CHARTER.md) §10, the open-questions ledger
-[`ARCHITECTURE.md`](ARCHITECTURE.md) §16._
+_Working document. August 2026. Three things, kept apart: what has shipped (§1, one line per
+milestone with its evidence), what is deliberately **deferred** (§2 — the single deferral
+inventory; every "future work" note in the tree points here and nowhere else), and what is
+**next** (§3 — open candidates only). The regression rule: zero TODO/FIXME in the tree — a
+deferral is a recorded decision here, never a code comment IOU. Where ADR-governed, the ADR's
+reopen condition wins ([`decisions/`](decisions/)); the phase plan is
+[`CHARTER.md`](CHARTER.md) §10._
 
 ---
 
 ## 1. Shipped
 
-**M0 — Foundation scaffold**: `ENGINEERING.md` transcribed into a real repo. **M1 — Prototype
-0001: referencer bake-off**: concluded ADR 0006 with evidence. **M2 — Walking skeleton**: HLS
-COG in, correct tile out via OGC API - Tiles, NDVI on the fly, viewer + x-ray v0 — validated
-against the GDAL oracle. **M3 — Materialization brain and legacy path**: the cost-aware
-planner, content-keyed write-through cache, virtual-reference serving of VIIRS, the openEO
-bounded profile (ADR 0010). **M4 — Color, measure, ship a container**: colormaps, bench + load
-baselines, the typed e2e harness, ADR 0012, the GHCR one-liner. **M5 — Product surface and
-evidence**: landing page, browsing, the authoring panel, trace analytics, screenshots,
-diagrams, `PERFORMANCE.md`, the `v0.1.0-alpha.1` prerelease. (M0-M5 complete.)
-**M6 — Legibility: the docs tell the truth** (in progress): rewriting the project's
-self-description around the now-existing evidence and killing every audit-flagged drift
-(#117-#126: README, QUICKSTART, operator guide, COMPARISON, the TiTiler head-to-head,
-ARCHITECTURE/EXTENDING/CHARTER/ENGINEERING/REQUIREMENTS reconciliation, the screenshot suite,
-this roadmap). **M7–M8**: the time dimension, overview generation, the dataset API, and the
-Icechunk interop — each carries its evidence on its §3 item below. **M9 — `run_udf`: user
-code at live latency** ([ADR 0018](decisions/0018-run-udf-sandboxed-wasm.md); complete, the
-public deploy deferred by maintainer decision 2026-08-25 — item 8). Exit criteria, each with
-its committed evidence: *determinism* — byte-identical, fuel-reproducible execution
-(`crates/adapters/swath-udf-wasmtime/tests/determinism.rs`, `engine_gate.rs`, the #259
-golden set); *the tile path under a fuel budget* — a `run_udf` NDVI byte-identical to band
-math with its cost in the trace (`crates/swath-api/tests/udf_tiles.rs`, #265); *fuel-bomb
-refusal* — `fuel_exhaustion_is_a_pinned_rfc7807_problem` (same file) and `POST /result`'s
-`ProcessGraphComplexity` (#267, `crates/swath-api/tests/openeo_result.rs`); *load under the
-ADR 0012 guard* — the UDF storm and the fuel bomb with `/healthz` + SSE probes
-([`PERFORMANCE.md`](PERFORMANCE.md) §9, [`perf/load-udf-baseline.md`](perf/load-udf-baseline.md),
-#268); *deployability* — the read-only recipe exercised end to end
-([`deploy/README.md`](deploy/README.md), #212).
+| Milestone | Delivered | Evidence |
+|---|---|---|
+| **M0** Foundation scaffold | `ENGINEERING.md` as a real repo; the CI-mirrored `just check` gate | ADR 0007 |
+| **M1** Referencer bake-off | Python vs pure-Rust virtual references, decided on evidence | `prototypes/0001`, ADR 0006/0008 |
+| **M2** Walking skeleton | HLS COG in, correct tile out over OGC API - Tiles; NDVI on the fly; viewer + x-ray v0 | GDAL oracle goldens (`tests/oracle/`) |
+| **M3** Materialization brain, legacy path | Cost-aware planner, content-keyed write-through cache, VIIRS served through virtual references, the openEO bounded profile | `design/materialization-planner.md`, ADR 0010 |
+| **M4** Colour, measure, ship a container | Colormaps; bench + load baselines; the typed e2e harness; the GHCR one-liner | ADR 0012, `perf/` |
+| **M5** Product surface and evidence | Landing, browsing, authoring panel, trace analytics, screenshots, diagrams, `PERFORMANCE.md`; `v0.1.0-alpha.1` | `media/`, `RELEASING.md` |
+| **M6** Legibility | The self-description rewritten around the evidence; the docs gates (`docs_check`) that keep it true | `crates/swath-cli/src/docs_check/` |
+| **M7** Time and overviews | Frame selection via `datetime=`; `swath materialize` pyramids | ADR 0015, #180/#181/#183 |
+| **M8** Ship the parts | Five published crates; Icechunk interop, byte-identical and traced | ADR 0016/0017/0020, #190–#193 |
+| **M9** `run_udf` | User code as sandboxed, fuel-metered WASM in the tile path; deterministic, load-tested, deployable read-only | ADR 0018, `PERFORMANCE.md` §9, `deploy/README.md` |
+| **M10** UX product structure | One shell, shadow-DOM primitives on tokens, rail modes, palette, catalog thumbnails, canvas primitives, touch parity | ADR 0021, `design/ui-system.md` |
+| **M11** Earn the DAG | `merge_cubes` at the bounded profile; the canvas a constrained DAG; change detection its first product | ADR 0022, `design/authoring-dag.md` |
 
 ## 2. Deferral inventory (canonical)
 
@@ -50,10 +37,10 @@ with a named revisit condition* — not forgotten.
 |---|---|---|---|---|
 | 1 | **WebP tile encoding** | `crates/swath-render/src/ir.rs` (`TileFormat`) | Every extra `image` codec is supply-chain surface; PNG serves every current consumer | A consumer actually needs WebP |
 | 2 | **Cache GC of orphaned entries** | `crates/swath-core/src/cache.rs`, `ARCHITECTURE.md` §16.3 | Content-derived keys never go stale, only unreachable; no current storage pressure | Measured storage growth in a real deployment |
-| 3 | **Partial-mosaic invalidation** | `crates/swath-core/src/cache.rs`, `docs/design/materialization-planner.md` §6 | Single-granule serving makes the whole-version bump exactly right | Multi-granule mosaic layers land, plus measured re-render cost |
-| 4 | **Learned planner cost model** | `docs/design/materialization-planner.md` §6, `crates/swath-planner/src/lib.rs` | The x-ray contract (R4) demands explainable choices; the Trace already carries the training pairs | A Trace corpus shows the fixed estimate constants materially wrong |
-| 5 | **Budget-aware (planner-owned) write policy** | `docs/design/materialization-planner.md` §6, `crates/swath-render/src/tiler.rs` | Write-through is unconditional; conditional caching earns nothing yet | Real storage pressure on the tile cache |
-| 6 | ~~**Overview *generation***~~ — **closed by #183**: `swath materialize` + `crates/adapters/swath-pyramid-objectstore` | `docs/design/materialization-planner.md` §6, `ARCHITECTURE.md` §10 | — | — |
+| 3 | **Partial-mosaic invalidation** | `crates/swath-core/src/cache.rs` | Single-granule serving makes the whole-version bump exactly right | Multi-granule mosaic layers land, plus measured re-render cost |
+| 4 | **Learned planner cost model** | `crates/swath-planner/src/lib.rs` | The x-ray contract (R4) demands explainable choices; the Trace already carries the training pairs | A Trace corpus shows the fixed estimate constants materially wrong |
+| 5 | **Budget-aware (planner-owned) write policy** | `crates/swath-render/src/tiler.rs` | Write-through is unconditional; conditional caching earns nothing yet | Real storage pressure on the tile cache |
+| 6 | ~~**Overview *generation***~~ — **closed by #183**: `swath materialize` + `crates/adapters/swath-pyramid-objectstore` | `ARCHITECTURE.md` §10 | — | — |
 | 7 | ~~**Time dimension**~~ — **consumed by [ADR 0015](decisions/0015-time-dimension-frame-selection.md)**; serving shipped by #180, graph-side windows by #181 | the ADR, `crates/swath-render/src/process.rs` | — | The ADR's reopen/supersede conditions |
 | 8 | **Non-WebMercator target TMS / multi-CRS mosaics** | `crates/swath-render/src/tiler.rs` | `WebMercatorQuad` is the only TMS every client asks for | A client needs another TMS, or cross-CRS mosaics land |
 | 9 | **COG metadata caching** | `crates/adapters/swath-source-cog/src/lib.rs` | Amortizing header/IFD walks changes no observable result | `describe` overhead visible at realistic asset counts |
@@ -71,6 +58,8 @@ with a named revisit condition* — not forgotten.
 | 21 | **Cross-CRS / cross-grid join branches** | [ADR 0022](decisions/0022-two-cube-join-merge-cubes.md) | Same collection = same grid; no resampling node in the graph yet | A second collection must join the first |
 | 22 | **N > 2 joins** | [ADR 0022](decisions/0022-two-cube-join-merge-cubes.md) | Two `merge_cubes` in series cover the foreseeable products | The first three-input product |
 | 23 | **Per-branch `datetime=`** | [ADR 0022](decisions/0022-two-cube-join-merge-cubes.md) | Intersecting every branch keeps "which frames changed" in one parameter | The device pass finds it too restrictive, with trace evidence |
+| 24 | **Splitting `process.rs`/`ir.rs` by compiler stage** | `crates/swath-render/src/process.rs` | Reviewability only; `tests/process_compiler.rs` is the spec | A feature forces a new stage |
+| 25 | **`ci.yml` as reusable workflows** | `.github/workflows/ci.yml` | One 24-job file is readable; splitting buys nothing until a second caller exists | A second workflow needs the same jobs |
 
 **ADR-governed deferrals** carry their reopen conditions in the ADR, listed only for
 completeness: WASM plug-ins and sidecar-RPC adapters (ADR 0013); openEO
@@ -93,52 +82,37 @@ would also change row 3's story) — and the native-Zarr `RasterSource` adapter
 **Revisit when:** a user needs versioned/transactional layers surfaced, or the native Zarr
 adapter lands.
 
-## 3. M7+ candidates (proposed order — maintainer decision pending)
-
-Everything parked for after M6, in proposed order — **not final until the maintainer approves
-it** (the PR that introduced this file carries the approval checkbox).
+## 3. Next (open candidates, proposed order — a maintainer decision)
 
 1. **#156 — openeo `save_result` profile-note drift** (smallest truth-telling fix).
 2. **#139 — linux/arm64 GHCR manifest** (the one-liner fails natively on Apple Silicon).
-3. **Time dimension** (row 7). *Decided by ADR 0015; shipped in #180/#181.*
-4. **Overview generation** (row 6). *Shipped by #183.*
-5. **#151 — authoring UX rethink** (guided flow, live preview-before-publish).
-6. **Dataset-creation API** — completes the "single pane of glass" claim.
-7. **Auth (OIDC/RBAC)** — Charter Phase 3; gates multi-tenancy, *writable* demos (maintainer
+3. **M12 — UX design language**: theme values, typography, motion, light/high-contrast —
+   mechanically a token-value swap (ADR 0021's freeze). **M13 — Consolidate**: one source of
+   truth per fact across docs, tests, crates and tooling (the milestone's issues carry the
+   invariant contract).
+4. **Dataset-creation API** — completes the "single pane of glass" claim.
+5. **Auth (OIDC/RBAC)** — Charter Phase 3; gates multi-tenancy, *writable* demos (maintainer
    decision 2026-08-12), the openEO conformance class.
-8. **Hosted public demo** — read-only ships auth-less on `--read-only` (#198); a writable
-   demo needs auth (7) and the ops learnings (9). *Amendment (maintainer, 2026-08-25, #212):
-   a read-only demo is not gated on auth — its recipe (`--read-only`, the UDF module store,
-   TLS, per-IP rate limits, preview behind conservative limits) shipped and was exercised end
-   to end in [`deploy/README.md`](deploy/README.md); the hosted URL itself is re-parked to
-   the auth era — the maintainer picks a host when (7) lands, and the CI-tested one-liner
-   stays the demo until then.*
-9. **Performance beyond the laptop** — the gaps `PERFORMANCE.md` §10 declines to claim. The
-   #212 recipe run's ops learnings (`deploy/README.md`, findings) are the first input.
-10. **Cache operations bundle** (rows 2, 3, 5) — real together, with mosaics and storage
-    pressure.
-11. **OGC API - EDR** — rides on the time dimension (3).
-12. **OGC API - Records** — wants real dataset extents (row 15).
-13. **OGC API - Features** — vector/GeoParquet.
-14. **OGC API - Maps** — lowest-demand surface.
-15. **Icechunk adapter** (above). *Interop executed in M8 per ADR 0016/0017: refs committed
-    (#191) and tiles served back from a commit, byte-identical and traced (#193); only the
-    versioned-layer product UX remainder stays demand-triggered.*
-16. **Engine breadth bundle** (rows 8, 9, 10) — demand-triggered.
-    *UDF operational deferrals (ADR 0018 §v2): halo/f32 ABI v2, Python UDFs, module-store GC,
-    planner fuel feedback, `Module::serialize` cache — demand-triggered with it.*
-17. **WebP** (row 1) — deliberately cheap late.
-18. **Learned planner cost model** (row 4) — needs a real-operation Trace corpus.
-19. **Embeddings frontier** (Charter Phase 4) — the biggest bet, deliberately last.
+6. **Hosted public demo** — the read-only recipe shipped and was exercised end to end
+   ([`deploy/README.md`](deploy/README.md), #212); the hosted URL is parked to the auth era —
+   the maintainer picks a host when (5) lands, and the CI-tested one-liner stays the demo until
+   then (maintainer, 2026-08-25).
+7. **Performance beyond the laptop** — the gaps `PERFORMANCE.md` §10 declines to claim; the
+   #212 run's ops findings are the first input.
+8. **Cache operations bundle** (rows 2, 3, 5) — real together, with mosaics and storage
+   pressure.
+9. **OGC API - EDR** — rides on the time dimension (ADR 0015).
+10. **OGC API - Records** — wants real dataset extents (row 15).
+11. **OGC API - Features** — vector/GeoParquet.
+12. **OGC API - Maps** — lowest-demand surface.
+13. **Versioned-layer product UX** — the Icechunk remainder (§2): time-travel surfacing,
+    transactional multi-granule updates, the native-Zarr `RasterSource` adapter.
+14. **Engine breadth bundle** (rows 8, 9, 10) — demand-triggered. *UDF operational deferrals
+    (ADR 0018 §v2): halo/f32 ABI v2, Python UDFs, module-store GC, planner fuel feedback,
+    `Module::serialize` cache — demand-triggered with it.*
+15. **WebP** (row 1) — deliberately cheap late.
+16. **Learned planner cost model** (row 4) — needs a real-operation Trace corpus.
+17. **Embeddings frontier** (Charter Phase 4) — the biggest bet, deliberately last.
 
-Inventory rows without a numbered entry (11–16) are demand-triggered maintenance: scheduled
-when their revisit trigger fires, not by milestone.
-
-**M10–M12 (maintainer, 2026-08-26 — the UX round, ahead of items 7–8):** **M10 — UX product
-structure** (ADR 0021, `design/ui-system.md`): one shell with the map always present, shadow-DOM
-primitives on design tokens, rail modes, status bar, HUD dock, command palette, catalog with
-engine-rendered thumbnails, DAG canvas primitives, touch parity. **M11 — Earn the DAG**: a typed
-two-cube join (`merge_cubes`, narrowed) in the compiler so the authoring canvas becomes a
-constrained DAG and change detection is its first product; design note + ADR first (#294).
-**M12 — UX design language**: theme values, typography, motion, light/high-contrast — mechanically
-a token-value swap. Item 5 (#151) is consumed by M10/M11; deck.gl stays out (ADR 0005).
+Inventory rows without a numbered entry are demand-triggered maintenance: scheduled when their
+revisit trigger fires, not by milestone. deck.gl stays out (ADR 0005).
