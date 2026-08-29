@@ -24,7 +24,14 @@ dir=target/e2e
 # container runs as uid 65534 (local-dev-only bind mount, never real infra).
 rm -rf "$dir" && mkdir -p "$dir/store/drop" "$dir/cache" "$dir/udf"
 chmod 777 "$dir/cache" "$dir/udf"
-docker compose build swath
+# A prebuilt image (#333: CI compiles the workspace once, natively, under
+# the cargo cache and hands the runtime image in as `SWATH_IMAGE`) skips
+# the cold in-Docker build; a laptop without one builds as before.
+if [ -n "${SWATH_IMAGE:-}" ]; then
+    echo "swath: using prebuilt image $SWATH_IMAGE"
+else
+    docker compose build swath
+fi
 start=$(date +%s)
 docker compose up -d --wait
 echo "stack healthy in $(( $(date +%s) - start ))s (pull/start -> all healthchecks green)"

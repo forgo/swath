@@ -14,6 +14,10 @@ services:
   # Honesty note: minio is topology (§15) — the store root here is the local
   # bind mount; pointing store-root at s3:// is exercised elsewhere.
   swath:
+    # `SWATH_IMAGE` (#333) names a prebuilt image — CI's stack-image
+    # artifact — and stack-up.sh then skips the build; unset, the stack
+    # builds the image from this checkout as it always has.
+    image: ${SWATH_IMAGE:-swath:e2e-local}
     build: .
     command:
       ["serve", "--config", "/app/config/swath.toml"]

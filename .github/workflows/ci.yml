@@ -342,6 +342,53 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run test
 
+  # The e2e stack image, built ONCE per run (#333): the web bundle and the
+  # release binary compile natively under the cargo cache (rust-cache keys
+  # on Cargo.lock and this job — a warm run recompiles only what changed),
+  # the Dockerfile's runtime stage wraps the prebuilt binary in seconds, and
+  # the image travels to the e2e jobs as an artifact. Before this, e2e and
+  # e2e-web each ran a cold `cargo build --release` inside Docker (464 s and
+  # 343 s on run 33201072681), in parallel, on every push.
+  stack-image:
+    needs: changes
+    if: needs.changes.outputs.stack == 'true' || needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tools: "none"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      # The same two commands a release build runs (`just build-full`): the
+      # UI bundle, then the binary that embeds it.
+      - run: just build-full
+      - name: Bake the runtime image around the prebuilt binary
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp target/release/swath dist/swath
+          docker build --build-arg SWATH_BINARY_STAGE=prebuilt -t swath:ci .
+          docker save swath:ci | zstd -T0 -3 -o swath-image.tar.zst
+          ls -l swath-image.tar.zst
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stack-image
+          path: swath-image.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+
   # The compose-stack e2e (R8): builds the swath image, brings up the full
   # stack (swath + pgstac + MinIO), and exercises the binary end to end —
   # landing page, golden-tile oracle match (pdiff), trace header + SSE.
@@ -349,14 +396,20 @@ jobs:
   # and nextest for the catalog integration suite, which runs first (it only
   # needs the pgstac service, so it fails fast before the image build).
   e2e:
-    needs: changes
+    needs: [changes, stack-image]
     if: needs.changes.outputs.stack == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      SWATH_IMAGE: swath:ci
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: stack-image
+      - run: zstd -d -c swath-image.tar.zst | docker load
       - uses: ./.github/actions/setup-rust
         with:
           tools: "nextest"
@@ -374,14 +427,20 @@ jobs:
   # docker stack and node, hence its own job spanning the stack and web
   # filters. No Rust toolchain: the bring-up is docker+curl only.
   e2e-web:
-    needs: changes
+    needs: [changes, stack-image]
     if: needs.changes.outputs.stack == 'true' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      SWATH_IMAGE: swath:ci
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: stack-image
+      - run: zstd -d -c swath-image.tar.zst | docker load
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           package_json_file: web/package.json
