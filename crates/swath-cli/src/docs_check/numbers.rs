@@ -18,7 +18,7 @@
 //!   grep-proof, mechanized: re-typing a headline number by hand anywhere
 //!   in the measured docs fails the gate.
 //!
-//! Rendering rules here must match the `just perf-doc` recipe exactly
+//! Rendering rules here must match `tests/perf/perf_doc.py` (`just perf-doc`) exactly
 //! (both are half of one contract; a divergence fails on the next
 //! regeneration). Legitimate historic figures — prototype 0001's quoted
 //! claims, which are provenance and must never track current artifacts —
