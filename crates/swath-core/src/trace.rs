@@ -25,9 +25,7 @@ use crate::raster::AssetRef;
 /// or render live from full-resolution source reads.
 ///
 /// `CacheHit` carries the [`TileKey`](crate::cache::TileKey) in string
-/// form, exactly as #21 planned ("`CacheHit` grows its key then" — "then"
-/// is #36, the `TileCache` port landing). This is the one deliberate
-/// change to the pinned JSON contract in #36: the wire form moves from the
+/// form: the wire form moves from the
 /// bare string `"cache_hit"` to `{"cache_hit": {"key": "…"}}` (externally
 /// tagged, like `overview`). The x-ray overlay's decision handling was
 /// updated in lockstep to read both shapes.
@@ -47,7 +45,7 @@ pub enum Strategy {
         /// resolution, 4 = quarter, …) — exactly the naming
         /// `RasterInfo::overview_levels` and `ReadLevel::Overview` use,
         /// so the x-ray shows the same number the port speaks. (Widened
-        /// from `u8` to `u32` when overview reads landed in #38; the JSON
+        /// from `u8` to `u32`; the JSON
         /// wire shape — a plain number — is unchanged.)
         level: u32,
     },
@@ -89,10 +87,10 @@ pub struct Timings {
     pub encode_ms: u64,
     /// End-to-end render duration.
     pub total_ms: u64,
-    /// The sandboxed `run_udf` stage alone (ADR 0018, #205): guest
+    /// The sandboxed `run_udf` stage alone: guest
     /// instantiation, the plane copies in and out, and the module's own
     /// execution. `0` — and omitted from the JSON, so traces of plans
-    /// without a UDF stage keep their exact pre-#205 bytes — when no UDF
+    /// without a UDF stage keep their exact bytes — when no UDF
     /// ran. The deterministic cost is [`Trace::udf_fuel_used`]; this is
     /// its wall-clock shadow.
     #[serde(default, skip_serializing_if = "is_zero")]
@@ -108,7 +106,7 @@ fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 
-/// The planner's reasoning for one tile (issue #37,
+/// The planner's reasoning for one tile (see
 /// `docs/design/materialization-planner.md`): the chosen strategy and
 /// **every** candidate weighed, each with its cost estimate,
 /// admissibility, and reason — the x-ray answer to "why did it decide
@@ -125,7 +123,7 @@ pub struct PlanTrace {
 }
 
 /// The planner's trace integration — the one piece of planner knowledge
-/// that stays home after the extraction (ADR 0016, #189: the published
+/// that stays home after the extraction (ADR 0016: the published
 /// `swath-planner` is Trace-free by the standalone rule, so the mapping
 /// from its [`Plan`] to the x-ray payload lives here, beside the model
 /// it feeds).
@@ -154,7 +152,7 @@ impl PlanTraceExt for Plan {
 }
 
 /// The rule that selected the granule backing a time-parameterized frame
-/// (ADR 0015): how the request's `datetime` (or its absence) was applied.
+/// how the request's `datetime` (or its absence) was applied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -170,7 +168,7 @@ pub enum TemporalRule {
     LatestInInterval,
 }
 
-/// The temporal decision behind one rendered frame (ADR 0015): which
+/// The temporal decision behind one rendered frame: which
 /// granule the tile's `datetime` parameter resolved to, and by what rule
 /// — the x-ray answer to "which acquisition am I looking at?". Present on
 /// catalog-backed renders only; static/fixture layers have no time
@@ -178,7 +176,7 @@ pub enum TemporalRule {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TemporalTrace {
     /// The granule the frame resolved to — for a layer over more than one
-    /// source (ADR 0022), the **primary** branch's (the first source, the
+    /// source, the **primary** branch's (the first source, the
     /// join's `cube1`); every branch is in [`sources`](Self::sources).
     pub granule_id: String,
     /// That granule's acquisition datetime (RFC 3339 UTC).
@@ -188,8 +186,8 @@ pub struct TemporalTrace {
     pub requested: Option<String>,
     /// The resolution rule that applied (to every branch alike).
     pub rule: TemporalRule,
-    /// One record per source the frame read, in branch order (ADR 0022,
-    /// issue #296) — which two granules a change tile's pixels came from.
+    /// One record per source the frame read, in branch order — which
+    /// two granules a change tile's pixels came from.
     /// Empty (and omitted from the JSON, so single-source traces are
     /// byte-identical) for layers over one source.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -246,7 +244,7 @@ pub struct Trace {
     /// CRS of the rendered tile.
     pub crs_to: Crs,
     /// Total **source** bytes read for this render. Deliberately `0` on a
-    /// cache hit (#36, documented decision): no source ranges were
+    /// cache hit (a documented decision): no source ranges were
     /// touched, so `bytes_read` stays honest to its definition and
     /// [`provenance`](Self::provenance) stays empty — the cached payload's
     /// size is already on the wire as `Content-Length`, and a hit is
@@ -260,23 +258,23 @@ pub struct Trace {
     /// Ingest-to-pixel latency, present when this tile is the first render
     /// reflecting a just-ingested granule (the north-star timer).
     pub ingest_to_pixel_ms: Option<u64>,
-    /// The planner's reasoning (#37): chosen strategy + every candidate
+    /// The planner's reasoning: chosen strategy + every candidate
     /// with estimates. Present on every planned render; `None` only for
     /// traces predating the planner (or synthetic ones).
     pub plan: Option<PlanTrace>,
-    /// The temporal decision (ADR 0015): the granule this frame resolved
+    /// The temporal decision: the granule this frame resolved
     /// to and the rule that chose it. Present on catalog-backed renders;
     /// `None` (and omitted from the JSON — the deliberate, additive
     /// contract change of #180) for static layers and older traces.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temporal: Option<TemporalTrace>,
     /// The deterministic fuel the tile's `run_udf` stage consumed
-    /// (ADR 0018, #205) — the cost the budget's `max_udf_fuel_per_tile`
+    /// — the cost the budget's `max_udf_fuel_per_tile`
     /// bounds, so the x-ray shows how close a layer's module runs to
     /// its limit. Same inputs, same fuel: unlike the timings this number
     /// reproduces and goldens may pin it. `None` (omitted from the JSON,
     /// like [`temporal`](Self::temporal)) when no UDF stage ran — plans
-    /// without one, cache hits, and every pre-#205 trace.
+    /// without one, cache hits, and every older trace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub udf_fuel_used: Option<u64>,
 }
@@ -350,7 +348,7 @@ mod tests {
     /// The serialized field names and enum tags are a contract (SSE stream +
     /// tests); this pins the exact JSON so drift is a visible diff.
     ///
-    /// The one deliberate change in #37: the Trace gains `plan` — the
+    /// The Trace gains `plan` — the
     /// planner's chosen strategy plus every weighed candidate (estimate,
     /// admissibility, reason). This is the x-ray "why did it decide
     /// that?" payload the charter promises (§6); candidates reuse the
@@ -413,9 +411,9 @@ mod tests {
         );
     }
 
-    /// The temporal decision's wire shape (ADR 0015, #180): pinned like
+    /// The temporal decision's wire shape, pinned like
     /// the rest of the contract. `temporal` is omitted entirely when
-    /// `None` — pre-#180 traces (and static-layer renders) keep their
+    /// `None` — older traces (and static-layer renders) keep their
     /// exact bytes, which is what makes the field additive.
     #[test]
     fn temporal_wire_shape_is_pinned_and_absent_when_none() {
@@ -453,10 +451,10 @@ mod tests {
         assert_eq!(back.temporal, None);
     }
 
-    /// The UDF cost fields' wire shape (ADR 0018, #205), pinned like
+    /// The UDF cost fields' wire shape, pinned like
     /// `temporal`: `timings.udf_ms` is omitted when zero and
     /// `udf_fuel_used` when `None`, so a trace without a UDF stage keeps
-    /// its exact pre-#205 bytes; a UDF render carries both as plain
+    /// its exact bytes; a UDF render carries both as plain
     /// numbers; older serialized traces still deserialize.
     #[test]
     fn udf_cost_wire_shape_is_pinned_and_absent_without_a_stage() {
@@ -494,8 +492,8 @@ mod tests {
         assert_eq!(back.timings.udf_ms, 0);
     }
 
-    /// The extraction-surviving half of #37's contract (re-homed from the
-    /// planner's own tests with the ADR 0016 split): a served plan maps
+    /// The half of the planner contract that stays in core with the
+    /// ADR 0016 split: a served plan maps
     /// chosen + considered verbatim into the Trace payload; a refusal
     /// emits none.
     #[test]

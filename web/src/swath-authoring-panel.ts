@@ -2,18 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `<swath-authoring-panel>` — the openEO authoring panel (issues #109
- * and #151, ADR 0010): compose a process graph as an ALWAYS-VALID
+ * `<swath-authoring-panel>` — the openEO authoring panel: compose a
+ * process graph as an ALWAYS-VALID
  * pipeline, publish it as an XYZ secondary service, delete published
  * services.
  *
  * Plain Custom Element, light DOM, no framework (ADR 0005). Collapsed
- * by default and lazy like the dataset browser beside it (issue #110):
+ * by default and lazy like the dataset browser beside it:
  * the closed panel fetches nothing until a user actually authors.
  *
- * # Model B — the always-valid canvas (issue #151, design note §4/§8)
+ * # Model B — the always-valid canvas (ADR 0025; design note §4/§8)
  *
- * The #148 panel validated FIELDS; the server still rejected pipeline
+ * An earlier panel validated FIELDS; the server still rejected pipeline
  * SHAPES (the recorded dangling-`divide` case). This panel generalizes
  * the pattern the collection picker proved — "an invalid value is
  * unreachable from the UI" — to pipeline structure. The invariant: the
@@ -48,7 +48,7 @@
  *   picture needs 1 (NDVI or a formula) or 3 (red, green, blue)" (B5);
  *   a degenerate stretch range flags inline (B8).
  *
- * The #148 wins carry over: plain-language one-liners under every
+ * What carries over: plain-language one-liners under every
  * field, smart defaults with per-card advanced collapse, the live
  * plain-words narrative, the one-click NDVI template, and server
  * diagnostics mapped onto the offending field — now nearly unreachable,
@@ -62,7 +62,7 @@
  * is ORDER, not vocabulary: it only sequences processes that exist,
  * mirroring compiler semantics the parameter schemas cannot express.
  *
- * # Preview before publish (issue #169, ADR 0014 — B11's countermeasure)
+ * # Preview before publish (ADR 0014 — B11's countermeasure)
  *
  * A graph that is *valid and wrong* (swapped nir/red, a washed-out
  * range, a mismatched colormap) is unreachable by any validator; the
@@ -76,7 +76,7 @@
  * (`ProcessGraphComplexity`) explains itself in plain words and never
  * blocks publishing — the budget bounds the preview, not the layer.
  *
- * # The UDF stage (issue #208, ADR 0018)
+ * # The UDF stage (ADR 0018)
  *
  * `run_udf` joins the canvas as one more stage-typed step — offered
  * exactly where the server serves it (a stack without `--udf-store`
@@ -91,7 +91,7 @@
  * JSON field. The output arity (gray or RGB) is the module's answer,
  * pinned server-side at compile time — the canvas says so rather than
  * guessing, and the preview shows which. The preview's fuel/trap
- * diagnostics (#206's `ProcessGraphComplexity` / `ProcessParameterInvalid`)
+ * diagnostics (`ProcessGraphComplexity` / `ProcessParameterInvalid`)
  * land on the module field in plain words, and never gate publishing.
  * Writing the module IN the browser (a Rust playground) is a recorded
  * deferral — `docs/ROADMAP.md` §2 row 18.
@@ -188,7 +188,7 @@ const PREVIEW_DEBOUNCE_MS = 300;
  * shortcut over the canvas, not a parallel form source. */
 const NDVI_TEMPLATE = ["load_collection", "ndvi", "linear_scale_range", "save_result"] as const;
 
-/** The change-detection template's processes (ADR 0022, #300): offered
+/** The change-detection template's processes (ADR 0022): offered
  * only when the server serves the join. */
 const CHANGE_TEMPLATE = [
   "load_collection",
@@ -211,7 +211,7 @@ const RESOLVER_LABELS: Record<ResolverOp, string> = {
   divide: "divide (first ÷ second)",
 };
 
-/** Where the canvas layout (node positions) is remembered (#299) — the
+/** Where the canvas layout (node positions) is remembered — the
  * same key discipline as `view-state`. */
 const LAYOUT_KEY = "swath.author.layout";
 
@@ -336,13 +336,13 @@ function isAdvancedParam(processId: string, param: ProcessParameter): boolean {
   if (
     hasSubtype(param.schema, "collection-id") ||
     hasSubtype(param.schema, "output-format-options") ||
-    // The load card's plain-words "when" control (ADR 0015): time is a
+    // The load card's plain-words "when" control: time is a
     // newcomer's choice now that windows select which granule serves.
     (processId === "load_collection" && hasSubtype(param.schema, "temporal-interval")) ||
-    // The UDF card's module settings (#208): optional, but the one thing
+    // The UDF card's module settings: optional, but the one thing
     // a module author actually tunes — a newcomer's choice, on the card.
     (processId === "run_udf" && param.name === "context") ||
-    // The join's resolver (ADR 0022): the one choice a join has.
+    // The join's resolver: the one choice a join has.
     (processId === "merge_cubes" && param.name === "overlap_resolver") ||
     // A branch's dates: the whole point of a filter step.
     (processId === "filter_temporal" && param.name === "extent") ||
@@ -422,7 +422,7 @@ function narrativePhrase(
 
 /** Panel chrome, matching the layer panel's dark-telemetry look. */
 
-/** The shell's regions for the authoring pieces (#291). */
+/** The shell's regions for the authoring pieces. */
 export interface AuthoringRegions {
   /** The step strip + narrative + preview: a bottom drawer over the map. */
   strip: HTMLElement;
@@ -444,7 +444,7 @@ export interface CollectionItem {
   bands: string[];
   /** The collection's temporal extent (`[start, end]`, either side
    * `null` when unknown) — what the change template's two windows are
-   * pre-filled from (#300). */
+   * pre-filled from. */
   interval?: [string | null, string | null];
 }
 
@@ -455,37 +455,37 @@ export interface CollectionItem {
  * linear chain, each cube input wired to the previous card. */
 interface Card {
   /** The persistent node id (`s1`…): the graph key it lowers to, the
-   * `sel=` value, the field-id prefix — never renumbered (#299). */
+   * `sel=` value, the field-id prefix — never renumbered. */
   id: string;
   process: ProcessDefinition;
   values: Map<string, string>;
   rows: FormulaRow[];
   /** Whether the card's advanced (defaulted/nullable) fields are shown. */
   advanced: boolean;
-  /** The UDF card's picked module (#208): its name and size for the
+  /** The UDF card's picked module: its name and size for the
    * card and the narrative (the `udf` value itself is the data URL),
    * `refused` when it was over the server's bound and never encoded. */
   udf?: { name: string; size: number; refused: boolean };
   /** A Load card's ticked bands, in tick order (the loaded-band order —
    * for a composite that order is R, G, B). Each load head has its own
-   * (#300: a join has two). */
+   * (a join has two). */
   bands?: string[];
 }
 
 export class SwathAuthoringPanel extends SwathElement {
   static override tagName = "swath-authoring-panel";
-  /** Light DOM (#291): the `#swath-authoring-*` ids, `[data-step]` and the
+  /** Light DOM: the `#swath-authoring-*` ids, `[data-step]` and the
    * 34 vitests address the light tree; the sheet is adopted by the document. */
   static override shadowOptions = null;
   static override styles = [PANEL_SHEET];
   static override properties = {
-    /** The selected step key (`s1`…), the `sel=` deep link (#291). */
+    /** The selected step key (`s1`…), the `sel=` deep link. */
     sel: { type: "string", reflect: true },
   } as const;
 
   declare sel: string | undefined;
 
-  /** Where a shell puts the pieces (#291): the step strip (a bottom drawer
+  /** Where a shell puts the pieces: the step strip (a bottom drawer
    * over the map) and the selected step's fields (the inspector). Without
    * regions everything renders inline — the rail today, every vitest. */
   #regions: AuthoringRegions | undefined;
@@ -499,7 +499,7 @@ export class SwathAuthoringPanel extends SwathElement {
     this.#render();
   }
 
-  /** A query over the panel AND its regions (#291): the strip and the
+  /** A query over the panel AND its regions: the strip and the
    * inspector hold pieces of the same form once a shell relocates them. */
   #find<T extends Element = Element>(selector: string): T | null {
     return (
@@ -549,10 +549,10 @@ export class SwathAuthoringPanel extends SwathElement {
    * serve one. */
   #loadCard: Card | undefined;
   /** Every card that is neither the first Load head nor the Output —
-   * middle steps, and (#300) a join's second branch, its own Load head
+   * middle steps, and a join's second branch, its own Load head
    * included. Order is creation order; the graph orders them. */
   #extra: Card[] = [];
-  /** The cube connections between cards (#300): edges into the cards'
+  /** The cube connections between cards: edges into the cards'
    * cube ports, the single source of structure. */
   #edges: Edge[] = [];
   /** The permanent tail: the Output card (`save_result`) — B1's
@@ -562,14 +562,14 @@ export class SwathAuthoringPanel extends SwathElement {
   #error = "";
   #unavailable = false;
   /** The catalog reads (`/collections` + `/services`) ride behind the
-   * canvas instead of gating it (issue #255): `pending` while they are
+   * canvas instead of gating it: `pending` while they are
    * in flight, `failed` when they answered non-OK or threw — the canvas
    * stays up either way, and a failure re-arms the lazy load so the
    * next open retries (the add-data panel's #254 contract). */
   #catalogPending = false;
   #catalogFailed = false;
   /** Canvas positions per node id — editor state, never in the graph;
-   * remembered across renders and in localStorage (#299). */
+   * remembered across renders and in localStorage. */
   #positions = new Map<string, { x: number; y: number }>(loadLayout());
   /** Field keys (`s1-id`) the user has interacted with — inline
    * required/type messages only show for these, so a freshly inserted
@@ -578,7 +578,7 @@ export class SwathAuthoringPanel extends SwathElement {
   /** Server diagnostics mapped onto fields (`s3-outputMin`) or whole
    * steps (`s3`); cleared per field on edit and wholesale on publish. */
   #serverNotes = new Map<string, string>();
-  /** The draft preview (issue #169, ADR 0014 — B11's countermeasure):
+  /** The draft preview (ADR 0014 — B11's countermeasure):
    * the object URL of the last previewed PNG, the plain-words note when
    * there is no image to show, and the request body the state was
    * rendered from — previews are keyed on the composed graph, so
@@ -588,7 +588,7 @@ export class SwathAuthoringPanel extends SwathElement {
   #previewedBody = "";
   #previewTimer: ReturnType<typeof setTimeout> | undefined;
   /** Field/step notes the PREVIEW filed (the UDF stage's fuel/trap
-   * diagnostics, #208; a located compile diagnostic): cleared whenever
+   * diagnostics; a located compile diagnostic): cleared whenever
    * the next preview answers, so a fixed draft loses its stale note. */
   #previewNoteKeys = new Set<string>();
 
@@ -657,7 +657,7 @@ export class SwathAuthoringPanel extends SwathElement {
     // `/services` both read the catalog, and under a concurrent live
     // tile-render burst (renders are inline on the runtime, ADR 0012)
     // those reads can be slow or transiently non-OK; the Load card's
-    // readiness must not depend on them (issue #255). They start in
+    // readiness must not depend on them. They start in
     // parallel here and hydrate the already-open canvas when they land.
     const catalog = this.#loadCatalog();
     try {
@@ -707,7 +707,7 @@ export class SwathAuthoringPanel extends SwathElement {
   }
 
   /** The catalog half of the lazy load: collections and services, off
-   * the canvas's critical path (issue #255). A failure keeps the canvas
+   * the canvas's critical path. A failure keeps the canvas
    * up, notes itself inline, and re-arms the lazy load so the next open
    * retries. */
   async #loadCatalog(): Promise<void> {
@@ -950,7 +950,7 @@ export class SwathAuthoringPanel extends SwathElement {
     this.#render();
   }
 
-  /** Starts a branch into a free cube port (#300): a Load head like the
+  /** Starts a branch into a free cube port: a Load head like the
    * first one (same collection and bands, its own dates) feeding an
    * NDVI, wired into `port` of `nodeId` — the join's second input.
    * Never used on a node whose port is fed. */
@@ -1017,7 +1017,7 @@ export class SwathAuthoringPanel extends SwathElement {
     this.#render();
   }
 
-  /** The change-detection template (ADR 0022, #300): the DAG model's
+  /** The change-detection template (ADR 0022): the DAG model's
    * `changeTemplate` — two `load → pick dates → NDVI` branches of the
    * first collection over the halves of its extent, joined by a
    * `subtract` resolver, scaled −1..1, RdYlGn — as cards and edges. The
@@ -1128,7 +1128,7 @@ export class SwathAuthoringPanel extends SwathElement {
     }
     const raw = (card.values.get(param.name) ?? "").trim();
     if (card.process.id === "run_udf") {
-      // The UDF card (#208): the module is picked, never typed — and a
+      // The UDF card: the module is picked, never typed — and a
       // module over the server's bound was refused before encoding, so
       // the field stays empty and says why.
       if (param.name === "udf") {
@@ -1202,7 +1202,7 @@ export class SwathAuthoringPanel extends SwathElement {
         issues.push(`no bands ticked yet${where}`);
       }
     }
-    // A join with a free input (#300): say which, before the compiler
+    // A join with a free input: say which, before the compiler
     // would (its "missing argument" names the same port).
     const dag = this.#dagLite();
     for (const card of this.#cards()) {
@@ -1281,7 +1281,7 @@ export class SwathAuthoringPanel extends SwathElement {
     this.#schedulePreview();
   }
 
-  // --- The draft preview (issue #169, ADR 0014 — B11's countermeasure) ---
+  // --- The draft preview (B11's countermeasure) ---
 
   /** Schedules (or clears) the draft preview: whenever the pipeline is
    * complete — the same gate as publish — the composed graph is
@@ -1363,8 +1363,8 @@ export class SwathAuthoringPanel extends SwathElement {
     this.#reflectPreview();
   }
 
-  /** Files a preview failure where the user can act on it (#208): the
-   * UDF stage's fuel/trap diagnostics (#206's registry codes) on the
+  /** Files a preview failure where the user can act on it: the
+   * UDF stage's fuel/trap diagnostics (the registry codes) on the
    * module field in plain words; a compile diagnostic naming a node and
    * argument on that field (the same safety net publishing uses); the
    * rest stays on the preview caption. Preview-filed notes are replaced
@@ -1473,10 +1473,9 @@ export class SwathAuthoringPanel extends SwathElement {
     return lower(this.#dag());
   }
 
-  /** The pipeline as the DAG model's graph (#298/#299): one node per
+  /** The pipeline as the DAG model's graph: one node per
    * card with its persistent id and non-cube arguments, one edge per
-   * consecutive pair into the next step's cube port. Linear today; the
-   * join arrives with #300. */
+   * consecutive pair into the next step's cube port. */
   #dag(): Dag {
     const cards = this.#cards();
     const nodes: DagNode[] = cards.map((card) => ({
@@ -1499,7 +1498,7 @@ export class SwathAuthoringPanel extends SwathElement {
       return args;
     }
     if (card.process.id === "merge_cubes") {
-      // The join (ADR 0022): its resolver child graph from the select;
+      // The join: its resolver child graph from the select;
       // `context` is never sent (not admitted).
       const op = (card.values.get("overlap_resolver") ?? "subtract") as ResolverOp;
       args["overlap_resolver"] = resolverGraph(RESOLVER_OPS.includes(op) ? op : "subtract");
@@ -1522,7 +1521,7 @@ export class SwathAuthoringPanel extends SwathElement {
         stage.kind !== "gray"
       ) {
         // B6 made structural: a colormap never rides a composite —
-        // nor a UDF result, which renders directly (ADR 0018).
+        // nor a UDF result, which renders directly.
         continue;
       }
       const raw = (card.values.get(param.name) ?? "").trim();
@@ -1673,7 +1672,7 @@ export class SwathAuthoringPanel extends SwathElement {
 
     const children: Element[] = [toggle, this.#renderForm()];
     if (this.#catalogFailed) {
-      // The canvas stays up on a failed catalog read (issue #255); the
+      // The canvas stays up on a failed catalog read; the
       // note says what is missing and how to retry (the next open
       // refetches — the add-data panel's #254 contract).
       const note = document.createElement("p");
@@ -1718,7 +1717,7 @@ export class SwathAuthoringPanel extends SwathElement {
     }
     const strip = document.createElement("div");
     strip.className = "swath-authoring-strip";
-    // The pipeline on the canvas primitives (#290/#299): one node per
+    // The pipeline on the canvas primitives: one node per
     // step, its chip as the node body (the same `.swath-authoring-chip`
     // every selector addresses), an edge per cube connection, orphans
     // greyed. Positions are editor state, remembered per node id.
@@ -1820,8 +1819,6 @@ export class SwathAuthoringPanel extends SwathElement {
       this.#positions.set(event.detail.id, { x: event.detail.x, y: event.detail.y });
       this.#saveLayout();
     });
-    // Scope fence (#299): no new connections yet — the join arrives with
-    // #300, and with it `edgeAllowed` answering the gesture.
     canvas.addEventListener("swath-port-connect-end", () => canvas.cancelConnect());
     canvas.addEventListener("swath-delete-request", (event) => {
       // Delete on a middle step's node removes it (the permanent head
@@ -1913,7 +1910,7 @@ export class SwathAuthoringPanel extends SwathElement {
         CHANGE_TEMPLATE.every((id) => this.#processes.some((process) => process.id === id)) &&
         this.#collections.length > 0
       ) {
-        // The first DAG product (ADR 0022, #300): offered only where the
+        // The first DAG product (ADR 0022): offered only where the
         // server serves the join.
         const change = document.createElement("button");
         change.type = "button";
@@ -1966,7 +1963,7 @@ export class SwathAuthoringPanel extends SwathElement {
       // An insert group per edge leaving this card, showing only the
       // chips the graph still types with (B2/B3/B4: what does not fit is
       // not offered, anywhere) — plus the join where the server serves it
-      // and the cube is gray (ADR 0022).
+      // and the cube is gray.
       for (const [gap, edge] of chain.entries()) {
         if (edge.from.node !== card.id) {
           continue;
@@ -2019,7 +2016,7 @@ export class SwathAuthoringPanel extends SwathElement {
     return form;
   }
 
-  /** The branch starter on a free cube port (#300): one chip that adds
+  /** The branch starter on a free cube port: one chip that adds
    * `load → NDVI` of the first head's collection into the port. */
   #renderBranchStarter(card: Card, port: string): Element {
     const item = document.createElement("li");
@@ -2132,7 +2129,7 @@ export class SwathAuthoringPanel extends SwathElement {
     if (card.process.id === "load_collection") {
       // The plain-worded where/when line (design note §4): area stays an
       // expert field under advanced; time is the card's own "when"
-      // control (ADR 0015) — the line says what the current choice
+      // control — the line says what the current choice
       // means, in the user's vocabulary.
       const plain = document.createElement("small");
       plain.className = "swath-authoring-plain";
@@ -2239,7 +2236,7 @@ export class SwathAuthoringPanel extends SwathElement {
   }
 
   /** The Load card's bands: one checkbox per band of the CHOSEN
-   * collection — the vocabulary hint of #148 promoted into the widget
+   * collection — the band vocabulary promoted into the widget
    * itself, so an unknown band is unconstructible (B7). Tick order is
    * loaded order. */
   #renderBandChecks(card: Card, fieldId: string, touch: () => void): Element {
@@ -2278,7 +2275,7 @@ export class SwathAuthoringPanel extends SwathElement {
   }
 
   /** The Load card's plain-words "when" control (design note §4, the
-   * Model B extent treatment; ADR 0015): two calendar pickers over the
+   * Model B extent treatment): two calendar pickers over the
    * `temporal-interval` subtype — schema-derived in mechanism, curated
    * in wording, like the collection picker. Empty on both sides means
    * "everything available"; the stored value is the interval JSON the
@@ -2316,7 +2313,7 @@ export class SwathAuthoringPanel extends SwathElement {
     return group;
   }
 
-  /** The UDF card's module control (#208): a file picker plus a drop
+  /** The UDF card's module control: a file picker plus a drop
    * zone over `.wasm` files. The picked module is base64-encoded
    * client-side into the `udf` value as a `data:` URL — after the size
    * check, so an over-bound module is refused in plain words (via
@@ -2444,7 +2441,7 @@ export class SwathAuthoringPanel extends SwathElement {
         return select;
       }
       if (this.#catalogPending) {
-        // The collections read rides behind the canvas (issue #255):
+        // The collections read rides behind the canvas:
         // the card is ready, the picker fills in when the list lands.
         const select = dropdown([], "(loading collections…)", false);
         select.disabled = true;
@@ -2506,7 +2503,7 @@ export class SwathAuthoringPanel extends SwathElement {
       return dropdown(this.#bandsOf(card), "(pick a band)", false);
     }
     if (card.process.id === "merge_cubes" && param.name === "overlap_resolver") {
-      // The join's resolver (ADR 0022): a select over the admitted
+      // The join's resolver: a select over the admitted
       // scalar processes — a join is never without one (B14).
       const select = dropdown(RESOLVER_OPS, undefined, false);
       for (const option of select.options) {

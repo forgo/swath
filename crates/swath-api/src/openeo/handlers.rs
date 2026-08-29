@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! The openEO surface's handlers (#354): capabilities, collections,
+//! The openEO surface's handlers: capabilities, collections,
 //! processes, secondary services and the bounded preview (ADR 0014).
 
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
@@ -113,7 +113,7 @@ pub(super) async fn processes<S, R, C>(
 /// `GET /file_formats` — the honest single-format answer: PNG out (the
 /// ADR 0014 preview), nothing in (`load_collection` is the only source).
 /// Standard clients (openeo-python-client's `save_result`) validate the
-/// requested format against this document before the POST (#195).
+/// requested format against this document before the POST.
 pub(super) async fn file_formats<S, R, C>(
     State(_): State<Arc<OpenEoState<S, R, C>>>,
 ) -> Json<Value> {
@@ -210,15 +210,15 @@ pub(super) async fn describe_service<S, R, C: Catalog>(
 }
 
 /// **The** graph lowering (single construction site): compiles `process`
-/// through the whole #32 compiler against the dataset's bands, lowers
-/// the compiled product to the persisted layer vocabulary via the #95
+/// through the whole process compiler against the dataset's bands, lowers
+/// the compiled product to the persisted layer vocabulary via the one
 /// constructor, and derives the servable [`CatalogLayer`] template from
 /// the persisted form — exactly the `POST /services` motion, shared with
 /// `POST /result` so a preview renders precisely what publishing the
 /// same graph would serve. A `run_udf` graph resolves its remote module
 /// **once**, here (ADR 0018, #204); the module bytes come back for the
 /// publish path to persist (a preview persists nothing). The template
-/// carries the operator's global budget (#272), from `lowering`.
+/// carries the operator's global budget, from `lowering`.
 pub(super) async fn lower_graph(
     lowering: Lowering<'_>,
     dataset: &Dataset,
@@ -238,11 +238,11 @@ pub(super) async fn lower_graph(
         Some(modules) => modules.apply(compile_context(dataset)),
         None => compile_context(dataset),
     };
-    // Validate: the whole #32 compiler, against the collection's bands.
+    // Validate: the whole process compiler, against the collection's bands.
     let product = compile(process, &ctx)?;
 
     // Lower the compiled product to the persisted layer vocabulary: the
-    // single #95 constructor derives the metadata from the same spec the
+    // single constructor derives the metadata from the same spec the
     // plan was built from, so the two representations cannot disagree.
     let (_, meta) = plan_for(&product.spec);
     let layer = DomainLayer {
@@ -263,7 +263,7 @@ pub(super) async fn lower_graph(
     Ok((layer, template, product.udf_module))
 }
 
-/// `POST /services` — the authoring loop in one motion (R3, ADR 0010):
+/// `POST /services` — the authoring loop in one motion (R3):
 /// validate the graph through the compiler against the referenced
 /// collection's bands, persist the derived layer on the dataset
 /// (`swath:layers`), make it servable immediately, answer 201 with the
@@ -289,7 +289,7 @@ pub(super) async fn create_service<S, R, C: Catalog>(
 
     // The module persists by content hash BEFORE the service does: a
     // published `PlanKind::Udf { code_hash }` must always resolve
-    // (ADR 0018, #204). Idempotent — re-publishing the same bytes is a
+    // (ADR 0018). Idempotent — re-publishing the same bytes is a
     // no-op put.
     if let (Some(udf), Some(bytes)) = (app.udf.as_ref(), module.as_deref()) {
         let stored = udf.persist(bytes).await.map_err(|err| {
@@ -349,7 +349,7 @@ pub(super) async fn delete_service<S, R, C: Catalog>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST /result` — the preview-bounded synchronous subset (ADR 0014):
+/// `POST /result` — the preview-bounded synchronous subset:
 /// the spec-shaped body (`{"process": {"process_graph": …}}`) compiles
 /// through [`lower_graph`], the exact `POST /services` path — same
 /// narrowing, same typed diagnostics — and answers **one** small
@@ -403,7 +403,7 @@ where
         PREVIEW_TILE_SIZE,
     )
     .await?;
-    // The preview budget (#272): the operator's global budget — so a
+    // The preview budget: the operator's global budget — so a
     // preview of a UDF graph runs the module under exactly the fuel its
     // published service would — with the byte ceiling the tighter of
     // the preview's own (ADR 0014) and the operator's. The operator's
@@ -425,13 +425,13 @@ where
         .provider
         // Previews render the latest granule (fully open window): the
         // graph's `temporal_extent` stays accepted-and-ignored until the
-        // compiler grows resolution windows (ADR 0015's graph half, #181).
+        // compiler grows resolution windows (`docs/ROADMAP.md`).
         .resolve_template(&template, None)
         .await
         .map_err(preview_resolution_error)?;
     // A named extent is shown whole; with none named, the frame fits the
     // granule(s) this preview renders — every branch's footprint, joined
-    // (ADR 0022) — the collection's real coverage at preview time; the
+    // — the collection's real coverage at preview time; the
     // advertised extent stands in only for a resolution that carries no
     // footprint.
     let footprint = resolved
@@ -447,7 +447,7 @@ where
     };
     let request = resolved.tile_request(coord);
     // The same executor the graph's module was just registered with
-    // (#205); a deployment without UDF wiring could not have compiled a
+    // ; a deployment without UDF wiring could not have compiled a
     // UDF graph above, so `NoUdf` is never reached by one.
     let executor = app.udf.as_ref().map(UdfPublish::executor);
     let udf: &dyn UdfExecutor = executor
@@ -473,7 +473,7 @@ where
     Ok(response)
 }
 
-/// The preview window (ADR 0014): the graph's `spatial_extent` — read
+/// The preview window: the graph's `spatial_extent` — read
 /// from its (first) `load_collection` node, the same node
 /// [`loaded_collection`] reads — validated: `Ok(Some)` for a well-formed
 /// box, `Ok(None)` when the node names none (null or absent — the caller
@@ -574,7 +574,7 @@ pub(super) fn preview_tile(bbox: &Bbox) -> TileCoord {
 /// footprint's center. The containing-tile rule of [`preview_tile`]
 /// serves a named box whole, but a footprint straddling a boundary at
 /// every deep zoom would climb to a tile where it is a few pixels
-/// (issue #270: the fixture granule is a sliver of z7, invisible at
+/// (the fixture granule is a sliver of z7, invisible at
 /// thumbnail size); with nothing named, the author asked to see the
 /// data, so the frame fits the data and a straddling edge is cropped.
 /// The smallest box holding both — what a two-source preview frames.

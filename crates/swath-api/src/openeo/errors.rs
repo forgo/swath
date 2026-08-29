@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! The openEO surface's error vocabulary (#354): the crate's one error
+//! The openEO surface's error vocabulary: the crate's one error
 //! type rendered as the spec's `{"code","message"}`, the compiler
 //! diagnostics in registry codes, and the preview's refusal-over-
 //! degradation mapping.
@@ -17,7 +17,7 @@ use swath_render::{CompileError, TileError, UdfError};
 use crate::error::OpenEo as OpenEoError;
 
 /// Maps compiler diagnostics onto standardized openEO error codes — the
-/// #32 diagnostics, spoken in the standard's vocabulary. The message is
+/// compiler's diagnostics, spoken in the standard's vocabulary. The message is
 /// the compiler's own (it names the offending node); the shapes are
 /// pinned by snapshot tests.
 impl From<CompileError> for OpenEoError {
@@ -70,7 +70,7 @@ pub(super) fn preview_resolution_error(err: crate::error::ApiError) -> OpenEoErr
 
 /// Preview render failures in the spec's registry vocabulary — refusal
 /// over degradation (ADR 0014), and the preview as the `run_udf`
-/// validation loop (ADR 0018, #206): a module's failure is the author's
+/// validation loop (ADR 0018): a module's failure is the author's
 /// to fix, so it answers a 400 that says what happened in plain words,
 /// never a 500.
 ///

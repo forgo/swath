@@ -24,7 +24,7 @@
 //! | `GET /services/{service_id}` · `DELETE …` | describe / delete one service |
 //!
 //! `POST /services` is the R3 wedge in one motion: the submitted process
-//! graph is validated through the #32 compiler against the referenced
+//! graph is validated through the process compiler against the referenced
 //! collection's bands, persisted as a [`Layer`](DomainLayer) on the
 //! Dataset (`swath:layers`, carrying the graph verbatim in its `process`
 //! field), inserted into the live [`CatalogLayers`] provider — and the 201
@@ -41,7 +41,7 @@
 //! - **`PATCH /services` is omitted** (delete + re-create covers v0), as
 //!   are jobs, batch processing, user-defined processes, and files.
 //! - **`POST /result` is preview-bounded, not general synchronous
-//!   processing** (ADR 0014): the graph compiles through the same #32
+//!   processing** (ADR 0014): the graph compiles through the same
 //!   path as `POST /services` (identical diagnostics — same codes for
 //!   the same graph on either route) and answers **one** small
 //!   overview-backed `image/png` render covering the graph's
@@ -58,7 +58,7 @@
 //!   processing conformance class is claimed. A `run_udf` graph previews
 //!   under the per-tile fuel budget publishing enforces, and a module's
 //!   runtime failure is a user-fixable 400 in the registry vocabulary
-//!   ([`preview_udf_error`]) — the ADR 0018 validation loop (#206).
+//!   ([`preview_udf_error`]) — the ADR 0018 validation loop.
 //! - Process definitions are served verbatim from the pinned
 //!   openeo-processes 1.2.0 documents, with Swath's parameter narrowing
 //!   appended to the `description` (see `data/openeo-processes/README.md`).
@@ -70,7 +70,7 @@
 //! - Service ids are content-derived (`xyz-` + a hash of the process
 //!   graph): re-POSTing an identical graph updates the same service
 //!   rather than minting a duplicate — creation is idempotent.
-//! - **`run_udf`** (ADR 0018, #204) is offered only where the deployment
+//! - **`run_udf`** is offered only where the deployment
 //!   wires a [`UdfPublish`] (executor + module store + fetcher): the
 //!   process list includes it exactly then, and the compile motion
 //!   registers the module, fetches a remote `udf` URL **once**, and
@@ -158,10 +158,10 @@ const WEB_MERCATOR_MAX_LAT: f64 = 85.051_128_779_806_59;
 /// exactly as the capabilities `endpoints` array declares it (only what
 /// exists; the spec says the `GET /` entry itself is not listed).
 /// `/conformance` is the shared OGC document. The `/datasets` entries are
-/// Swath's dataset-creation surface (#196) and granule browsing (#107) —
+/// Swath's dataset-creation surface and granule browsing —
 /// not openEO vocabulary, but the capabilities document is where a client
-/// (the #197 add-data panel) learns what is mounted, and the read-only
-/// filter (#198) prunes them with the other write methods.
+/// (the add-data panel) learns what is mounted, and the read-only
+/// filter prunes them with the other write methods.
 pub const OPENEO_ENDPOINTS: &[(&str, &[&str])] = &[
     ("/collections", &["GET"]),
     ("/collections/{collection_id}", &["GET"]),
@@ -179,7 +179,7 @@ pub const OPENEO_ENDPOINTS: &[(&str, &[&str])] = &[
 /// Everything the openEO handlers need: the same [`CatalogLayers`] the
 /// tile handlers resolve through (clones share the layer set — a
 /// `POST`ed service serves on the next tile request), the two render
-/// ports the preview endpoint consumes (ADR 0014 — `POST /result`
+/// ports the preview endpoint consumes (`POST /result`
 /// renders inline, exactly like the tile handler), and the base URL
 /// links and service URLs are minted under.
 #[derive(Debug)]
@@ -191,12 +191,12 @@ pub struct OpenEoState<S, R, C> {
     /// The preview budget's `max_estimated_live_bytes` ceiling
     /// ([`PREVIEW_MAX_ESTIMATED_LIVE_BYTES`] unless overridden).
     preview_ceiling: u64,
-    /// The operator's resolved global budget (#272): every published
+    /// The operator's resolved global budget: every published
     /// service serves under it, and a preview runs under it narrowed by
     /// [`Self::preview_ceiling`]. `Budget::default()` unless the binary
     /// hands over its resolved `[budget]` → flags/env layering.
     budget: Budget,
-    /// The `run_udf` publish wiring (ADR 0018, #204); `None` = the
+    /// The `run_udf` publish wiring; `None` = the
     /// process is not offered here.
     udf: Option<UdfPublish>,
 }
@@ -226,7 +226,7 @@ impl<S, R, C> OpenEoState<S, R, C> {
         }
     }
 
-    /// Sets the operator's global budget (#272): the resolved `[budget]`
+    /// Sets the operator's global budget: the resolved `[budget]`
     /// → `--max-udf-fuel-per-tile` / `--max-estimated-live-bytes` layering
     /// the binary already applies to config-declared layers. Published
     /// services (`POST /services`, and every restart's rehydration through
@@ -241,7 +241,7 @@ impl<S, R, C> OpenEoState<S, R, C> {
         self
     }
 
-    /// Enables `run_udf` on this surface (ADR 0018, #204): graphs compile
+    /// Enables `run_udf` on this surface: graphs compile
     /// their module through `udf`'s registrar, remote modules are fetched
     /// once through its fetcher, and published modules persist in its
     /// store. `GET /processes` lists `run_udf` exactly when this is set.
@@ -281,7 +281,7 @@ where
 }
 
 /// The read half of the openEO surface alone — what `--read-only` serving
-/// mounts (#198): discovery, collections, processes, service listings,
+/// mounts: discovery, collections, processes, service listings,
 /// and `POST /result` (deliberately: the ADR 0014 preview is
 /// planner-budget-bounded by design and stays enabled — the demo wow).
 /// The write routes (`POST /services`, `DELETE /services/{id}`) are
@@ -310,11 +310,11 @@ where
 /// document — `GET /` serves both standards' required fields from one
 /// root. Called by the landing handler when the openEO surface is
 /// enabled ([`ApiState::with_openeo`](crate::ApiState::with_openeo)).
-/// `uploads` additionally declares the local-mode upload route (#197) —
+/// `uploads` additionally declares the local-mode upload route —
 /// mounted, like everything here, only where it is true.
 pub(crate) fn extend_capabilities(landing: &mut Value, base: &str, read_only: bool, uploads: bool) {
     // The capabilities document states what is MOUNTED: read-only serving
-    // (#198) filters the write methods out rather than advertising routes
+    // filters the write methods out rather than advertising routes
     // that do not exist.
     let mut endpoints: Vec<Value> = OPENEO_ENDPOINTS
         .iter()
@@ -570,7 +570,7 @@ mod tests {
                 Some(&PixelOp::Colormap(ir)),
                 "{name}: compiled plan must end in its colormap"
             );
-            // Plan -> persisted vocabulary, variant for variant (the #95
+            // Plan -> persisted vocabulary, variant for variant (the
             // constructor derives it from the compiled spec).
             let meta = plan_for(&product.spec).1;
             assert_eq!(meta.colormap, Some(domain));
