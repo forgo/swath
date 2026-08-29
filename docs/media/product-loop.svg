@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+SPDX-License-Identifier: Apache-2.0
+
+Hand-crafted diagram of the product loop: granules arrive, are cataloged
+and served as live tiles, are viewed and authored from one screen, and the
+authored product is published back into the same serve path — with the
+glass box beside every tile. Every box is traceable via
+docs/media/product-loop.notes.md. Opaque light background so it renders
+identically on GitHub light and dark.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" width="960" height="600"
+     font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#57606a"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#0969da"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1a7f37"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="600" fill="#ffffff"/>
+
+  <text x="480" y="38" text-anchor="middle" font-size="19" font-weight="600" fill="#1f2328">Swath — from granule to published product, in one loop</text>
+  <text x="480" y="60" text-anchor="middle" font-size="12.5" fill="#57606a">Ingest → catalog → serve automatically · derive and publish back into the same path · every tile explains itself</text>
+
+  <!-- ============ forward row: your data becomes live tiles on one screen ============ -->
+  <rect x="40" y="110" width="170" height="110" rx="8" fill="#fff1e5" stroke="#bc4c00" stroke-width="1.5"/>
+  <text x="125" y="140" text-anchor="middle" font-weight="600" fill="#1f2328">Granules land</text>
+  <text x="125" y="162" text-anchor="middle" font-size="11.5" fill="#57606a">COG, or archival HDF5</text>
+  <text x="125" y="178" text-anchor="middle" font-size="11.5" fill="#57606a">served in place, never converted</text>
+  <text x="125" y="194" text-anchor="middle" font-size="11.5" fill="#57606a">on S3 or on disk</text>
+
+  <line x1="210" y1="165" x2="248" y2="165" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="229" y="240" text-anchor="middle" font-size="11" fill="#57606a">no per-scene work</text>
+
+  <rect x="250" y="110" width="170" height="110" rx="8" fill="#f6f8fa" stroke="#57606a" stroke-width="1.5"/>
+  <text x="335" y="140" text-anchor="middle" font-weight="600" fill="#1f2328">Catalog</text>
+  <text x="335" y="162" text-anchor="middle" font-size="11.5" fill="#57606a">STAC, filled in for you</text>
+  <text x="335" y="178" text-anchor="middle" font-size="11.5" fill="#57606a">every acquisition kept —</text>
+  <text x="335" y="194" text-anchor="middle" font-size="11.5" fill="#57606a">a time series, not a mosaic</text>
+
+  <line x1="420" y1="165" x2="458" y2="165" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="439" y="240" text-anchor="middle" font-size="11" fill="#57606a">the latest granule, per tile</text>
+
+  <rect x="460" y="110" width="200" height="110" rx="8" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+  <text x="560" y="140" text-anchor="middle" font-weight="600" fill="#1f2328">Live tiles</text>
+  <text x="560" y="162" text-anchor="middle" font-size="11.5" fill="#57606a">OGC API - Tiles · XYZ · datetime=</text>
+  <text x="560" y="178" text-anchor="middle" font-size="11.5" fill="#57606a">a planner picks cache, overview,</text>
+  <text x="560" y="194" text-anchor="middle" font-size="11.5" fill="#57606a">or live render — per tile, in budget</text>
+
+  <line x1="660" y1="165" x2="698" y2="165" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="679" y="240" text-anchor="middle" font-size="11" fill="#57606a">any map client</text>
+
+  <rect x="700" y="110" width="220" height="110" rx="8" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+  <text x="810" y="140" text-anchor="middle" font-weight="600" fill="#1f2328">One pane of glass</text>
+  <text x="810" y="162" text-anchor="middle" font-size="11.5" fill="#57606a">layers · time slider · compare swipe</text>
+  <text x="810" y="178" text-anchor="middle" font-size="11.5" fill="#57606a">share link to this exact view</text>
+  <text x="810" y="194" text-anchor="middle" font-size="11.5" fill="#57606a">QGIS via plain XYZ · phone-ready</text>
+
+  <!-- ============ return loop: derive a product, publish it the same way ============ -->
+  <line x1="810" y1="220" x2="810" y2="288" stroke="#1a7f37" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+  <text x="822" y="272" font-size="11" fill="#1a7f37">pick bands, compose</text>
+
+  <rect x="700" y="290" width="220" height="100" rx="8" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.5"/>
+  <text x="810" y="318" text-anchor="middle" font-weight="600" fill="#1f2328">Derive a product</text>
+  <text x="810" y="340" text-anchor="middle" font-size="11.5" fill="#57606a">an openEO graph over the live layers:</text>
+  <text x="810" y="356" text-anchor="middle" font-size="11.5" fill="#57606a">an index, a formula, a date-vs-date</text>
+  <text x="810" y="372" text-anchor="middle" font-size="11.5" fill="#57606a">change, your own code — sandboxed</text>
+
+  <line x1="700" y1="340" x2="662" y2="340" stroke="#1a7f37" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+  <text x="681" y="329" text-anchor="middle" font-size="11" fill="#1a7f37">publish</text>
+
+  <rect x="460" y="290" width="200" height="100" rx="8" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.5"/>
+  <text x="560" y="318" text-anchor="middle" font-weight="600" fill="#1f2328">Published layer</text>
+  <text x="560" y="340" text-anchor="middle" font-size="11.5" fill="#57606a">one request, a live tile URL,</text>
+  <text x="560" y="356" text-anchor="middle" font-size="11.5" fill="#57606a">previewed before it is published,</text>
+  <text x="560" y="372" text-anchor="middle" font-size="11.5" fill="#57606a">listed beside the built-in layers</text>
+
+  <line x1="560" y1="290" x2="560" y2="222" stroke="#1a7f37" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+  <text x="548" y="272" text-anchor="end" font-size="11" fill="#1a7f37">served the same way</text>
+
+  <!-- ============ the glass box ============ -->
+  <line x1="440" y1="220" x2="440" y2="428" stroke="#57606a" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+  <text x="428" y="330" text-anchor="end" font-size="11" fill="#57606a">every tile emits a trace</text>
+
+  <rect x="40" y="430" width="880" height="120" rx="8" fill="#f6f8fa" stroke="#57606a" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="60" y="456" font-weight="600" fill="#1f2328">Glass box — every tile explains itself</text>
+
+  <rect x="60" y="470" width="260" height="64" rx="6" fill="#ffffff" stroke="#57606a" stroke-width="1"/>
+  <text x="190" y="492" text-anchor="middle" font-weight="600" font-size="12.5" fill="#1f2328">Per-tile trace</text>
+  <text x="190" y="510" text-anchor="middle" font-size="11.5" fill="#57606a">the decision, the granules read,</text>
+  <text x="190" y="525" text-anchor="middle" font-size="11.5" fill="#57606a">byte ranges, timings — as data</text>
+
+  <rect x="350" y="470" width="260" height="64" rx="6" fill="#ffffff" stroke="#57606a" stroke-width="1"/>
+  <text x="480" y="492" text-anchor="middle" font-weight="600" font-size="12.5" fill="#1f2328">X-ray in the viewer</text>
+  <text x="480" y="510" text-anchor="middle" font-size="11.5" fill="#57606a">badges · why-view · bytes heatmap</text>
+  <text x="480" y="525" text-anchor="middle" font-size="11.5" fill="#57606a">trace feed · live analytics</text>
+
+  <rect x="640" y="470" width="260" height="64" rx="6" fill="#ffffff" stroke="#57606a" stroke-width="1"/>
+  <text x="770" y="492" text-anchor="middle" font-weight="600" font-size="12.5" fill="#1f2328">The same data in the tests</text>
+  <text x="770" y="510" text-anchor="middle" font-size="11.5" fill="#57606a">CI asserts on the trace the viewer</text>
+  <text x="770" y="525" text-anchor="middle" font-size="11.5" fill="#57606a">shows — one account, not two</text>
+
+  <text x="480" y="580" text-anchor="middle" font-size="11" fill="#57606a">Orange: your data · blue: serving · green: your product · dashed: what the machine tells you. Each box's committed artifact: docs/media/product-loop.notes.md</text>
+</svg>

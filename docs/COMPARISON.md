@@ -13,6 +13,11 @@ artifact **in this repository**; each project gets a non-empty
 ["what they do better"](#what-they-do-better) section; the maintainer signs off
 on fairness before merge.
 
+![Capability-ladder diagram: derived products through the public API on the horizontal axis against dynamic tile serving on the vertical. TiTiler and xpublish-tiles sit at "dynamic tiles by design" for serving but at deploy-time or rendering-only rungs for derived products; openEO backends reach runtime graphs plus UDFs for derived products but deliver batch-first; Swath sits top-right — runtime graphs plus user code served as measured, traced dynamic tiles.](media/wedge-a-quadrants.svg)
+
+*The two ladders the diagram grades on are capability rows 1–2 of the matrix below; rung
+definitions and every placement's citation are in [`media/wedge.notes.md`](media/wedge.notes.md).*
+
 ## Compared versions (pinned)
 
 | Project | Version compared | Released | Docs accessed |

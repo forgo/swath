@@ -1,8 +1,8 @@
 # The stopwatch demo — ingest-to-pixel, live
 
-The Phase-1 exit demo (CHARTER.md §10): watch a granule go from *"file arrives"* to *"correct
-pixels on the map"* with zero manual steps, and put a number on it — **ingest-to-pixel
-latency** (REQUIREMENTS.md §3).
+The stopwatch demo: watch a granule go from *"file arrives"* to *"correct pixels on the
+map"* with zero manual steps, and put a number on it — **ingest-to-pixel latency**
+(REQUIREMENTS.md §3; why this demo exists: CHARTER.md §10).
 
 ## What you'll see
 
@@ -34,13 +34,19 @@ The overlay (on by default via `?xray`) is the glass box (REQUIREMENTS.md R4): i
 to `/traces` and paints, per tile, the server's own account of the render — the **decision**,
 and on click an inspector with sources, byte ranges, CRS hop, and stage timings; the top-left
 readout shows the latest **ingest→pixel** number. Every fact comes from the same `Trace` the
-e2e asserts on. Since x-ray v1 (#42): three display modes — **decision**, **bytes** (a
-log-scale heatmap), **off** — plus the inspector's **why-view** (every candidate the planner
-weighed) and a bounded, pausable **trace feed** drawer.
+e2e asserts on. Three display modes — **decision**, **bytes** (a log-scale heatmap),
+**off** — plus the inspector's **why-view** (every candidate the planner weighed) and a
+bounded, pausable **trace feed** drawer.
+
+![X-ray decision overlay: every tile badged with its render decision and timing, the ingest→pixel readout top-left.](media/screenshots/04-xray-decisions.png)
+
+![Why-view for one tile: the planner's candidate table — the chosen plan, the rejected candidates, the reason for each.](media/screenshots/05-xray-why-view.png)
+
+![Trace feed: the /traces stream as scrollback, every line a render decision, clickable back to its tile.](media/screenshots/07-xray-trace-feed.png)
 
 ## Watch a fire season evolve
 
-The time dimension, live (ADR 0015, #182). The demo stack also ingests the **six-date 2024
+The time dimension, live. The demo stack also ingests the **six-date 2024
 Park Fire series** (`tests/fixtures/README.md`), so the same session can scrub a real fire
 season:
 
@@ -60,6 +66,19 @@ season:
 The regression guarantee extends here: `just e2e` asserts `datetime=` frame selection against
 committed oracle goldens, and the Playwright suite (`web/e2e/time-slider.e2e.ts`) drives this
 exact scrub-twice loop through the same trace stream.
+
+![Time slider over the Park Fire season, first pass: the scrubbed frame is rendered live — every badge says so.](media/screenshots/13-time-slider-live.png)
+
+![The same frame revisited: every tile is a cache hit — same granule, same cache entry — which is why the loop replays smoothly.](media/screenshots/14-time-slider-cached.png)
+
+The compare swipe puts two frames of the season — or two layers — under one draggable handle
+(`?t=…&ct=…`, or `?layer=…&cl=…`; the handle's position rides in the share link):
+
+![Compare swipe, layer against layer: NDVI left, true color right of one handle.](media/screenshots/16-compare-swipe.png)
+
+Frame identity rules (which granule a `datetime=` selects, why a revisited frame is a cache
+hit): ADR 0015.
+
 
 ## Current measured numbers
 
