@@ -57,6 +57,7 @@ jobs:
               - 'docs/**'
               - 'README.md'
               - 'crates/**'
+              - 'tools/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
@@ -66,6 +67,7 @@ jobs:
               - '.github/**'
             rust:
               - 'crates/**'
+              - 'tools/**'
               - 'examples/udf/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -80,6 +82,7 @@ jobs:
               - 'Dockerfile'
               - '.dockerignore'
               - 'crates/**'
+              - 'tools/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'

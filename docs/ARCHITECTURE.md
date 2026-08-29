@@ -2,7 +2,7 @@
 
 _Working document. Draft v0.3 — August 2026. §§4, 6, 7 and 12 describe the code as built and
 carry a "last verified against sources" content fingerprint checked by the docs gate
-(`crates/swath-cli/src/docs_check/stamps.rs`; on a source change the gate prints the new
+(`tools/docs-check/src/check/stamps.rs`; on a source change the gate prints the new
 fingerprint to paste after re-verifying). The remaining sections are design intent. Where any
 doc disagrees with an ADR, the ADR wins; engineering standards live in `ENGINEERING.md`._
 
@@ -63,7 +63,7 @@ All nodes are implemented (per-module detail lives in each crate's rustdoc); the
 `VirtualiZarr` sidecar is deliberately absent — the conformance *reference* for
 `swath-referencer` (ADR 0006), not a runtime component.
 
-_Last verified against sources `a66f2c0b7692`._
+_Last verified against sources `f352850826b6`._
 
 ## 5. The Core (pure logic)
 
@@ -242,7 +242,7 @@ immutable once concluded), and `docs/`. Phase-1 adapters are direct dependencies
 embedded UI and HDF5 weight, not adapter selection (§14 covers extension beyond compile
 time).
 
-_Last verified against sources `a66f2c0b7692`._
+_Last verified against sources `f352850826b6`._
 
 ## 13. Frontend architecture
 

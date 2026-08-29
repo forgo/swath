@@ -4337,7 +4337,6 @@ dependencies = [
  "object_store",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "swath-api",
  "swath-catalog-pgstac",
  "swath-core",
@@ -4371,6 +4370,18 @@ dependencies = [
  "swath-manifest",
  "swath-planner",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "swath-docs-check"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "clap",
+ "serde_json",
+ "sha2 0.10.9",
+ "swath-cli",
+ "swath-testsupport",
+ "toml",
 ]
 
 [[package]]

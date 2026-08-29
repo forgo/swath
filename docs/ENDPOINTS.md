@@ -20,7 +20,7 @@ absent by default (ADR 0011).
 ## Route table
 
 The block below is mechanically checked against the axum routers by the
-docs gate (`crates/swath-cli/src/docs_check/routes.rs`): every mounted
+docs gate (`tools/docs-check/src/check/routes.rs`): every mounted
 route must appear — methods and mounting included — and no phantom rows
 survive.
 

@@ -251,5 +251,5 @@ just perf-doc          # regenerate every table AND every inline number marker
 Commit the artifact diffs alongside the regenerated tables; the PR should say why numbers
 moved. Headline figures quoted in prose live inside inline `number:<key>` HTML-comment marker
 pairs that `just perf-doc` fills (idempotent) and the docs-check gate verifies
-(`crates/swath-cli/src/docs_check/numbers.rs`). To quote a headline number, add a marker with an
+(`tools/docs-check/src/check/numbers.rs`). To quote a headline number, add a marker with an
 existing key and run `just perf-doc`; never type the number by hand.

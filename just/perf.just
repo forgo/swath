@@ -164,7 +164,7 @@ perf-referencer runs="10":
 # PERFORMANCE.md, ARCHITECTURE.md,
 # COMPARISON.md, media/wedge.notes.md); the prose around the markers is
 # hand-written. Idempotent — rerunning without artifact changes is a no-op.
-# The docs-check gate (crates/swath-cli/src/docs_check/numbers.rs) verifies
+# The docs-check gate (tools/docs-check/src/check/numbers.rs) verifies
 # marker content against the same artifacts and rejects naked headline
 # literals. Run after any baseline artifact changes.
 perf-doc:

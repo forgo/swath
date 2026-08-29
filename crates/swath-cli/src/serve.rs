@@ -43,7 +43,7 @@ const WATCH_POLL: Duration = Duration::from_millis(250);
 /// variable (clap's `env` attribute — `--help` documents both); either
 /// outranks the config file.
 #[derive(Debug, clap::Args)]
-pub(crate) struct ServeArgs {
+pub struct ServeArgs {
     /// TOML config file (layers live here; flags/env override scalars).
     #[arg(long, value_name = "PATH", conflicts_with = "fixtures")]
     pub(crate) config: Option<PathBuf>,
@@ -146,7 +146,7 @@ pub(crate) struct ServeArgs {
 
 /// Serve-path errors, each phrased for the operator reading the log.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum ServeError {
+pub enum ServeError {
     /// Configuration resolution failed.
     #[error(transparent)]
     Config(#[from] config::ConfigError),
@@ -175,7 +175,7 @@ pub(crate) enum ServeError {
 }
 
 /// Resolves config, builds the runtime, and serves until SIGINT/SIGTERM.
-pub(crate) fn run(args: &ServeArgs) -> Result<(), ServeError> {
+pub fn run(args: &ServeArgs) -> Result<(), ServeError> {
     let cfg = config::resolve(args)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
