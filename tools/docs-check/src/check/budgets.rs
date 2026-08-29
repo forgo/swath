@@ -36,7 +36,7 @@ use super::repo_root;
 /// row became `min(its previous budget, measured + ~5% rounded up to 25)` —
 /// a ratchet only moves down. Raising one is a reviewed edit with a dated
 /// reason, in the same diff as the words.
-const BUDGETS: [(&str, usize); 22] = [
+const BUDGETS: [(&str, usize); 23] = [
     ("README.md", 1250),
     ("docs/ARCHITECTURE.md", 2125),
     ("docs/CHARTER.md", 1350),
@@ -53,6 +53,8 @@ const BUDGETS: [(&str, usize); 22] = [
     ("docs/RELEASING.md", 600),
     ("docs/REQUIREMENTS.md", 1400),
     ("docs/ROADMAP.md", 1850),
+    // New on 2026-08-29 (#347): the Cargo.toml dependency essays, in one place.
+    ("docs/SUPPLY-CHAIN.md", 1100),
     ("docs/design/authoring-dag.md", 2250),
     ("docs/design/authoring-ux.md", 3025),
     ("docs/design/catalog-domain.md", 1925),

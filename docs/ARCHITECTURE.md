@@ -63,7 +63,7 @@ All nodes are implemented (per-module detail lives in each crate's rustdoc); the
 `VirtualiZarr` sidecar is deliberately absent — the conformance *reference* for
 `swath-referencer` (ADR 0006), not a runtime component.
 
-_Last verified against sources `f352850826b6`._
+_Last verified against sources `c2102315d7a7`._
 
 ## 5. The Core (pure logic)
 
@@ -242,7 +242,7 @@ immutable once concluded), and `docs/`. Phase-1 adapters are direct dependencies
 embedded UI and HDF5 weight, not adapter selection (§14 covers extension beyond compile
 time).
 
-_Last verified against sources `f352850826b6`._
+_Last verified against sources `c2102315d7a7`._
 
 ## 13. Frontend architecture
 

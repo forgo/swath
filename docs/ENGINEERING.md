@@ -24,7 +24,8 @@ live in `tools/docs-check/src/check/`.
 - **Lints**: `unsafe_code = "warn"`, `unreachable_pub = "warn"`; clippy `pedantic` at warn with
   a curated allow-list plus targeted restriction lints; CI runs clippy with `-D warnings`.
   rustfmt: stable defaults, no config.
-- **Supply chain**: cargo-deny on every PR and nightly (`security.yml`, files issues).
+- **Supply chain**: cargo-deny on every PR and nightly; the reasoning per dependency is
+  `SUPPLY-CHAIN.md`.
   `cargo auditable` is **deferred to graduation tier** (§7, RELEASING.md); cargo-vet/crev
   skipped; `cargo-semver-checks` only when library crates are published.
 - **Testing stack**: cargo-nextest (plus `cargo test --doc`), proptest, insta, criterion.
