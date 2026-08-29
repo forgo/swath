@@ -20,7 +20,7 @@ reopen condition wins ([`decisions/`](decisions/)); the phase plan is
 | **M3** Materialization brain, legacy path | Cost-aware planner, content-keyed write-through cache, VIIRS served through virtual references, the openEO bounded profile | `design/materialization-planner.md`, ADR 0010 |
 | **M4** Colour, measure, ship a container | Colormaps; bench + load baselines; the typed e2e harness; the GHCR one-liner | ADR 0012, `perf/` |
 | **M5** Product surface and evidence | Landing, browsing, authoring panel, trace analytics, screenshots, diagrams, `PERFORMANCE.md`; `v0.1.0-alpha.1` | `media/`, `RELEASING.md` |
-| **M6** Legibility | The self-description rewritten around the evidence; the docs gates (`docs_check`) that keep it true | `crates/swath-cli/src/docs_check/` |
+| **M6** Legibility | The self-description rewritten around the evidence; the docs gates (`docs_check`) that keep it true | `tools/docs-check/src/check/` |
 | **M7** Time and overviews | Frame selection via `datetime=`; `swath materialize` pyramids | ADR 0015, #180/#181/#183 |
 | **M8** Ship the parts | Five published crates; Icechunk interop, byte-identical and traced | ADR 0016/0017/0020, #190–#193 |
 | **M9** `run_udf` | User code as sandboxed, fuel-metered WASM in the tile path; deterministic, load-tested, deployable read-only | ADR 0018, `PERFORMANCE.md` §9, `deploy/README.md` |

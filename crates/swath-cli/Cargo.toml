@@ -91,8 +91,6 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 # Authoring an openEO process graph in the serve-time rehydration test.
 serde_json = { workspace = true }
-# The docs gate's source-fingerprint stamps (docs_check/stamps.rs).
-sha2 = { workspace = true }
 # Parallel-safe temp dirs for store roots, drop dirs, and manifest outputs.
 swath-testsupport = { path = "../swath-testsupport", version = "0.1.0-alpha.1" }
 

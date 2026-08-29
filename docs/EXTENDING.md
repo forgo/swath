@@ -7,7 +7,7 @@ adapter on the unmerged evidence branch
 [`demo/125-toy-source-inmem`](https://github.com/forgo/swath/tree/demo/125-toy-source-inmem)
 (§5) — and **verified against the sources** — each section carries a
 `_Last verified against sources_` content fingerprint of its referenced files, checked by the
-docs gate (`crates/swath-cli/src/docs_check/stamps.rs`, ARCHITECTURE.md §6's discipline); a PR
+docs gate (`tools/docs-check/src/check/stamps.rs`, ARCHITECTURE.md §6's discipline); a PR
 that changes a referenced source pastes the new fingerprint the failing gate prints. The
 rustdoc on the named files is the normative contract and wins over this guide.
 

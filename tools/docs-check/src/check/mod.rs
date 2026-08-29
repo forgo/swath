@@ -62,8 +62,8 @@ use std::path::{Path, PathBuf};
 
 use clap::CommandFactory as _;
 
-use crate::Cli;
-use crate::config::ConfigFile;
+use swath_cli::Cli;
+use swath_cli::config::ConfigFile;
 
 /// The repository root (the docs live at `<root>/docs`), resolved from
 /// this crate's manifest so the gate works from any working directory.

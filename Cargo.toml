@@ -24,6 +24,7 @@ members = [
     "crates/swath-render",
     "crates/swath-testsupport",
     "crates/swath-udf-guest",
+    "tools/docs-check",
     "crates/swath-warp",
 ]
 # Prototypes are standalone, dated experiments — never workspace members.

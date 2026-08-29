@@ -1,0 +1,26 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-docs-check"
+description = "The documentation gates: tests that hold docs/ to the code (never shipped)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+clap = { workspace = true }
+serde_json = { workspace = true }
+# The source-fingerprint stamps (check/stamps.rs).
+sha2 = { workspace = true }
+swath-cli = { path = "../../crates/swath-cli", version = "0.1.0-alpha.1", default-features = false }
+# Parallel-safe temp dirs for the stamp gate's squash simulation.
+swath-testsupport = { path = "../../crates/swath-testsupport", version = "0.1.0-alpha.1" }
+toml = { workspace = true }
+
+[lints]
+workspace = true

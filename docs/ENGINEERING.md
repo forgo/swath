@@ -15,7 +15,7 @@ immutable) + `docs/`; SHA-pinned workflows and a composite `setup-rust` action. 
 tooling. **Tasks are the contract**: CI never invokes raw tool commands a developer can't run
 identically via `just <recipe>`; `just check` is everything CI enforces. The workflow around it
 — gate before push, merge on green by exit code — is `CONTRIBUTING.md`; the docs gates it names
-live in `crates/swath-cli/src/docs_check/`.
+live in `tools/docs-check/src/check/`.
 
 ## 2. Rust standards
 

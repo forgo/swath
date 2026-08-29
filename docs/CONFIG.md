@@ -5,7 +5,7 @@ variables, and the `--config` TOML file. The in-binary help remains the
 source of truth; **this file is kept synchronized mechanically** — the
 tables between `config-check` markers are diffed against the clap tree
 and serde schema by the docs-drift tests
-(`crates/swath-cli/src/docs_check/`): drift in either direction fails
+(`tools/docs-check/src/check/`): drift in either direction fails
 the build.
 Companions: [`OPERATIONS.md`](OPERATIONS.md), [`ENDPOINTS.md`](ENDPOINTS.md).
 

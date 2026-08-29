@@ -38,7 +38,7 @@ use crate::source::CompositeSource;
 /// `swath materialize` arguments: the config surface is `swath serve`'s
 /// (same file, same store-root grammar); `--layer` narrows the run.
 #[derive(Debug, clap::Args)]
-pub(crate) struct MaterializeArgs {
+pub struct MaterializeArgs {
     /// TOML config file (the same file `swath serve` reads).
     #[arg(long, value_name = "PATH")]
     pub(crate) config: Option<PathBuf>,
@@ -62,7 +62,7 @@ pub(crate) struct MaterializeArgs {
 
 /// Materialize-path errors, each phrased for the operator reading the log.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum MaterializeCliError {
+pub enum MaterializeCliError {
     /// Configuration resolution failed.
     #[error(transparent)]
     Config(#[from] config::ConfigError),
@@ -109,7 +109,7 @@ pub(crate) enum MaterializeCliError {
 }
 
 /// Resolves config, collects each layer's assets, and materializes them.
-pub(crate) fn run(args: &MaterializeArgs) -> Result<(), MaterializeCliError> {
+pub fn run(args: &MaterializeArgs) -> Result<(), MaterializeCliError> {
     let cfg = config::resolve(&ServeArgs {
         read_only: false,
         config: args.config.clone(),

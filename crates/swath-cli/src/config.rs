@@ -47,7 +47,7 @@ const FIXTURES_ROOT: &str = "./tests/fixtures";
 
 /// Configuration errors, each phrased for the operator reading the log.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum ConfigError {
+pub enum ConfigError {
     /// The `--config` file could not be read.
     #[error("cannot read config file `{path}`: {source}")]
     Read {
@@ -191,7 +191,7 @@ pub(crate) struct CatalogMode {
 /// a typo must fail loudly, not silently fall back to a default).
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub(crate) struct ConfigFile {
+pub struct ConfigFile {
     /// Socket address to listen on.
     bind: Option<SocketAddr>,
     /// Base URL minted into OGC links.

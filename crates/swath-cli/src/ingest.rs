@@ -18,7 +18,7 @@ use swath_referencer::{ReferencerError, SwathReferencer};
 
 /// `swath ingest <subcommand>` arguments.
 #[derive(Debug, clap::Args)]
-pub(crate) struct IngestArgs {
+pub struct IngestArgs {
     #[command(subcommand)]
     command: IngestCommand,
 }
@@ -44,7 +44,7 @@ enum IngestCommand {
 
 /// Ingest-path errors, phrased for the operator.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum IngestError {
+pub enum IngestError {
     /// The generator refused or failed.
     #[error("referencing `{granule}`: {source}")]
     Reference {
@@ -75,7 +75,7 @@ pub(crate) enum IngestError {
 }
 
 /// Runs one ingest subcommand.
-pub(crate) fn run(args: &IngestArgs) -> Result<(), IngestError> {
+pub fn run(args: &IngestArgs) -> Result<(), IngestError> {
     match &args.command {
         IngestCommand::Reference {
             granule,
