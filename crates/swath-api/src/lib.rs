@@ -18,17 +18,11 @@
 //!
 //! # Routes
 //!
-//! | Path | Resource |
-//! |------|----------|
-//! | `GET /` | OGC API landing page |
-//! | `GET /conformance` | conformance declaration |
-//! | `GET /tiles` | tilesets list (the standard's dataset-tilesets path) |
-//! | `GET /tilesets` | tilesets list (same representation, canonical path) |
-//! | `GET /tilesets/{layerId}` | tileset metadata (`WebMercatorQuad`) |
-//! | `GET /tilesets/{layerId}/tiles/{tileMatrix}/{tileRow}/{tileCol}` | a PNG tile |
-//! | `GET /traces` | the x-ray Trace SSE stream (control-plane, issue #28) |
-//! | `GET /healthz` | liveness probe: plain 200 `ok` (operational, non-OGC, issue #29) |
-//! | *(fallback)* | embedded UI assets, when a bundle is mounted (issue #103, [`ui`]) |
+//! Every mounted route, with captured examples, is `docs/ENDPOINTS.md`,
+//! whose table the docs gate diffs against the routers in this crate; the
+//! OGC API - Tiles routes live in [`router`], the x-ray `GET /traces` stream
+//! and the `/healthz` probe beside them, and the embedded UI in the fallback
+//! ([`ui`]).
 //!
 //! Catalog-backed deployments additionally merge in the **openEO
 //! authoring surface** (ADR 0010, [`openeo`] module: capabilities,
@@ -99,15 +93,9 @@
 //!
 //! # Deferred (noted, not built)
 //!
-//! - **Bounded concurrency / backpressure** (ARCHITECTURE.md §11):
-//!   `render_tile` runs inline on the handler task; `spawn_blocking`/rayon
-//!   offload and admission control wait until a real server feels the
-//!   latency (§16.7).
-//! - **WebP / content negotiation beyond PNG**: PNG is the only encode
-//!   format the render path emits today (`TileFormat`).
-//!
-//! Both are tracked deferrals: WebP in `docs/ROADMAP.md`'s inventory,
-//! render offload via ADR 0012's reopen trigger.
+//! Bounded concurrency/backpressure for the inline render (ADR 0012's
+//! reopen trigger) and encode formats beyond PNG (`docs/ROADMAP.md`, the
+//! deferral inventory) — neither is built, both are recorded there.
 //!
 //! # Layer resolution (issue #31)
 //!

@@ -1,29 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! The virtual-reference manifest: schema v1 of the generator contract
-//! (Swath ADR 0006, prototype 0001 §3). The normative schema description
-//! ships with this crate as `SPEC.md`; this API is that document made
-//! executable.
+#![doc = include_str!("../README.md")]
 //!
-//! A [`VirtualManifest`] describes a legacy granule (NetCDF4/HDF5, GRIB2) as
-//! a set of arrays whose chunks are **byte ranges into the original file** —
-//! the granule is served as a cloud-native cube without rewriting it. The
-//! manifest is the contract: whoever generates it (the production Rust
-//! generator in `swath-referencer`, or the Python `VirtualiZarr` sidecar in the
-//! conformance harness), the serve path reads it identically, so generators
-//! are interchangeable behind the contract. [`compare`] is that
-//! interchangeability made executable — the equivalence check promoted from
-//! prototype 0001.
-//!
-//! # Versioning
-//!
-//! The JSON document carries `"manifest_version": 1` and the serde shape is
-//! pinned by snapshot test (`tests/manifest_schema.rs`). Schema changes bump
-//! the version; readers reject versions they do not understand
-//! ([`ManifestVersion`] deserialization fails loudly) rather than guessing.
-//!
-//! # Georeferencing vocabulary (new over the prototype schema)
+//! # Georeferencing vocabulary
 //!
 //! Serving needs each array's spatial identity, so v1 adds an optional
 //! per-array [`Georef`]: CRS + geotransform + nodata + band semantics. The

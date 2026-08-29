@@ -1,15 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Guest-side kit for the Swath UDF ABI v1 (`docs/udf-abi/v1.md`, ADR 0018).
+#![doc = include_str!("../README.md")]
 //!
-//! A `run_udf` module maps input planes to output planes and nothing else:
-//! zero imports, four exports, a length-prefixed JSON header followed by
-//! `f64` planes and `u8` validity masks, dimension-preserving. This crate makes writing a
-//! conforming module ergonomic: decode a [`Request`], return a [`Response`],
-//! and let [`swath_udf!`] produce the four exports — including the linear
-//! allocator and panic handler a `no_std` `wasm32-unknown-unknown` build
-//! needs.
+//! # Writing a module
 //!
 //! A real module is one `#![no_std]` crate with `crate-type = ["cdylib"]`,
 //! built for `wasm32-unknown-unknown` (worked examples: the swath repo's
@@ -48,9 +42,6 @@
 //! are decode errors, and `swath_udf_run` answers any of them with `0` —
 //! the guest-declared failure the host turns into a loud per-tile error.
 //!
-//! Everything except the `wasm32` runtime plumbing (allocator, panic
-//! handler) compiles and is tested on the host; the encode/decode helpers
-//! double as the host-side builders the adapter's fixture tests use.
 
 #![no_std]
 

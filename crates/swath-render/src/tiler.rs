@@ -15,10 +15,9 @@
 //!   [`swath_core::planner::plan`], and **executes** the choice — every
 //!   band reads at the planned level ([`ReadLevel::Overview`] at the
 //!   common factor, or full resolution), so execution matches the Trace
-//!   by construction. The #38 per-band overview vote is subsumed: the
-//!   planner picks the coarsest factor *every* band can serve (or none)
-//!   — one tile, one honest decision, now decided before any read. The
-//!   Trace carries the whole reasoning as [`Trace::plan`]. A plan that
+//!   by construction; the planner picks the coarsest factor *every* band
+//!   can serve (or none) — one tile, one honest decision, decided before
+//!   any read. The Trace carries the whole reasoning as [`Trace::plan`]. A plan that
 //!   refuses (live estimate over the budget's
 //!   `max_estimated_live_bytes` ceiling with nothing cheaper available)
 //!   surfaces as [`TileError::BudgetExceeded`] — an explicit error,
