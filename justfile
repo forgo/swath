@@ -1228,15 +1228,15 @@ perf-doc:
 docs-check:
     cargo nextest run -p swath-cli -E 'test(docs_check)'
 
-# The word-count measurement behind the per-doc budgets (issue #177):
-# whitespace-delimited words (`wc -w`) per doc over README.md + docs/*.md,
-# plus the total — the same counting rule the budget gate applies
-# (crates/swath-cli/src/docs_check/budgets.rs uses split_whitespace, which
-# agrees with `wc -w` on every committed doc).
+# The word-count measurement behind the word budgets (issue #177, #342):
+# `wc -w` per doc over README.md + docs/*.md + docs/design/*.md, then the
+# docs/media/*.md sum the directory ceiling applies to — the same counting
+# rule as crates/swath-cli/src/docs_check/budgets.rs.
 docs-words:
     #!/usr/bin/env bash
     set -euo pipefail
-    wc -w README.md docs/*.md | sort -n
+    wc -w README.md docs/*.md docs/design/*.md | sort -n
+    echo "docs/media/*.md sum: $(cat docs/media/*.md | wc -w | tr -d ' ')"
 
 # Packaging dry-run for the five publishable crates (ADR 0016's four, #192,
 # plus swath-udf-guest — ADR 0020, the #209 SDK): cargo

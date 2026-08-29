@@ -16,68 +16,55 @@
 //! deletion — or loosening one deliberately alongside new content — is
 //! a reviewed edit to [`BUDGETS`], visible in the diff.
 //!
-//! Scope is the sweep's scope: `README.md` + `docs/*.md`. The map is
-//! closed in both directions, like every allowlist in this gate: a new
-//! doc under `docs/` must get a budget row, and a row whose doc was
-//! deleted or renamed fails as stale.
+//! Scope: `README.md` + `docs/*.md` + `docs/design/*.md` (per-file rows,
+//! closed in both directions like every allowlist in this gate: a new doc
+//! must get a row, a row whose doc was deleted or renamed fails as stale)
+//! plus a directory ceiling over `docs/media/*.md` (#342) — the figure
+//! pages and provenance sidecars grow with the figure set, so the ceiling
+//! is on their sum. Generated docs (`docs/media/screenshots/index.md`,
+//! `docs/perf/*.md`) and the immutable canon (`docs/decisions/`) stay out.
+//!
+//! Budgets ratchet: after a consolidation lands, every row becomes the
+//! smaller of its previous value and the measured count + ~5% (first
+//! ratchet 2026-08-29, #342), so the gate locks each gain in and never
+//! records growth.
 
 use super::repo_root;
 
 /// The committed budgets: (repo-relative doc, max whitespace-delimited
-/// words). Values are the post-sweep counts plus ~10%, rounded up to 25.
-const BUDGETS: [(&str, usize); 16] = [
-    // 1025 → 1250 on 2026-08-29 (#331, the product-language pass): the hero is
-    // the product-loop diagram and the README carries three captioned
-    // screenshots instead of one — alt text and captions are the growth; the
-    // prose itself shrank (the milestone paragraph went). Measured at 1216.
+/// words). On 2026-08-29 (#342, the first ratchet after M13 phase 1) every
+/// row became `min(its previous budget, measured + ~5% rounded up to 25)` —
+/// a ratchet only moves down. Raising one is a reviewed edit with a dated
+/// reason, in the same diff as the words.
+const BUDGETS: [(&str, usize); 22] = [
     ("README.md", 1250),
     ("docs/ARCHITECTURE.md", 2125),
-    // Held at 1350 on 2026-08-29 (#338): PITCH.md (192 words) folded in as §14
-    // while §§1, 4, 7, 12 became pointers to REQUIREMENTS — measured at 1289,
-    // net −125 across the two files.
     ("docs/CHARTER.md", 1350),
-    // 1600 → 1700 on 2026-08-29 (#331): the wedge diagram and its alt moved
-    // here from the README, where the reader-facing hero replaced it.
     ("docs/COMPARISON.md", 1700),
     ("docs/CONFIG.md", 1775),
-    // 775 → 875 on 2026-08-29 (#331): six screenshot embeds (x-ray, slider,
-    // compare) — alt text, not prose.
     ("docs/DEMO.md", 875),
-    // 1700 → 1760 on 2026-08-28: the merge_cubes join and its preview framing
-    // (ADR 0022) — three sentences the process list could not carry; → 1800
-    // the same day for the tileset metadata's window and branch count (#301).
     ("docs/ENDPOINTS.md", 1800),
     ("docs/ENGINEERING.md", 1000),
-    ("docs/EXTENDING.md", 1525),
+    ("docs/EXTENDING.md", 1475),
     ("docs/OPERATIONS.md", 975),
-    // Raised 2050 -> 2425 with #207's `run_udf` evidence: PERFORMANCE.md
-    // gained §9 (UDF bench + load evidence under the ADR 0012 guard) and
-    // its generated load table — an acceptance criterion, not prose
-    // regrowth — re-measured at 2372 + the usual headroom.
     ("docs/PERFORMANCE.md", 2425),
-    // 850 → 900 on 2026-08-29 (#331): the tracks show their screenshots
-    // instead of linking them.
-    ("docs/QUICKSTART.md", 900),
-    // Raised 525 -> 545 with #194's evidence screenshot: the QGIS recipe
-    // gained its capture note and image line (an acceptance criterion,
-    // not prose regrowth), re-measured at 534 + the usual headroom.
+    ("docs/QUICKSTART.md", 850),
     ("docs/RECIPES.md", 545),
     ("docs/RELEASING.md", 600),
     ("docs/REQUIREMENTS.md", 1400),
-    // Raised 1375 -> 1420 with #208's deferral row 18, then -> 1775 with
-    // #212's era evidence: §1 gained the M9 entry (exit criteria, each
-    // linking its committed evidence) and §3 item 8 its recorded
-    // amendment — acceptance criteria, not prose regrowth; re-measured
-    // at 1619 + the usual headroom.
-    // Raised 1775 → 1950 with ADR 0022 (#294): the canonical deferral
-    // inventory grew by five reopen-condition rows (19–23, ~110 words,
-    // written tight) — table growth, not prose regrowth — plus ~4%
-    // headroom for the next row.
-    // Lowered 1950 → 1850 on 2026-08-29 (#339): §1 became a one-line-per-milestone
-    // table, §3 lost its shipped items, the two co-recording ledgers point at §2;
-    // measured at 1752 — the ratchet after a consolidation, not headroom.
     ("docs/ROADMAP.md", 1850),
+    ("docs/design/authoring-dag.md", 2250),
+    ("docs/design/authoring-ux.md", 3025),
+    ("docs/design/catalog-domain.md", 1925),
+    ("docs/design/extraction-boundary.md", 675),
+    ("docs/design/materialization-planner.md", 1675),
+    ("docs/design/ui-system.md", 3425),
 ];
+
+/// Directory ceilings: (repo-relative directory, max words summed over its
+/// `*.md` files, non-recursive). `docs/media/` measured at 5594 on
+/// 2026-08-29 (#342).
+const DIR_BUDGETS: [(&str, usize); 1] = [("docs/media", 5875)];
 
 /// The word count of `text` under the committed measurement method:
 /// whitespace-delimited tokens, the same rule as `wc -w`.
@@ -85,23 +72,38 @@ fn word_count(text: &str) -> usize {
     text.split_whitespace().count()
 }
 
-/// The budgeted scope as found on disk: `README.md` + `docs/*.md`.
-fn scope() -> Vec<String> {
-    let mut files = vec!["README.md".to_owned()];
-    let mut docs: Vec<String> = std::fs::read_dir(repo_root().join("docs"))
-        .expect("docs directory exists")
+/// The `*.md` files directly under `dir` (repo-relative), sorted.
+fn markdown_in(dir: &str) -> Vec<String> {
+    let mut docs: Vec<String> = std::fs::read_dir(repo_root().join(dir))
+        .unwrap_or_else(|err| panic!("{dir} is readable: {err}"))
         .map(|entry| entry.expect("readable dir entry").file_name())
         .filter_map(|name| {
             let name = name.to_str().expect("utf-8 filename").to_owned();
             std::path::Path::new(&name)
                 .extension()
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-                .then(|| format!("docs/{name}"))
+                .then(|| format!("{dir}/{name}"))
         })
         .collect();
     docs.sort();
-    files.append(&mut docs);
+    docs
+}
+
+/// The per-file budgeted scope as found on disk: `README.md` +
+/// `docs/*.md` + `docs/design/*.md`.
+fn scope() -> Vec<String> {
+    let mut files = vec!["README.md".to_owned()];
+    files.append(&mut markdown_in("docs"));
+    files.append(&mut markdown_in("docs/design"));
     files
+}
+
+/// Words summed over the `*.md` files directly under `dir`.
+fn directory_words(dir: &str) -> usize {
+    markdown_in(dir)
+        .iter()
+        .map(|file| word_count(&super::read_repo(file)))
+        .sum()
 }
 
 /// The gate: every in-scope doc within its budget, every budget row
@@ -131,6 +133,16 @@ pub(super) fn check() -> Result<(), String> {
         if !on_disk.iter().any(|file| file == doc) {
             violations.push(format!(
                 "stale budget row (doc no longer exists — remove it): {doc}"
+            ));
+        }
+    }
+    for (dir, budget) in DIR_BUDGETS {
+        let words = directory_words(dir);
+        if words > budget {
+            violations.push(format!(
+                "{dir}/*.md is over its directory word budget: {words} words > {budget} — \
+                 the figure pages and sidecars are budgeted on their sum; trim, or raise \
+                 the ceiling deliberately in the same reviewed diff"
             ));
         }
     }
@@ -180,5 +192,21 @@ fn a_doc_over_budget_is_caught() {
     assert!(
         word_count(&padded) > budget && words <= budget,
         "padding must be what pushes {doc} over its budget"
+    );
+}
+
+/// The directory ceiling is live: the measured sum sits under it, and a
+/// ceiling one word below the sum would fail.
+#[test]
+fn the_media_directory_ceiling_is_live() {
+    let (dir, budget) = DIR_BUDGETS[0];
+    let words = directory_words(dir);
+    assert!(
+        words <= budget,
+        "{dir} measured {words} words, over its {budget} ceiling"
+    );
+    assert!(
+        words > budget / 2,
+        "{dir} ceiling {budget} is far above the measured {words}"
     );
 }
