@@ -35,6 +35,7 @@
  * "N traces, H hits" is the honest demo number.
  */
 
+import { formatMs } from "./format";
 import { decisionKind, type TraceDecision } from "./swath-xray.js";
 
 /** Percentile window: the last this-many traces. ~200 is a few
@@ -185,9 +186,6 @@ export class TraceAnalytics {
 /** `12` / `17.5` — interpolated percentiles carry at most the one
  * decimal a half-step between integer millisecond samples produces
  * worth showing. */
-function formatMs(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
 
 /** The readouts-panel face of [`TraceAnalytics`]: one stats card in the
  * overlay's bottom-left readout column, styled like the ingest readout

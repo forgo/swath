@@ -53,6 +53,7 @@ export type TraceDecision =
   | { cache_hit: { key: string } };
 
 import { type CompareSides, traceSide } from "./compare-model.js";
+import { formatBytes, formatKb } from "./format";
 import { tileNorthWest } from "./tms.js";
 import { adoptSheet, css, readToken } from "./ui/styles.js";
 import { AnalyticsPanel } from "./xray-analytics.js";
@@ -604,24 +605,6 @@ function parseTile(tile: string): { z: number; x: number; y: number } | undefine
     return undefined;
   }
   return Number.isFinite(z) && Number.isFinite(x) && Number.isFinite(y) ? { z, x, y } : undefined;
-}
-
-function formatKb(bytes: number): string {
-  const kb = bytes / 1024;
-  return kb >= 100 ? String(Math.round(kb)) : kb.toFixed(1);
-}
-
-/** Human-formatted byte count with a unit (B / KB / MB). */
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  const kb = bytes / 1024;
-  if (kb < 1024) {
-    return `${formatKb(bytes)} KB`;
-  }
-  const mb = kb / 1024;
-  return `${mb >= 100 ? String(Math.round(mb)) : mb.toFixed(1)} MB`;
 }
 
 /** Wall-clock `HH:MM:SS` for a feed line. */

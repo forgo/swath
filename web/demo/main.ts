@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+import { onServiceDeleted, wireAuthoring } from "../src/app/authoring.js";
+import { wirePalette } from "../src/app/palette.js";
+import { wireReflow } from "../src/app/reflow.js";
+import { wireShare } from "../src/app/share.js";
 import {
   type AppState,
   appStatesEqual,
@@ -12,7 +16,6 @@ import {
   type ViewMode,
   withAppState,
 } from "../src/app-state.js";
-import { buildCommands } from "../src/commands.js";
 // The entry page's app shell (issue #108). Semantics live in
 // src/view-state.ts; this file only wires them to the DOM:
 //
@@ -39,6 +42,7 @@ import { buildCommands } from "../src/commands.js";
 //   `cinematic`): the bare URL stays bare until the user takes over.
 import { GranuleFootprints } from "../src/granule-footprints.js";
 import { formatCrs, formatIngest, formatLonLat, formatZoomCell } from "../src/status-model.js";
+import { safeLocalStorage } from "../src/storage.js";
 import { defineSwathAddDataPanel, SwathAddDataPanel } from "../src/swath-add-data-panel.js";
 import { defineSwathAuthoringPanel, SwathAuthoringPanel } from "../src/swath-authoring-panel.js";
 import { defineSwathCatalog, SwathCatalog } from "../src/swath-catalog.js";
@@ -48,7 +52,6 @@ import { defineSwathShell, SwathShell } from "../src/swath-shell.js";
 import { SwathButton } from "../src/ui/button.js";
 import { SwathCommandPalette } from "../src/ui/command-palette.js";
 import { SwathDrawer } from "../src/ui/drawer.js";
-import { createSwathEvent } from "../src/ui/events.js";
 import { SwathHudDock } from "../src/ui/hud-dock.js";
 import { SwathRail } from "../src/ui/rail.js";
 import { SwathStatusBar, SwathStatusCell } from "../src/ui/status-bar.js";
@@ -60,9 +63,7 @@ import {
   parseTime,
   parseViewState,
   resolveInitialState,
-  safeLocalStorage,
   saveViewState,
-  shareUrl,
   type ViewState,
   viewStatesEqual,
   withViewState,
@@ -636,232 +637,24 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     wireShare(shareElement, snapshot);
   }
 
-  // Responsive reflow (issue #293, ui-system.md §6): the shell reports its
-  // tier; the host moves the pieces. Wide: as drawn. Medium/narrow: an
-  // icon rail, the mode content in a right drawer (modal with a scrim on
-  // narrow). Phone: a bottom tab bar, the content as a sheet (40/90 snaps),
-  // the status bar folded into the dock as one chip, the map inert under
-  // a 90% sheet. Tapping the active tab toggles the sheet.
-  const railDrawer = document.querySelector("#swath-rail-drawer");
-  const railDrawerBody = document.querySelector("#swath-rail-drawer-body");
-  const statusBar = document.querySelector("swath-status-bar");
-  const hudDock = document.querySelector("swath-hud-dock");
-  const railContent = (): HTMLElement[] =>
-    [panel, datasetElement, addDataElement, authoringElement, xrayRail].filter(
-      (node): node is HTMLElement => node instanceof HTMLElement,
-    );
-  let tier = "wide";
-  const modeHasContent = (): boolean => appState.view !== "xray" || map.hasAttribute("xray");
-  const applyTier = (next: string): void => {
-    tier = next;
-    document.body.dataset["tier"] = next;
-    const compact = next !== "wide";
-    if (
-      railDrawer instanceof SwathDrawer &&
-      railDrawerBody instanceof HTMLElement &&
-      railElement instanceof SwathRail
-    ) {
-      if (compact) {
-        railDrawerBody.append(...railContent());
-        railDrawer.modal = next === "narrow";
-        railDrawer.open = modeHasContent();
-      } else {
-        railElement.append(...railContent());
-        railDrawer.open = false;
-      }
-    }
-    if (
-      statusBar instanceof SwathStatusBar &&
-      hudDock instanceof HTMLElement &&
-      shellElement instanceof SwathShell
-    ) {
-      if (next === "phone") {
-        statusBar.chip = true;
-        statusBar.slot = "bottom-left";
-        hudDock.append(statusBar);
-      } else {
-        statusBar.chip = false;
-        statusBar.slot = "statusbar";
-        shellElement.append(statusBar);
-      }
-    }
-    syncInert();
-  };
-  const syncInert = (): void => {
-    const sheetFull =
-      railDrawer instanceof SwathDrawer &&
-      railDrawer.open &&
-      railDrawer.getAttribute("presentation") === "bottom" &&
-      railDrawer.snapIndex === 1;
-    const modalOpen = railDrawer instanceof SwathDrawer && railDrawer.open && railDrawer.modal;
-    map.inert = sheetFull || modalOpen;
-  };
-  if (shellElement instanceof SwathShell) {
-    shellElement.addEventListener("swath-change", (event) => {
-      if (event.detail.name === "tier") {
-        applyTier(String(event.detail.value));
-      }
-    });
-    if (shellElement.tier !== undefined) {
-      applyTier(shellElement.tier);
-    }
-  }
-  if (railDrawer instanceof SwathDrawer) {
-    railDrawer.addEventListener("swath-drawer-close", () => {
-      railDrawer.open = false;
-      syncInert();
-    });
-    railDrawer.addEventListener("swath-change", (event) => {
-      if (event.detail.name === "snap") {
-        syncInert();
-      }
-    });
-  }
-  if (railElement instanceof SwathRail && railDrawer instanceof SwathDrawer) {
-    // Capture phase: this must see the view *before* the rail's own click
-    // handler switches modes — otherwise tapping a new tab opens the sheet
-    // (mode change) and immediately toggles it closed (same-mode tap).
-    railElement.addEventListener(
-      "click",
-      (event) => {
-        const item = event
-          .composedPath()
-          .find(
-            (n): n is HTMLElement => n instanceof HTMLElement && n.dataset["mode"] !== undefined,
-          );
-        if (item && item.dataset["mode"] === appState.view && tier !== "wide") {
-          railDrawer.open = !railDrawer.open;
-          syncInert();
-        }
-      },
-      { capture: true },
-    );
-    railElement.addEventListener("swath-mode-change", () => {
-      if (tier !== "wide" && railDrawer instanceof SwathDrawer) {
-        railDrawer.open = modeHasContent();
-        syncInert();
-      }
-    });
-  }
-
-  // The command palette (issue #292): built from live state each time it
-  // opens — layers, the other modes, the map toggles, share, and in Data
-  // mode a jump to any listed granule. ⌘K / Ctrl-K anywhere, or the top
-  // bar's button; Esc restores focus to where it was.
-  const palette = document.querySelector("swath-command-palette");
-  if (palette instanceof SwathCommandPalette) {
-    const openPalette = (): void => {
-      palette.commands = buildCommands({
-        layers: panel.layers,
-        activeLayer: appliedLayer,
-        mode: appState.view,
-        xray: map.hasAttribute("xray"),
-        compareAvailable: map.querySelector(".swath-map-compare-toggle:not([hidden])") !== null,
-        granules:
-          datasetElement instanceof SwathCatalog && datasetElement.selected !== ""
-            ? datasetElement.granules.map((granule) => ({
-                dataset: datasetElement.selected,
-                granule,
-              }))
-            : undefined,
-        setLayer: (id) => {
-          map.setLayer(id).catch(() => undefined);
-        },
-        setMode,
-        toggleXray: () => {
-          if (map.hasAttribute("xray")) {
-            map.removeAttribute("xray");
-          } else {
-            map.setAttribute("xray", "");
-          }
-        },
-        toggleCompare: () => map.toggleCompare(),
-        zoomToData: () => map.zoomToData(),
-        share: () => shareElement?.click(),
-        zoomToGranule: (_dataset, granule) => {
-          if (datasetElement instanceof SwathCatalog) {
-            datasetElement.dispatchEvent(
-              createSwathEvent("swath-granule-zoom", {
-                dataset: _dataset,
-                id: granule.id,
-                bbox: granule.bbox,
-              }),
-            );
-          }
-        },
-      });
-      palette.show();
-    };
-    document.querySelector("#swath-search")?.addEventListener("click", openPalette);
-    window.addEventListener("keydown", (event) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        if (palette.open) {
-          palette.close();
-        } else {
-          openPalette();
-        }
-      }
-    });
-  }
-}
-
-/** How long the Share button reads "copied" before reverting. */
-const SHARE_FEEDBACK_MS = 1600;
-
-/** The Share button (issue #211): copies the canonical deep link of the
- * current view — the same URL the address bar shows after an
- * interaction, written in full even on a bare landing. Clipboard
- * failure (no secure context, permission denied) falls back to a
- * prompt holding the link, so the URL is never unreachable. */
-function wireShare(button: SwathButton, snapshot: () => ViewState): void {
-  const idle = (button.textContent ?? "").trim();
-  let revert: number | undefined;
-  const feedback = (state: "copied" | "failed"): void => {
-    button.dataset["state"] = state;
-    button.textContent = state === "copied" ? "copied" : "copy failed";
-    window.clearTimeout(revert);
-    revert = window.setTimeout(() => {
-      delete button.dataset["state"];
-      button.textContent = idle;
-    }, SHARE_FEEDBACK_MS);
-  };
-  button.addEventListener("click", () => {
-    const url = shareUrl(location.href, snapshot());
-    button.dataset["url"] = url; // what was copied, inspectable (tests, tooling)
-    navigator.clipboard
-      .writeText(url)
-      .then(() => feedback("copied"))
-      .catch(() => {
-        feedback("failed");
-        window.prompt("Copy this link", url);
-      });
+  wireReflow({
+    map,
+    rail: railElement,
+    shell: shellElement,
+    content: () =>
+      [panel, datasetElement, addDataElement, authoringElement, xrayRail].filter(
+        (node): node is HTMLElement => node instanceof HTMLElement,
+      ),
+    currentView: () => appState.view,
   });
-}
 
-// The authoring panel (issue #109) is a pure openEO client; the shell
-// only routes its outcomes to the map. A created service becomes the
-// viewed layer (the switch refetches /tilesets, so the layer browser
-// lists it immediately — no reload); a deleted one falls back to the
-// server's default layer when it was the viewed one, else just refreshes
-// the layer list.
-function wireAuthoring(map: SwathMap, authoring: SwathAuthoringPanel): void {
-  authoring.addEventListener("swath-service-created", (event) => {
-    const id = event.detail.id;
-    map.setLayer(id).catch(() => undefined);
+  wirePalette({
+    map,
+    panel,
+    catalog: datasetElement,
+    share: shareElement,
+    currentLayer: () => appliedLayer,
+    currentView: () => appState.view,
+    setMode,
   });
-  authoring.addEventListener("swath-service-deleted", (event) => {
-    onServiceDeleted(map, event.detail.id);
-  });
-}
-
-/** A service is gone (deleted from the authoring panel or a layer row's
- * kebab): the viewed layer falls back to the server default, any other
- * just refreshes the list. */
-function onServiceDeleted(map: SwathMap, id: string): void {
-  if (map.getAttribute("layer") === id) {
-    map.removeAttribute("layer"); // re-applies with the server default
-  } else {
-    map.refresh();
-  }
 }

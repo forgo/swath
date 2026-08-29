@@ -1,3 +1,5 @@
+import { fixed } from "./format";
+
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
@@ -109,28 +111,19 @@ export function parseNumber(value: string | null): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-/** Fixed-precision decimal with trailing zeros (and a bare `.`) trimmed —
- * `-106.00000` → `-106`, `39.30000` → `39.3`. */
-function trimmed(value: number, decimals: number): string {
-  return value
-    .toFixed(decimals)
-    .replace(/(\.\d*?)0+$/, "$1")
-    .replace(/\.$/, "");
-}
-
 /** Canonical `"lon,lat"` for URLs, attributes, and storage. */
 export function formatCenter(center: [number, number]): string {
-  return `${trimmed(center[0], CENTER_DECIMALS)},${trimmed(center[1], CENTER_DECIMALS)}`;
+  return `${fixed(center[0], CENTER_DECIMALS)},${fixed(center[1], CENTER_DECIMALS)}`;
 }
 
 /** Canonical zoom string. */
 export function formatZoom(zoom: number): string {
-  return trimmed(zoom, ZOOM_DECIMALS);
+  return fixed(zoom, ZOOM_DECIMALS);
 }
 
 /** Canonical swipe-fraction string for URLs, attributes, and storage. */
 export function formatSwipe(swipe: number): string {
-  return trimmed(swipe, SWIPE_DECIMALS);
+  return fixed(swipe, SWIPE_DECIMALS);
 }
 
 /** Parses a swipe fraction: a finite number in [0, 1]; undefined when
@@ -403,14 +396,4 @@ export function loadViewState(storage: Storage): ViewState | undefined {
     state.swipe = record["swipe"];
   }
   return state;
-}
-
-/** `window.localStorage`, or undefined where touching it throws (storage
- * disabled): the whole persistence feature then degrades to no-op. */
-export function safeLocalStorage(): Storage | undefined {
-  try {
-    return window.localStorage;
-  } catch {
-    return undefined;
-  }
 }
