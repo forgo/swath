@@ -438,8 +438,53 @@ test("change detection: the first DAG product on the canvas", async ({ page }) =
   await capture(
     page,
     "15-change-detection.png",
-    "Change detection (ADR 0022): two dated branches of one collection joined by a subtract resolver — NDVI(later) − NDVI(earlier), previewed before publishing.",
+    // The join is ADR 0022's; the caption is for readers, not the ADR index.
+    "Change detection: two dated branches of one collection joined by a subtract — NDVI(later) − NDVI(earlier), previewed before publishing.",
     { maxBadFrac: 0.03 }, // the preview's live render carries a few seam pixels
+  );
+});
+
+test("compare swipe: NDVI against true color, one handle", async ({ page }) => {
+  const truecolorTile = page.waitForResponse(
+    (r) => r.url().includes("/tilesets/truecolor/tiles/") && r.status() === 200,
+  );
+  await gotoAndWaitForTiles(
+    page,
+    `${DEMO_PATH}?layer=ndvi&cl=truecolor&center=${CENTER}&zoom=12&swipe=0.5`,
+    "ndvi",
+  );
+  await truecolorTile;
+  const handle = page.locator("swath-map .swath-map-compare-handle");
+  await expect(handle).toHaveAttribute("data-mode", "layer");
+  await expect(page.locator('.swath-map-compare-label[data-side="left"]')).toHaveText("ndvi");
+  await expect(page.locator('.swath-map-compare-label[data-side="right"]')).toHaveText("truecolor");
+  await waitForMapIdle(page);
+  await capture(
+    page,
+    "16-compare-swipe.png",
+    "Compare swipe, layer against layer: NDVI left, true color right of one draggable handle — the same handle works date-vs-date on a time series, and its position rides in the share link.",
+  );
+});
+
+test("command palette: ⌘K, type, jump", async ({ page }) => {
+  await gotoAndWaitForTiles(
+    page,
+    `${DEMO_PATH}?layer=truecolor&center=${CENTER}&zoom=12`,
+    "truecolor",
+  );
+  await page.keyboard.press("ControlOrMeta+k");
+  const palette = page.locator("swath-command-palette");
+  await expect(palette).toHaveAttribute("open", "");
+  await expect(palette.locator('[part="input"]')).toBeFocused();
+  await page.keyboard.type("ndvi");
+  await expect(palette.locator('[part="item"]').first()).toHaveAttribute(
+    "data-command",
+    "layer:ndvi",
+  );
+  await capture(
+    page,
+    "17-command-palette.png",
+    "Command palette (⌘K / Ctrl-K): type a layer, mode, or action and jump — the whole shell is reachable from the keyboard.",
   );
 });
 
@@ -581,7 +626,8 @@ test("time slider: first pass live, second pass cached (issue #182)", async ({ p
   await capture(
     page,
     "14-time-slider-cached.png",
-    "The same frame revisited: every tile is a cache hit (same granule, same cache entry — ADR 0015 frame identity), which is why the loop replays smoothly.",
+    // Frame identity is ADR 0015's rule; the caption stays in the reader's words.
+    "The same frame revisited: every tile is a cache hit (same granule, same cache entry), which is why the loop replays smoothly.",
     { maxBadFrac: 0.03 },
   );
 });
