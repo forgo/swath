@@ -43,16 +43,12 @@ authors = ["Elliott Richerson <elliott.richerson@gmail.com>"]
 
 # Shared dependency versions live here as crates adopt them (`dep = { workspace = true }`).
 [workspace.dependencies]
-# PNG decode/encode only — the perceptual-diff oracle (issue #19) and, later,
-# the tile encoder. Default features off: every extra codec is supply-chain
-# surface the license gate (deny.toml) must then carry.
+# PNG only — the pdiff oracle and the tile encoder; every extra codec is deny surface.
 image = { version = "0.25.8", default-features = false, features = ["png"] }
 # Trace model serialization (ARCHITECTURE.md §9): the SSE stream and the test
 # suite both consume the same JSON shape.
 serde = { version = "1.0.228", features = ["derive"] }
-# float_roundtrip: the catalog's lossless STAC round trip (issue #30) is a
-# contract on exact f64 identity through JSON text; serde_json's default float
-# parser is the fast path that can be off by 1 ulp.
+# `float_roundtrip`: the catalog's lossless STAC round trip needs exact f64 identity.
 serde_json = { version = "1.0.145", features = ["float_roundtrip"] }
 # Error taxonomy derive (ENGINEERING.md adopt list).
 thiserror = { version = "2.0.17" }
@@ -61,16 +57,9 @@ proptest = { version = "1.8.0" }
 # Snapshot tests (ENGINEERING.md §2 testing stack): pins the Render IR's
 # serde JSON shape and small eval outputs. Dev-dependency only.
 insta = { version = "1.48.0", features = ["json"] }
-# Microbenchmarks (issue #37: `plan()` must be trivially cheap and stay
-# that way; issue #100: the render-stage suites). Dev-dependency only;
-# default features off — no plotters/rayon report machinery, just the
-# harness (every extra crate is deny surface). `async_tokio` lets the
-# full-tile composite bench await the real `render_tile` future (#100).
+# Microbenchmarks (dev-only); default features off, `async_tokio` for the full-tile bench.
 criterion = { version = "0.7.0", default-features = false, features = ["cargo_bench_support", "async_tokio"] }
-# COG/TIFF reading is ADOPT (ARCHITECTURE.md §3): async-tiff (developmentseed)
-# parses headers/IFDs/GeoKeys and decodes tiles; default features off — we
-# drive it through our own object_store-backed reader (no reqwest, and no
-# coupling to the object_store version async-tiff's optional feature pins).
+# COG/TIFF, adopted (ARCHITECTURE.md §3); default features off — driven through our own reader.
 async-tiff = { version = "0.3.0", default-features = false }
 # The one storage abstraction (ARCHITECTURE.md §3/§7): local fs + in-memory
 # today, S3/MinIO later behind the same trait.
@@ -81,39 +70,17 @@ async-trait = { version = "0.1.89" }
 bytes = { version = "1.10.1" }
 # Adapter/test async runtime. NEVER a dependency of swath-core.
 tokio = { version = "1.49.0", default-features = false }
-# Postgres driver for the pgstac catalog adapter (#30). sqlx over
-# tokio-postgres: the pooled, typed-bind, one-crate surface (PgPool + jsonb
-# binds via the json feature) versus hand-rolling pooling/TLS/typed binds on
-# tokio-postgres + deadpool — two more deps for less. Feature-trimmed hard:
-# postgres + runtime-tokio + json only; no TLS backend compiled (local/dev
-# and in-cluster plaintext for now — a tls-* feature is a deliberate later
-# addition), no macros/migrate/derive (queries here are three static SQL
-# strings calling pgstac functions; compile-time checking would drag a
-# DATABASE_URL into every build).
+# Postgres for pgstac: `postgres` + `runtime-tokio` + `json` only (docs/SUPPLY-CHAIN.md).
 sqlx = { version = "0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "json"] }
-# Was dev-only (truth-table pixel hashes); promoted to a runtime dep of
-# swath-core by the TileCache key (#36): the cache key must be stable
-# across Rust releases and architectures (it names objects in a store), so
-# it is SHA-256, never `DefaultHasher`. Pure computation — no I/O, keeps
-# the core runtime-free. Already licensed/vetted in the tree (MIT/Apache).
+# The tile-cache key: SHA-256, stable across builds and platforms — never `DefaultHasher`.
 sha2 = { version = "0.10.9" }
-# `run_udf`'s inline module form (`data:application/wasm;base64,…`, ADR
-# 0018 / #204) decodes in the process compiler. Already in the tree
-# transitively (reqwest/object_store); pure computation, MIT/Apache.
+# `run_udf`'s inline `data:application/wasm;base64,…` form decodes in the compiler.
 base64 = { version = "0.22.1" }
-# Projection math is BIND, never build (ADR 0002): pure-Rust proj4 for the
-# common CRS set; PROJ C-bindings feature-gated later for the long tail.
-# Default features off: they only add binaries and multi-thread NAD-grid
-# machinery the adapter doesn't use.
+# Projection math is bind, never build (ADR 0002); default features off.
 proj4rs = { version = "0.1.10", default-features = false }
-# Inbound HTTP (ARCHITECTURE.md §11: tokio + axum). Default features off:
-# the API crate builds Routers and serializes JSON — the server wiring
-# (http1/tokio features) arrives with the binary (#29) and pays for itself
-# then, not before.
+# Inbound HTTP: the API crate builds routers; the binary adds `http1`/`tokio`.
 axum = { version = "0.8.9", default-features = false, features = ["json"] }
-# The `Stream` trait alone (trait-only crate, already in axum's own graph):
-# implementing the stream axum's `Sse` consumes requires naming the trait.
-# Never futures-util — the combinator surface stays out of the tree.
+# The `Stream` trait alone, for the SSE stream — never futures-util.
 futures-core = { version = "0.3.31", default-features = false, features = ["alloc"] }
 # OGC conformance smoke tests (REQUIREMENTS.md R5): responses are validated
 # against the committed official OGC schemas. Dev-dependency only.
@@ -121,22 +88,13 @@ jsonschema = { version = "0.49.8", default-features = false }
 # tower's ServiceExt::oneshot drives the Router in-process in tests — no
 # real network. Dev-dependency only.
 tower = { version = "0.5.3", default-features = false, features = ["util"] }
-# The opt-in CORS layer (issue #103, ADR 0011). Default features off; the
-# consuming crate enables exactly `cors` — nothing else from the middleware
-# grab bag enters the graph.
+# Exactly `cors` (ADR 0011); nothing else from the middleware grab bag.
 tower-http = { version = "0.6.11", default-features = false }
-# Compile-time embedding of the production web bundle (issue #103, ADR
-# 0011): `swath serve` alone serves the UI. Feature-gated in swath-cli
-# (`embedded-ui`, default on); the build script points it at an OUT_DIR
-# copy of web/dist so a dist-less `cargo build` still compiles (empty UI).
+# The embedded UI bundle (ADR 0011), feature-gated in swath-cli.
 include_dir = { version = "0.7.4" }
 # Collecting response bodies in tests (axum's body is a Stream).
 http-body-util = { version = "0.1.4" }
-# CLI parsing for the `swath` binary (#29). `derive` for the declarative
-# command tree; `env` so flags document and read their SWATH_* variables in
-# one place (--help shows them). Config layering stays hand-rolled on top
-# (clap + toml + serde — figment rejected: three deps do the job and every
-# extra crate is deny surface).
+# `derive` + `env`; config layering stays hand-rolled on clap + toml + serde.
 clap = { version = "4.5.48", features = ["derive", "env"] }
 # The config-file half of the layered config (defaults -> TOML -> env/flags).
 toml = { version = "0.9.5" }
@@ -146,50 +104,11 @@ toml = { version = "0.9.5" }
 tracing = { version = "0.1.41" }
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt"] }
 
-# Codec-chain decode for the virtual-reference source (#190, supersedes the
-# hand-rolled flate2+unshuffle slice of #39): the manifest's HDF5 filter
-# pipeline (`zlib:<level>`, `shuffle`) decodes through zarrs's codec
-# implementations — the same crate a native-Zarr adapter (§16.1, still
-# demand-triggered) would BIND, so codec behavior is maintained upstream, not
-# duplicated here. Feature-trimmed hard: default features off (drops the
-# filesystem store, ndarray, blosc/zstd/crc32c codecs, sharding, transpose)
-# and exactly `zlib` on — the one gated codec the manifests use (`shuffle` is
-# ungated; gzip stays off until a manifest can emit it). flate2 returns to
-# being transitive (zarrs's zlib feature), still the rust_backend/miniz_oxide
-# already in the tree under png. The residual cost is zarrs's mandatory core
-# (rayon, moka, num, half, inventory, …) — measured and itemized in PR #190;
-# this dep is the supply-chain rehearsal for M9's wasmtime review.
+# Codec-chain decode for virtual references; feature-trimmed hard — docs/SUPPLY-CHAIN.md.
 zarrs = { version = "0.23.13", default-features = false, features = ["zlib"] }
-# The WASM runtime for run_udf (ADR 0018, #200 — the supply-chain
-# checkpoint this comment IS, per the #190 zarrs pattern above). Trimmed to
-# the ADR's commitments and nothing else: `runtime` + `cranelift` (compile
-# + execute core modules), `pooling-allocator` (per-request instantiation
-# at tile rates), `std`. Explicitly ABSENT, forever by default: `wasi`
-# (zero-import modules — determinism is structural), `component-model`,
-# `async` (execution is bounded by fuel + epoch, inline per ADR 0012),
-# `cache`/`incremental-cache` (module compilation is content-addressed by
-# OUR store, #204), `parallel-compilation` (rayon stays out of the serve
-# path), gc/profiling/debug machinery. License: Apache-2.0 WITH
-# LLVM-exception (deny.toml allows the exact expression). Only the udf
-# adapter crate may name this dep; the referencer's wasmtime-free guard
-# test pins the isolation.
+# The `run_udf` runtime (ADR 0018), trimmed to the ADR's commitments — docs/SUPPLY-CHAIN.md.
 wasmtime = { version = "47.0.3", default-features = false, features = ["runtime", "cranelift", "pooling-allocator", "std"] }
-# The production referencer (ADR 0006, issue #40). gribberish: GRIB2 section
-# metadata (offsets/lengths/grids/packing templates) — referencing needs no
-# field decode, so default features stay off. hdf5-metno `static`: builds the
-# bundled libhdf5 from source, so no system HDF5 is required on any platform
-# (the single-binary story, prototype 0001 H4); versions pinned to the ones
-# the bake-off validated.
-# Icechunk interop (ADR 0016 + addendum, #191): the manifest→Icechunk
-# committer writes virtual chunk references natively (spec v2.1, the version
-# icechunk 2.1.x writes). Feature-trimmed hard: default features off drops
-# the AWS SDK (s3), the GCS/Azure/HTTP object_store backends, and reqwest;
-# exactly `object-store-fs` on — the local-filesystem repo the conformance
-# gate and `swath ingest` write today (S3 arrives with a real deployment,
-# feature-flagged then). The residual cost is icechunk's core: tokio,
-# flatbuffers/rmp-serde/zstd (the on-disk format), chrono — itemized in
-# PR #191 per the #190 supply-chain checkpoint pattern. Unpublished adapter
-# only: the published swath-referencer stays free of all of this.
+# The manifest → Icechunk committer (spec v2.1), `object-store-fs` only — docs/SUPPLY-CHAIN.md.
 icechunk = { version = "2.1.2", default-features = false, features = ["object-store-fs"] }
 # Filesystem-path -> file:// URL construction for virtual chunk locations
 # (percent-encoding done right); already in the tree transitively under
