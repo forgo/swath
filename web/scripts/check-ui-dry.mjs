@@ -6,13 +6,12 @@
 // elsewhere. Zero dependencies, plain node.
 //
 //   node scripts/check-ui-dry.mjs          # every finding fails
-//   node scripts/check-ui-dry.mjs --warn   # advisory, except STRICT files
 //
-// Lifecycle: advisory when introduced (#278); each organism that migrates
-// onto the primitives joins STRICT so it can never regress; the allow-list
-// is empty by the author-mode issue (#291). A stale allow-list entry (one
-// that no longer matches) fails in every mode, so the escape hatch can only
-// shrink.
+// Blocking everywhere under `src/` and `demo/` (since #350; the advisory
+// mode that eased the M10 migration is retired — every organism is on the
+// primitives). The allow-list holds the two reasoned exceptions in
+// `swath-map.ts`; a stale entry (one that no longer matches) fails too, so
+// the escape hatch can only shrink.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,22 +19,6 @@ import { fileURLToPath } from "node:url";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SCANNED = ["src", "demo"];
 const EXTENSIONS = new Set([".ts", ".css", ".html"]);
-
-/** Patterns of files that must be clean even under --warn: the UI system
- * itself (#280) and each organism as it migrates. */
-const STRICT = [
-  /^src\/ui\//,
-  /^src\/swath-badge\.ts$/,
-  /^src\/swath-shell\.ts$/,
-  /^src\/swath-layer-list\.ts$/,
-  /^src\/swath-map\.ts$/,
-  /^src\/swath-compare\.ts$/,
-  /^src\/time-slider\.ts$/,
-  /^src\/granule-footprints\.ts$/,
-  /^src\/swath-xray\.ts$/,
-  /^src\/xray-analytics\.ts$/,
-  /^src\/swath-add-data-panel\.ts$/,
-];
 
 /**
  * Rules: `home` is the one file allowed to match. `tests: false` skips
@@ -124,7 +107,6 @@ function lineOf(text, index) {
   return line;
 }
 
-const warn = process.argv.includes("--warn");
 const findings = [];
 const allowHits = new Map(ALLOW.map((entry) => [`${entry.file}::${entry.rule}`, 0]));
 
@@ -150,15 +132,9 @@ for (const dir of SCANNED) {
 }
 
 const stale = ALLOW.filter((entry) => allowHits.get(`${entry.file}::${entry.rule}`) === 0);
-const strict = (file) => STRICT.some((pattern) => pattern.test(file));
-const blocking = findings.filter((f) => !warn || strict(f.file));
-const advisory = findings.filter((f) => warn && !strict(f.file));
 
 const out = process.stdout;
-for (const f of advisory) {
-  out.write(`warn  ${f.file}:${f.line}  ${f.rule}  ${JSON.stringify(f.text)}\n`);
-}
-for (const f of blocking) {
+for (const f of findings) {
   out.write(`FAIL  ${f.file}:${f.line}  ${f.rule}  ${JSON.stringify(f.text)}\n`);
 }
 for (const entry of stale) {
@@ -169,7 +145,6 @@ for (const entry of stale) {
 
 const byFile = new Set(findings.map((f) => f.file)).size;
 out.write(
-  `check-ui-dry: ${findings.length} finding(s) in ${byFile} file(s); ` +
-    `${blocking.length} blocking, ${advisory.length} advisory, ${stale.length} stale allow-list\n`,
+  `check-ui-dry: ${findings.length} finding(s) in ${byFile} file(s); ${stale.length} stale allow-list\n`,
 );
-process.exit(blocking.length + stale.length > 0 ? 1 : 0);
+process.exit(findings.length + stale.length > 0 ? 1 : 0);
