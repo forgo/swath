@@ -5,7 +5,7 @@
 //! Phase-1 adapters into the API router, and run axum on a multi-thread
 //! tokio runtime with graceful SIGINT/SIGTERM shutdown.
 //!
-//! Catalog mode (`--catalog`, issue #31) additionally: connects to pgstac,
+//! Catalog mode (`--catalog`) additionally: connects to pgstac,
 //! registers the configured datasets (upsert — the dataset-must-pre-exist
 //! half of the ingest contract), serves layers that resolve assets from
 //! each dataset's latest granule, and — with `--watch-dir` — runs the
@@ -77,7 +77,7 @@ pub struct ServeArgs {
     )]
     pub(crate) catalog: Option<String>,
 
-    /// Serve read-only (#198): the write routes (POST /datasets, POST
+    /// Serve read-only: the write routes (POST /datasets, POST
     /// /datasets/{id}/granules, POST/DELETE /services, PUT
     /// /uploads/{filename}) are absent — not
     /// 403'd — and the capabilities document reflects it. POST /result
@@ -97,27 +97,27 @@ pub struct ServeArgs {
     pub(crate) watch_dir: Option<PathBuf>,
 
     /// Tile cache root: a local directory or `s3://bucket[/prefix]`
-    /// (issue #36). Rendered tiles are written through and served from
+    /// Rendered tiles are written through and served from
     /// here on repeat requests; absent, no cache is consulted and serving
     /// behaves exactly as before.
     #[arg(long, value_name = "ROOT", env = "SWATH_CACHE")]
     pub(crate) cache: Option<String>,
 
     /// `run_udf` module-store root: a local directory or
-    /// `s3://bucket[/prefix]` (ADR 0018). Published WASM modules persist
+    /// `s3://bucket[/prefix]`. Published WASM modules persist
     /// here by content hash and are resolved from here on restart;
     /// absent, `run_udf` is not offered on the openEO surface.
     #[arg(long, value_name = "ROOT", env = "SWATH_UDF_STORE")]
     pub(crate) udf_store: Option<String>,
 
     /// Global default for the planner's overview oversampling slack
-    /// (issue #37): an overview factor is eligible when `factor <=
+    /// : an overview factor is eligible when `factor <=
     /// desired ratio x this value`. Default 1.2 (GDAL's slack). Per-layer
     /// `[layers.budget]` values override it.
     #[arg(long, value_name = "RATIO", env = "SWATH_OVERVIEW_OVERSAMPLE")]
     pub(crate) overview_oversample: Option<f64>,
 
-    /// Global default for the planner's live-render ceiling (issue #37):
+    /// Global default for the planner's live-render ceiling:
     /// refuse tiles whose estimated live cost exceeds this many bytes
     /// when nothing cheaper can serve. Absent, never refuse. Per-layer
     /// `[layers.budget]` values override it.
@@ -125,7 +125,7 @@ pub struct ServeArgs {
     pub(crate) max_estimated_live_bytes: Option<u64>,
 
     /// Global default for the deterministic fuel a `run_udf` stage may
-    /// consume per tile (ADR 0018, #205): a module that exhausts it
+    /// consume per tile: a module that exhausts it
     /// fails that tile loudly. Default 100000000 (100 M). Per-layer
     /// `[layers.budget]` values override it.
     #[arg(long, value_name = "FUEL", env = "SWATH_MAX_UDF_FUEL_PER_TILE")]
@@ -134,7 +134,7 @@ pub struct ServeArgs {
     /// Serve CORS headers for these origins (comma-separated exact
     /// origins, or `*` for any — cross-origin dev). Default: none — no
     /// CORS headers at all; same-origin serving (the embedded UI, or the
-    /// vite dev proxy) needs none (issue #103, ADR 0011).
+    /// vite dev proxy) needs none (ADR 0011).
     #[arg(
         long,
         value_name = "ORIGINS",
@@ -222,7 +222,7 @@ where
     }
 }
 
-/// API-registered datasets (#196) are not in the config; they live only
+/// API-registered datasets are not in the config; they live only
 /// in the catalog. Rehydrates their authored service layers so a
 /// restarted server serves exactly what was registered + published
 /// (config datasets' services are carried over in the registration loop
@@ -267,18 +267,18 @@ struct Shared {
     base_url: String,
     store_root: String,
     cache: Option<String>,
-    /// `run_udf` module-store root (ADR 0018, #204); `None` = not offered.
+    /// `run_udf` module-store root; `None` = not offered.
     udf_store: Option<String>,
-    /// CORS origin allowlist (issue #103, ADR 0011); empty = no CORS
+    /// CORS origin allowlist; empty = no CORS
     /// layer at all (the default).
     cors_allowed_origins: Vec<String>,
     read_only: bool,
-    /// The resolved global budget (#37) — what published openEO services
-    /// and previews serve under (#272), rehydrated services included.
+    /// The resolved global budget — what published openEO services
+    /// and previews serve under, rehydrated services included.
     budget: Budget,
 }
 
-/// The `run_udf` publish wiring (ADR 0018, #204): the wasmtime executor
+/// The `run_udf` publish wiring: the wasmtime executor
 /// as the compile-time registrar, the content-addressed module store at
 /// `root`, and the once-per-publish http(s) fetcher — or `None`, saying
 /// why, when no store root is configured or this build carries no WASM
@@ -323,8 +323,8 @@ fn udf_publish(root: Option<&str>) -> Result<Option<swath_api::UdfPublish>, Serv
 
 /// Recompiles a persisted openEO service layer into its serving template
 /// — a `run_udf` module is resolved from the module store by its persisted
-/// hash, never fetched (ADR 0018, #204) — under the CURRENT config's
-/// global budget (#272): nothing budget-shaped is persisted with a
+/// hash, never fetched (ADR 0018) — under the CURRENT config's
+/// global budget: nothing budget-shaped is persisted with a
 /// service, so a restart after tightening `[budget]` tightens every
 /// published service.
 async fn rehydrate_service(
@@ -353,7 +353,7 @@ where
 /// The connection-independent body of catalog mode: register datasets
 /// (carrying over any layers the openEO services surface published in
 /// earlier runs), start the ingest loop, serve — with the openEO authoring
-/// router merged in (ADR 0010). Generic over the [`Catalog`] so tests can
+/// router merged in. Generic over the [`Catalog`] so tests can
 /// drive it against an in-memory catalog.
 #[allow(
     clippy::too_many_lines,
@@ -373,7 +373,7 @@ where
     // truth for dataset identity + config-defined layers, and granules
     // ingested later require their dataset to pre-exist
     // (swath_core::ingest docs). Layers authored through the openEO
-    // services surface (ADR 0010) live only in the catalog — carry them
+    // services surface live only in the catalog — carry them
     // over before the upsert and recompile them into serving templates,
     // so published products survive a restart.
     let udf = udf_publish(cfg.udf_store.as_deref())?;
@@ -410,7 +410,7 @@ where
                 }
             }
         }
-        // Derived temporal extent (ADR 0015): the config compiles an
+        // Derived temporal extent: the config compiles an
         // open "no granule yet" interval; the served truth is the
         // min/max acquisition datetime of what has actually been
         // ingested. Re-deriving from all granules at registration also
@@ -461,23 +461,23 @@ where
         tokio::spawn(ingest_loop(events, catalog.clone()));
     }
     let layer_count = mode.layers.len();
-    // The granule browsing surface (issue #107): read-only
+    // The granule browsing surface: read-only
     // `GET /datasets/{datasetId}/granules` over the same catalog.
     let granules = swath_api::granules_router(Arc::new(swath_api::GranulesState::new(
         catalog.clone(),
         &cfg.base_url,
     )));
     let provider = CatalogLayers::new(catalog, mode.layers);
-    // The openEO authoring surface (ADR 0010) over the same provider:
+    // The openEO authoring surface over the same provider:
     // clones share the layer set, so a POSTed service serves on the next
-    // tile request. The preview endpoint (ADR 0014's POST /result)
+    // tile request. The preview endpoint (POST /result)
     // renders inline through the same composite source and reprojection
     // adapters the tile handlers use — same store root, same pixels
     // (pyramid overlay included, so previews benefit from materialized
     // overviews exactly as tiles do).
     let store = build_store(&cfg.store_root)?;
     // Published services and previews serve under the operator's
-    // resolved global budget (#272), exactly as declared layers do.
+    // resolved global budget, exactly as declared layers do.
     let mut openeo_state = swath_api::OpenEoState::new(
         provider.clone(),
         PyramidSource::new(CompositeSource::new(Arc::clone(&store)), Arc::clone(&store)),
@@ -485,21 +485,21 @@ where
         &cfg.base_url,
     )
     .with_budget(cfg.budget.clone());
-    // `run_udf` (ADR 0018, #204): offered exactly where the module store
+    // `run_udf`: offered exactly where the module store
     // and the WASM runtime are wired — and then served by the tile
-    // handlers through the same executor (#205).
+    // handlers through the same executor.
     let executor = udf.as_ref().map(swath_api::UdfPublish::executor);
     if let Some(udf) = udf {
         openeo_state = openeo_state.with_udf(udf);
     }
     let openeo_state = Arc::new(openeo_state);
-    // Read-only serving (#198): the write routes are ABSENT, not 403'd —
+    // Read-only serving: the write routes are ABSENT, not 403'd —
     // the openEO read half only (POST /result stays: the ADR 0014 preview
     // is planner-budget-bounded by design), and no dataset-creation
     // surface at all. The landing/capabilities document reflects exactly
     // what mounted (run_server marks the state).
     let (extra, uploads) = if cfg.read_only {
-        tracing::info!("read-only: write routes unmounted (#198)");
+        tracing::info!("read-only: write routes unmounted");
         (
             swath_api::openeo_read_router(openeo_state).merge(granules),
             false,
@@ -526,16 +526,16 @@ where
 }
 
 /// The local-vs-remote line every local-only affordance gates on — legacy
-/// referencing (the watch-dir branch above) and the upload route (#197)
+/// referencing (the watch-dir branch above) and the upload route
 /// share this one predicate so the two sites cannot drift.
 fn is_local_root(root: &str) -> bool {
     !root.contains("://")
 }
 
 /// The write half of catalog serving, never mounted read-only: the
-/// dataset-creation surface (#196 — register datasets/granules by API,
+/// dataset-creation surface (register datasets/granules by API,
 /// validated through the same source stack tiles read), plus, over a
-/// *local* store root only, the upload route (#197 — browser file drops
+/// *local* store root only, the upload route (browser file drops
 /// land in the serving store, then register through the same surface; the
 /// local-vs-remote line is [`is_local_root`], shared with the legacy
 /// referencer gate — a remote store has real upload tooling). Both
@@ -569,9 +569,9 @@ where
 /// The mode-independent tail of `serve`: build the store, assemble the
 /// state, bind, run until SIGINT/SIGTERM. `extra` merges an additional
 /// router into the OGC one — catalog mode passes the openEO authoring
-/// surface (ADR 0010), which also switches the landing page into its
+/// surface, which also switches the landing page into its
 /// dual OGC + openEO-capabilities form. `udf` is the `run_udf` executor
-/// the tile handlers render UDF plans through (ADR 0018, #205) — the
+/// the tile handlers render UDF plans through — the
 /// object the openEO surface registers modules with; `None` leaves the
 /// `NoUdf` default, honest wherever no UDF plan can exist.
 #[allow(
@@ -593,9 +593,9 @@ where
 {
     let store = build_store(&cfg.store_root)?;
     // The composite source (crate::source): COG assets and virtual-cube
-    // manifests (#39) served from the same store root, dispatched per
+    // manifests served from the same store root, dispatched per
     // asset — legacy granules render from byte ranges into their
-    // original files. Wrapped in the pyramid overlay (#183): levels
+    // original files. Wrapped in the pyramid overlay: levels
     // materialized by `swath materialize` under `pyramids/` in the same
     // root are advertised to the planner and served from stored chunks;
     // with no pyramid present the overlay is a per-describe existence
@@ -618,7 +618,7 @@ where
     if uploads {
         state = state.with_uploads();
     }
-    // The embedded UI (issue #103, ADR 0011): browsers get index.html at
+    // The embedded UI: browsers get index.html at
     // `/`, hashed assets serve from the router fallback, API clients see
     // no change. Compiled in by default (feature `embedded-ui`); an empty
     // embed (a build without web/dist) degrades honestly to no UI.
@@ -635,9 +635,9 @@ where
             state = state.with_ui(ui);
         }
     }
-    // The cache is just another object store (#36): same root grammar,
+    // The cache is just another object store: same root grammar,
     // same builder. Wired through `with_cache` so a cache-less config
-    // constructs the exact pre-#36 state type and serve path.
+    // constructs the uncached state type and serve path.
     let app = match &cfg.cache {
         Some(root) => {
             tracing::info!("tile cache enabled (write-through) at {root}");
@@ -650,7 +650,7 @@ where
         Some(extra) => app.merge(extra),
         None => app,
     };
-    // Opt-in CORS (issue #103, ADR 0011), layered over the WHOLE merged
+    // Opt-in CORS (ADR 0011), layered over the WHOLE merged
     // router (openEO included). Absent origins = absent layer: the
     // default same-origin story serves byte-identical responses.
     let app = match swath_api::cors_layer(&cfg.cors_allowed_origins) {
@@ -1138,7 +1138,7 @@ mod tests {
         )
     }
 
-    /// A persisted openEO service layer (ADR 0010) as the services surface
+    /// A persisted openEO service layer as the services surface
     /// would have written it.
     fn service_layer(id: &str, process: serde_json::Value) -> swath_core::catalog::Layer {
         swath_core::catalog::Layer {
@@ -1176,7 +1176,7 @@ mod tests {
         }})
     }
 
-    /// Rehydration serves under the CURRENT config's global budget (#272):
+    /// Rehydration serves under the CURRENT config's global budget:
     /// a restart after tightening `[budget]` / the global flags tightens
     /// every restored service — nothing budget-shaped is persisted with it.
     #[tokio::test]
@@ -1258,7 +1258,7 @@ mod tests {
             .await
             .expect("seed dataset");
         // Granules from earlier runs: registration must derive the
-        // dataset's temporal extent from them (ADR 0015) rather than
+        // dataset's temporal extent from them rather than
         // re-registering the config's open placeholder interval.
         for (id, datetime) in [
             ("g-jun", "2024-06-07T19:03:00Z"),

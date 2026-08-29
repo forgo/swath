@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! The openEO surface's documents and compile helpers (#354): the
+//! The openEO surface's documents and compile helpers: the
 //! collection and service documents, the pinned process definitions, the
 //! service request, and the graph → layer lowering.
 
@@ -21,7 +21,7 @@ use super::{OpenEoError, OpenEoState, SERVICE_ID_PREFIX, SERVICE_TYPE, TILE_SIZE
 use crate::provider::CatalogLayer;
 use crate::udf::{UdfModules, UdfPublish};
 
-/// A [`Dataset`] as an openEO collection document: the #30 STAC converter
+/// A [`Dataset`] as an openEO collection document: the STAC converter
 /// output with the swath-internal fields (`swath:bands`, `swath:layers`)
 /// removed, datacube dimensions derived from the extent and band
 /// vocabulary, and the required links minted. openEO collections are
@@ -325,7 +325,7 @@ pub(super) fn compile_context(dataset: &Dataset) -> CompileContext {
 /// resolved from the module store by hash, never fetched; `None` where
 /// no UDF support is wired, which makes a `run_udf` graph
 /// [`CompileError::UdfUnavailable`]). `budget` is the operator's resolved
-/// global budget (#272) — the same value config-declared layers get, so
+/// global budget — the same value config-declared layers get, so
 /// a published service serves under the `[budget]` table and the global
 /// flags/env exactly as a declared layer does. Nothing about the budget
 /// is persisted with the service: rehydration passes the *current*
@@ -435,7 +435,7 @@ pub(super) async fn graph_dataset<S, R, C: Catalog>(
 
 /// What a graph lowering reads from the surface's state beyond the
 /// request itself: the `run_udf` wiring (`None` = not offered) and the
-/// operator's global budget (#272). [`OpenEoState::lowering`] hands it
+/// operator's global budget. [`OpenEoState::lowering`] hands it
 /// out so `POST /services` and `POST /result` cannot lower differently.
 #[derive(Clone, Copy)]
 pub(super) struct Lowering<'a> {

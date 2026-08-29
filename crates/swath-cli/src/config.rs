@@ -7,17 +7,17 @@
 //! their flags one surface, so both outrank the file).
 //!
 //! The surface is deliberately small: bind address, base URL, store root,
-//! optional tile-cache root (#36), optional materialization budgets
-//! (#37: a global `[budget]` default — its scalar knobs also reachable as
+//! optional tile-cache root, optional materialization budgets
+//! (a global `[budget]` default — its scalar knobs also reachable as
 //! `--overview-oversample`/`SWATH_OVERVIEW_OVERSAMPLE`,
 //! `--max-estimated-live-bytes`/`SWATH_MAX_ESTIMATED_LIVE_BYTES`, and
-//! `--max-udf-fuel-per-tile`/`SWATH_MAX_UDF_FUEL_PER_TILE` (#205) — with
+//! `--max-udf-fuel-per-tile`/`SWATH_MAX_UDF_FUEL_PER_TILE` — with
 //! per-layer `[layers.budget]` overrides; see [`BudgetConfig`]), and
 //! layer definitions. Layers are file-only (or `--fixtures`) — a
 //! layer is a structure, not a scalar, and encoding structures in
 //! environment variables is a misfeature. The layer `kind` enum
 //! (`truecolor` | `ndvi`) is the walking-skeleton stand-in the openEO
-//! process compiler (issue #32) replaces with real process graphs.
+//! process compiler replaces with real process graphs.
 //!
 //! Hand-rolled layering (clap + toml + serde) over a config framework:
 //! two optional scalars per field is an `or()` chain, and figment's extra
@@ -138,25 +138,25 @@ pub(crate) struct ResolvedConfig {
     pub(crate) base_url: String,
     /// Object-store root: a local directory or `s3://bucket[/prefix]`.
     pub(crate) store_root: String,
-    /// Tile-cache root (`--cache`/`SWATH_CACHE`/`cache`, issue #36):
+    /// Tile-cache root (`--cache`/`SWATH_CACHE`/`cache`):
     /// local directory or `s3://bucket[/prefix]`. `None` = no cache —
     /// serving is byte-for-byte the pre-cache behavior.
     pub(crate) cache: Option<String>,
     /// `run_udf` module-store root (`--udf-store`/`SWATH_UDF_STORE`/
-    /// `udf-store`, ADR 0018 / #204): local directory or
+    /// `udf-store`): local directory or
     /// `s3://bucket[/prefix]`, where published WASM modules persist by
     /// content hash. `None` = `run_udf` is not offered.
     pub(crate) udf_store: Option<String>,
-    /// CORS origin allowlist (issue #103, ADR 0011): exact origins, or
+    /// CORS origin allowlist: exact origins, or
     /// `*` for any. Empty (the default) = no CORS layer at all — the
     /// same-origin story (embedded UI / vite proxy) needs none.
     pub(crate) cors_allowed_origins: Vec<String>,
-    /// Read-only serving (#198): write routes unmounted.
+    /// Read-only serving: write routes unmounted.
     pub(crate) read_only: bool,
-    /// The resolved global default budget (#37: defaults → `[budget]` →
+    /// The resolved global default budget (defaults → `[budget]` →
     /// flags/env). Already overlaid into every declared layer; carried
     /// here so published openEO services and previews serve under it
-    /// too (#272).
+    /// too.
     pub(crate) budget: Budget,
     /// Where the layers come from.
     pub(crate) layers: LayerSource,
@@ -164,7 +164,7 @@ pub(crate) struct ResolvedConfig {
 
 /// The two serving modes: a static in-memory registry (fixtures or
 /// `[[layers]]` — the walking-skeleton path, unchanged), or catalog-backed
-/// resolution over pgstac (issue #31).
+/// resolution over pgstac.
 pub(crate) enum LayerSource {
     /// Fixtures / `[[layers]]`: assets fixed at startup.
     Static(LayerRegistry),
@@ -207,9 +207,9 @@ pub struct ConfigFile {
     catalog: Option<String>,
     /// Drop directory watched for granule manifests (catalog mode only).
     watch_dir: Option<PathBuf>,
-    /// CORS origin allowlist (issue #103); `["*"]` = any origin.
+    /// CORS origin allowlist; `["*"]` = any origin.
     cors_allowed_origins: Option<Vec<String>>,
-    /// Global default materialization budget (issue #37); per-layer
+    /// Global default materialization budget; per-layer
     /// `[layers.budget]` values override it knob by knob.
     budget: Option<BudgetConfig>,
     /// Static layer definitions (mutually exclusive with catalog mode).
@@ -262,19 +262,19 @@ struct LayerConfig {
     /// `truecolor` (raw values clamp); `ndvi` defaults to `[-1, 1]`.
     rescale: Option<[f64; 2]>,
     /// Colormap applied to the gray result — `ndvi` only (`truecolor`
-    /// renders RGB directly); `ndvi` defaults to `rdylgn` (issue #94).
+    /// renders RGB directly); `ndvi` defaults to `rdylgn`.
     colormap: Option<ColormapConfig>,
     /// Warp kernel; defaults to bilinear (nodata-excluding).
     #[serde(default)]
     resampling: ResamplingConfig,
     /// Tile side length in pixels; defaults to 256.
     tile_size: Option<u32>,
-    /// This layer's materialization budget (issue #37): knobs given here
+    /// This layer's materialization budget: knobs given here
     /// override the resolved global default knob by knob.
     budget: Option<BudgetConfig>,
 }
 
-/// The materialization-budget knobs as config spells them (issue #37,
+/// The materialization-budget knobs as config spells them (
 /// `docs/design/materialization-planner.md` §1). Every knob is optional
 /// at every level; resolution is knob-by-knob with per-layer values
 /// outranking the global default (which is built-in defaults → top-level
@@ -296,7 +296,7 @@ struct BudgetConfig {
     /// not clear a global one (set a huge value to effectively disable).
     max_estimated_live_bytes: Option<u64>,
     /// Deterministic fuel a `run_udf` stage may consume per tile
-    /// (ADR 0018, #205; default 100 M — the planner crate's documented
+    /// (default 100 M — the planner crate's documented
     /// calibration point). Only layers with a UDF stage spend any.
     max_udf_fuel_per_tile: Option<u64>,
 }
@@ -432,7 +432,7 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
         args.cors_allowed_origins.clone()
     };
 
-    // The resolved global default budget (#37): built-in defaults →
+    // The resolved global default budget: built-in defaults →
     // top-level [budget] → flags/env. Per-layer [layers.budget] overlays
     // this knob by knob (BudgetConfig docs carry the precedence story).
     let mut default_budget = file
@@ -582,7 +582,7 @@ fn load_file(path: &Path) -> Result<ConfigFile, ConfigError> {
 
 impl LayerConfig {
     /// The effective colormap of a gray (`ndvi`) layer: the configured
-    /// map, defaulting to the diverging `RdYlGn` (issue #94).
+    /// map, defaulting to the diverging `RdYlGn`.
     fn colormap(&self) -> ColormapConfig {
         self.colormap.unwrap_or(ColormapConfig::Rdylgn)
     }
@@ -629,14 +629,13 @@ impl LayerConfig {
     }
 
     /// This entry's [`PlanSpec`] — the one plan-kind vocabulary
-    /// [`plan_for`] lowers ([issue #95]) — with each band role resolved
+    /// [`plan_for`] lowers — with each band role resolved
     /// through `band` (identity in static mode, role → dataset band in
     /// catalog mode). `materialize_rescale`: catalog mode always writes
     /// the truecolor rescale (the persisted record and the compiled ops
     /// must describe the same rendering, default `[0, 255]`); static mode
     /// omits it when unset (raw values clamp at quantization).
     ///
-    /// [issue #95]: https://github.com/forgo/swath/issues/95
     fn plan_spec(
         &self,
         band: impl Fn(&'static str) -> String,
@@ -724,7 +723,7 @@ impl LayerConfig {
                 |budget| budget.overlay(default_budget),
             ),
             // Config-defined layers are temporally unconstrained: latest
-            // wins, exactly as before ADR 0015.
+            // wins.
             window: swath_core::catalog::TimeRange::default(),
             sources: Vec::new(),
         };
@@ -741,7 +740,7 @@ impl LayerConfig {
             },
             tile_size,
             // Operator-config layers carry no openEO process record; only
-            // the services surface (ADR 0010) authors layers with one.
+            // the services surface authors layers with one.
             process: None,
         };
         Ok((template, domain_layer))
@@ -817,7 +816,7 @@ mod tests {
         assert_eq!(cfg.base_url, "http://localhost:7070");
     }
 
-    /// The tile-cache root (#36) layers exactly like the other scalars:
+    /// The tile-cache root layers exactly like the other scalars:
     /// absent everywhere = None (no cache), file value used, flag/env
     /// outranks the file.
     #[test]
@@ -841,7 +840,7 @@ mod tests {
         assert_eq!(cfg.cache.as_deref(), Some("s3://tiles/cache"));
     }
 
-    /// The `run_udf` module-store root (ADR 0018, #204) layers like the
+    /// The `run_udf` module-store root layers like the
     /// cache and defaults to absent — `run_udf` is not offered until an
     /// operator names where modules persist.
     #[test]
@@ -866,7 +865,7 @@ mod tests {
         assert_eq!(cfg.udf_store.as_deref(), Some("s3://tiles/udf"));
     }
 
-    /// CORS (issue #103, ADR 0011) layers like the other scalars and —
+    /// CORS (ADR 0011) layers like the other scalars and —
     /// the decision — defaults to OFF (an empty allowlist).
     #[test]
     fn cors_origins_default_off_and_flags_outrank_the_file() {
@@ -947,7 +946,7 @@ mod tests {
         ));
     }
 
-    /// The materialization budget (#37) layers as documented: built-in
+    /// The materialization budget layers as documented: built-in
     /// defaults, a global `[budget]` default, flags/env over that, and an
     /// explicit `[layers.budget]` winning knob by knob.
     #[test]
@@ -1061,7 +1060,7 @@ mod tests {
         );
     }
 
-    /// The per-layer colormap key (issue #94): ndvi defaults to the
+    /// The per-layer colormap key: ndvi defaults to the
     /// diverging `RdYlGn`, an explicit map wins, and RGB kinds reject the
     /// key loudly.
     #[test]
@@ -1143,7 +1142,7 @@ mod tests {
     }
 
     /// Catalog mode persists the same default: the ndvi layer's domain
-    /// record carries the diverging map (issue #94).
+    /// record carries the diverging map.
     #[test]
     fn catalog_ndvi_layer_persists_the_rdylgn_colormap() {
         let file: ConfigFile = toml::from_str(CATALOG_TOML).expect("parses");
@@ -1350,8 +1349,7 @@ mod tests {
         );
     }
 
-    /// The two file-level failures (issue #96: previously unasserted
-    /// variants): an unreadable path and invalid TOML, each naming the
+    /// The two file-level failures: an unreadable path and invalid TOML, each naming the
     /// file as given.
     #[test]
     fn config_file_read_and_parse_failures_name_the_path() {

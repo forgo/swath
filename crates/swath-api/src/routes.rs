@@ -74,13 +74,13 @@ const MAX_TILE_MATRIX: u8 = 24;
 /// reprojection (same idea as the tiler's window boundary sampling).
 const BOUNDS_SAMPLES_PER_EDGE: u32 = 16;
 
-/// Tile matrix set id hashed into cache keys (#36) — the one TMS served.
+/// Tile matrix set id hashed into cache keys — the one TMS served.
 const TMS_ID: &str = "WebMercatorQuad";
 
 /// Everything the handlers need, wired once at startup: the layer
-/// provider (static registry or catalog-backed, issue #31), the two
+/// provider (static registry or catalog-backed), the two
 /// ports the render path consumes, and — when configured — the tile
-/// cache (#36). Generic exactly like [`render_tile`] — the binary (#29)
+/// cache. Generic exactly like [`render_tile`] — the binary
 /// and the tests pick concrete adapters. The cache parameter defaults to
 /// [`NoCache`] so cache-less construction ([`ApiState::new`]) names no
 /// cache type; [`ApiState::with_cache`] swaps in a real one.
@@ -89,11 +89,11 @@ pub struct ApiState<S, R, L, C = NoCache> {
     layers: L,
     source: S,
     reproject: R,
-    /// The write-through tile cache; `None` serves exactly as before #36
+    /// The write-through tile cache; `None` serves without one
     /// (the render path never consults it).
     cache: Option<C>,
     /// The `run_udf` executor the render path runs a plan's UDF stage
-    /// through (ADR 0018, #205). [`NoUdf`] until
+    /// through. [`NoUdf`] until
     /// [`ApiState::with_udf_executor`] — plans without a UDF stage never
     /// consult it, and a UDF plan then refuses loudly.
     udf: UdfPort,
@@ -101,18 +101,18 @@ pub struct ApiState<S, R, L, C = NoCache> {
     /// `http://localhost:8080`.
     base_url: String,
     /// The trace bus: the tile handler publishes every render, the
-    /// `GET /traces` SSE stream (issue #28) fans them out.
+    /// `GET /traces` SSE stream fans them out.
     traces: TraceBus,
     /// Whether the openEO surface is mounted beside this router
-    /// (ADR 0010): the landing page then serves the openEO capabilities
+    /// : the landing page then serves the openEO capabilities
     /// vocabulary alongside the OGC one.
     openeo: bool,
     read_only: bool,
-    /// Whether the local-mode upload route (#197) is mounted beside this
+    /// Whether the local-mode upload route is mounted beside this
     /// router: the capabilities document then advertises
     /// `PUT /uploads/{filename}`.
     uploads: bool,
-    /// The embedded UI bundle (issue #103): `GET /` negotiates browsers
+    /// The embedded UI bundle: `GET /` negotiates browsers
     /// onto its `index.html`, and the router fallback serves its assets.
     /// `None` (or an empty bundle) serves exactly the pre-UI surface.
     ui: Option<Arc<UiAssets>>,
@@ -123,7 +123,7 @@ impl<S, R, L> ApiState<S, R, L> {
     /// [`LayerRegistry`](crate::registry::LayerRegistry), or
     /// [`CatalogLayers`](crate::provider::CatalogLayers) for catalog-backed
     /// serving), the two ports, and the base URL links advertise (trailing
-    /// slash trimmed). No cache: serving is byte-for-byte the pre-#36
+    /// slash trimmed). No cache: serving is byte-for-byte the uncached
     /// behavior until [`ApiState::with_cache`] adds one.
     pub fn new(layers: L, source: S, reproject: R, base_url: impl Into<String>) -> Self {
         let mut base_url: String = base_url.into();
@@ -158,7 +158,7 @@ impl std::fmt::Debug for UdfPort {
 }
 
 impl<S, R, L, C> ApiState<S, R, L, C> {
-    /// Wires the `run_udf` executor (ADR 0018, #205) — the same object
+    /// Wires the `run_udf` executor — the same object
     /// the openEO surface registered modules with
     /// ([`UdfPublish::executor`](crate::UdfPublish::executor)), so every
     /// published module is runnable here. Absent, UDF plans refuse via
@@ -178,7 +178,7 @@ impl<S, R, L, C> ApiState<S, R, L, C> {
         self
     }
 
-    /// Enables the write-through tile cache (#36): the tile handler
+    /// Enables the write-through tile cache: the tile handler
     /// consults it before rendering and writes fresh renders through.
     #[must_use]
     pub fn with_cache<C2>(self, cache: C2) -> ApiState<S, R, L, C2> {
@@ -197,7 +197,7 @@ impl<S, R, L, C> ApiState<S, R, L, C> {
         }
     }
 
-    /// Mounts the embedded UI bundle (issue #103): browsers get its
+    /// Mounts the embedded UI bundle: browsers get its
     /// `index.html` at `GET /` (content negotiation — API clients keep
     /// the JSON landing page) and its assets from the router fallback,
     /// which API routes always outrank. An empty bundle is ignored.
@@ -209,7 +209,7 @@ impl<S, R, L, C> ApiState<S, R, L, C> {
         self
     }
 
-    /// Declares that the openEO surface (ADR 0010) is merged beside this
+    /// Declares that the openEO surface is merged beside this
     /// router: `GET /` then serves the openEO capabilities fields
     /// (`api_version`, `endpoints`, …) alongside the OGC landing page — one
     /// root, both vocabularies.
@@ -219,7 +219,7 @@ impl<S, R, L, C> ApiState<S, R, L, C> {
         self
     }
 
-    /// Marks this serving read-only (#198): the landing/capabilities
+    /// Marks this serving read-only: the landing/capabilities
     /// document filters out the write methods, matching a router assembly
     /// that mounted none of them (write routes are absent, never 403'd).
     #[must_use]
@@ -228,7 +228,7 @@ impl<S, R, L, C> ApiState<S, R, L, C> {
         self
     }
 
-    /// Declares that the local-mode upload route (#197) is merged beside
+    /// Declares that the local-mode upload route is merged beside
     /// this router: the capabilities document then advertises
     /// `PUT /uploads/{filename}` — the file-drop half of the add-data
     /// panel is capabilities-driven, not guessed.
@@ -246,7 +246,7 @@ impl<S, R, L, C> ApiState<S, R, L, C> {
 }
 
 /// The render [`Trace`] of a served tile, attached to the response as an
-/// extension — the seam the Trace SSE stream (issue #28) consumes: a
+/// extension — the seam the Trace SSE stream consumes: a
 /// middleware or stream fan-out reads it from the response without the
 /// handler having to know who is listening. `Arc` because the Trace is
 /// shared read-only once rendered.
@@ -277,13 +277,13 @@ where
             "/tilesets/{layerId}/tiles/{tileMatrix}/{tileRow}/{tileCol}",
             get(tile),
         )
-        // The x-ray Trace stream (issue #28) — control-plane, not OGC.
+        // The x-ray Trace stream — control-plane, not OGC.
         .route("/traces", get(traces))
-        // Operational liveness probe (#29) — not an OGC resource; kept
+        // Operational liveness probe — not an OGC resource; kept
         // dependency-free (no registry/source I/O) so orchestrator
         // healthchecks measure the process, not the data plane.
         .route("/healthz", get(healthz))
-        // Embedded UI assets (issue #103) live in the FALLBACK: axum
+        // Embedded UI assets live in the FALLBACK: axum
         // consults it only when no route above matched, so API paths
         // structurally outrank any file the bundle could ever ship (the
         // ui module docs carry the full serving rules). Without a bundle
@@ -329,8 +329,7 @@ fn accepts_html(headers: &HeaderMap) -> bool {
 }
 
 /// `GET /healthz` — plain 200 `ok`. Liveness only: the process is up and
-/// serving HTTP. Readiness of catalog/store dependencies is a later,
-/// separate concern (issues #30/#31).
+/// serving HTTP; readiness of catalog/store dependencies is not probed.
 async fn healthz() -> &'static str {
     "ok"
 }
@@ -341,7 +340,7 @@ async fn healthz() -> &'static str {
 /// ([`ApiState::with_openeo`]), the same document additionally carries
 /// the openEO capabilities fields (both standards claim the root, so the
 /// root speaks both — each schema tolerates the other's fields). With an
-/// embedded UI ([`ApiState::with_ui`], issue #103), an `Accept` listing
+/// embedded UI ([`ApiState::with_ui`]), an `Accept` listing
 /// `text/html` (a browser) receives the UI's `index.html` instead — the
 /// JSON document stays byte-identical for every other client.
 async fn landing<S, R, L, C>(
@@ -477,7 +476,7 @@ where
         .title(format!("{} tiles (PNG)", identity.title))
         .templated(),
     );
-    // Catalog-backed layers advertise their granule listing (ADR 0015):
+    // Catalog-backed layers advertise their granule listing:
     // the granules' acquisition datetimes are the frames `datetime=` can
     // select, so this link is how a client (the web time slider) learns
     // the layer's temporal domain. Static layers are a single timeless
@@ -506,7 +505,7 @@ where
             ordered_axes: ["Lon".to_owned(), "Lat".to_owned()],
         },
         links,
-        // The frames a client may ask for (ADR 0015 / ADR 0022): the
+        // The frames a client may ask for: the
         // compiled window, and how many branches resolve per frame.
         window: identity.window.as_ref().map(|window| {
             [
@@ -521,11 +520,11 @@ where
 // --- The tile handler ---
 
 /// The tile: PNG bytes for one frame. One optional query parameter,
-/// `datetime` (ADR 0015) — the OGC API grammar (an RFC 3339 UTC instant,
+/// `datetime` — the OGC API grammar (an RFC 3339 UTC instant,
 /// or `start/end` with either side openable as `..`, never both;
 /// [`crate::temporal`]) — selects **which granule backs the frame**:
 /// latest-at-or-before for an instant, latest-within for an interval,
-/// plain latest when absent (byte-for-byte the pre-#180 behavior).
+/// plain latest when absent.
 /// Malformed → 400 naming the grammar; a window selecting no granule →
 /// 404, the same shape as "no granule ingested yet". Other query
 /// parameters are ignored, as on the granules route.
@@ -554,7 +553,7 @@ where
 
     let request = layer.tile_request(coord);
     let render = match &app.cache {
-        // Cache configured (#36): consult it first, write fresh renders
+        // Cache configured: consult it first, write fresh renders
         // through. The key is computed per request — resolution already
         // ran, so every input is at hand and no I/O is added; the layer
         // version is content-derived (granule id + plan hash), which is
@@ -587,7 +586,7 @@ where
     };
     let (encoded, mut trace) = render.map_err(render_error)?;
 
-    // The temporal decision (ADR 0015) is resolution-time knowledge, so
+    // The temporal decision is resolution-time knowledge, so
     // the handler — not the tiler — records it: which granule this frame
     // resolved to, under which rule. Catalog-backed layers only; static
     // layers have no time dimension and their traces stay byte-identical.
@@ -602,7 +601,7 @@ where
                 Some(crate::temporal::DatetimeParam::Instant(_)) => TemporalRule::LatestAtOrBefore,
                 Some(crate::temporal::DatetimeParam::Interval(_)) => TemporalRule::LatestInInterval,
             },
-            // Every branch of a multi-source frame (ADR 0022); one-source
+            // Every branch of a multi-source frame; one-source
             // traces stay byte-identical (empty, omitted).
             sources: if layer.granules.len() > 1 {
                 layer
@@ -621,11 +620,11 @@ where
     }
 
     // 200 + PNG bytes, with the Trace both summarized in a debug header
-    // and attached whole as a response extension (the #28 SSE seam — the
+    // and attached whole as a response extension (the SSE seam — the
     // handler never discards the Trace). `ingest_to_pixel_ms` joins the
     // header when present: the north-star number must be readable from a
     // plain curl -D (the e2e gate does exactly that). `decision` joined
-    // in #36 so a cache hit is readable the same way (the e2e asserts
+    // so a cache hit is readable the same way (the e2e asserts
     // `cache_hit` off exactly this header).
     let debug_header = trace_debug_header(&trace);
     let mut response = (
@@ -641,7 +640,7 @@ where
     response
         .extensions_mut()
         .insert(TraceExtension(Arc::clone(&trace)));
-    // Published to the SSE bus (#28) only after the response is fully
+    // Published to the SSE bus only after the response is fully
     // assembled, so stream fan-out can never skew served-tile timing.
     // `publish` is non-blocking by construction — a slow x-ray subscriber
     // loses events (reported as `lagged`), never delays a tile.
@@ -656,7 +655,7 @@ where
 /// the epoch backstop, trapping — spells out the executor's own diagnosis
 /// in `detail`, since the outer `TileError`'s display alone
 /// (`pixel ops failed`) would hide the one fact an operator sizing the
-/// fuel axis needs (ADR 0018, #205). The shape is snapshot-pinned.
+/// fuel axis needs. The shape is snapshot-pinned.
 fn render_error(err: TileError) -> ApiError {
     match err {
         TileError::Plan(PlanError::Udf(udf)) => {
@@ -675,8 +674,8 @@ fn render_error(err: TileError) -> ApiError {
 /// The `X-Swath-Trace` debug summary of a render: decision, bytes read,
 /// total time, and — when the assets came from a catalog granule — the
 /// north-star `ingest_to_pixel_ms`; when a `run_udf` stage ran, its
-/// deterministic `udf_fuel_used` (ADR 0018, #205). Shared by the tile
-/// handler and the openEO preview (ADR 0014), so both renders read the
+/// deterministic `udf_fuel_used`. Shared by the tile
+/// handler and the openEO preview, so both renders read the
 /// same from a plain `curl -D`.
 pub(crate) fn trace_debug_header(trace: &Trace) -> String {
     let ingest_to_pixel = trace
@@ -696,7 +695,7 @@ pub(crate) fn trace_debug_header(trace: &Trace) -> String {
     )
 }
 
-/// `GET /traces` — the x-ray SSE stream (issue #28): `text/event-stream`
+/// `GET /traces` — the x-ray SSE stream: `text/event-stream`
 /// of every render published from connection time on. Wire contract and
 /// slow-subscriber semantics live in [`crate::traces`].
 async fn traces<S, R, L, C>(State(app): State<Arc<ApiState<S, R, L, C>>>) -> impl IntoResponse
@@ -923,7 +922,7 @@ mod tests {
         assert!(!accepts_html(&headers(Some("application/json"))));
     }
 
-    // --- The embedded-UI route table (issue #103) ---
+    // --- The embedded-UI route table ---
 
     use std::sync::Arc;
 

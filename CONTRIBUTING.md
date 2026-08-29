@@ -43,6 +43,11 @@ just check       # the full local gate — identical to CI
   a budget is a reviewed edit with a dated reason, in the same diff as the words.
 - **CI-vs-local differences are findings, not obstacles** — investigate and record them in the
   PR; never bypass a gate.
+- **Comments explain constraints, not history.** Cite an ADR or issue in code only where it
+  explains something the reader cannot infer — a fenced exception, a contract another test pins,
+  a decision the code merely obeys. Never as a changelog ("since #205…", "as before ADR 0015",
+  "the join arrives with #300"): ROADMAP, the ADRs and git history already record when and why
+  things changed, and a comment that narrates them goes stale the day the next change lands.
 
 ## Merging
 
