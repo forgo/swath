@@ -1,37 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! The cost-aware materialization planner extracted from
-//! [Swath](https://github.com/forgo/swath) (ADR 0016; full decision model
-//! in the repo's `docs/design/materialization-planner.md`).
-//!
-//! [`plan`] chooses, per `(layer, tile)`, one of cache-hit / overview /
-//! live under an explicit per-layer [`Budget`], and returns **every**
-//! candidate it weighed with its estimate, admissibility, and reason —
-//! the x-ray "why did it decide that?" payload Swath's Trace records
-//! verbatim.
-//!
-//! # Purity contract
-//!
-//! `plan()` performs no I/O and consults no clocks: the **caller**
-//! gathers [`Availability`] (the cache probe *result* — never a request
-//! to probe, so planning can never double-fetch — plus per-band window
-//! geometry from metadata it already holds) and executes the returned
-//! choice. Same inputs, same [`Plan`], always.
-//!
-//! # The cost model (v1: transparent, calibratable, not learned)
-//!
-//! Costs are **estimated source bytes decoded** — the same quantity
-//! Swath's Trace measures as `bytes_read`, so estimates are checkable
-//! against reality (and tests check them, loosely). Per strategy:
-//!
-//! - cache: the stored payload length (already fetched by the probe);
-//! - overview at factor `f`: `Σ_bands ceil(cols/f) · ceil(rows/f) ·
-//!   bytes_per_sample` (× [`WARP_COST_WEIGHT`]);
-//! - live: the same at `f = 1`.
-//!
-//! Constants are documented calibration points (spec §2), never runtime
-//! fits; a learned model over Trace history is recorded future work.
+#![doc = include_str!("../README.md")]
 //!
 //! # Examples
 //!

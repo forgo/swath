@@ -154,7 +154,7 @@ planner crate, ADR 0016 — re-exported at `swath_core::planner`; `PlanChoice` i
 `run_udf` executor as a `dyn` port (ADR 0018); the cached variant owns the probe +
 write-through.
 
-_Last verified against sources `fa4b7d3f176c`._
+_Last verified against sources `fbc2abefb87e`._
 
 ## 7. Adapters and inbound APIs
 

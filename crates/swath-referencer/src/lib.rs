@@ -1,40 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! The production pure-Rust virtual-reference generator (ADR 0006, issue
-//! #40): [`SwathReferencer`] turns a legacy granule (HDF5/NetCDF4 via
-//! `hdf5-metno`, GRIB2 via `gribberish`) into a
-//! [`VirtualManifest`](manifest::VirtualManifest) — byte-range references
-//! into the original file, generated in milliseconds from a metadata walk,
-//! no pixel data touched.
+#![doc = include_str!("../README.md")]
+//!
+//! # In the workspace
 //!
 //! Standalone by design (ADR 0016): this crate exposes its own
 //! [`ReferencerError`] taxonomy and depends only on the manifest
 //! vocabulary — Swath's `IngestReferencer` port stays in `swath-core`,
-//! adapted by a thin in-tree shim. An optional `cli` feature adds the
-//! `swath-referencer` binary (granule in, manifest JSON out).
-//!
-//! Productionized from prototype 0001 (referencer-bakeoff), whose generator
-//! logic was proven byte-identical to the Python `VirtualiZarr`/kerchunk
-//! reference on a real VNP09GA granule (67 arrays, 1,551 chunk refs) and a
-//! GFS GRIB2 sample. The prototype itself is immutable; this crate carries
-//! the proven logic forward with the v1 schema's georeferencing
-//! ([`eos`]: HDF-EOS `StructMetadata.0` grid parsing for VNP09GA's
-//! sinusoidal grids), the core error taxonomy, and no printing.
-//!
-//! The Python sidecar remains the *conformance reference*: the gated
-//! equivalence harness (`just test-referencer`, documented for external
-//! consumers in this crate's README) runs both generators on a real
-//! VNP09GA granule and asserts byte-range equivalence via
-//! [`manifest::compare`].
-//!
-//! HDF5/NetCDF4 support (and with it the statically bundled libhdf5 C
-//! build) sits behind the default-ON `legacy-hdf5` feature (issue #99):
-//! every default build behaves exactly as described above, while the
-//! feature-off dev-loop profile (`just check-fast` / `just test-fast`)
-//! compiles without a C toolchain — `handles()` declines `.h5`/`.nc` and
-//! `generate` returns a loud "built without the `legacy-hdf5` feature"
-//! error. GRIB2 is always on (pure Rust, cheap).
+//! adapted by a thin in-tree shim. [`SwathReferencer`] is the entry point;
+//! HDF-EOS grid parsing for VNP09GA's sinusoidal grids lives in the `eos` module, and
+//! the conformance harness's equivalence check is [`manifest::compare`].
 
 #[cfg(feature = "legacy-hdf5")]
 mod eos;

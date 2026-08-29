@@ -1,21 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! GDAL-exact warp/resample kernel in pure Rust.
-//!
-//! This crate replicates GDAL 3.12's `GDALWarpKernel` semantics
-//! bit-for-bit for nearest and bilinear resampling: the scaled triangle
-//! filters GDAL switches to when a warp decimates, its per-axis scale
-//! snapping, its source-window computation, and its exact validity
-//! cutoffs. Correctness is proven against GDAL-oracle goldens committed
-//! as crate tests (`tests/golden.rs`); the README documents the oracle
-//! method and the equivalence contract.
-//!
-//! The crate is deliberately self-contained: it takes trait-shaped,
-//! minimal input types of its own — a [`CoordTransform`] for the
-//! target-CRS → source-CRS point transform, a [`GeoTransform`] for the
-//! source grid's pixel↔CRS mapping, and plain `f64` sample buffers — and
-//! depends on nothing.
+#![doc = include_str!("../README.md")]
 //!
 //! # Warping one buffer
 //!
@@ -76,11 +62,6 @@
 //! margin), exactly as GDAL's `ComputeSourceWindow` does — densified
 //! boundary trace, out-of-domain points excluded, clipped to the raster.
 //!
-//! # What this crate is not
-//!
-//! Projection math. [`CoordTransform`] is a port: implement it over
-//! proj4rs, PROJ, or any other projection library. The kernel only ever
-//! asks it for points.
 
 mod error;
 mod geo;

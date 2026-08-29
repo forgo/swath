@@ -21,7 +21,7 @@ with no API-stability promise between alphas.
 On the conformance granule (an 8 MB VNP09GA VIIRS HDF-EOS5 granule: 67
 arrays, 1,551 chunk refs), generation takes
 <!-- number:ref-warm-ms -->13.8 ms<!-- /number:ref-warm-ms --> warm
-(median) against the Python VirtualiZarr sidecar's
+(median) against the Python `VirtualiZarr` sidecar's
 <!-- number:ref-sidecar-warm-ms -->545.6 ms<!-- /number:ref-sidecar-warm-ms --> —
 <!-- number:ref-ratio -->39.5×<!-- /number:ref-ratio --> faster, with
 byte-identical output. Method, environment, and raw numbers live in the
@@ -32,7 +32,7 @@ hand-typed.
 
 ## Library
 
-```rust
+```rust,no_run
 use swath_referencer::{ReferencerError, SwathReferencer};
 
 fn main() -> Result<(), ReferencerError> {
@@ -64,7 +64,7 @@ swath-referencer granule.h5 --output granule.vmanifest.json
 
 ## Conformance
 
-The claim is byte-range **equivalence with VirtualiZarr**, and it is
+The claim is byte-range **equivalence with `VirtualiZarr`**, and it is
 executable, not aspirational:
 
 - **Known-answer suite** (runs in every CI build): the committed
