@@ -33,7 +33,8 @@ use super::repo_root;
 
 /// The committed budgets: (repo-relative doc, max whitespace-delimited
 /// words). On 2026-08-29 (#342, the first ratchet after M13 phase 1) every
-/// row became `min(its previous budget, measured + ~5% rounded up to 25)` —
+/// row became `min(its previous budget, measured + ~5% rounded up to 25)`;
+/// the second ratchet (2026-08-29, #344) applied the same rule after phase 4 —
 /// a ratchet only moves down. Raising one is a reviewed edit with a dated
 /// reason, in the same diff as the words.
 const BUDGETS: [(&str, usize); 23] = [
