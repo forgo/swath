@@ -9,7 +9,7 @@ The route tables live in code at
 [`crates/swath-api/src/routes.rs`](../crates/swath-api/src/routes.rs)
 (OGC + control plane, always mounted),
 [`granules.rs`](../crates/swath-api/src/granules.rs) and
-[`openeo.rs`](../crates/swath-api/src/openeo.rs) (both merged beside the
+[`openeo/mod.rs`](../crates/swath-api/src/openeo/mod.rs) (both merged beside the
 OGC router **in catalog mode only** — static/fixtures serving has no
 catalog, so those routes do not exist there). Conventions: every route
 is `GET` unless noted (axum answers `HEAD` from the same handlers);

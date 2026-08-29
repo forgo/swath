@@ -97,7 +97,10 @@ const SECTIONS: [(&str, &[Section]); 2] = [
                 files: &[
                     "crates/swath-api/src/routes.rs",
                     "crates/swath-api/src/granules.rs",
-                    "crates/swath-api/src/openeo.rs",
+                    "crates/swath-api/src/openeo/mod.rs",
+                    "crates/swath-api/src/openeo/handlers.rs",
+                    "crates/swath-api/src/openeo/types.rs",
+                    "crates/swath-api/src/openeo/errors.rs",
                     "crates/swath-api/src/datasets.rs",
                 ],
             },

@@ -136,7 +136,7 @@ pub mod uploads;
 
 pub use cors::cors_layer;
 pub use datasets::{DatasetsState, datasets_router};
-pub use error::ApiError;
+pub use error::{ApiError, OpenEo};
 pub use granules::{GranuleList, GranulesState, granules_router};
 pub use model::{Conformance, LandingPage, Link, TileSetItem, TileSetList, TileSetMetadata};
 pub use openeo::{
