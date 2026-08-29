@@ -13,9 +13,9 @@ operating summary plus the as-shipped status of every practice._
 Cargo workspace (`crates/`) + `web/` (pnpm) + `python/` (uv workspace) + `prototypes/` (dated,
 immutable) + `docs/`; SHA-pinned workflows and a composite `setup-rust` action. No Bazel-class
 tooling. **Tasks are the contract**: CI never invokes raw tool commands a developer can't run
-identically via `just <recipe>`. `just check` is the one-command gate run before every push —
-everything CI enforces, including the web job (`check-web`: biome lint, tsc typecheck, vitest;
-a loud SKIP when pnpm is absent, never a silent pass).
+identically via `just <recipe>`; `just check` is everything CI enforces. The workflow around it
+— gate before push, merge on green by exit code — is `CONTRIBUTING.md`; the docs gates it names
+live in `crates/swath-cli/src/docs_check/`.
 
 ## 2. Rust standards
 
@@ -102,8 +102,7 @@ alongside `ci-ok` and `lint-pr-title` (ADR 0003; DCO grants no relicensing right
 owning `/.github/workflows/`. Issue forms; PR template. SPDX + REUSE lint (the open-core
 boundary, machine-checkable). Light prek pre-commit hooks via `just setup`, never mandatory.
 **OpenSSF Best Practices badge**: **explicitly deferred** — not applied for; deferral inventory
-candidate for ROADMAP.md (#126). Contributor Covenant; CONTRIBUTING.md points at `just`
-recipes and this doc.
+candidate for ROADMAP.md (#126). Contributor Covenant.
 
 ## 9. What we deliberately did NOT adopt
 
@@ -118,3 +117,4 @@ per-commit commitlint, harden-runner-as-boundary, workflow-level `paths:` filter
 - 2026-08-11 — full aspiration-vs-reality pass (#123): every practice now either exists in the
   tree/CI or carries an explicit status marker (§§2-3, 5, 8).
 - 2026-08-26 — §3: the UI system (ADR 0021) and its DRY gate (#277).
+- 2026-08-29 — §§1, 8: workflow rules moved to `CONTRIBUTING.md`, their one home (#341).
