@@ -2,7 +2,9 @@
 
 _Mini-spec resolving ARCHITECTURE.md §16.5 ("exact `Dataset`/`Layer` schema that cleanly hides
 STAC yet round-trips to it losslessly"). Companion code: `swath_core::catalog` (domain types +
-`Catalog` port + STAC converters) and `swath-catalog-pgstac` (the adapter). August 2026._
+`Catalog` port + STAC converters) and `swath-catalog-pgstac` (the adapter). August 2026.
+**Decision recorded in [ADR 0023](../decisions/0023-catalog-domain-model.md); this note is the
+mechanics** — field tables, the STAC mapping, the validation strategy._
 
 ## 1. The contract
 

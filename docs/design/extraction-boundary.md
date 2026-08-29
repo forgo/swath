@@ -3,7 +3,8 @@
 _Design note for issue #185, the mechanics companion to
 [ADR 0016](../decisions/0016-extraction-boundary-published-crates.md). The ADR decides what
 ships and what it promises; this note records the per-crate extraction shape the M8 issues
-(#186–#193) execute, and the research behind the names._
+(#186–#193) execute, and the research behind the names. **Decision recorded in the ADR; this
+note is the mechanics, and its work items are shipped.**_
 
 ## 1. The boundary, per crate
 

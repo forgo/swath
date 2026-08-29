@@ -3,7 +3,8 @@
 _Design note for issue #294 (M11 — Earn the DAG). Companion to
 [`authoring-ux.md`](authoring-ux.md) (Model B, the always-valid canvas) and
 [`ui-system.md`](ui-system.md) (the canvas primitives, #290). The decision it prepares is
-[ADR 0022](../decisions/0022-two-cube-join-merge-cubes.md)._
+[ADR 0022](../decisions/0022-two-cube-join-merge-cubes.md). **Decision recorded there; this
+note is the reasoning and the walkthroughs.**_
 
 ## 1. Where Model B ceilings
 
