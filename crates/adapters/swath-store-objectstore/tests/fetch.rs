@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use swath_core::udf::{MODULE_MAX_BYTES, ModuleFetchError, ModuleFetcher};
-use swath_modulestore_objectstore::HttpModuleFetcher;
+use swath_store_objectstore::HttpModuleFetcher;
 
 const MODULE: &[u8] = b"\0asm\x01\0\0\0 the module";
 

@@ -20,8 +20,7 @@ use swath_core::crs::Crs;
 use swath_core::raster::{DType, GeoTransform, RasterInfo, WindowRequest};
 use swath_core::reproject::{CoordTransform, ReprojectError};
 use swath_core::source::{PixelBuffer, WindowData};
-use swath_core::tile::MercatorBounds;
-use swath_render::{NodataPolicy, Resampling, TargetGrid, warp};
+use swath_render::{GridBounds, NodataPolicy, Resampling, TargetGrid, warp};
 
 const NODATA: i16 = -9999;
 
@@ -91,7 +90,7 @@ fn cases() -> impl Strategy<Value = (u64, u64, Vec<i16>, TargetGrid, Resampling)
         .prop_map(
             |(w, h, pixels, (min_x, dx), (min_y, dy), (gw, gh), resampling)| {
                 let grid = TargetGrid::new(
-                    MercatorBounds {
+                    GridBounds {
                         min_x,
                         min_y,
                         max_x: min_x + dx,

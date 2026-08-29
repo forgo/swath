@@ -29,7 +29,7 @@ criterion = { workspace = true }
 insta = { workspace = true }
 object_store = { workspace = true }
 proptest = { workspace = true }
-swath-cache-objectstore = { path = "../adapters/swath-cache-objectstore", version = "0.1.0-alpha.1" }
+swath-store-objectstore = { path = "../adapters/swath-store-objectstore", version = "0.1.0-alpha.1" }
 swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.1.0-alpha.1" }
 swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.1.0-alpha.1" }
 swath-testsupport = { path = "../swath-testsupport", version = "0.1.0-alpha.1" }

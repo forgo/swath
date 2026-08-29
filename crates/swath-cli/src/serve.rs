@@ -22,7 +22,6 @@ use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
 use object_store::prefix::PrefixStore;
 use swath_api::{ApiState, CatalogLayers, LayerProvider};
-use swath_cache_objectstore::ObjectStoreTileCache;
 use swath_catalog_pgstac::PgstacCatalog;
 use swath_core::catalog::{Catalog, CatalogError, Dataset};
 use swath_core::events::EventSource;
@@ -30,6 +29,7 @@ use swath_core::planner::Budget;
 use swath_events_filedrop::FiledropEvents;
 use swath_pyramid_objectstore::PyramidSource;
 use swath_reproject_proj4rs::Proj4rsReproject;
+use swath_store_objectstore::ObjectStoreTileCache;
 
 use crate::config::{self, CatalogMode, LayerSource, ResolvedConfig};
 use crate::source::CompositeSource;
@@ -300,7 +300,7 @@ fn udf_publish(root: Option<&str>) -> Result<Option<swath_api::UdfPublish>, Serv
                 return Ok(None);
             }
         };
-        let store = swath_modulestore_objectstore::ObjectStoreModuleStore::new(build_store(root)?);
+        let store = swath_store_objectstore::ObjectStoreModuleStore::new(build_store(root)?);
         tracing::info!(
             "udf runtime ready: {version}; run_udf modules persist at {root} (ADR 0018)",
             version = swath_udf_wasmtime::runtime_version(),
@@ -308,7 +308,7 @@ fn udf_publish(root: Option<&str>) -> Result<Option<swath_api::UdfPublish>, Serv
         Ok(Some(swath_api::UdfPublish::new(
             executor,
             store,
-            swath_modulestore_objectstore::HttpModuleFetcher::new(),
+            swath_store_objectstore::HttpModuleFetcher::new(),
         )))
     }
     #[cfg(not(feature = "udf-wasm"))]

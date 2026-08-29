@@ -47,19 +47,15 @@
 pub mod colormaps;
 mod encode;
 mod error;
-mod grid;
 pub mod ir;
 pub mod plan;
 pub mod process;
-mod shim;
 mod tiler;
 pub mod udf;
 mod warp;
-mod window;
 
 pub use encode::{EncodeError, encode_png};
 pub use error::RenderError;
-pub use grid::TargetGrid;
 pub use ir::{Evaluation, RenderPlan, RgbaTile, UdfCost, eval, eval_with};
 pub use plan::{PlanMetadata, PlanSpec, ndvi_expr, plan_for};
 pub use process::{CompileContext, CompileError, CompiledProduct, SourceWindow, compile};
@@ -68,5 +64,6 @@ pub use udf::{
     NoUdf, UdfError, UdfExecutor, UdfLimits, UdfOutput, UdfRegistrar, UdfRegistration, UdfSource,
     UdfStage,
 };
-pub use warp::{NodataPolicy, Resampling, WarpedBuffer, warp};
-pub use window::{BOUNDARY_SAMPLES_PER_EDGE, source_window};
+pub use warp::{
+    GridBounds, NodataPolicy, Resampling, TargetGrid, WarpedBuffer, source_window, tile_grid, warp,
+};

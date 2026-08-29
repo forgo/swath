@@ -38,7 +38,7 @@
 //!
 //! Both follow the crate's native-AFIT port pattern (see
 //! [`crate::source`]): `Send` futures, no runtime dependency in the
-//! core. The adapters live in `swath-modulestore-objectstore`.
+//! core. The adapters live in `swath-store-objectstore`.
 
 use core::future::Future;
 

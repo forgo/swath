@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! `TileCache` adapter over `object_store` (ARCHITECTURE.md §7: the
+//! The `TileCache` adapter over `object_store` (ARCHITECTURE.md §7: the
 //! Phase-1 cache adapter — local fs and in-memory today, S3/MinIO via the
 //! same trait).
 //!
@@ -52,7 +52,7 @@ const FRAME_VERSION: u8 = 1;
 
 /// Prefix all entries live under, so a cache can share a bucket with
 /// other data (and a future GC sweep knows exactly what is its own).
-const PREFIX: &str = "tiles";
+const TILES_PREFIX: &str = "tiles";
 
 /// The `object_store`-backed [`TileCache`]: local filesystem, in-memory,
 /// or S3-compatible — whatever store the binary wires in.
@@ -75,7 +75,7 @@ impl ObjectStoreTileCache {
         // Keys are 64 hex chars by construction; slicing 0..2/2..4 cannot
         // panic on any key `TileKey::compute` produces.
         Path::from(format!(
-            "{PREFIX}/{}/{}/{hex}",
+            "{TILES_PREFIX}/{}/{}/{hex}",
             &hex[..2.min(hex.len())],
             &hex[2.min(hex.len())..4.min(hex.len())],
         ))

@@ -44,6 +44,12 @@ use crate::manifest::VirtualManifest;
 /// generator does not do that" from "this granule is broken" from "the
 /// machine failed" — consumers route the first to the fallback/conformance
 /// story (ADR 0006), log the second per granule, and retry the third.
+///
+/// `swath_referencer::ReferencerError` is this enum's structural twin, on
+/// purpose (#352): the published referencer may not depend on `swath-core`
+/// (ADR 0016's standalone rule) and the core does not take a dependency on
+/// the referencer, so the port owns its taxonomy and the in-tree shim
+/// (`swath-cli`'s `ReferencerShim`) maps variant for variant.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ReferencerError {

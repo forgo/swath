@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! `ModuleStore` and `ModuleFetcher` adapters over `object_store`
+//! The `ModuleStore` and `ModuleFetcher` adapters over `object_store`
 //! (ADR 0018, issue #204): where `run_udf` module bytes persist, and how
 //! a remote module is fetched — once — at the publish motion.
 //!
@@ -9,7 +9,7 @@
 //!
 //! A module's `code_hash` is 64 lowercase hex chars; its bytes live at
 //! `udf/<hh>/<hh>/<full-hash>.wasm` — the same two-level shard the tile
-//! cache uses (`swath-cache-objectstore`), so a filesystem root never
+//! cache uses (the sibling [`tile_cache`](super::tile_cache) module), so a filesystem root never
 //! accumulates thousands of siblings and an operator can map an object
 //! back to its hash by inspection. The object is the raw module: no
 //! framing, no metadata — the hash IS the integrity check, verified on
@@ -41,7 +41,7 @@ use swath_core::udf::{
 
 /// Prefix all entries live under, so a store can share a root with other
 /// data (and a future GC sweep knows exactly what is its own).
-const PREFIX: &str = "udf";
+const UDF_PREFIX: &str = "udf";
 
 /// The `object_store`-backed [`ModuleStore`]: local filesystem,
 /// in-memory, or S3-compatible — whatever store the binary wires in.
@@ -63,7 +63,7 @@ impl ObjectStoreModuleStore {
             code_hash.get(0..2).unwrap_or(code_hash),
             code_hash.get(2..4).unwrap_or_default(),
         );
-        Path::from(format!("{PREFIX}/{first}/{second}/{code_hash}.wasm"))
+        Path::from(format!("{UDF_PREFIX}/{first}/{second}/{code_hash}.wasm"))
     }
 }
 

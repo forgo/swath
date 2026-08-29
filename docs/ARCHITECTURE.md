@@ -48,7 +48,7 @@ flowchart TB
   RENDER["swath-render: tiler, warp/resample kernels (via swath-warp), process compiler, Render IR, encoder"]
   CORE["swath-core (no I/O): planner, catalog domain, ingest step, manifest v1 (re-exported from swath-manifest), tile/TMS math, Trace"]
   PORTS[["Ports (swath-core traits): RasterSource, Reproject, Catalog, TileCache, EventSource, IngestReferencer, ModuleStore/ModuleFetcher"]]
-  ADS["Adapters: swath-source-cog, swath-source-virtual, swath-pyramid-objectstore, swath-reproject-proj4rs, swath-catalog-pgstac, swath-cache-objectstore, swath-events-filedrop, swath-icechunk, swath-referencer, swath-udf-wasmtime, swath-modulestore-objectstore"]
+  ADS["Adapters: swath-source-cog, swath-source-virtual, swath-pyramid-objectstore, swath-reproject-proj4rs, swath-catalog-pgstac, swath-store-objectstore, swath-events-filedrop, swath-icechunk, swath-referencer, swath-udf-wasmtime, swath-store-objectstore"]
   EXT[("External: object storage, Postgres/pgstac, granule files")]
   CLI["swath-cli — wires adapters; serve + filedrop ingest loop"]
 
@@ -63,7 +63,7 @@ All nodes are implemented (per-module detail lives in each crate's rustdoc); the
 `VirtualiZarr` sidecar is deliberately absent — the conformance *reference* for
 `swath-referencer` (ADR 0006), not a runtime component.
 
-_Last verified against sources `ae16b5eafb25`._
+_Last verified against sources `a66f2c0b7692`._
 
 ## 5. The Core (pure logic)
 
@@ -154,7 +154,7 @@ planner crate, ADR 0016 — re-exported at `swath_core::planner`; `PlanChoice` i
 `run_udf` executor as a `dyn` port (ADR 0018); the cached variant owns the probe +
 write-through.
 
-_Last verified against sources `98dec53cf6bf`._
+_Last verified against sources `fa4b7d3f176c`._
 
 ## 7. Adapters and inbound APIs
 
@@ -165,10 +165,10 @@ _Last verified against sources `98dec53cf6bf`._
 | `RasterSource` | `swath-source-cog`; `swath-source-virtual`; `swath-icechunk` (read-back from a commit, #193); `swath-pyramid-objectstore` (pyramid overlay) | `zarrs` (native Zarr) |
 | `Reproject` | `swath-reproject-proj4rs` | `proj` C-bindings |
 | `Catalog` | `swath-catalog-pgstac` | — |
-| `TileCache` | `swath-cache-objectstore` (local/S3) | Redis hot-tile cache |
+| `TileCache` | `swath-store-objectstore` (local/S3) | Redis hot-tile cache |
 | `EventSource` | `swath-events-filedrop` | S3 notifications, CMR polling |
 | `IngestReferencer` | `swath-referencer` (HDF-EOS, GRIB2; the Python sidecar as conformance reference, ADR 0006) | HDF5/NetCDF4 breadth |
-| `ModuleStore` / `ModuleFetcher` | `swath-modulestore-objectstore` (local/S3; http(s) fetch) | GC sweep (ROADMAP row 17) |
+| `ModuleStore` / `ModuleFetcher` | `swath-store-objectstore` (local/S3; http(s) fetch) | GC sweep (ROADMAP row 17) |
 | `EmbeddingModel`/`VectorIndex` | — (frontier; no port trait yet) | model + vector index |
 
 No `ProcessRegistry` port exists (§6): the openEO subset compiles in-core against a
@@ -242,7 +242,7 @@ immutable once concluded), and `docs/`. Phase-1 adapters are direct dependencies
 embedded UI and HDF5 weight, not adapter selection (§14 covers extension beyond compile
 time).
 
-_Last verified against sources `ae16b5eafb25`._
+_Last verified against sources `a66f2c0b7692`._
 
 ## 13. Frontend architecture
 

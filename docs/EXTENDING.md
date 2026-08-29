@@ -74,7 +74,7 @@ Every outbound port follows the identical recipe (signatures in ARCHITECTURE.md 
 | --- | --- | --- | --- |
 | `Reproject`/`CoordTransform` (sync, dyn-compatible) | `crates/swath-core/src/reproject.rs` | `swath-reproject-proj4rs` | pyproj truth tables + proptests |
 | `Catalog` (domain-shaped; STAC only inside adapters) | `crates/swath-core/src/catalog.rs` | `swath-catalog-pgstac` | domain↔STAC round-trip proptests; live-Postgres integration |
-| `TileCache` (content-derived keys, no TTL) | `crates/swath-core/src/cache.rs` | `swath-cache-objectstore` | key→path scheme + round-trip unit tests |
+| `TileCache` (content-derived keys, no TTL) | `crates/swath-core/src/cache.rs` | `swath-store-objectstore` | key→path scheme + round-trip unit tests |
 | `EventSource` (pull-shaped, `&mut self`) | `crates/swath-core/src/events.rs` | `swath-events-filedrop` | real-filesystem integration |
 | `IngestReferencer` (sync; ADR 0006) | `crates/swath-core/src/ingest.rs` | `swath-referencer` | referencer-equivalence vs the Python reference (`tests/referencer/`) |
 

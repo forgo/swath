@@ -38,7 +38,7 @@ use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPla
 use swath_render::udf::UdfStage;
 use swath_render::{
     NoUdf, NodataPolicy, Resampling, RgbaTile, TargetGrid, TileRequest, WarpedBuffer, encode_png,
-    eval, render_tile, source_window, warp,
+    eval, render_tile, source_window, tile_grid, warp,
 };
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
@@ -99,7 +99,7 @@ fn prepare(rt: &Runtime) -> Prepared {
             .transformer(&Crs::WEB_MERCATOR, &info.crs)
             .expect("3857 -> fixture UTM transform");
         let (z, x, y) = TILE;
-        let grid = TargetGrid::for_tile(TileCoord::new(z, x, y).expect("valid tile"), 256);
+        let grid = tile_grid(TileCoord::new(z, x, y).expect("valid tile"), 256);
         let window = source_window(&grid, &info, to_source.as_ref(), WINDOW_MARGIN)
             .expect("window computation")
             .expect("fixture tile intersects the raster");
