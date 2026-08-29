@@ -61,6 +61,7 @@ jobs:
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
               - 'justfile'
+              - 'just/**'
               - '.config/nextest.toml'
               - '.github/**'
             rust:
@@ -71,6 +72,7 @@ jobs:
               - 'rust-toolchain.toml'
               - 'deny.toml'
               - 'justfile'
+              - 'just/**'
               - '.config/nextest.toml'
               - '.github/**'
             stack:
@@ -84,15 +86,18 @@ jobs:
               - 'tests/fixtures/**'
               - 'tests/e2e/**'
               - 'justfile'
+              - 'just/**'
               - '.config/nextest.toml'
               - '.github/**'
             web:
               - 'web/**'
               - 'justfile'
+              - 'just/**'
               - '.github/**'
             python:
               - 'python/**'
               - 'justfile'
+              - 'just/**'
               - '.github/**'
             oracle:
               - 'tests/**'
@@ -100,6 +105,7 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'justfile'
+              - 'just/**'
               - '.github/**'
 
   rust-fmt:
@@ -489,9 +495,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The version is the justfile's (`zizmor_version`), the one place every
+      # tool is pinned and Renovate bumps (#357).
+      - id: pins
+        run: echo "zizmor=$(grep -oE '^zizmor_version := "[0-9.]+"' justfile | grep -oE '[0-9.]+')" >> "$GITHUB_OUTPUT"
       - uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
         with:
-          tool: zizmor@1.29.0
+          tool: zizmor@${{ steps.pins.outputs.zizmor }}
       - name: Run zizmor (SARIF)
         id: zizmor
         run: |

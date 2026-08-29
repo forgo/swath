@@ -1,16 +1,9 @@
-# Versioned GHCR image on release tags (docs/RELEASING.md, issue #116).
-# The tag-push sibling of publish-image.yml (which owns main-branch
-# `latest`/`main`/`sha-*` publishing — a separate workflow because `paths:`
-# filters and tag triggers don't mix), sharing its multi-arch design
-# (#139): build per platform on NATIVE runners (linux/amd64 on
-# ubuntu-latest, linux/arm64 on ubuntu-24.04-arm — QEMU emulation of the
-# cmake libhdf5 + Rust release build blows the budget), SMOKE-TEST EACH
-# PLATFORM BEFORE PUSHING (the same shared script), push each smoked image
-# by digest, then stitch one multi-arch manifest under exactly one
-# immutable tag, `ghcr.io/forgo/swath:v{version}`, and assert it lists
-# both platforms. `latest` does not move on pre-releases — it keeps
-# tracking main until the graduation checklist (docs/RELEASING.md) says
-# otherwise.
+# Versioned GHCR image on release tags (docs/RELEASING.md, issue #116): the
+# tag-push caller of image.yml — exactly one immutable tag,
+# `ghcr.io/forgo/swath:v{version}` (`type=ref,event=tag`). `latest` does
+# not move on pre-releases — it keeps tracking main until the graduation
+# checklist (docs/RELEASING.md) says otherwise. A separate caller because
+# `paths:` filters and tag triggers don't mix.
 
 name: Release image
 
@@ -26,165 +19,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
-  # Per-platform: build locally, smoke natively, then push by digest only.
-  # Nothing tagged is touched here — a failed platform leaves every
-  # existing tag exactly where it was.
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            arch: amd64
-            runner: ubuntu-latest
-          - platform: linux/arm64
-            arch: arm64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
+  image:
+    uses: ./.github/workflows/image.yml
     permissions:
       contents: read
-      packages: write # GHCR digest push; scoped to this job only
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-
-      # OCI annotations ride along as image labels, as on main; the tag is
-      # applied in the merge job.
-      - id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          images: ghcr.io/${{ github.repository }}
-          labels: |
-            org.opencontainers.image.description=Swath — cloud-native geospatial tiles: serve the committed HLS fixtures and the embedded viewer with `docker run -p 8080:8080 ghcr.io/forgo/swath serve --fixtures`
-            org.opencontainers.image.licenses=Apache-2.0
-
-      # Build for the local docker engine first — nothing is pushed until
-      # the smoke test below has passed against this exact image. GHA
-      # layer cache is scoped per platform (shared with publish-image.yml,
-      # which builds the same Dockerfile).
-      - name: Build (local, not yet pushed)
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          platforms: ${{ matrix.platform }}
-          load: true
-          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=publish-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=publish-${{ matrix.arch }}
-
-      # The same assertions the main-branch publish makes (shared script):
-      # liveness, a real rendered tile, and the embedded UI. Native on
-      # both platforms.
-      - name: Smoke-test the release image
-        run: ./.github/scripts/smoke-image.sh "ghcr.io/forgo/swath:${GITHUB_REF_NAME}"
-
-      - name: Record image size
-        env:
-          ARCH: ${{ matrix.arch }}
-        run: |
-          set -euo pipefail
-          size=$(docker image inspect --format '{{.Size}}' "ghcr.io/forgo/swath:${GITHUB_REF_NAME}")
-          printf 'Image size (%s): %d bytes (%d MB)\n' "$ARCH" "$size" "$((size / 1000000))" \
-            | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Same context and platform — every layer comes out of the buildx
-      # cache, so this pushes the exact image that passed the smoke, by
-      # digest only (no tag moves until the merge job below).
-      - name: Push by digest
-        id: push
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          platforms: ${{ matrix.platform }}
-          labels: ${{ steps.meta.outputs.labels }}
-          tags: ghcr.io/${{ github.repository }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=publish-${{ matrix.arch }}
-
-      - name: Export digest
-        env:
-          DIGEST: ${{ steps.push.outputs.digest }}
-        run: |
-          set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/digests"
-          touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: digest-${{ matrix.arch }}
-          path: ${{ runner.temp }}/digests/*
-          if-no-files-found: error
-          retention-days: 1
-
-  # Stitch the per-platform digests into one manifest list under the
-  # release tag, then assert the published manifest lists both platforms
-  # (#139's regression guard).
-  merge:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write # GHCR manifest push; scoped to this job only
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: digest-*
-          path: ${{ runner.temp }}/digests
-          merge-multiple: true
-
-      # Exactly one tag: the release version, immutable
-      # (`type=ref,event=tag` -> `v0.1.0-alpha.1`).
-      - id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=ref,event=tag
-
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create the multi-arch manifest
-        env:
-          IMAGE: ghcr.io/${{ github.repository }}
-        run: |
-          set -euo pipefail
-          cd "${RUNNER_TEMP}/digests"
-          # DOCKER_METADATA_OUTPUT_JSON is exported by metadata-action.
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf "$IMAGE@sha256:%s " *)
-
-      - name: Assert the manifest lists linux/amd64 and linux/arm64
-        env:
-          IMAGE: ghcr.io/${{ github.repository }}
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: |
-          set -euo pipefail
-          docker manifest inspect "${IMAGE}:${VERSION}" > manifest.json
-          for arch in amd64 arm64; do
-            jq -e --arg a "$arch" \
-              '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a)' \
-              manifest.json > /dev/null \
-              || { echo "::error::published manifest is missing linux/${arch}"; exit 1; }
-            echo "manifest: linux/${arch} present"
-          done
-          docker buildx imagetools inspect "${IMAGE}:${VERSION}" | tee -a "$GITHUB_STEP_SUMMARY"
+      packages: write # GHCR digest + manifest push, scoped in the called jobs
+    with:
+      local-tag: ${{ github.ref_name }}
+      tags: |
+        type=ref,event=tag
