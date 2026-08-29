@@ -5,8 +5,7 @@
 // ingest→pixel reads a real value after the first traced tile with the
 // x-ray OFF; the cursor cell follows the mouse and copies on click.
 import { expect, type Page, test } from "@playwright/test";
-
-const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
+import { DEMO_PATH } from "./support";
 
 const cell = (page: Page, id: string) => page.locator(`#swath-status-${id} [part="value"]`);
 

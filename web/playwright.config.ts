@@ -14,10 +14,20 @@
 //
 // Specs read SWATH_DEMO_PATH for the page path; it defaults per mode here
 // (the config module is evaluated in every worker, so specs see it too).
+//
+// The docs screenshot capture (issue #112, `just screenshots`) is a fourth
+// project of this same config (#349), present only when SWATH_SHOTS_DIR is
+// set: `just e2e-web` never runs it, and `just screenshots` runs it alone
+// (`--project screenshots`). Its geometry — a fixed viewport and DPR — is
+// pinned because the shots are committed artifacts a second capture run
+// must reproduce within a perceptual-diff policy
+// (tests/screenshots/verify_stable.py). Capture always runs through the
+// vite dev server, exactly like `just demo`.
 import { defineConfig, devices } from "@playwright/test";
 
 const binaryMode = process.env.SWATH_E2E_MODE === "binary";
 process.env.SWATH_DEMO_PATH ??= binaryMode ? "/" : "/demo/";
+const screenshots = process.env.SWATH_SHOTS_DIR !== undefined;
 
 /** The one test that restarts the server under the stack (the x-ray
  * suite's kill-and-resume). A whole-stack outage cannot share the stack
@@ -49,6 +59,28 @@ export default defineConfig({
         isMobile: true,
       },
     },
+    ...(screenshots
+      ? [
+          {
+            name: "screenshots",
+            testDir: "screenshots",
+            testMatch: /capture\.ts/,
+            // The shot sequence is stateful on purpose (each capture run
+            // must replay the identical tile-request history from a cold
+            // cache, so decisions and analytics counters reproduce): in
+            // order, no retries — a mid-sequence retry would replay against
+            // a warm cache. `just screenshots` passes `--workers 1`.
+            fullyParallel: false,
+            retries: 0,
+            timeout: 120_000,
+            use: {
+              // Pinned shot geometry: rail (248px) + a 1280px-wide canvas, DPR 1.
+              viewport: { width: 1528, height: 928 }, // shell: 44 top bar + 860 canvas + 24 status bar (#284)
+              deviceScaleFactor: 1,
+            },
+          },
+        ]
+      : []),
   ],
   use: {
     baseURL: binaryMode ? "http://localhost:8080" : "http://localhost:5173",

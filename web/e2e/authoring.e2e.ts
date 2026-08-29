@@ -17,8 +17,16 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
-
-const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
+import {
+  chip,
+  DEMO_PATH,
+  ensureStep,
+  fieldById,
+  openAuthoringPanel as openPanel,
+  submitButton,
+  TILE,
+} from "./support";
+import { FUEL_BOMB } from "./support/wasm";
 
 /** The guest kit's reference NDVI module (ADR 0020, `examples/udf/ndvi`
  * — the committed fixture the wasmtime adapter's goldens pin): two
@@ -29,71 +37,12 @@ const NDVI_WASM = readFileSync(
   ),
 );
 
-/** The proven-live fixture tile (z/y/x — OGC tileMatrix/tileRow/tileCol):
- * the granule tests/e2e/stack-up.sh drops, same tile the Rust
- * byte-identity test uses (crates/swath-api/tests/openeo_services.rs). */
-const TILE = "12/1561/848";
-
 /** Author mode shows ONE step's fields at a time in the inspector (#291):
  * click the step's chip in the strip before addressing its fields. */
 /** The rail's layer list shows in Layers mode; author mode shows the
  * authoring pieces instead (#291). */
 async function showLayers(page: Page): Promise<void> {
   await page.locator('swath-rail [part="item"][data-mode="layers"]').click();
-}
-
-async function ensureStep(page: Page, key: string): Promise<void> {
-  const chip = page.locator(`.swath-authoring-chip[data-chip="${key}"]`);
-  if ((await chip.count()) > 0 && (await chip.getAttribute("aria-pressed")) !== "true") {
-    await chip.click();
-  }
-}
-
-function fieldById(page: Page, id: string) {
-  const key = /^(s\d+)-/.exec(id)?.[1];
-  const locator = page.locator(`#swath-authoring-${id}`);
-  if (key === undefined) {
-    return locator;
-  }
-  // Selecting the chip is a side effect of addressing the field: a locator
-  // proxy that switches steps before the first action on it.
-  return new Proxy(locator, {
-    get(target, prop, receiver) {
-      const value = Reflect.get(target, prop, receiver);
-      if (typeof value !== "function") {
-        return value;
-      }
-      return async (...args: unknown[]) => {
-        await ensureStep(page, key);
-        return (value as (...a: unknown[]) => unknown).apply(target, args);
-      };
-    },
-  });
-}
-
-/** The stage-typed insert chip for `processId` at `gap` (0 = right
- * after the Load card). */
-function chip(page: Page, gap: number, processId: string) {
-  return page.locator(
-    `.swath-authoring-insert[data-gap="${gap}"] ` + `button[data-process="${processId}"]`,
-  );
-}
-
-/** The panel is collapsed and lazy (fetches nothing until opened, like
- * the dataset browser): every flow starts by toggling it open. The
- * permanent Load card (s1) rendering means the canvas is ready. */
-async function openPanel(page: Page): Promise<void> {
-  // Author mode (issue #291): the steps live in the strip drawer over the
-  // map and the selected step's fields in the inspector; the toggle stays
-  // in the rail.
-  await page.locator('swath-rail [part="item"][data-mode="author"]').click();
-  await page.locator("swath-authoring-panel .swath-authoring-toggle").click();
-  await ensureStep(page, "s1");
-  await expect(page.locator('[data-step="s1"]')).toBeVisible();
-}
-
-function submitButton(page: Page) {
-  return page.locator(".swath-authoring-submit");
 }
 
 /** Ticks a Load-card band checkbox (tick order = loaded order). */
@@ -131,105 +80,6 @@ async function authorNdvi(page: Page, outputMax: string, colormap: string): Prom
 // (which this mirrors byte for byte): structurally conforming — the four
 // v1 exports plus memory — so it registers, with a `swath_udf_run` that
 // spins until the per-tile fuel budget (or the epoch backstop) stops it.
-
-function uleb(value: number): number[] {
-  const out: number[] = [];
-  let v = value;
-  for (;;) {
-    const byte = v & 0x7f;
-    v = Math.floor(v / 128);
-    if (v === 0) {
-      out.push(byte);
-      return out;
-    }
-    out.push(byte | 0x80);
-  }
-}
-
-function sleb(value: number): number[] {
-  const out: number[] = [];
-  let v = value;
-  for (;;) {
-    const byte = v & 0x7f;
-    v >>= 7;
-    const sign = (byte & 0x40) !== 0;
-    if ((v === 0 && !sign) || (v === -1 && sign)) {
-      out.push(byte);
-      return out;
-    }
-    out.push(byte | 0x80);
-  }
-}
-
-function section(id: number, payload: number[]): number[] {
-  return [id, ...uleb(payload.length), ...payload];
-}
-
-function counted(items: number[][]): number[] {
-  return [...uleb(items.length), ...items.flat()];
-}
-
-function name(text: string): number[] {
-  const bytes = [...new TextEncoder().encode(text)];
-  return [...uleb(bytes.length), ...bytes];
-}
-
-/** `i32.const k` then `end`. */
-function retI32(k: number): number[] {
-  return [0x41, ...sleb(k), 0x0b];
-}
-
-/** A structurally conforming ABI v1 module (abi = 1, one output plane,
- * `swath_udf_alloc` answering 8 inside a 4 MiB memory) whose
- * `swath_udf_run` body is `run`. */
-function abiModule(run: number[]): Buffer {
-  const exportEntry = (n: string, kind: number, index: number): number[] => [
-    ...name(n),
-    kind,
-    ...uleb(index),
-  ];
-  const body = (code: number[]): number[] => {
-    const entry = [0x00, ...code]; // zero locals
-    return [...uleb(entry.length), ...entry];
-  };
-  return Buffer.from([
-    0x00,
-    0x61,
-    0x73,
-    0x6d,
-    0x01,
-    0x00,
-    0x00,
-    0x00,
-    // Types: 0 = () -> i32, 1 = (i32) -> i32, 2 = (i32, i32) -> i64.
-    ...section(
-      1,
-      counted([
-        [0x60, 0x00, 0x01, 0x7f],
-        [0x60, 0x01, 0x7f, 0x01, 0x7f],
-        [0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7e],
-      ]),
-    ),
-    // Functions: abi, output_planes, alloc, run.
-    ...section(3, counted([[0], [1], [1], [2]])),
-    // Memory: 64 pages (4 MiB), no max.
-    ...section(5, counted([[0x00, 0x40]])),
-    ...section(
-      7,
-      counted([
-        exportEntry("memory", 0x02, 0),
-        exportEntry("swath_udf_abi", 0x00, 0),
-        exportEntry("swath_udf_output_planes", 0x00, 1),
-        exportEntry("swath_udf_alloc", 0x00, 2),
-        exportEntry("swath_udf_run", 0x00, 3),
-      ]),
-    ),
-    ...section(10, counted([body(retI32(1)), body(retI32(1)), body(retI32(8)), body(run)])),
-  ]);
-}
-
-/** The fuel bomb: `swath_udf_run` is `(loop (br 0))`. */
-const FUEL_BOMB = abiModule([0x03, 0x40, 0x0c, 0x00, 0x0b, 0x42, 0x00, 0x0b]);
 
 /** Picks `buffer` as a `.wasm` through the UDF card's file input. */
 async function uploadModule(page: Page, id: string, fileName: string, buffer: Buffer) {

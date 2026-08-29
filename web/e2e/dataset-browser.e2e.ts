@@ -6,8 +6,10 @@
 // ingest guidance, and thumbnails that are previews the ENGINE rendered
 // (`POST /result`) — never a client-side decode (ADR 0019).
 import { expect, type Page, test } from "@playwright/test";
+import { DEMO_PATH, railMode, waitForFittedView } from "./support";
 
-const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
+const dataMode = (page: Page) => railMode(page, "data");
+
 const FOOTPRINTS_ID = "swath-granule-footprints";
 
 const FIXTURE_GRANULES = {
@@ -31,17 +33,6 @@ const FIXTURE_GRANULES = {
 };
 const EMPTY_PAGE = { granules: [], numberMatched: 0, numberReturned: 0, links: [] };
 
-async function waitForFittedView(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const el = document.querySelector("swath-map") as {
-      map?: { loaded(): boolean; areTilesLoaded(): boolean; getZoom(): number };
-    } | null;
-    const map = el?.map;
-    return Boolean(map?.loaded() && map.areTilesLoaded() && map.getZoom() > 5);
-  });
-}
-
-const dataMode = (page: Page) => page.locator('swath-rail [part="item"][data-mode="data"]');
 const datasetSelect = (page: Page) => page.locator('swath-catalog [part="dataset"] select');
 const card = (page: Page, id: string) =>
   page.locator(`swath-catalog swath-granule-card[data-granule="${id}"]`);

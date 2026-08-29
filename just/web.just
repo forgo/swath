@@ -101,7 +101,7 @@ screenshots:
         # Cold cache per run: decisions/plan mix reproduce exactly.
         rm -rf target/e2e/cache/* 2>/dev/null || true
         (cd web && SWATH_SHOTS_DIR="$1" SWATH_CAPTURE_SHA="$sha" \
-            pnpm exec playwright test --config playwright.screenshots.config.ts)
+            pnpm exec playwright test --project screenshots --workers 1)
     }
     mkdir -p "$out" && rm -f "$out"/*.png "$out"/index.md "$out"/shots.json
     rm -rf "$second" && mkdir -p "$second"

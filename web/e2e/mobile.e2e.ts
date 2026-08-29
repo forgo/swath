@@ -5,13 +5,10 @@
 // sheet with 40/90 snaps, the dock chip, the toggles in the dock, author
 // entry — the same product, both modes.
 import { expect, type Page, test } from "@playwright/test";
-
-const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
+import { DEMO_PATH, railMode as tab } from "./support";
 
 test.skip(({ isMobile }) => !isMobile, "the phone tier runs on the mobile project");
 
-const tab = (page: Page, mode: string) =>
-  page.locator(`swath-rail [part="item"][data-mode="${mode}"]`);
 const sheet = (page: Page) => page.locator("#swath-rail-drawer");
 
 async function landed(page: Page): Promise<void> {

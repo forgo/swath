@@ -19,8 +19,19 @@
 // - play advances frames on its own and prefetches the next frame's
 //   tiles before showing them.
 import { expect, type Page, test } from "@playwright/test";
-
-const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
+import {
+  compareHandle,
+  FIRE_DATASET as DATASET,
+  DEMO_PATH,
+  type Envelope,
+  granuleFrames,
+  FIRE_LAYER as LAYER,
+  mapView,
+  scrubTo,
+  slider,
+  subscribeToTraces,
+  waitForFittedView,
+} from "./support";
 
 /** The Park Fire fixture footprint's viewpoint (granule bbox
  * -121.7388..-121.6475 / 39.9856..40.0559). The vite-dev pass views z13
@@ -41,89 +52,6 @@ const ZOOM = process.env.SWATH_E2E_MODE === "binary" ? "13" : "12";
  * runs (whose queued requests die with the page) stayed live. */
 const SIGNATURE_ZOOM = process.env.SWATH_E2E_MODE === "binary" ? "14" : "13";
 
-const LAYER = "park-fire-ndvi";
-const DATASET = "hls-s30-fire";
-
-/** The trace envelope as swath-api pins it (subset these tests read). */
-interface Envelope {
-  tile: string;
-  layer: string;
-  trace: {
-    decision: string | { overview: { level: number } } | { cache_hit: { key: string } };
-    timings: { total_ms: number };
-    temporal?: {
-      granule_id: string;
-      granule_datetime: string;
-      requested: string | null;
-      rule: string;
-    } | null;
-  };
-}
-
-declare global {
-  interface Window {
-    __timeReceived?: Envelope[];
-  }
-}
-
-/** The test's own subscription, awaited until the stream is OPEN —
- * not just constructed. The distinction is load-bearing on CI: the
- * fire view's initial load saturates the browser's per-origin
- * connection budget with ~28 tile requests, and a still-queued
- * EventSource misses every envelope published before it connects (SSE
- * has no replay) — the badge/stream agreement below could then never
- * complete. Locally the tiles drain fast enough to mask it. */
-async function subscribeToTraces(page: Page): Promise<void> {
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) => {
-        const received: Envelope[] = [];
-        window.__timeReceived = received;
-        const source = new EventSource("/traces");
-        source.addEventListener("trace", (event) => {
-          received.push(JSON.parse((event as MessageEvent<string>).data) as Envelope);
-        });
-        source.addEventListener("open", () => resolve(), { once: true });
-      }),
-  );
-}
-
-/** Waits until the zero-config bounds fit has landed and settled. */
-async function waitForFittedView(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const el = document.querySelector("swath-map") as {
-      map?: { loaded(): boolean; areTilesLoaded(): boolean; getZoom(): number };
-    } | null;
-    const map = el?.map;
-    return Boolean(map?.loaded() && map.areTilesLoaded() && map.getZoom() > 5);
-  });
-}
-
-/** The layer's temporal domain straight from the granules API, reduced
- * exactly as the slider must: ascending, de-duplicated. */
-async function granuleFrames(page: Page): Promise<string[]> {
-  const response = await page.request.get(`/datasets/${DATASET}/granules`);
-  expect(response.ok()).toBe(true);
-  const body = (await response.json()) as { granules?: { datetime?: string }[] };
-  const datetimes = (body.granules ?? [])
-    .map((granule) => granule.datetime)
-    .filter((value): value is string => typeof value === "string");
-  return [...new Set(datetimes)].sort((a, b) => Date.parse(a) - Date.parse(b));
-}
-
-const slider = (page: Page) => page.locator(".swath-map-time");
-
-/** Scrubs to frame `index` through the control's own range input (the
- * user path: set + input event, exactly what dragging emits). */
-async function scrubTo(page: Page, index: number): Promise<void> {
-  await page
-    .locator('.swath-map-time input[type="range"]')
-    .evaluate((el: HTMLInputElement, value) => {
-      el.value = String(value);
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-    }, index);
-}
-
 /**
  * Polls until every painted badge of the fire layer at the displayed
  * zoom (a) belongs to `frame` per the latest trace the TEST received
@@ -135,7 +63,7 @@ async function expectFrameBadges(page: Page, frame: string, kind: string): Promi
   const dump = async (): Promise<string> =>
     await page.evaluate(
       ({ frame, kind, layer }) => {
-        const received = window.__timeReceived ?? [];
+        const received = window.__received ?? [];
         const latest = new Map<string, Envelope>();
         for (const envelope of received) {
           latest.set(`${envelope.layer}/${envelope.tile}`, envelope);
@@ -172,7 +100,7 @@ async function expectFrameBadges(page: Page, frame: string, kind: string): Promi
   const handle = await page
     .waitForFunction(
       ({ frame, kind, layer }) => {
-        const received = window.__timeReceived ?? [];
+        const received = window.__received ?? [];
         const latest = new Map<string, Envelope>();
         for (const envelope of received) {
           latest.set(`${envelope.layer}/${envelope.tile}`, envelope);
@@ -343,7 +271,7 @@ test("the signature loop: first pass renders live, second pass replays from cach
 
   // Every temporal trace this test received belongs to the fire layer's
   // frames — the stream's account and the granules API agree.
-  const received = await page.evaluate(() => window.__timeReceived ?? []);
+  const received = await page.evaluate(() => window.__received ?? []);
   const frameSet = new Set(frames);
   for (const envelope of received) {
     if (envelope.layer === LAYER && envelope.trace.temporal) {
@@ -411,21 +339,6 @@ test("play advances frames and prefetches the next frame before showing it", asy
 // --- finding the data (issue #182 follow-up): the ~10 km fire window
 // must be reachable without knowing where on Earth to look.
 
-/** The map's current view, read off the live MapLibre instance. */
-async function mapView(page: Page): Promise<{ lng: number; lat: number; zoom: number }> {
-  return await page.evaluate(() => {
-    const el = document.querySelector("swath-map") as {
-      map?: { getCenter(): { lng: number; lat: number }; getZoom(): number };
-    } | null;
-    const map = el?.map;
-    if (!map) {
-      throw new Error("swath-map has no map instance");
-    }
-    const center = map.getCenter();
-    return { lng: center.lng, lat: center.lat, zoom: map.getZoom() };
-  });
-}
-
 const zoomToData = (page: Page) => page.getByRole("button", { name: "Zoom to the layer's data" });
 
 test("switching to the off-screen fire layer auto-frames it; deep links are honored", async ({
@@ -481,8 +394,6 @@ test("switching to the off-screen fire layer auto-frames it; deep links are hono
 /** The compare tests' own style zoom: display tiles z12 (vite) / z13
  * (binary) — never the signature loop's z14/z15. */
 const COMPARE_ZOOM = process.env.SWATH_E2E_MODE === "binary" ? "12" : "11";
-
-const compareHandle = (page: Page) => page.locator("swath-map .swath-map-compare-handle");
 
 test("date-vs-date: t and ct split one layer across the handle, byte-stably", async ({
   page,
