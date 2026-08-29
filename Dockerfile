@@ -11,6 +11,14 @@
 # future HTTPS object-store roots. The toolchain tag tracks rust-toolchain.toml;
 # the Node major tracks web/package.json's devEngines.
 
+# Where the runtime stage takes its binary from (#333): `build` — the
+# in-image Rust build below (the published image, a laptop `docker compose
+# build`) — or `prebuilt`, a binary the caller compiled natively and placed
+# at dist/swath in the build context (CI's stack-image job: the workspace
+# compiles once under the cargo cache instead of cold inside Docker on
+# every run). Same stages, same runtime layer either way.
+ARG SWATH_BINARY_STAGE=build
+
 FROM node:24-trixie-slim AS web
 WORKDIR /src/web
 # pnpm at the version package.json pins (packageManager); corepack ships
@@ -38,12 +46,20 @@ COPY --from=web /src/web/dist /src/web/dist
 # --locked: the committed Cargo.lock is the build, exactly as in CI.
 RUN cargo build --release --locked -p swath-cli
 
+# A natively built binary handed in through the context (CI). BuildKit
+# skips this stage entirely unless it is selected, so a laptop build never
+# needs dist/swath to exist.
+FROM scratch AS prebuilt
+COPY --chmod=755 dist/swath /src/target/release/swath
+
+FROM ${SWATH_BINARY_STAGE} AS binary
+
 FROM debian:trixie-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY --from=build /src/target/release/swath /usr/local/bin/swath
+COPY --from=binary /src/target/release/swath /usr/local/bin/swath
 # The committed demo fixtures, at the path `--fixtures` expects relative to
 # the workdir (./tests/fixtures).
 COPY tests/fixtures /app/tests/fixtures
