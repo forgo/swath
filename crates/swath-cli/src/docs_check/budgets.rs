@@ -73,7 +73,10 @@ const BUDGETS: [(&str, usize); 16] = [
     // inventory grew by five reopen-condition rows (19–23, ~110 words,
     // written tight) — table growth, not prose regrowth — plus ~4%
     // headroom for the next row.
-    ("docs/ROADMAP.md", 1950),
+    // Lowered 1950 → 1850 on 2026-08-29 (#339): §1 became a one-line-per-milestone
+    // table, §3 lost its shipped items, the two co-recording ledgers point at §2;
+    // measured at 1752 — the ratchet after a consolidation, not headroom.
+    ("docs/ROADMAP.md", 1850),
 ];
 
 /// The word count of `text` under the committed measurement method:

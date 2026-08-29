@@ -272,8 +272,8 @@ Resolved/Closed item reopens only via a superseding ADR.
 | --- | --- | --- | --- |
 | 1 | Port granularity: one `RasterSource`, or split? | Resolved | As-built port set, §6 (#152); the cube half returns with a native `zarrs` adapter (§7) — reopen trigger in [`ROADMAP.md`](ROADMAP.md) |
 | 2 | Where warp lives: kernels, or a `Warp` offload port? | Resolved | As built, §6 (#152): kernels, no port; evidence in [ADR 0012](decisions/0012-render-stays-inline-async.md); GPU/GDAL offload deferred in [`ROADMAP.md`](ROADMAP.md) |
-| 3 | Cache key & invalidation | Open (narrowed by #36) | `swath-core` `cache` module docs; GC and partial-mosaic invalidation in [`ROADMAP.md`](ROADMAP.md)'s inventory |
-| 4 | Planner budget semantics | Resolved | [`docs/design/materialization-planner.md`](design/materialization-planner.md) (#37); future work tracked in [`ROADMAP.md`](ROADMAP.md) |
+| 3 | Cache key & invalidation | Open (narrowed by #36) | `swath-core` `cache` module docs; [`ROADMAP.md`](ROADMAP.md) rows 2–3 |
+| 4 | Planner budget semantics | Resolved | [`docs/design/materialization-planner.md`](design/materialization-planner.md) (#37); [`ROADMAP.md`](ROADMAP.md) rows 4–5 |
 | 5 | Control-plane domain model | Resolved | [`docs/design/catalog-domain.md`](design/catalog-domain.md) |
 | 6 | Extension mechanism (§14) | Closed-by-ADR | [ADR 0013](decisions/0013-extension-features-plus-openeo-graphs.md) |
 | 7 | Async vs blocking render boundary | Resolved | [ADR 0012](decisions/0012-render-stays-inline-async.md) |

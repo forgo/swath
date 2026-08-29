@@ -175,23 +175,7 @@ knobs with documented storage-vs-latency semantics and a checkable byte
 model deliver that today, and Trace history gives a learned model its
 training data *later* without redesign.
 
-**Recorded future work** (deliberately not v1; each item is tracked, with
-its revisit trigger, in [`../ROADMAP.md`](../ROADMAP.md)'s deferral
-inventory):
-
-- **Learned cost model**: fit the estimate constants (compression ratio,
-  warp weight, per-source latency) from accumulated Trace history
-  (`plan.considered` estimates vs measured `bytes_read`/timings — the
-  training pairs are already on the wire).
-- **Planner-owned write policy**: today write-through is unconditional at
-  the tiler when a cache is configured and enabled; a budget-aware policy
-  ("cache only tiles whose live cost exceeds X") belongs to the planner
-  once storage pressure is real.
-- **Partial-mosaic invalidation**: unchanged from #36 — per-footprint
-  invalidation lands with mosaics themselves (`swath-core::cache` docs).
-- **Overview *generation*** (the batch-materialization path): shipped by
-  issue #183 — `swath materialize` builds per-asset GeoZarr-shaped
-  pyramids (`crates/adapters/swath-pyramid-objectstore`) and the
-  `PyramidSource` overlay feeds them into `Availability` through
-  `describe`, unchanged planner (`docs/ROADMAP.md` deferral row 6,
-  closed).
+**Recorded future work** — deliberately not v1: the learned cost model, a planner-owned
+write policy, partial-mosaic invalidation. Each is a row of
+[`../ROADMAP.md`](../ROADMAP.md) §2 (rows 4, 5, 3), which owns the revisit trigger; overview
+*generation* shipped with #183 (row 6, closed).
