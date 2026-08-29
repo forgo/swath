@@ -26,6 +26,7 @@ reopen condition wins ([`decisions/`](decisions/)); the phase plan is
 | **M9** `run_udf` | User code as sandboxed, fuel-metered WASM in the tile path; deterministic, load-tested, deployable read-only | ADR 0018, `PERFORMANCE.md` §9, `deploy/README.md` |
 | **M10** UX product structure | One shell, shadow-DOM primitives on tokens, rail modes, palette, catalog thumbnails, canvas primitives, touch parity | ADR 0021, `design/ui-system.md` |
 | **M11** Earn the DAG | `merge_cubes` at the bounded profile; the canvas a constrained DAG; change detection its first product | ADR 0022, `design/authoring-dag.md` |
+| **M13** Consolidate | One source of truth per fact: REQUIREMENTS owns the mission, CONTRIBUTING the workflow, ADRs 0023–0025 the design decisions; one test-support crate, one e2e support module, one object_store adapter, one API error type; `swath-cli` a library; the docs gates in `tools/docs-check` with budgets over design/ and media/ | #338–#357, the milestone's invariant contract in every PR |
 
 ## 2. Deferral inventory (canonical)
 
@@ -87,9 +88,7 @@ adapter lands.
 1. **#156 — openeo `save_result` profile-note drift** (smallest truth-telling fix).
 2. **#139 — linux/arm64 GHCR manifest** (the one-liner fails natively on Apple Silicon).
 3. **M12 — UX design language**: theme values, typography, motion, light/high-contrast —
-   mechanically a token-value swap (ADR 0021's freeze). **M13 — Consolidate**: one source of
-   truth per fact across docs, tests, crates and tooling (the milestone's issues carry the
-   invariant contract).
+   mechanically a token-value swap (ADR 0021's freeze).
 4. **Dataset-creation API** — completes the "single pane of glass" claim.
 5. **Auth (OIDC/RBAC)** — Charter Phase 3; gates multi-tenancy, *writable* demos (maintainer
    decision 2026-08-12), the openEO conformance class.
