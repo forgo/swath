@@ -1,9 +1,10 @@
 # docs/media — technical diagrams
 
-Five diagrams (the product loop, plus the four of the docs audit, issue #113). Conventions:
+Six diagram families: the product loop, the four of the docs audit (issue #113), and the wedge
+pair behind `docs/COMPARISON.md`. Conventions:
 
-- **Hand-crafted SVG, canonical.** All four diagrams are hand-crafted SVGs (plan decision #3
-  set the style with the virtual-reference figure; maintainer review extended it to all four).
+- **Hand-crafted SVG, canonical.** Every diagram is a hand-crafted SVG (plan decision #3 set
+  the style with the virtual-reference figure; maintainer review extended it to the rest).
   SVG is a text format, so each committed `.svg` is simultaneously the editable source and the
   export — there is no generated artifact to drift. Each has a Markdown page embedding it with
   a full-prose alt text.
@@ -25,9 +26,12 @@ Five diagrams (the product loop, plus the four of the docs audit, issue #113). C
 | Planner decision loop, real `plan.considered` | [`planner-decision-loop.md`](planner-decision-loop.md) | [`planner-decision-loop.svg`](planner-decision-loop.svg) | [`planner-decision-loop.notes.md`](planner-decision-loop.notes.md) |
 | Legacy virtual-reference mechanism | [`virtual-reference.md`](virtual-reference.md) | [`virtual-reference.svg`](virtual-reference.svg) | [`virtual-reference.notes.md`](virtual-reference.notes.md) |
 | Standards surfaces map | [`standards-map.md`](standards-map.md) | [`standards-map.svg`](standards-map.svg) | [`standards-map.notes.md`](standards-map.notes.md) |
+| The wedge: capability ladders and the single-system frontier (embedded in `COMPARISON.md`) | — | [`wedge-a-quadrants.svg`](wedge-a-quadrants.svg), [`wedge-b-frontier.svg`](wedge-b-frontier.svg) | [`wedge.notes.md`](wedge.notes.md) |
 
 `planner-trace.capture.json` is the committed capture (verbatim `GET /traces` SSE frames from
 the fixture stack) that the planner diagram's embedded payload is copied from.
+`qgis-xyz-connection.png` is the QGIS evidence capture for `docs/RECIPES.md` (issue #194) —
+the one raster here, taken by hand because it is a third-party window.
 
 ## Screenshots
 
