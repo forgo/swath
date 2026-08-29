@@ -34,13 +34,13 @@ use axum::http::StatusCode;
 use object_store::local::LocalFileSystem;
 use object_store::memory::InMemory;
 use swath_api::{ApiState, CatalogLayer, CatalogLayers, TraceExtension, router};
-use swath_cache_objectstore::ObjectStoreTileCache;
 use swath_core::catalog::DatasetId;
 use swath_core::trace::{Strategy, TemporalRule};
 use swath_render::ir::Colormap;
 use swath_render::{NodataPolicy, PlanSpec, Resampling, ndvi_expr, plan_for};
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
+use swath_store_objectstore::ObjectStoreTileCache;
 
 /// The proven fire tile: z13 (col 1326, row 3100) sits fully inside the
 /// fixture window (tests/fixtures/README.md), OGC path order z/row/col.

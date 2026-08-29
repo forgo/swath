@@ -50,13 +50,12 @@ image = { workspace = true }
 # surface).
 insta = { workspace = true }
 jsonschema = { workspace = true }
-swath-cache-objectstore = { path = "../adapters/swath-cache-objectstore", version = "0.1.0-alpha.1" }
+swath-store-objectstore = { path = "../adapters/swath-store-objectstore", version = "0.1.0-alpha.1" }
 swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.1.0-alpha.1" }
 swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.1.0-alpha.1" }
 # The real run_udf publish motion end to end (#204): the wasmtime
 # registrar over the committed fixture modules, the object_store module
 # store in memory.
-swath-modulestore-objectstore = { path = "../adapters/swath-modulestore-objectstore", version = "0.1.0-alpha.1" }
 swath-udf-wasmtime = { path = "../adapters/swath-udf-wasmtime", version = "0.1.0-alpha.1" }
 # `net`/`io-util`/`time`: the SSE tests' hand-rolled HTTP client (TCP +
 # chunked-transfer reader + timeouts).

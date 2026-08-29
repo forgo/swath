@@ -325,7 +325,7 @@ pub(crate) fn openeo_app_seeded_cached(
     granules: Vec<Granule>,
 ) -> (Router, MemoryCatalog) {
     use swath_api::{CatalogLayers, OpenEoState, openeo_router};
-    use swath_cache_objectstore::ObjectStoreTileCache;
+    use swath_store_objectstore::ObjectStoreTileCache;
 
     let catalog = MemoryCatalog::default();
     catalog.seed(dataset, granules);
@@ -433,7 +433,7 @@ where
     F: swath_core::udf::ModuleFetcher + 'static,
 {
     use swath_api::{CatalogLayers, OpenEoState, UdfPublish, openeo_router};
-    use swath_modulestore_objectstore::ObjectStoreModuleStore;
+    use swath_store_objectstore::ObjectStoreModuleStore;
     use swath_udf_wasmtime::WasmtimeUdf;
 
     let catalog = MemoryCatalog::default();
@@ -472,5 +472,5 @@ pub(crate) struct UdfApp {
     pub(crate) app: Router,
     pub(crate) catalog: MemoryCatalog,
     pub(crate) publish: swath_api::UdfPublish,
-    pub(crate) store: swath_modulestore_objectstore::ObjectStoreModuleStore,
+    pub(crate) store: swath_store_objectstore::ObjectStoreModuleStore,
 }

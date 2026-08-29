@@ -18,10 +18,10 @@ use http_body_util::BodyExt as _;
 use object_store::local::LocalFileSystem;
 use object_store::memory::InMemory;
 use swath_api::{ApiState, LayerRegistry, TraceExtension, router};
-use swath_cache_objectstore::ObjectStoreTileCache;
 use swath_core::trace::Strategy;
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
+use swath_store_objectstore::ObjectStoreTileCache;
 
 /// The fixture app of `common::app()`, plus an in-memory write-through
 /// tile cache. One router, reused across requests — the cache lives in

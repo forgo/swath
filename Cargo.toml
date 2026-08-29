@@ -5,14 +5,13 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/adapters/swath-cache-objectstore",
+    "crates/adapters/swath-store-objectstore",
     "crates/adapters/swath-catalog-pgstac",
     "crates/adapters/swath-events-filedrop",
     "crates/adapters/swath-pyramid-objectstore",
     "crates/adapters/swath-reproject-proj4rs",
     "crates/adapters/swath-source-cog",
     "crates/adapters/swath-icechunk",
-    "crates/adapters/swath-modulestore-objectstore",
     "crates/adapters/swath-source-virtual",
     "crates/adapters/swath-udf-wasmtime",
     "crates/swath-api",

@@ -14,7 +14,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use object_store::local::LocalFileSystem;
 use object_store::memory::InMemory;
-use swath_cache_objectstore::ObjectStoreTileCache;
 use swath_core::cache::{CacheError, CachedTile, TileCache, TileKey, TileKeyInputs, layer_version};
 use swath_core::crs::Crs;
 use swath_core::planner::{Budget, PlannedStrategy};
@@ -25,6 +24,7 @@ use swath_render::ir::{BandInput, OutputSpec, PixelOp, RenderPlan, TileFormat};
 use swath_render::{NoUdf, NodataPolicy, Resampling, TileRequest, render_tile_cached};
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
+use swath_store_objectstore::ObjectStoreTileCache;
 
 const B04: &str = "hlss30-t13sdd-2024158-b04.tif";
 

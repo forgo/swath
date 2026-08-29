@@ -92,11 +92,12 @@ use swath_core::trace::{PlanTraceExt as _, Provenance, Strategy, Timings, Trace}
 
 use crate::encode::{EncodeError, encode_png};
 use crate::error::RenderError;
-use crate::grid::TargetGrid;
 use crate::ir::{PlanError, RenderPlan, TileFormat, eval_with};
 use crate::udf::{UdfExecutor, UdfLimits};
-use crate::warp::{Resampling, WarpedBuffer, warp};
-use crate::window::{SourceExtent, clip_to_raster, source_extent};
+use crate::warp::{
+    Resampling, SourceExtent, TargetGrid, WarpedBuffer, clip_to_raster, source_extent, tile_grid,
+    warp,
+};
 
 #[cfg(doc)]
 use swath_core::source::WindowData;
@@ -585,7 +586,7 @@ async fn render_planned<S: RasterSource, R: Reproject + ?Sized>(
 ) -> Result<(EncodedTile, Trace), TileError> {
     let started = Instant::now();
     let geometry = RenderGeometry {
-        grid: TargetGrid::for_tile(request.coord, request.tile_size),
+        grid: tile_grid(request.coord, request.tile_size),
         resampling: request.resampling,
         margin: window_margin(request.resampling),
     };

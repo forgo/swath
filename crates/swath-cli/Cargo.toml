@@ -63,7 +63,7 @@ clap = { workspace = true }
 object_store = { workspace = true, features = ["aws"] }
 serde = { workspace = true }
 swath-api = { path = "../swath-api", version = "0.1.0-alpha.1" }
-swath-cache-objectstore = { path = "../adapters/swath-cache-objectstore", version = "0.1.0-alpha.1" }
+swath-store-objectstore = { path = "../adapters/swath-store-objectstore", version = "0.1.0-alpha.1" }
 swath-catalog-pgstac = { path = "../adapters/swath-catalog-pgstac", version = "0.1.0-alpha.1" }
 swath-core = { path = "../swath-core", version = "0.1.0-alpha.1" }
 swath-events-filedrop = { path = "../adapters/swath-events-filedrop", version = "0.1.0-alpha.1" }
@@ -76,7 +76,6 @@ swath-pyramid-objectstore = { path = "../adapters/swath-pyramid-objectstore", ve
 swath-icechunk = { path = "../adapters/swath-icechunk", version = "0.1.0-alpha.1" }
 swath-referencer = { path = "../swath-referencer", version = "0.1.0-alpha.1", default-features = false }
 swath-udf-wasmtime = { path = "../adapters/swath-udf-wasmtime", version = "0.1.0-alpha.1", optional = true }
-swath-modulestore-objectstore = { path = "../adapters/swath-modulestore-objectstore", version = "0.1.0-alpha.1" }
 swath-render = { path = "../swath-render", version = "0.1.0-alpha.1" }
 swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.1.0-alpha.1" }
 swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.1.0-alpha.1" }

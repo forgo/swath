@@ -1,0 +1,26 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-store-objectstore"
+description = "The object_store adapters (local fs, in-memory, S3): the hash-sharded TileCache for encoded tiles, and the content-addressed ModuleStore + http(s) ModuleFetcher for run_udf modules (ADR 0018)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+# `http`: the module fetcher's one GET rides object_store's HTTP store.
+object_store = { workspace = true, features = ["http"] }
+swath-core = { path = "../../swath-core", version = "0.1.0-alpha.1" }
+url = { workspace = true }
+
+[dev-dependencies]
+# The fetch test serves a module from a local axum listener.
+axum = { workspace = true, features = ["http1", "tokio"] }
+swath-testsupport = { path = "../../swath-testsupport", version = "0.1.0-alpha.1" }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
+
+[lints]
+workspace = true

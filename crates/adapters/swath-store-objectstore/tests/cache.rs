@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use object_store::local::LocalFileSystem;
 use object_store::memory::InMemory;
-use swath_cache_objectstore::ObjectStoreTileCache;
+use swath_store_objectstore::ObjectStoreTileCache;
 // CacheError is only consumed by the unix-gated read-only-dir test below;
 // an unconditional import is an unused-import error on Windows (-D warnings).
 #[cfg(unix)]

@@ -4303,28 +4303,17 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "swath-cache-objectstore",
  "swath-core",
- "swath-modulestore-objectstore",
  "swath-render",
  "swath-reproject-proj4rs",
  "swath-source-cog",
+ "swath-store-objectstore",
  "swath-testsupport",
  "swath-udf-wasmtime",
  "thiserror 2.0.20",
  "tokio",
  "tower",
  "tower-http",
-]
-
-[[package]]
-name = "swath-cache-objectstore"
-version = "0.1.0-alpha.1"
-dependencies = [
- "object_store",
- "swath-core",
- "swath-testsupport",
- "tokio",
 ]
 
 [[package]]
@@ -4350,18 +4339,17 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "swath-api",
- "swath-cache-objectstore",
  "swath-catalog-pgstac",
  "swath-core",
  "swath-events-filedrop",
  "swath-icechunk",
- "swath-modulestore-objectstore",
  "swath-pyramid-objectstore",
  "swath-referencer",
  "swath-render",
  "swath-reproject-proj4rs",
  "swath-source-cog",
  "swath-source-virtual",
+ "swath-store-objectstore",
  "swath-testsupport",
  "swath-udf-wasmtime",
  "thiserror 2.0.20",
@@ -4436,17 +4424,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "swath-modulestore-objectstore"
-version = "0.1.0-alpha.1"
-dependencies = [
- "axum",
- "object_store",
- "swath-core",
- "tokio",
- "url",
-]
-
-[[package]]
 name = "swath-planner"
 version = "0.1.0-alpha.1"
 dependencies = [
@@ -4493,10 +4470,10 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
- "swath-cache-objectstore",
  "swath-core",
  "swath-reproject-proj4rs",
  "swath-source-cog",
+ "swath-store-objectstore",
  "swath-testsupport",
  "swath-udf-wasmtime",
  "swath-warp",
@@ -4545,6 +4522,18 @@ dependencies = [
  "swath-testsupport",
  "tokio",
  "zarrs",
+]
+
+[[package]]
+name = "swath-store-objectstore"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "axum",
+ "object_store",
+ "swath-core",
+ "swath-testsupport",
+ "tokio",
+ "url",
 ]
 
 [[package]]

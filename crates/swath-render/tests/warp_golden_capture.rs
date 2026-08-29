@@ -41,7 +41,7 @@ use swath_core::raster::AssetRef;
 use swath_core::reproject::{CoordTransform, Reproject as _, ReprojectError};
 use swath_core::source::{BandSelection, PixelBuffer, RasterSource as _, ReadLevel};
 use swath_core::tile::TileCoord;
-use swath_render::{NodataPolicy, Resampling, TargetGrid, source_window, warp};
+use swath_render::{NodataPolicy, Resampling, TargetGrid, source_window, tile_grid, warp};
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
 
@@ -114,7 +114,7 @@ async fn capture(case: &Case) -> Vec<(f64, f64)> {
     };
 
     let tile = TileCoord::new(z, x, y).expect("valid tile");
-    let grid = TargetGrid::for_tile(tile, 256);
+    let grid = tile_grid(tile, 256);
     let window = source_window(&grid, &info, &recording, WINDOW_MARGIN)
         .expect("window computation")
         .expect("fixture tiles intersect the raster");
