@@ -12,14 +12,18 @@
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
+import {
+  DEMO_PATH,
+  type Envelope,
+  latestByKey,
+  type ReceivedPlan,
+  subscribeToTraces,
+  waitForFittedView,
+} from "./support";
 
 /** The compose project root (web/e2e/ → repo root), where the analytics
  * kill-and-resume test restarts the swath service from. */
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
-
-// Where the demo page lives: /demo/ under vite dev, / when the binary
-// serves the embedded production bundle (set by playwright.config.ts).
-const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
 
 /** The Colorado fixture layer, asked for explicitly: a paramless visit
  * is the cinematic landing since issue #211 — the fire-season loop,
@@ -28,68 +32,6 @@ const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
  * `layer` is deep-link state (never animated over); the bounds fit
  * still lands, so `waitForFittedView` applies unchanged. */
 const STATIC_LANDING = `${DEMO_PATH}?layer=ndvi`;
-
-/** Waits until the zero-config bounds fit has landed and settled. The
- * fit is async (tileset metadata fetch -> setStyle -> fitBounds): a view
- * jump issued before it lands is silently clobbered back to the fitted
- * view. The binary-served bundle (issue #103) boots fast enough to
- * expose exactly that race. `getZoom() > 5` discriminates the fitted
- * footprint view (~z12) from the zoom-1 boot view. */
-async function waitForFittedView(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const el = document.querySelector("swath-map") as {
-      map?: { loaded(): boolean; areTilesLoaded(): boolean; getZoom(): number };
-    } | null;
-    const map = el?.map;
-    return Boolean(map?.loaded() && map.areTilesLoaded() && map.getZoom() > 5);
-  });
-}
-
-/** The trace envelope as swath-api pins it (traces.rs). */
-interface Envelope {
-  tile: string;
-  layer: string;
-  trace: {
-    decision: string | { overview: { level: number } } | { cache_hit: { key: string } };
-    bytes_read: number;
-    timings: { total_ms: number };
-    ingest_to_pixel_ms: number | null;
-    /** The planner's reasoning (#37); null on unplanned traces. */
-    plan?: ReceivedPlan | null;
-  };
-}
-
-declare global {
-  interface Window {
-    __received?: Envelope[];
-    /** Quiescence probe state for the analytics baseline (see below). */
-    __quietLen?: number;
-    __quietAt?: number;
-  }
-}
-
-/** The test's own subscription — opened in the page so it shares the
- * proxy path (and origin) with the overlay's stream. */
-async function subscribeToTraces(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const received: Envelope[] = [];
-    window.__received = received;
-    const source = new EventSource("/traces");
-    source.addEventListener("trace", (event) => {
-      received.push(JSON.parse((event as MessageEvent<string>).data) as Envelope);
-    });
-  });
-}
-
-/** Latest received envelope per `"layer/z/x/y"` key — the same
- * latest-wins reduction the overlay's store performs. */
-function latestByKey(received: Envelope[]): Map<string, Envelope> {
-  const latest = new Map<string, Envelope>();
-  for (const envelope of received) {
-    latest.set(`${envelope.layer}/${envelope.tile}`, envelope);
-  }
-  return latest;
-}
 
 test("overlay paints decisions matching the traces the test received over SSE", async ({
   page,
@@ -209,17 +151,6 @@ test("overlay paints decisions matching the traces the test received over SSE", 
 // One source of truth (the test's own SSE subscription), verified twice:
 // the bytes heatmap buckets, the feed lines, and the why-view table must
 // all match what the stream itself delivered.
-
-/** The plan payload as swath-core pins it (subset the assertions read). */
-interface ReceivedPlan {
-  chosen: string | { overview: { factor: number } };
-  considered: {
-    strategy: string | { overview: { factor: number } };
-    estimated_cost_bytes: number;
-    admissible: boolean;
-    reason: string;
-  }[];
-}
 
 test("v1: heatmap buckets, feed lines, and why-view match the SSE stream", async ({ page }) => {
   await page.goto(STATIC_LANDING);

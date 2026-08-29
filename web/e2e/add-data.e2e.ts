@@ -12,12 +12,7 @@
 // capabilities hiding the form (#198 — a second server flavor the compose
 // stack does not run, so the capabilities document is the fixture).
 import { expect, type Page, test } from "@playwright/test";
-
-const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
-
-/** The proven-live fixture tile (z/y/x — OGC tileMatrix/tileRow/tileCol)
- * of the granule tests/e2e/stack-up.sh drops. */
-const TILE = "12/1561/848";
+import { DEMO_PATH, TILE } from "./support";
 
 /** A fixture COG key the stack's store really holds (stack-up drops it). */
 const FIXTURE_COG = "hlss30-t13sdd-2024158-b04.tif";

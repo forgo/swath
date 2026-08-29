@@ -5,12 +5,7 @@
 // act on the viewed layer's raster in the real map; kebab delete lives in
 // authoring.e2e.ts (it needs a published service).
 import { expect, type Page, test } from "@playwright/test";
-
-const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
-const FIRE = "park-fire-ndvi";
-
-const row = (page: Page, id: string) =>
-  page.locator(`swath-layer-item[data-layer="${id}"] [part="row"]`);
+import { DEMO_PATH, FIRE_LAYER as FIRE, layerRow as row } from "./support";
 
 /** The raster layer's paint on the primary map. */
 async function paint(page: Page): Promise<{ visibility: string; opacity: number }> {

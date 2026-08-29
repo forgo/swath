@@ -31,7 +31,8 @@ import sys
 PDIFF = ["cargo", "run", "--quiet", "-p", "swath-testkit", "--bin", "pdiff", "--"]
 
 # The entry page's rail width in the pinned 1528px viewport
-# (web/playwright.screenshots.config.ts: rail 248px + a 1280px canvas); the
+# (the `screenshots` project of web/playwright.config.ts: rail 248px + a
+# 1280px canvas); the
 # content gate inspects the canvas only, so a rail full of text never
 # rescues a blank map.
 RAIL_WIDTH = 248

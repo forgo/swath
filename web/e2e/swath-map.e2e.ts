@@ -7,28 +7,7 @@
 // template ordering meets reality: a wrong template would still produce
 // tile *requests*, but off-footprint ones — no 200s, blank canvas.
 import { expect, type Page, test } from "@playwright/test";
-
-// Where the demo page lives: /demo/ under vite dev, / when the binary
-// serves the embedded production bundle (set by playwright.config.ts).
-const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
-
-/** Minimal structural view of the element for in-page evaluation. */
-interface SwathMapLike {
-  map?: {
-    loaded(): boolean;
-    areTilesLoaded(): boolean;
-    triggerRepaint(): void;
-    once(event: string, listener: () => void): unknown;
-    getCanvas(): HTMLCanvasElement;
-  };
-}
-
-async function waitForMapIdle(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const map = (document.querySelector("swath-map") as SwathMapLike | null)?.map;
-    return Boolean(map?.loaded() && map?.areTilesLoaded());
-  });
-}
+import { DEMO_PATH, type SwathMapLike, tileResponse, waitForMapIdle } from "./support";
 
 /** Reads the WebGL canvas back during a render frame (the drawing buffer
  * is not preserved, so pixels are only readable mid-frame) and reduces it
@@ -68,18 +47,6 @@ async function canvasStats(page: Page): Promise<{ distinctColors: number; width:
       map.triggerRepaint();
     });
   });
-}
-
-function tileResponse(page: Page, layerId: string): Promise<{ url: string; contentType: string }> {
-  return page
-    .waitForResponse(
-      (response) =>
-        response.url().includes(`/tilesets/${layerId}/tiles/`) && response.status() === 200,
-    )
-    .then((response) => ({
-      url: response.url(),
-      contentType: response.headers()["content-type"] ?? "",
-    }));
 }
 
 test("map loads, fetches real tiles, renders pixels, and switches layers", async ({ page }) => {

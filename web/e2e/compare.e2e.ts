@@ -21,25 +21,15 @@
 // style zoom 10, display tiles z11 — below everything the x-ray suite
 // renders, so its cold-cache premises stay untouched.
 import { expect, type Page, test } from "@playwright/test";
-
-const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
+import {
+  DEMO_PATH,
+  compareHandle as handle,
+  waitForFittedView as waitForSettledView,
+} from "./support";
 
 /** The Colorado fixture viewpoint shared by ndvi and truecolor. */
 const CO_CENTER = "-105.4475,39.265";
 const CO_ZOOM = "10";
-
-/** Waits until the map is up and settled on its deep-linked view. */
-async function waitForSettledView(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const el = document.querySelector("swath-map") as {
-      map?: { loaded(): boolean; areTilesLoaded(): boolean; getZoom(): number };
-    } | null;
-    const map = el?.map;
-    return Boolean(map?.loaded() && map.areTilesLoaded() && map.getZoom() > 5);
-  });
-}
-
-const handle = (page: Page) => page.locator("swath-map .swath-map-compare-handle");
 
 test("layer-vs-layer: cl puts the second layer's tiles on the right side", async ({ page }) => {
   const deepLink = `${DEMO_PATH}?layer=ndvi&cl=truecolor&center=${CO_CENTER}&zoom=${CO_ZOOM}`;

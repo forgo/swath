@@ -5,12 +5,10 @@
 // a deep link is honoured byte-for-byte, a switch writes it, storage
 // restores it on a bare visit. No shell yet: today's panels show or hide.
 import { expect, type Page, test } from "@playwright/test";
+import { DEMO_PATH, railMode as modeButton } from "./support";
 
-const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
 const APP_KEY = "swath.app-state.v1";
 
-const modeButton = (page: Page, mode: string) =>
-  page.locator(`swath-rail [part="item"][data-mode="${mode}"]`);
 const pressed = (page: Page, mode: string) =>
   expect(modeButton(page, mode)).toHaveAttribute("aria-current", "page");
 

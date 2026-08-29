@@ -22,7 +22,6 @@
     "screenshots",
     "vitest.config.ts",
     "vite.config.ts",
-    "playwright.config.ts",
-    "playwright.screenshots.config.ts"
+    "playwright.config.ts"
   ]
 }

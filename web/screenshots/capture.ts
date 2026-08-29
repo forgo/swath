@@ -30,14 +30,21 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-
-const DEMO_PATH = "/demo/";
+import {
+  chip,
+  DEMO_PATH,
+  fieldById,
+  gotoAndWaitForTiles,
+  openAuthoringPanel,
+  type SwathMapLike,
+  TILE,
+  waitForFittedView,
+  waitForMapIdle,
+} from "../e2e/support";
 
 /** The demo viewpoint (same center `just demo` opens on) and the proven
  * fixture tile (z/y/x) the stack polls live before capture starts. */
 const CENTER = "-105.4475,39.2650";
-const TILE = "12/1561/848";
-
 const OUT_DIR = process.env.SWATH_SHOTS_DIR ?? "";
 if (OUT_DIR === "") {
   throw new Error("SWATH_SHOTS_DIR is required (run via `just screenshots`)");
@@ -86,52 +93,6 @@ async function capture(
   });
 }
 
-/** Structural view of <swath-map> for in-page evaluation (same shape the
- * e2e suites use). */
-interface SwathMapLike {
-  map?: {
-    loaded(): boolean;
-    areTilesLoaded(): boolean;
-    getZoom(): number;
-    jumpTo(options: { zoom: number }): void;
-  };
-}
-
-/** Waits until the map is up and settled on a real view: style loaded,
- * every needed tile loaded, and past the boot view (zoom 1). */
-async function waitForFittedView(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const map = (document.querySelector("swath-map") as SwathMapLike | null)?.map;
-    return Boolean(map?.loaded() && map.areTilesLoaded() && map.getZoom() > 5);
-  });
-}
-
-/**
- * Opens a view and waits for a REAL tile of `layer` to answer 200 before
- * the fitted-view gate. The gate alone is not enough (the #211 review
- * found blank shots): a layer apply reads tileset metadata and the
- * granule listing before its first tile request, and during that round
- * trip the map is loaded, needs zero tiles (`areTilesLoaded` is true of
- * an empty source), and already sits at the deep link's zoom — every
- * condition met, nothing painted. Registering the response wait BEFORE
- * navigation means a fast tile cannot be missed either.
- */
-async function gotoAndWaitForTiles(page: Page, url: string, layer: string): Promise<void> {
-  const tile = page.waitForResponse(
-    (response) => response.url().includes(`/tilesets/${layer}/tiles/`) && response.status() === 200,
-  );
-  await page.goto(url);
-  await tile;
-  await waitForFittedView(page);
-}
-
-async function waitForMapIdle(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const map = (document.querySelector("swath-map") as SwathMapLike | null)?.map;
-    return Boolean(map?.loaded() && map.areTilesLoaded());
-  });
-}
-
 /** Waits for the x-ray overlay to be painting AND settled: attached,
  * the map idle (every tile loaded, so every trace has been published),
  * the badge count quiescent (>0 and unchanged for 1.2 s — badges ride
@@ -162,33 +123,6 @@ async function waitForXRay(page: Page): Promise<void> {
       { timeout: 10_000 },
     )
     .catch(() => undefined); // cache-hit-only views may never learn i2p
-}
-
-function fieldById(page: Page, id: string) {
-  return page.locator(`#swath-authoring-${id}`);
-}
-
-/** The Model B canvas's stage-typed insert chip for `processId` at
- * `gap` (0 = right after the permanent Load card) — the same driving
- * convention as web/e2e/authoring.e2e.ts. */
-function chip(page: Page, gap: number, processId: string) {
-  return page.locator(
-    `.swath-authoring-insert[data-gap="${gap}"] ` + `button[data-process="${processId}"]`,
-  );
-}
-
-/** The panel is collapsed and lazy; the permanent Load card (s1)
- * rendering means the canvas is ready (Model B, issue #168). */
-async function openAuthoringPanel(page: Page): Promise<void> {
-  // Author mode (#291): the strip drawer over the map + the inspector.
-  await page.locator('swath-rail [part="item"][data-mode="author"]').click();
-  await page.locator("swath-authoring-panel .swath-authoring-toggle").click();
-  // The inspector (fields, preview, publish) shows the *selected* step.
-  const chip = page.locator('.swath-authoring-chip[data-chip="s1"]');
-  if ((await chip.count()) > 0 && (await chip.getAttribute("aria-pressed")) !== "true") {
-    await chip.click();
-  }
-  await expect(page.locator('[data-step="s1"]')).toBeVisible();
 }
 
 /** Waits until the canvas's live preview (POST /result, debounced) has

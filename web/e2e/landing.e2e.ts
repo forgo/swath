@@ -18,18 +18,22 @@
 // - URL params beat localStorage — THE precedence rule.
 // - localStorage restores the last layer/viewport on a paramless visit.
 import { expect, type Page, test } from "@playwright/test";
-
-const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
+import {
+  DEMO_PATH,
+  FIRE_LAYER as FIRE,
+  granuleFrames,
+  mapView,
+  layerRow as panelButton,
+  playButton,
+  scrubTo,
+  slider,
+  waitForFittedView,
+} from "./support";
 
 /** The app's storage key (src/view-state.ts). */
 const STORAGE_KEY = "swath.view-state.v1";
 
-/** The landing's layer: the first playable series (six Park Fire dates). */
-const FIRE = "park-fire-ndvi";
-
 const landingCard = (page: Page) => page.locator(".swath-map-landing");
-const playButton = (page: Page) => page.locator(".swath-map-time-play");
-const slider = (page: Page) => page.locator(".swath-map-time");
 // `#swath-share` is a <swath-button> host: enabled/disabled and clicks
 // belong to the native <button> in its shadow root (Playwright's CSS
 // pierces it); the copy feedback (`data-state`, `data-url`) sits on the host.
@@ -47,24 +51,6 @@ async function waitForFrameChange(page: Page, from: string | null): Promise<stri
   return (await slider(page).getAttribute("data-datetime")) ?? "";
 }
 
-/** Scrubs through the control's own range input (the user path). */
-async function scrubTo(page: Page, index: number): Promise<void> {
-  await page
-    .locator('.swath-map-time input[type="range"]')
-    .evaluate((el: HTMLInputElement, value) => {
-      el.value = String(value);
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-    }, index);
-}
-
-/** The fire series' frames straight from the granules API (ascending). */
-async function granuleFrames(page: Page): Promise<string[]> {
-  const response = await page.request.get("/datasets/hls-s30-fire/granules");
-  expect(response.ok()).toBe(true);
-  const body = (await response.json()) as { granules?: { datetime?: string }[] };
-  return [...new Set((body.granules ?? []).map((granule) => granule.datetime ?? ""))].sort();
-}
-
 /** The share link the button copied: the clipboard's text (the real
  * thing) — which must also be what the button reports it copied. */
 async function copiedLink(page: Page): Promise<string> {
@@ -73,38 +59,6 @@ async function copiedLink(page: Page): Promise<string> {
   const clipboard = await page.evaluate(() => navigator.clipboard.readText());
   expect(await shareHost(page).getAttribute("data-url")).toBe(clipboard);
   return clipboard;
-}
-
-/** Waits for the zero-config bounds fit to land (same discriminator as
- * the x-ray suite: the fitted footprint view is deep, the boot view is
- * zoom 1). */
-async function waitForFittedView(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const el = document.querySelector("swath-map") as {
-      map?: { loaded(): boolean; areTilesLoaded(): boolean; getZoom(): number };
-    } | null;
-    const map = el?.map;
-    return Boolean(map?.loaded() && map.areTilesLoaded() && map.getZoom() > 5);
-  });
-}
-
-/** The map's current view, read off the live MapLibre instance. */
-async function mapView(page: Page): Promise<{ lng: number; lat: number; zoom: number }> {
-  return await page.evaluate(() => {
-    const el = document.querySelector("swath-map") as {
-      map?: { getCenter(): { lng: number; lat: number }; getZoom(): number };
-    } | null;
-    const map = el?.map;
-    if (!map) {
-      throw new Error("swath-map has no map instance");
-    }
-    const center = map.getCenter();
-    return { lng: center.lng, lat: center.lat, zoom: map.getZoom() };
-  });
-}
-
-function panelButton(page: Page, layerId: string) {
-  return page.locator(`swath-layer-item[data-layer="${layerId}"] [part="row"]`);
 }
 
 test("paramless / is the cinematic landing: the fire season loops, URL untouched", async ({
