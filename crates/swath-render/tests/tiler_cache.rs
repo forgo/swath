@@ -6,10 +6,6 @@
 //! Trace, version bump → clean miss, and a failing cache that never
 //! fails a response.
 
-#[allow(
-    dead_code,
-    reason = "shared with golden.rs; not every helper is used here"
-)]
 mod common;
 
 use std::collections::BTreeMap;

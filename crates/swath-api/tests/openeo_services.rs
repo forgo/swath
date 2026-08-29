@@ -12,16 +12,12 @@
 //! idempotent re-creation, deletion, and the snapshot-pinned openEO error
 //! shapes for every documented failure path.
 
-#[allow(
-    dead_code,
-    reason = "shared between the API test targets; not every helper is used in each"
-)]
 mod common;
 
 use axum::http::StatusCode;
 use serde_json::{Value, json};
 use swath_core::catalog::PlanKind;
-use swath_testkit::{DiffPolicy, diff, load_png};
+use swath_testsupport::{DiffPolicy, diff, load_png};
 
 /// The NDVI process graph, authored the way an openEO client would:
 /// dataset band names, the `ndvi` convenience process, the -1..1 → 0..255

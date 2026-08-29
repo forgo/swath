@@ -10,10 +10,6 @@
 //! committed module runs the same path end to end in swath-api
 //! (`udf_tiles.rs`).
 
-#[allow(
-    dead_code,
-    reason = "shared with golden.rs; not every helper is used here"
-)]
 mod common;
 
 use std::collections::BTreeMap;

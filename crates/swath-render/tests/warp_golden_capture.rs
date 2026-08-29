@@ -31,8 +31,9 @@
 //! the same recorded inputs.
 
 use std::io::Write as _;
-use std::path::PathBuf;
+
 use std::sync::{Arc, Mutex};
+use swath_testsupport::paths::{fixtures_dir, warp_data_dir};
 
 use object_store::local::LocalFileSystem;
 use swath_core::crs::Crs;
@@ -69,14 +70,6 @@ impl CoordTransform for Recording {
         self.log.lock().expect("log lock").extend_from_slice(points);
         Ok(())
     }
-}
-
-fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
-}
-
-fn warp_data_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../swath-warp/tests/data")
 }
 
 fn put_u64(buf: &mut Vec<u8>, v: u64) {

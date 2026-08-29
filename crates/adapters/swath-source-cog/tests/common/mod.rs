@@ -4,7 +4,6 @@
 //! Shared plumbing for the adapter integration tests: fixture paths and
 //! `CogSource` construction over local-filesystem and in-memory stores.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use object_store::ObjectStoreExt as _;
@@ -13,11 +12,7 @@ use object_store::memory::InMemory;
 use object_store::path::Path as StorePath;
 use swath_core::raster::DType;
 use swath_source_cog::CogSource;
-
-/// The committed HLS fixture directory (tests/fixtures/README.md, ADR 0004).
-pub(crate) fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../tests/fixtures")
-}
+pub(crate) use swath_testsupport::paths::fixtures_dir;
 
 /// A `CogSource` over the real fixture files on the local filesystem.
 pub(crate) fn local_source() -> CogSource {

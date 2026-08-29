@@ -9,19 +9,10 @@
 //! over-claimed conformance, no `swath:` internals leaking — are asserted
 //! directly.
 
-#[allow(
-    dead_code,
-    reason = "shared between the API test targets; not every helper is used in each"
-)]
 mod common;
 
 use axum::http::StatusCode;
-
-async fn json_ok(app: &axum::Router, path: &str) -> serde_json::Value {
-    let response = common::request_on(app, "GET", path, None).await;
-    assert_eq!(response.status(), StatusCode::OK, "GET {path}");
-    common::body_json(response).await
-}
+use swath_testsupport::http::json_ok;
 
 // --- Capabilities (GET / doubles as the OGC landing page) ---
 

@@ -1,6 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+// `mod common` is compiled once per test binary and each binary uses a
+// subset of it — one allow here instead of one per binary (#348).
+#![allow(
+    dead_code,
+    reason = "compiled once per test binary; each uses a subset"
+)]
+
 //! Shared plumbing for the API tests: the fixture-wired app (COG source +
 //! proj4rs over the committed HLS fixtures), an in-process request
 //! helper (`tower::ServiceExt::oneshot` — no network), and the OGC
@@ -11,17 +18,30 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::{Request, Response};
-use http_body_util::BodyExt as _;
+use axum::http::Response;
 use jsonschema::{Retrieve, Uri, Validator};
 use object_store::local::LocalFileSystem;
 use swath_api::{ApiState, LayerRegistry, router};
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
-use tower::ServiceExt as _;
 
 pub(crate) mod wasm;
 
+// The shared plumbing (#348): one in-memory catalog, the committed fixtures
+// in catalog form, the test-data paths and the in-process request helpers
+// live in `swath-testsupport`; this module keeps only what builds the API
+// itself (the routers, the states, the schema validators). `mod common` is
+// compiled once per test binary and each uses a subset, hence the allow.
+#[allow(
+    unused_imports,
+    reason = "shared between the API test binaries; not every one uses each"
+)]
+pub(crate) use swath_testsupport::{
+    catalog::MemoryCatalog,
+    fixtures::{hls_catalog_dataset, hls_catalog_granule, park_fire},
+    http::{body_bytes, body_json, request_on},
+    paths::{fixtures_dir, render_goldens_dir},
+};
 /// Base URL the test app mints links under.
 pub(crate) const BASE_URL: &str = "http://localhost";
 
@@ -53,20 +73,9 @@ pub(crate) fn wasm_data_url(bytes: &[u8]) -> String {
     )
 }
 
-/// The committed HLS fixture directory (tests/fixtures/README.md, ADR 0004).
-pub(crate) fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
-}
-
 /// The committed official OGC schemas (tests/data/ogc/README.md).
 pub(crate) fn schemas_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/ogc")
-}
-
-/// swath-render's committed oracle goldens (the #25/#26 suite) — the API
-/// tile tests compare served tiles against the very same references.
-pub(crate) fn render_goldens_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../swath-render/tests/data")
 }
 
 /// The API over the fixture registry, wired to the concrete Phase-1
@@ -90,30 +99,7 @@ pub(crate) async fn get(path: &str) -> Response<Body> {
 
 /// One in-process GET with an optional `Accept` header.
 pub(crate) async fn get_with_accept(path: &str, accept: Option<&str>) -> Response<Body> {
-    let mut request = Request::builder().uri(path).method("GET");
-    if let Some(accept) = accept {
-        request = request.header("accept", accept);
-    }
-    app()
-        .oneshot(request.body(Body::empty()).expect("request builds"))
-        .await
-        .expect("infallible service")
-}
-
-/// Collects a response body to bytes.
-pub(crate) async fn body_bytes(response: Response<Body>) -> Vec<u8> {
-    response
-        .into_body()
-        .collect()
-        .await
-        .expect("body collects")
-        .to_bytes()
-        .to_vec()
-}
-
-/// Collects a response body as JSON.
-pub(crate) async fn body_json(response: Response<Body>) -> serde_json::Value {
-    serde_json::from_slice(&body_bytes(response).await).expect("body is JSON")
+    swath_testsupport::http::get_with_accept(&app(), path, accept).await
 }
 
 /// Resolves external `$ref`s against the committed schema files: every
@@ -172,13 +158,7 @@ pub(crate) fn assert_valid(relative: &str, instance: &serde_json::Value) {
 
 // --- openEO test plumbing (issue #41, ADR 0010) ---
 
-use std::collections::BTreeMap;
-use std::sync::Mutex;
-
-use swath_core::catalog::{
-    Bbox, Catalog, CatalogError, Dataset, DatasetId, Datetime, Extent, Granule, GranuleQuery,
-    TimeRange,
-};
+use swath_core::catalog::{Dataset, DatasetId, Granule, TimeRange};
 
 /// The pinned openEO API 1.2.0 spec (tests/data/openeo/README.md).
 pub(crate) fn openeo_spec_dir() -> PathBuf {
@@ -301,183 +281,6 @@ pub(crate) fn assert_openeo_valid(
     );
 }
 
-/// A minimal in-memory [`Catalog`] for the openEO surface tests: datasets
-/// and granules behind a mutex, shared by clones (the provider and the
-/// services handlers must see one store, like pgstac in production).
-#[derive(Debug, Clone, Default)]
-pub(crate) struct MemoryCatalog {
-    datasets: Arc<Mutex<BTreeMap<String, Dataset>>>,
-    granules: Arc<Mutex<Vec<Granule>>>,
-}
-
-impl MemoryCatalog {
-    /// Seeds the store synchronously (test setup).
-    pub(crate) fn seed(&self, dataset: Dataset, granules: Vec<Granule>) {
-        self.datasets
-            .lock()
-            .unwrap()
-            .insert(dataset.id.as_str().to_owned(), dataset);
-        self.granules.lock().unwrap().extend(granules);
-    }
-
-    /// The stored dataset, for post-mutation assertions.
-    pub(crate) fn stored_dataset(&self, id: &str) -> Option<Dataset> {
-        self.datasets.lock().unwrap().get(id).cloned()
-    }
-}
-
-impl Catalog for MemoryCatalog {
-    async fn upsert_dataset(&self, dataset: &Dataset) -> Result<(), CatalogError> {
-        self.datasets
-            .lock()
-            .unwrap()
-            .insert(dataset.id.as_str().to_owned(), dataset.clone());
-        Ok(())
-    }
-
-    async fn upsert_granules(&self, granules: &[Granule]) -> Result<(), CatalogError> {
-        self.granules.lock().unwrap().extend_from_slice(granules);
-        Ok(())
-    }
-
-    async fn get_dataset(&self, id: &DatasetId) -> Result<Option<Dataset>, CatalogError> {
-        Ok(self.datasets.lock().unwrap().get(id.as_str()).cloned())
-    }
-
-    async fn list_datasets(&self) -> Result<Vec<Dataset>, CatalogError> {
-        Ok(self.datasets.lock().unwrap().values().cloned().collect())
-    }
-
-    async fn find_granules(
-        &self,
-        dataset: &DatasetId,
-        query: &GranuleQuery,
-    ) -> Result<Vec<Granule>, CatalogError> {
-        Ok(self
-            .granules
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|granule| granule.dataset == *dataset && matches_query(query, granule))
-            .cloned()
-            .collect())
-    }
-}
-
-/// Whether `granule` satisfies `query` — the filter semantics the pgstac
-/// adapter delegates to STAC search: bbox intersection (inclusive edges;
-/// no antimeridian handling — the fixture footprints don't cross it) and
-/// inclusive datetime bounds.
-fn matches_query(query: &GranuleQuery, granule: &Granule) -> bool {
-    if let Some(bbox) = query.bbox {
-        let g = granule.bbox;
-        if bbox.west > g.east || g.west > bbox.east || bbox.south > g.north || g.south > bbox.north
-        {
-            return false;
-        }
-    }
-    if let Some(range) = &query.datetime {
-        let t = granule.datetime.to_unix_millis();
-        if range.start.as_ref().is_some_and(|s| t < s.to_unix_millis())
-            || range.end.as_ref().is_some_and(|e| t > e.to_unix_millis())
-        {
-            return false;
-        }
-    }
-    true
-}
-
-/// The HLS fixture dataset in catalog form: the same band vocabulary and
-/// serving layers as `LayerRegistry::hls_fixtures`, persisted the way
-/// `[[datasets]]` config would persist them (`PlanKind` + rescale).
-pub(crate) fn hls_catalog_dataset() -> Dataset {
-    use swath_core::catalog::{Colormap, Layer, PlanKind, Resampling, Rescale};
-    Dataset {
-        id: DatasetId::new("hls-s30"),
-        title: "HLS Sentinel-2 (S30)".to_owned(),
-        description: "Harmonized Landsat Sentinel-2, S30 product.".to_owned(),
-        license: "CC0-1.0".to_owned(),
-        extent: Extent {
-            bbox: Bbox {
-                west: -105.537,
-                south: 39.1954,
-                east: -105.3581,
-                north: 39.3345,
-            },
-            interval: TimeRange {
-                start: Some(Datetime::new("2024-06-01T00:00:00Z").unwrap()),
-                end: None,
-            },
-        },
-        bands: ["b02", "b03", "b04", "b8a"]
-            .map(str::to_owned)
-            .into_iter()
-            .collect(),
-        layers: vec![
-            Layer {
-                id: "ndvi".to_owned(),
-                title: "HLS NDVI".to_owned(),
-                description: "(B8A - B04) / (B8A + B04), grayscale.".to_owned(),
-                plan: PlanKind::BandMath {
-                    expression: "(b8a - b04) / (b8a + b04)".to_owned(),
-                },
-                rescale: Rescale {
-                    min: -1.0,
-                    max: 1.0,
-                },
-                colormap: Some(Colormap::Grayscale),
-                resampling: Resampling::Bilinear,
-                tile_size: 256,
-                process: None,
-            },
-            Layer {
-                id: "truecolor".to_owned(),
-                title: "HLS true color".to_owned(),
-                description: "B04/B03/B02 composite.".to_owned(),
-                plan: PlanKind::Composite {
-                    r: "b04".to_owned(),
-                    g: "b03".to_owned(),
-                    b: "b02".to_owned(),
-                },
-                rescale: Rescale {
-                    min: 0.0,
-                    max: 3000.0,
-                },
-                colormap: None,
-                resampling: Resampling::Bilinear,
-                tile_size: 256,
-                process: None,
-            },
-        ],
-    }
-}
-
-/// The committed HLS fixture granule, catalog form: band assets are the
-/// bare fixture file names the local store root resolves.
-pub(crate) fn hls_catalog_granule() -> Granule {
-    use swath_core::catalog::{GranuleAsset, GranuleId};
-    let asset = |name: &str| GranuleAsset::raster(format!("hlss30-t13sdd-2024158-{name}.tif"));
-    Granule {
-        id: GranuleId::new("hlss30-t13sdd-2024158"),
-        dataset: DatasetId::new("hls-s30"),
-        bbox: Bbox {
-            west: -105.537,
-            south: 39.1954,
-            east: -105.3581,
-            north: 39.3345,
-        },
-        datetime: Datetime::new("2024-06-06T17:54:00Z").unwrap(),
-        assets: [
-            ("b02".to_owned(), asset("b02")),
-            ("b03".to_owned(), asset("b03")),
-            ("b04".to_owned(), asset("b04")),
-            ("b8a".to_owned(), asset("b8a")),
-        ]
-        .into(),
-        ingested_at: Some(Datetime::new("2024-06-06T18:00:00Z").unwrap()),
-    }
-}
-
 /// The catalog-mode app with the openEO surface merged in — the wiring
 /// `swath serve --catalog` does, over the in-memory catalog and the
 /// committed fixtures. Returns the router (Clone; reuse one instance so
@@ -513,54 +316,6 @@ pub(crate) fn openeo_app_seeded(
         OpenEoState::new(provider, CogSource::new(store), Proj4rsReproject, BASE_URL);
     let app = router(Arc::new(state)).merge(openeo_router(Arc::new(openeo_state)));
     (app, catalog)
-}
-
-/// The Park Fire dataset (`park-fire`, NDVI bands, no config layers) with
-/// one committed T10TFK granule per `(day, datetime)` — the fixture the
-/// temporal and two-source suites share.
-pub(crate) fn park_fire(days: &[(&str, &str)]) -> (Dataset, Vec<Granule>) {
-    use swath_core::catalog::{Bbox, Extent, GranuleAsset, GranuleId, TimeRange};
-    let bbox = Bbox {
-        west: -121.7388,
-        south: 39.9866,
-        east: -121.6474,
-        north: 40.0549,
-    };
-    let dataset = Dataset {
-        id: DatasetId::new("park-fire"),
-        title: "HLS S30 Park Fire series".to_owned(),
-        description: "T10TFK acquisitions across the 2024 Park Fire.".to_owned(),
-        license: "CC0-1.0".to_owned(),
-        extent: Extent {
-            bbox,
-            interval: TimeRange {
-                start: Some(Datetime::new("2024-06-07T19:03:00Z").expect("datetime")),
-                end: Some(Datetime::new("2024-10-15T19:03:00Z").expect("datetime")),
-            },
-        },
-        bands: ["b04", "b8a"].map(str::to_owned).into_iter().collect(),
-        layers: Vec::new(),
-    };
-    let granules = days
-        .iter()
-        .map(|&(day, datetime)| {
-            let asset =
-                |band: &str| GranuleAsset::raster(format!("hlss30-t10tfk-{day}-{band}.tif"));
-            Granule {
-                id: GranuleId::new(format!("hlss30-t10tfk-{day}")),
-                dataset: DatasetId::new("park-fire"),
-                bbox,
-                datetime: Datetime::new(datetime).expect("datetime"),
-                assets: [
-                    ("b04".to_owned(), asset("b04")),
-                    ("b8a".to_owned(), asset("b8a")),
-                ]
-                .into(),
-                ingested_at: Some(Datetime::new("2024-11-01T00:00:00Z").expect("datetime")),
-            }
-        })
-        .collect();
-    (dataset, granules)
 }
 
 /// [`openeo_app_seeded`] plus an in-memory write-through tile cache — the
@@ -718,25 +473,4 @@ pub(crate) struct UdfApp {
     pub(crate) catalog: MemoryCatalog,
     pub(crate) publish: swath_api::UdfPublish,
     pub(crate) store: swath_modulestore_objectstore::ObjectStoreModuleStore,
-}
-
-/// One in-process request against a specific router instance.
-pub(crate) async fn request_on(
-    app: &Router,
-    method: &str,
-    path: &str,
-    body: Option<serde_json::Value>,
-) -> Response<Body> {
-    let mut request = Request::builder().uri(path).method(method);
-    let body = match body {
-        Some(json) => {
-            request = request.header("content-type", "application/json");
-            Body::from(serde_json::to_vec(&json).expect("body serializes"))
-        }
-        None => Body::empty(),
-    };
-    app.clone()
-        .oneshot(request.body(body).expect("request builds"))
-        .await
-        .expect("infallible service")
 }

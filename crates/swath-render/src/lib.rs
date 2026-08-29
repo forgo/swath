@@ -27,7 +27,7 @@
 //! Correctness is defined by the GDAL/rio-tiler oracle (ADR 0002): the
 //! golden tests in `tests/golden.rs` render real HLS fixture tiles through
 //! these kernels and perceptually diff them against committed
-//! oracle-rendered tiles under the default `swath-testkit` policy. The
+//! oracle-rendered tiles under the default `swath-testsupport` policy. The
 //! nodata semantics of [`Resampling::Bilinear`] deliberately mirror GDAL's
 //! warper (see [`NodataPolicy`]).
 //!

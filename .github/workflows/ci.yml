@@ -96,7 +96,7 @@ jobs:
               - '.github/**'
             oracle:
               - 'tests/**'
-              - 'crates/swath-testkit/**'
+              - 'crates/swath-testsupport/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'justfile'
@@ -392,7 +392,7 @@ jobs:
   # The compose-stack e2e (R8): builds the swath image, brings up the full
   # stack (swath + pgstac + MinIO), and exercises the binary end to end —
   # landing page, golden-tile oracle match (pdiff), trace header + SSE.
-  # setup-rust is here for the pdiff comparator (`cargo run -p swath-testkit`)
+  # setup-rust is here for the pdiff comparator (`cargo run -p swath-testsupport`)
   # and nextest for the catalog integration suite, which runs first (it only
   # needs the pgstac service, so it fails fast before the image build).
   e2e:

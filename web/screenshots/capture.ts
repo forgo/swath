@@ -49,7 +49,7 @@ const CAPTURE_SHA = process.env.SWATH_CAPTURE_SHA ?? "uncommitted";
 interface Shot {
   file: string;
   caption: string;
-  /** pdiff per-channel tolerance (swath-testkit DiffPolicy). */
+  /** pdiff per-channel tolerance (swath-testsupport DiffPolicy). */
   tolerance: number;
   /** pdiff max fraction of pixels allowed past the tolerance. Shots that
    * show wall-clock timestamps or per-run timings budget for exactly that
@@ -664,7 +664,7 @@ test.afterAll(() => {
     "HLS granule, no third-party basemap) at a pinned viewport (1528x928, DPR 1 — a 1280x860 canvas beside the 248px rail, under the 44px top bar); every shot must",
     "show a painted map (`pdiff --content`: the map region is never near-uniform), and a second",
     "capture run must reproduce each shot within its perceptual-diff policy",
-    "(tests/screenshots/verify_stable.py + swath-testkit pdiff) before the recipe passes.",
+    "(tests/screenshots/verify_stable.py + swath-testsupport pdiff) before the recipe passes.",
     "",
     `- capture sha: \`${CAPTURE_SHA}\``,
     `- captured: ${manifest.captured}`,

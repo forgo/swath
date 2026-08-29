@@ -12,10 +12,6 @@
 //!
 //! Serving the tile itself (the executor behind `render_tile`) is #205.
 
-#[allow(
-    dead_code,
-    reason = "shared between the API test targets; not every helper is used in each"
-)]
 mod common;
 
 use std::sync::{Arc, Mutex};
@@ -122,15 +118,7 @@ fn service_request(process: &Value) -> Value {
 }
 
 async fn publish(app: &axum::Router, process: Value) -> (StatusCode, String) {
-    let response =
-        common::request_on(app, "POST", "/services", Some(service_request(&process))).await;
-    let status = response.status();
-    let id = response
-        .headers()
-        .get("openeo-identifier")
-        .map(|v| v.to_str().expect("ascii").to_owned())
-        .unwrap_or_default();
-    (status, id)
+    swath_testsupport::http::try_publish(app, service_request(&process)).await
 }
 
 /// The plan the compiler must produce for the NDVI UDF product.

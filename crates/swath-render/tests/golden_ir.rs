@@ -8,18 +8,14 @@
 //! path (bilinear, the continuous-band kernel), evaluates a `RenderPlan`,
 //! and perceptually diffs the RGBA tile against a committed oracle render
 //! (`just render-goldens`, `compose` subcommand) under the **default**
-//! `swath-testkit` policy. The swath-edge tiles exercise the validity →
+//! `swath-testsupport` policy. The swath-edge tiles exercise the validity →
 //! alpha path across multiple bands; alpha is compared like any channel.
 
-#[allow(
-    dead_code,
-    reason = "shared with golden.rs; not every helper is used here"
-)]
 mod common;
 
 use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPlan, TileFormat};
 use swath_render::{NoUdf, NodataPolicy, Resampling, WarpedBuffer, encode_png, eval};
-use swath_testkit::{DiffPolicy, RgbaImage, diff, load_png};
+use swath_testsupport::RgbaImage;
 
 const B02: &str = "hlss30-t13sdd-2024158-b02.tif";
 const B03: &str = "hlss30-t13sdd-2024158-b03.tif";
@@ -93,21 +89,10 @@ async fn assert_matches_oracle(
     let tile = eval(plan, &warped, &NoUdf).expect("plan evaluates");
     let ours = RgbaImage::from_raw(tile.width, tile.height, tile.pixels.clone())
         .expect("tile buffer matches dimensions");
-    let reference = load_png(&common::goldens_dir().join(golden)).expect("golden loads");
-
-    let report = diff(&ours, &reference).expect("dimensions match");
-    let policy = DiffPolicy::default();
-    let bad_pct = report.pct_pixels_exceeding_tolerance(policy.per_channel_tolerance) * 100.0;
-    println!(
-        "{golden}: max |diff| {max}, mean |diff| {mean:.4}, bad pixels {bad_pct:.4}%",
-        max = report.max_abs_channel_diff,
-        mean = report.mean_abs_diff,
-    );
-    assert!(
-        report.passes(&policy),
-        "{golden}: fails default policy — max |diff| {}, {bad_pct:.4}% pixels over tolerance {}",
-        report.max_abs_channel_diff,
-        policy.per_channel_tolerance,
+    swath_testsupport::pdiff::assert_matches_golden(
+        golden,
+        &ours,
+        &common::goldens_dir().join(golden),
     );
 
     // The encoded tile is deterministic and lossless: double-encode

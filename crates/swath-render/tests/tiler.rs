@@ -8,15 +8,11 @@
 //! warp → pixel ops → encode) over the committed HLS fixtures and
 //! perceptually diff the encoded tile against the same oracle goldens the
 //! IR tests use (`just render-goldens`, `compose` subcommand), under the
-//! **default** `swath-testkit` policy. Trace assertions are the R4 test:
+//! **default** `swath-testsupport` policy. Trace assertions are the R4 test:
 //! the explanation of a render *is* the data these tests assert against.
 //! Timings are asserted for presence and sanity only — they are
 //! best-effort wall clock and never part of equality assertions.
 
-#[allow(
-    dead_code,
-    reason = "shared with golden.rs; not every helper is used here"
-)]
 mod common;
 
 use std::collections::BTreeMap;
@@ -35,7 +31,7 @@ use swath_render::{
 };
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
-use swath_testkit::{DiffPolicy, RgbaImage, diff, load_png};
+use swath_testsupport::RgbaImage;
 
 const B02: &str = "hlss30-t13sdd-2024158-b02.tif";
 const B03: &str = "hlss30-t13sdd-2024158-b03.tif";
@@ -133,27 +129,13 @@ fn decode(encoded: &EncodedTile) -> RgbaImage {
 
 // --- Golden tests: full pipeline vs the oracle `compose` renders ---
 
-#[allow(clippy::print_stdout, reason = "diff metrics are the test's report")]
 async fn assert_matches_oracle(request: &TileRequest, golden: &str) {
     let (encoded, trace) = render(request).await;
     let ours = decode(&encoded);
-    let reference = load_png(&common::goldens_dir().join(golden)).expect("golden loads");
-
-    let report = diff(&ours, &reference).expect("dimensions match");
-    let policy = DiffPolicy::default();
-    let bad_pct = report.pct_pixels_exceeding_tolerance(policy.per_channel_tolerance) * 100.0;
-    println!(
-        "{golden}: max |diff| {max}, mean |diff| {mean:.4}, bad pixels {bad_pct:.4}% \
-         (bytes_read {bytes})",
-        max = report.max_abs_channel_diff,
-        mean = report.mean_abs_diff,
-        bytes = trace.bytes_read,
-    );
-    assert!(
-        report.passes(&policy),
-        "{golden}: fails default policy — max |diff| {}, {bad_pct:.4}% pixels over tolerance {}",
-        report.max_abs_channel_diff,
-        policy.per_channel_tolerance,
+    swath_testsupport::pdiff::assert_matches_golden(
+        &format!("{golden} (bytes_read {})", trace.bytes_read),
+        &ours,
+        &common::goldens_dir().join(golden),
     );
 }
 

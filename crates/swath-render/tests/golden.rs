@@ -9,7 +9,7 @@
 //! 3857→UTM transform → `swath-render` warp → oracle-identical grayscale
 //! encode) and perceptually diffs it against a committed reference tile
 //! rendered by rio-tiler/GDAL from the same fixture. All comparisons must
-//! pass the **default** `swath-testkit` policy (tolerance 2/255, ≤0.5% bad
+//! pass the **default** `swath-testsupport` policy (tolerance 2/255, ≤0.5% bad
 //! pixels); alpha is compared like any channel, so the validity mask is
 //! held to the same bar as the pixel values (the swath-edge tiles are the
 //! real nodata test).
@@ -23,7 +23,6 @@ mod common;
 
 use swath_core::tile::TileCoord;
 use swath_render::{NodataPolicy, Resampling};
-use swath_testkit::{DiffPolicy, diff, load_png};
 
 /// One golden case: fixture band, tile, kernel, oracle-matching rescale.
 struct Case {
@@ -61,30 +60,14 @@ fn fmask_case(golden: &'static str, z: u8, x: u32, y: u32) -> Case {
     }
 }
 
-#[allow(clippy::print_stdout, reason = "diff metrics are the test's report")]
 async fn assert_matches_oracle(case: Case) {
     let (warped, nodata, elapsed) =
         common::render_warped(case.fixture, case.tile, case.resampling).await;
     let ours = common::encode_like_oracle(&warped, nodata, case.rescale);
-    let golden = load_png(&common::goldens_dir().join(case.golden)).expect("golden loads");
-
-    let report = diff(&ours, &golden).expect("dimensions match");
-    let policy = DiffPolicy::default();
-    let bad_pct = report.pct_pixels_exceeding_tolerance(policy.per_channel_tolerance) * 100.0;
-    println!(
-        "{golden}: max |diff| {max}, mean |diff| {mean:.4}, bad pixels {bad_pct:.4}% \
-         (warp {elapsed:?})",
-        golden = case.golden,
-        max = report.max_abs_channel_diff,
-        mean = report.mean_abs_diff,
-    );
-    assert!(
-        report.passes(&policy),
-        "{}: fails default policy — max |diff| {}, {:.4}% pixels over tolerance {}",
-        case.golden,
-        report.max_abs_channel_diff,
-        bad_pct,
-        policy.per_channel_tolerance,
+    swath_testsupport::pdiff::assert_matches_golden(
+        &format!("{} (warp {elapsed:?})", case.golden),
+        &ours,
+        &common::goldens_dir().join(case.golden),
     );
 }
 

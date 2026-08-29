@@ -37,6 +37,7 @@ tokio = { workspace = true, features = ["sync"] }
 tower-http = { workspace = true, features = ["cors"] }
 
 [dev-dependencies]
+swath-testsupport = { path = "../swath-testsupport", version = "0.1.0-alpha.1" }
 # Encoding the fixture module as a `data:` URL in the run_udf suite.
 base64 = { workspace = true }
 # `http1` (+ the `tokio` feature above): the SSE tests drive a real
@@ -52,7 +53,6 @@ jsonschema = { workspace = true }
 swath-cache-objectstore = { path = "../adapters/swath-cache-objectstore", version = "0.1.0-alpha.1" }
 swath-reproject-proj4rs = { path = "../adapters/swath-reproject-proj4rs", version = "0.1.0-alpha.1" }
 swath-source-cog = { path = "../adapters/swath-source-cog", version = "0.1.0-alpha.1" }
-swath-testkit = { path = "../swath-testkit", version = "0.1.0-alpha.1" }
 # The real run_udf publish motion end to end (#204): the wasmtime
 # registrar over the committed fixture modules, the object_store module
 # store in memory.

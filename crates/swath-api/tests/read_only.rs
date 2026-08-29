@@ -6,10 +6,6 @@
 //! capabilities document says exactly what is mounted — asserted over the
 //! same in-process wiring `swath serve --read-only` assembles.
 
-#[allow(
-    dead_code,
-    reason = "this binary uses a subset of the shared test plumbing"
-)]
 mod common;
 
 use std::sync::Arc;

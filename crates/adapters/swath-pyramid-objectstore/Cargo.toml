@@ -18,6 +18,7 @@ swath-core = { path = "../../swath-core", version = "0.1.0-alpha.1" }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+swath-testsupport = { path = "../../swath-testsupport", version = "0.1.0-alpha.1" }
 swath-source-cog = { path = "../swath-source-cog", version = "0.1.0-alpha.1" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 

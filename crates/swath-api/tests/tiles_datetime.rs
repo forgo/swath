@@ -10,65 +10,41 @@
 //! asked for; the Trace records the temporal decision; malformed values
 //! are RFC 7807 400s and empty windows the established 404 refusal.
 
-#[allow(
-    dead_code,
-    reason = "shared between the API test targets; not every helper is used in each"
-)]
 mod common;
+
+use swath_testsupport::fixtures::{FIRE_DAYS, fire_dataset, fire_granule};
+use swath_testsupport::http::get;
+
+/// The served PNG must match the committed oracle golden.
+fn assert_matches_golden(served: &[u8], golden_name: &str) {
+    let served = image::load_from_memory(served)
+        .expect("served PNG decodes")
+        .into_rgba8();
+    swath_testsupport::pdiff::assert_matches_golden(
+        golden_name,
+        &served,
+        &common::render_goldens_dir().join(golden_name),
+    );
+}
 
 use std::sync::Arc;
 
 use axum::Router;
-use axum::body::Body;
 use axum::http::StatusCode;
 use object_store::local::LocalFileSystem;
 use object_store::memory::InMemory;
 use swath_api::{ApiState, CatalogLayer, CatalogLayers, TraceExtension, router};
 use swath_cache_objectstore::ObjectStoreTileCache;
-use swath_core::catalog::{
-    Bbox, Dataset, DatasetId, Datetime, Extent, Granule, GranuleAsset, GranuleId, TimeRange,
-};
+use swath_core::catalog::DatasetId;
 use swath_core::trace::{Strategy, TemporalRule};
 use swath_render::ir::Colormap;
 use swath_render::{NodataPolicy, PlanSpec, Resampling, ndvi_expr, plan_for};
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
-use swath_testkit::{DiffPolicy, diff, load_png};
-use tower::ServiceExt as _;
 
 /// The proven fire tile: z13 (col 1326, row 3100) sits fully inside the
 /// fixture window (tests/fixtures/README.md), OGC path order z/row/col.
 const TILE: &str = "/tilesets/fire-ndvi/tiles/13/3100/1326";
-
-/// Acquisition datetimes of the fixture dates used here (nominal T10TFK
-/// Sentinel-2 overpass time; the values are the catalog's, set at seed).
-const DATES: [(&str, &str); 3] = [
-    ("hlss30-t10tfk-2024159", "2024-06-07T19:03:00Z"),
-    ("hlss30-t10tfk-2024204", "2024-07-22T19:03:00Z"),
-    ("hlss30-t10tfk-2024229", "2024-08-16T19:03:00Z"),
-];
-
-fn fire_granule(id: &str, datetime: &str) -> Granule {
-    let asset = |band: &str| GranuleAsset::raster(format!("{id}-{band}.tif"));
-    Granule {
-        id: GranuleId::new(id),
-        dataset: DatasetId::new("hls-s30-fire"),
-        // The fixture window's CRS84 footprint (tests/fixtures/README.md).
-        bbox: Bbox {
-            west: -121.7388,
-            south: 39.9856,
-            east: -121.6475,
-            north: 40.0559,
-        },
-        datetime: Datetime::new(datetime).unwrap(),
-        assets: [
-            ("b8a".to_owned(), asset("b8a")),
-            ("b04".to_owned(), asset("b04")),
-        ]
-        .into(),
-        ingested_at: Some(Datetime::new("2026-08-08T00:00:00Z").unwrap()),
-    }
-}
 
 /// The catalog-mode app over the Park Fire dates: one grayscale-NDVI
 /// layer (comparable to the oracle goldens), an in-memory catalog whose
@@ -77,26 +53,10 @@ fn fire_granule(id: &str, datetime: &str) -> Granule {
 fn fire_app() -> Router {
     let catalog = common::MemoryCatalog::default();
     catalog.seed(
-        Dataset {
-            id: DatasetId::new("hls-s30-fire"),
-            title: "HLS S30 (Park Fire)".to_owned(),
-            description: "2024 Park Fire time series".to_owned(),
-            license: "CC0-1.0".to_owned(),
-            extent: Extent {
-                bbox: Bbox {
-                    west: -121.7388,
-                    south: 39.9856,
-                    east: -121.6475,
-                    north: 40.0559,
-                },
-                interval: TimeRange::default(),
-            },
-            bands: ["b04", "b8a"].map(str::to_owned).into_iter().collect(),
-            layers: Vec::new(),
-        },
-        DATES
+        fire_dataset("hls-s30-fire"),
+        FIRE_DAYS[..3]
             .iter()
-            .map(|(id, datetime)| fire_granule(id, datetime))
+            .map(|(day, at)| fire_granule("hls-s30-fire", "t10tfk", day, at))
             .collect(),
     );
     let provider = CatalogLayers::new(
@@ -132,18 +92,6 @@ fn fire_app() -> Router {
     router(Arc::new(state))
 }
 
-async fn get(app: &Router, path: &str) -> axum::http::Response<Body> {
-    app.clone()
-        .oneshot(
-            axum::http::Request::builder()
-                .uri(path)
-                .body(Body::empty())
-                .expect("request builds"),
-        )
-        .await
-        .expect("infallible service")
-}
-
 /// GETs a tile expecting 200 PNG; returns (bytes, decision, temporal).
 async fn get_frame(
     app: &Router,
@@ -161,20 +109,6 @@ async fn get_frame(
     );
     let bytes = common::body_bytes(response).await;
     (bytes, trace.decision.clone(), trace.temporal.clone())
-}
-
-fn assert_matches_golden(served: &[u8], golden_name: &str) {
-    let served = image::load_from_memory(served)
-        .expect("served PNG decodes")
-        .into_rgba8();
-    let golden = load_png(&common::render_goldens_dir().join(golden_name)).expect("golden loads");
-    let report = diff(&served, &golden).expect("dimensions match");
-    let policy = DiffPolicy::default();
-    assert!(
-        report.passes(&policy),
-        "served tile fails the oracle policy vs {golden_name}: max |diff| {}",
-        report.max_abs_channel_diff,
-    );
 }
 
 /// The keystone (issue #180 AC): the same tile at two dates renders

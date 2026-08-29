@@ -10,7 +10,7 @@
 //! ```
 //!
 //! The first form prints a [`DiffReport`] and exits nonzero when the images
-//! violate the [`DiffPolicy`] (defaults documented in `swath-testkit`).
+//! violate the [`DiffPolicy`] (defaults documented in `swath_testsupport::pdiff`).
 //! `--corrupt` is oracle-harness self-test support: it copies `IN.png` with a
 //! single channel of a single pixel perturbed by exactly 1, the smallest error
 //! a zero-tolerance diff must catch (`just oracle-verify` uses it to prove the
@@ -32,7 +32,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::ExitCode;
 
-use swath_testkit::{DiffPolicy, RgbaImage, diff, load_png};
+use swath_testsupport::{DiffPolicy, RgbaImage, diff, load_png};
 
 const USAGE: &str = "usage: pdiff A.png B.png [--tolerance N] [--max-bad-frac F]\n       pdiff --corrupt IN.png OUT.png\n       pdiff --content IMG.png [--left X] [--max-modal-frac F]";
 
@@ -218,7 +218,7 @@ fn corrupt(input: &Path, output: &Path) -> Result<(), String> {
 mod tests {
     use std::path::PathBuf;
 
-    use swath_testkit::RgbaImage;
+    use swath_testsupport::RgbaImage;
     use swath_testsupport::TempDir;
 
     use super::{parse_compare_args, run};
@@ -244,7 +244,7 @@ mod tests {
     fn parse_defaults_and_flags() {
         let (paths, policy) = parse_compare_args(&args(&["a.png", "b.png"])).expect("valid args");
         assert_eq!(paths, ("a.png".to_string(), "b.png".to_string()));
-        assert_eq!(policy, swath_testkit::DiffPolicy::default());
+        assert_eq!(policy, swath_testsupport::DiffPolicy::default());
 
         let (_, policy) = parse_compare_args(&args(&[
             "a.png",
@@ -369,7 +369,7 @@ mod tests {
         let out = dir.join("sat-corrupt.png");
         let (a_s, out_s) = (a.display().to_string(), out.display().to_string());
         assert_eq!(run(&args(&["--corrupt", &a_s, &out_s])), Ok(0));
-        let corrupted = swath_testkit::load_png(&out).expect("readable output");
+        let corrupted = swath_testsupport::load_png(&out).expect("readable output");
         assert_eq!(corrupted.get_pixel(0, 0).0[0], 254);
         assert_eq!(run(&args(&["--corrupt"])), Err(super::USAGE.to_string()));
     }

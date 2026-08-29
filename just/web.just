@@ -78,7 +78,7 @@ e2e-web:
 # policy), both stamped with the capture git sha. The tile cache is cleared
 # before EACH capture run so every run replays the identical request history
 # from the same cold state; a SECOND capture into target/screenshots is then
-# perceptually diffed shot-by-shot against the first (swath-testkit pdiff,
+# perceptually diffed shot-by-shot against the first (swath-testsupport pdiff,
 # per-shot policy) — a shot that cannot be reproduced fails the recipe
 # instead of going stale. Needs `just setup-web`.
 screenshots:

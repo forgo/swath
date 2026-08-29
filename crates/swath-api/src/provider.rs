@@ -584,69 +584,17 @@ fn catalog_error(dataset: &DatasetId, err: &CatalogError) -> ApiError {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::sync::Mutex;
 
     use swath_core::catalog::{
-        Bbox, Catalog, CatalogError, Dataset, DatasetId, Datetime, Granule, GranuleAsset,
-        GranuleId, GranuleQuery, TimeRange,
+        Bbox, DatasetId, Datetime, Granule, GranuleAsset, GranuleId, TimeRange,
     };
     use swath_core::tile::TileCoord;
     use swath_render::ir::{BandInput, OutputSpec, PixelOp, RenderPlan, TileFormat};
     use swath_render::{NodataPolicy, Resampling, SourceWindow};
 
     use super::{CatalogLayer, CatalogLayers, LayerProvider};
-
-    /// Granule-serving stub: `find_granules` returns the canned set,
-    /// honoring the query's `datetime` filter exactly as the port
-    /// documents it (inclusive, optionally open-ended) — the resolution
-    /// rule under test is "catalog filters the window, provider takes
-    /// the latest of what remains".
-    struct StubCatalog {
-        granules: Mutex<Vec<Granule>>,
-    }
-
-    impl Catalog for StubCatalog {
-        async fn upsert_dataset(&self, _: &Dataset) -> Result<(), CatalogError> {
-            unreachable!("serving never writes datasets")
-        }
-
-        async fn upsert_granules(&self, _: &[Granule]) -> Result<(), CatalogError> {
-            unreachable!("serving never writes granules")
-        }
-
-        async fn get_dataset(&self, _: &DatasetId) -> Result<Option<Dataset>, CatalogError> {
-            unreachable!("resolution uses find_granules only")
-        }
-
-        async fn list_datasets(&self) -> Result<Vec<Dataset>, CatalogError> {
-            unreachable!("resolution uses find_granules only")
-        }
-
-        async fn find_granules(
-            &self,
-            _: &DatasetId,
-            query: &GranuleQuery,
-        ) -> Result<Vec<Granule>, CatalogError> {
-            let granules = self.granules.lock().unwrap().clone();
-            let Some(window) = &query.datetime else {
-                return Ok(granules);
-            };
-            Ok(granules
-                .into_iter()
-                .filter(|g| {
-                    let ms = g.datetime.to_unix_millis();
-                    window
-                        .start
-                        .as_ref()
-                        .is_none_or(|start| start.to_unix_millis() <= ms)
-                        && window
-                            .end
-                            .as_ref()
-                            .is_none_or(|end| ms <= end.to_unix_millis())
-                })
-                .collect())
-        }
-    }
+    use swath_testsupport::catalog::MemoryCatalog;
+    use swath_testsupport::fixtures::hls_catalog_dataset;
 
     fn granule(id: &str, datetime: &str, ingested_at: Option<&str>) -> Granule {
         Granule {
@@ -677,7 +625,16 @@ mod tests {
         }
     }
 
-    fn provider(granules: Vec<Granule>) -> CatalogLayers<StubCatalog> {
+    /// The shared in-memory catalog with the HLS dataset registered and
+    /// `granules` seeded — resolution reads through `find_granules`, whose
+    /// datetime filter the double honours exactly as the port documents.
+    fn seeded(granules: Vec<Granule>) -> MemoryCatalog {
+        let catalog = MemoryCatalog::default();
+        catalog.seed(hls_catalog_dataset(), granules);
+        catalog
+    }
+
+    fn provider(granules: Vec<Granule>) -> CatalogLayers<MemoryCatalog> {
         let plan = RenderPlan::new(
             vec![
                 BandInput::new("b04"),
@@ -692,9 +649,7 @@ mod tests {
             OutputSpec::new(TileFormat::Png),
         );
         CatalogLayers::new(
-            StubCatalog {
-                granules: Mutex::new(granules),
-            },
+            seeded(granules),
             vec![CatalogLayer {
                 id: "truecolor".to_owned(),
                 title: "True color".to_owned(),
@@ -730,9 +685,7 @@ mod tests {
                 end: Some(Datetime::new(end).unwrap()),
             };
             CatalogLayers::new(
-                StubCatalog {
-                    granules: Mutex::new(granules),
-                },
+                seeded(granules),
                 vec![CatalogLayer {
                     id: "change".to_owned(),
                     title: "Change".to_owned(),

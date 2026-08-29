@@ -6,17 +6,14 @@
 //! byte-identical bytes with a `cache_hit` decision readable from both
 //! the `X-Swath-Trace` header and the Trace extension.
 
-#[allow(
-    dead_code,
-    reason = "shared between the API test targets; not every helper is used in each"
-)]
 mod common;
+
+use swath_testsupport::http::get;
 
 use std::sync::Arc;
 
 use axum::Router;
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::StatusCode;
 use http_body_util::BodyExt as _;
 use object_store::local::LocalFileSystem;
 use object_store::memory::InMemory;
@@ -25,7 +22,6 @@ use swath_cache_objectstore::ObjectStoreTileCache;
 use swath_core::trace::Strategy;
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
-use tower::ServiceExt as _;
 
 /// The fixture app of `common::app()`, plus an in-memory write-through
 /// tile cache. One router, reused across requests — the cache lives in
@@ -40,18 +36,6 @@ fn cached_app() -> Router {
     )
     .with_cache(ObjectStoreTileCache::new(Arc::new(InMemory::new())));
     router(Arc::new(state))
-}
-
-async fn get(app: &Router, path: &str) -> axum::http::Response<Body> {
-    app.clone()
-        .oneshot(
-            Request::builder()
-                .uri(path)
-                .body(Body::empty())
-                .expect("request builds"),
-        )
-        .await
-        .expect("infallible service")
 }
 
 #[tokio::test]

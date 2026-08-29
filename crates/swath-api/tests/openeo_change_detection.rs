@@ -10,33 +10,24 @@
 //! a `datetime=` that empties a branch is a 404 naming it, and branches
 //! in different CRSs are refused by the tiler's `MixedCrs`.
 
-#[allow(
-    dead_code,
-    reason = "shared between the API test targets; not every helper is used in each"
-)]
 mod common;
+
+use swath_testsupport::fixtures::{FIRE_DAYS, fire_dataset, fire_granule, park_fire};
+use swath_testsupport::http::publish;
+
+fn fire_granules() -> Vec<Granule> {
+    park_fire(&FIRE_DAYS).1
+}
 
 use std::sync::Arc;
 
 use axum::http::StatusCode;
 use serde_json::{Value, json};
 use swath_api::TraceExtension;
-use swath_core::catalog::{
-    Bbox, Catalog as _, Dataset, DatasetId, Datetime, Extent, Granule, GranuleAsset, GranuleId,
-    TimeRange,
-};
+use swath_core::catalog::{Catalog as _, Granule, GranuleId};
 use swath_core::trace::{Strategy, TemporalRule, Trace};
-use swath_testkit::{DiffPolicy, diff, load_png};
+use swath_testsupport::{DiffPolicy, diff, load_png};
 
-/// The six Park Fire acquisitions (fixture README).
-const FIRE_DAYS: [(&str, &str); 6] = [
-    ("2024159", "2024-06-07T19:03:00Z"),
-    ("2024204", "2024-07-22T19:03:00Z"),
-    ("2024229", "2024-08-16T19:03:00Z"),
-    ("2024249", "2024-09-05T19:03:00Z"),
-    ("2024274", "2024-09-30T19:03:00Z"),
-    ("2024289", "2024-10-15T19:03:00Z"),
-];
 /// The July (pre-fire) and August (fresh burn scar) windows, left-closed.
 const JULY: [&str; 2] = ["2024-07-01T00:00:00Z", "2024-08-01T00:00:00Z"];
 const AUGUST: [&str; 2] = ["2024-08-01T00:00:00Z", "2024-09-01T00:00:00Z"];
@@ -44,64 +35,12 @@ const PRE: &str = "hlss30-t10tfk-2024204";
 const POST: &str = "hlss30-t10tfk-2024229";
 const TILE: &str = "tiles/13/3100/1326";
 
-fn fire_bbox() -> Bbox {
-    Bbox {
-        west: -121.7388,
-        south: 39.9866,
-        east: -121.6474,
-        north: 40.0549,
-    }
-}
-
-fn fire_dataset(id: &str) -> Dataset {
-    Dataset {
-        id: DatasetId::new(id),
-        title: "HLS S30 Park Fire series".to_owned(),
-        description: "Six T10TFK acquisitions across the 2024 Park Fire.".to_owned(),
-        license: "CC0-1.0".to_owned(),
-        extent: Extent {
-            bbox: fire_bbox(),
-            interval: TimeRange {
-                start: Some(Datetime::new("2024-06-07T19:03:00Z").unwrap()),
-                end: Some(Datetime::new("2024-10-15T19:03:00Z").unwrap()),
-            },
-        },
-        bands: ["b04", "b8a"].map(str::to_owned).into_iter().collect(),
-        layers: Vec::new(),
-    }
-}
-
 /// A granule of `dataset` whose assets are the fixture files of `tile`
 /// (`t10tfk` or `t13sdd`) at `day`.
 fn granule(dataset: &str, id: &str, tile: &str, day: &str, datetime: &str) -> Granule {
-    let asset = |band: &str| GranuleAsset::raster(format!("hlss30-{tile}-{day}-{band}.tif"));
-    Granule {
-        id: GranuleId::new(id),
-        dataset: DatasetId::new(dataset),
-        bbox: fire_bbox(),
-        datetime: Datetime::new(datetime).unwrap(),
-        assets: [
-            ("b04".to_owned(), asset("b04")),
-            ("b8a".to_owned(), asset("b8a")),
-        ]
-        .into(),
-        ingested_at: Some(Datetime::new("2024-11-01T00:00:00Z").unwrap()),
-    }
-}
-
-fn fire_granules() -> Vec<Granule> {
-    FIRE_DAYS
-        .iter()
-        .map(|(day, datetime)| {
-            granule(
-                "park-fire",
-                &format!("hlss30-t10tfk-{day}"),
-                "t10tfk",
-                day,
-                datetime,
-            )
-        })
-        .collect()
+    let mut granule = fire_granule(dataset, tile, day, datetime);
+    granule.id = GranuleId::new(id);
+    granule
 }
 
 /// The change service: `NDVI(after) − NDVI(before)`, each branch its own
@@ -146,15 +85,6 @@ fn change_service(collection: &str, after: [&str; 2], before: [&str; 2]) -> Valu
             }, "result": true },
         }},
     })
-}
-
-async fn publish(app: &axum::Router, request: Value) -> String {
-    let response = common::request_on(app, "POST", "/services", Some(request)).await;
-    assert_eq!(response.status(), StatusCode::CREATED);
-    response.headers()["openeo-identifier"]
-        .to_str()
-        .expect("identifier header")
-        .to_owned()
 }
 
 async fn get_tile(

@@ -22,8 +22,8 @@
 
 use std::collections::BTreeMap;
 use std::hint::black_box;
-use std::path::PathBuf;
 use std::sync::Arc;
+use swath_testsupport::paths::fixtures_dir;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use object_store::ObjectStoreExt as _;
@@ -64,11 +64,6 @@ const BILINEAR: Resampling = Resampling::Bilinear(NodataPolicy::ExcludeRenormali
 /// Source-window margin covering the resampling support (the golden
 /// suites' constant).
 const WINDOW_MARGIN: u32 = 4;
-
-/// The committed HLS fixture directory (tests/fixtures/README.md, ADR 0004).
-fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
-}
 
 /// A `CogSource` over an in-memory store preloaded with the fixture bytes,
 /// so benched renders never touch the filesystem (the adapters' pattern).

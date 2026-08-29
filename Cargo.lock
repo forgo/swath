@@ -4309,7 +4309,7 @@ dependencies = [
  "swath-render",
  "swath-reproject-proj4rs",
  "swath-source-cog",
- "swath-testkit",
+ "swath-testsupport",
  "swath-udf-wasmtime",
  "thiserror 2.0.20",
  "tokio",
@@ -4392,7 +4392,7 @@ dependencies = [
  "serde",
  "serde_json",
  "swath-core",
- "swath-testkit",
+ "swath-testsupport",
 ]
 
 [[package]]
@@ -4465,6 +4465,7 @@ dependencies = [
  "sha2 0.10.9",
  "swath-core",
  "swath-source-cog",
+ "swath-testsupport",
  "thiserror 2.0.20",
  "tokio",
 ]
@@ -4496,7 +4497,6 @@ dependencies = [
  "swath-core",
  "swath-reproject-proj4rs",
  "swath-source-cog",
- "swath-testkit",
  "swath-testsupport",
  "swath-udf-wasmtime",
  "swath-warp",
@@ -4548,21 +4548,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "swath-testkit"
-version = "0.1.0-alpha.1"
-dependencies = [
- "image",
- "swath-testsupport",
-]
-
-[[package]]
 name = "swath-testsupport"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "axum",
+ "http-body-util",
+ "image",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "swath-core",
+ "tower",
 ]
 
 [[package]]
