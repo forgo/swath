@@ -4,7 +4,9 @@ _Design spec for issue #37 — the `swath-core::planner` module. This resolves
 ARCHITECTURE.md §16.4 for v1 and subsumes the tiler's inline strategy
 decisions from #36 (cache-first check) and #38 (`select_overview`). After
 this lands, `plan()` owns the per-tile strategy choice; the tiler executes
-it and the Trace shows the work (CHARTER.md §6: "why did it decide that?")._
+it and the Trace shows the work (CHARTER.md §6: "why did it decide that?").
+**Decision recorded in [ADR 0024](../decisions/0024-planner-v1-explicit-knobs-transparent-estimates.md);
+this note is the mechanics** — the contract, the cost model, the decision procedure._
 
 ## 1. Contract
 

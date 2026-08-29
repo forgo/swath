@@ -4,7 +4,9 @@ _Design note for issue #151, satisfying its first acceptance criterion: compare 
 models concretely, with the maintainer choosing before any implementation issue is filed.
 Companion code studied: `web/src/swath-authoring-panel.ts` (the M5 panel, #109/PR #148) and
 `crates/swath-render/src/process.rs` (the #32 compiler, whose diagnostics define the bad-state
-family). August 2026._
+family). August 2026. **Decision recorded in
+[ADR 0025](../decisions/0025-authoring-model-b-always-valid-canvas.md); this note is the
+comparison** — the two models, the bad-state family, the walkthroughs._
 
 ## 1. Where #148 landed, and where it ceilings
 

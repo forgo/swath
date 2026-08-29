@@ -1,6 +1,6 @@
 # ADR 0022 — The two-cube join: `merge_cubes` at the bounded profile
 
-**Status:** Proposed · **Date:** 2026-08-28 · **Refs:** issue #294 (M11 — Earn the DAG),
+**Status:** Accepted (proposed 2026-08-28; accepted 2026-08-29 with #300/#301 shipped and 33 files depending on it) · **Date:** 2026-08-28 · **Refs:** issue #294 (M11 — Earn the DAG),
 `docs/design/authoring-dag.md` (the reasoning), ADR 0010 (bounded openEO profile), ADR 0014
 (preview budget), ADR 0015 (frame selection), ADR 0021 (the UI system; its "M11" section defers
 this decision here)

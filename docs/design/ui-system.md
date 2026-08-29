@@ -3,7 +3,9 @@
 _Design note for issue #277 (M10 — UX product structure and surfacing value), the contract every
 M10 PR is reviewed against and the freeze M12 (design language) inherits. Companion code studied:
 `web/src/*.ts` (the M5–M9 elements), `web/demo/index.html` + `main.ts` (the shell), the Playwright
-and screenshot harnesses. Decisions recorded in ADR 0021. August 2026._
+and screenshot harnesses. August 2026. **Decisions recorded in
+[ADR 0021](../decisions/0021-ui-system-shadow-dom-tokens-one-shell.md); this note is the
+contract's mechanics** — layers, foundations, primitives, the freeze, the DRY gate._
 
 ## 1. Where the M5–M9 UI landed, and where it ceilings
 
