@@ -4,14 +4,14 @@
 but should always be checkable against what is written here — drift means a conscious, dated
 amendment in §10 or a course correction. Read this first, forever.*
 
-**Status:** v1.0 — 2026-08-08; amended through 2026-08-11 (§10).
+**Status:** v1.0 — 2026-08-08; amended through 2026-08-29 (§10).
 
 ---
 
 ## 1. Mission (one sentence)
 
-**Satellite data comes in and is immediately available on a map — from a single pane of glass —
-and anyone can derive a new product from the live flow and publish it the same way.**
+**Satellite data comes in and is immediately live on a map — and anyone can derive a new
+product from that live flow and publish it the same way, from one screen.**
 
 ## 2. The problem we exist to solve
 
@@ -137,3 +137,8 @@ act.
   checkout, one CI-smoke-tested command runs the demo container; installers are
   graduation-tier (`docs/RELEASING.md`). *Decided:* issue #104; ENGINEERING §7. *Sign-off:*
   PR #157.
+
+- **2026-08-29 — A5: the mission sentence, one wording.** §1 now carries the sentence the
+  README opens with — wording only ("live on a map", "from one screen"); the meaning is
+  v1.0's. A docs gate keeps README and §1 identical, so the mission is stated once and quoted
+  everywhere else. *Decided:* issue #338. *Sign-off:* PR #358.

@@ -81,6 +81,28 @@ fn reintroducing_comparisons_stale_readme_quote_fails() {
     );
 }
 
+/// Drift 7 (README.md, #338): the README's opening sentence drifting from
+/// REQUIREMENTS §1 — the pre-consolidation state, when the mission had
+/// three hand-maintained wordings.
+#[test]
+fn reintroducing_a_second_mission_wording_fails() {
+    let readme = read_repo("README.md");
+    let requirements = read_repo("docs/REQUIREMENTS.md");
+    claims::readme_opens_with_the_mission(&readme, &requirements)
+        .expect("the unmutated README must open with the mission");
+    let mutated = reintroduce(
+        &readme,
+        "immediately live on a map",
+        "immediately available on a map — from a single pane of glass",
+    );
+    let err = claims::readme_opens_with_the_mission(&mutated, &requirements)
+        .expect_err("a second wording of the mission must fail");
+    assert!(
+        err.contains("REQUIREMENTS"),
+        "error must name the mission's home: {err}"
+    );
+}
+
 /// Drift 4 (README.md): the oracle-history pointer citing CHARTER §7
 /// (the pre-renumbering section) instead of §8.
 #[test]

@@ -15,6 +15,9 @@
 //!   `docs/CHARTER.md` section that actually discusses the oracles.
 //! - `docs/perf/load-2cpu-16.7-evidence.md`'s header must describe the
 //!   2-CPU pinned run its filename and data claim (ADR 0012's rerun).
+//!
+//! A fifth check (#338): the mission sentence has one home,
+//! `docs/REQUIREMENTS.md` §1, and `README.md` opens with it verbatim.
 
 use super::{normalize_ws, read_repo, strip_code_fences, strip_number_tags};
 
@@ -197,6 +200,48 @@ pub(super) fn load_2cpu_header_names_the_pinned_run(evidence: &str) -> Result<()
              ADR's 2-CPU column, not the 12-core baseline): {generated}"
         ))
     }
+}
+
+/// The first `**…**` span of `text`, if any.
+fn first_bold_span(text: &str) -> Option<&str> {
+    let start = text.find("**")? + 2;
+    let len = text[start..].find("**")?;
+    Some(&text[start..start + len])
+}
+
+/// `README.md` vs `docs/REQUIREMENTS.md`: the README's opening bold
+/// paragraph is REQUIREMENTS §1's mission sentence, verbatim
+/// (whitespace-normalized) — the mission is stated once.
+pub(super) fn readme_opens_with_the_mission(
+    readme: &str,
+    requirements: &str,
+) -> Result<(), String> {
+    let heading = "\n## 1. Mission";
+    let start = requirements
+        .find(heading)
+        .ok_or_else(|| "docs/REQUIREMENTS.md has no `## 1. Mission` section".to_owned())?;
+    let section = &requirements[start + 1..];
+    let section = &section[..section.find("\n## ").unwrap_or(section.len())];
+    let mission = first_bold_span(section)
+        .map(normalize_ws)
+        .ok_or_else(|| "docs/REQUIREMENTS.md §1 carries no bold mission sentence".to_owned())?;
+    let lede = first_bold_span(&strip_code_fences(readme))
+        .map(normalize_ws)
+        .ok_or_else(|| "README.md has no bold opening sentence".to_owned())?;
+    if lede == mission {
+        Ok(())
+    } else {
+        Err(format!(
+            "README.md's opening sentence is not docs/REQUIREMENTS.md §1's mission sentence \
+             (the mission has one home; quote it):\n  README:       {lede}\n  REQUIREMENTS: {mission}"
+        ))
+    }
+}
+
+#[test]
+fn readme_opening_sentence_is_the_mission() {
+    readme_opens_with_the_mission(&read_repo("README.md"), &read_repo("docs/REQUIREMENTS.md"))
+        .unwrap();
 }
 
 #[test]

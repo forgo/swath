@@ -25,13 +25,16 @@ use super::repo_root;
 
 /// The committed budgets: (repo-relative doc, max whitespace-delimited
 /// words). Values are the post-sweep counts plus ~10%, rounded up to 25.
-const BUDGETS: [(&str, usize); 17] = [
+const BUDGETS: [(&str, usize); 16] = [
     // 1025 → 1250 on 2026-08-29 (#331, the product-language pass): the hero is
     // the product-loop diagram and the README carries three captioned
     // screenshots instead of one — alt text and captions are the growth; the
     // prose itself shrank (the milestone paragraph went). Measured at 1216.
     ("README.md", 1250),
     ("docs/ARCHITECTURE.md", 2125),
+    // Held at 1350 on 2026-08-29 (#338): PITCH.md (192 words) folded in as §14
+    // while §§1, 4, 7, 12 became pointers to REQUIREMENTS — measured at 1289,
+    // net −125 across the two files.
     ("docs/CHARTER.md", 1350),
     // 1600 → 1700 on 2026-08-29 (#331): the wedge diagram and its alt moved
     // here from the README, where the reader-facing hero replaced it.
@@ -52,7 +55,6 @@ const BUDGETS: [(&str, usize); 17] = [
     // its generated load table — an acceptance criterion, not prose
     // regrowth — re-measured at 2372 + the usual headroom.
     ("docs/PERFORMANCE.md", 2425),
-    ("docs/PITCH.md", 225),
     // 850 → 900 on 2026-08-29 (#331): the tracks show their screenshots
     // instead of linking them.
     ("docs/QUICKSTART.md", 900),
