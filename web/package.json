@@ -15,11 +15,10 @@
   },
   "scripts": {
     "build": "vite build",
-    "lint": "biome ci . && node scripts/check-ui-dry.mjs --warn",
+    "lint": "biome ci . && node scripts/check-ui-dry.mjs",
     "lint:fix": "biome check --write .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "check:ui-dry": "node scripts/check-ui-dry.mjs"
+    "test": "vitest run"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",

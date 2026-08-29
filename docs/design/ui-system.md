@@ -271,9 +271,9 @@ one home: hex/`rgb(`/`hsl(` and font-stack literals (home: `tokens.css`); `injec
 `STYLE_ELEMENT_ID`, `customElements.define(` (home: `ui/element.ts`; the MapLibre stylesheet in
 `swath-map.ts` allow-listed with a reason); `new CustomEvent(` (home: `ui/events.ts`); `fetch(`
 (home: `api.ts`; the basemap cache allow-listed); `from "../` inside `web/src/ui/`. Advisory
-when introduced (#278); blocking per file as each organism migrates; the allow-list is empty by
-the author-mode issue (#291), and a stale allow-list entry fails the gate so the escape hatch can
-only shrink.
+when introduced (#278), blocking everywhere since every organism migrated (#350). The allow-list
+holds exactly those two reasoned `swath-map.ts` entries, and a stale entry fails the gate, so the
+escape hatch can only shrink.
 
 ## 10. Honest risks
 
