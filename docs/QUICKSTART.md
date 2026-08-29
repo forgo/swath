@@ -76,12 +76,11 @@ answers `200 image/png`.
 
 ## Track 3 — the full demo from a checkout
 
-The stopwatch demo (R8): the full local stack — `swath` in catalog mode,
-pgstac, MinIO — comes up, a granule drops, and ingest → catalog → serve
-happens with zero manual steps, timed ([`DEMO.md`](DEMO.md) is the full
-tour). You need Docker (with compose), `git`,
-[`just`](https://just.systems), Node.js and `pnpm`; no Rust toolchain — the
-server builds inside Docker.
+The stopwatch demo: the full local stack comes up, a granule drops, and
+ingest → catalog → serve happens with zero manual steps, timed. What you will
+see, and what the x-ray is telling you, is [`DEMO.md`](DEMO.md). You need
+Docker (with compose), `git`, [`just`](https://just.systems), Node.js and
+`pnpm`; no Rust toolchain — the server builds inside Docker.
 
 ```sh
 git clone https://github.com/forgo/swath.git
@@ -91,13 +90,8 @@ just demo
 ```
 
 The first run builds the image (several minutes; later runs start in
-seconds). Open the printed viewer URL while it builds: the footprint is gray
-on purpose — a tile of the empty catalog is an honest 404. When the countdown
-ends the granule drops, imagery appears on its own, the x-ray badges every
-tile with the server's own account of its render, and the measured
-**ingest-to-pixel** number prints big at the end; `ctrl-c` tears the stack
-down. CI runs this same path (`just e2e`) on every PR and push — the demo
-cannot rot.
+seconds); open the printed viewer URL while it builds. `ctrl-c` tears the
+stack down.
 
 ![X-ray decision overlay after the drop: every tile badged with its render decision and timing, the ingest→pixel readout top-left.](media/screenshots/04-xray-decisions.png)
 

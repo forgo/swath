@@ -18,7 +18,11 @@ prototypes/NNNN-YYYY-MM-DD-short-name/
 
 - **NNNN** — zero-padded sequence (0001, 0002, …).
 - **YYYY-MM-DD** — the date the prototype was started.
-- Each `README.md` follows the template in §Template below.
+- Each `README.md` has the shape of
+  [`0001-2026-08-08-referencer-bakeoff/README.md`](0001-2026-08-08-referencer-bakeoff/README.md):
+  question, why it's uncertain, hypotheses stated before running, method (reproducible, with
+  data), metrics tied to the north star, success criteria for each outcome, dated results, and
+  the decision with its ADR.
 - When a prototype concludes, its decision is promoted to an **ADR** in `docs/decisions/`, which links back
   here. The prototype is the evidence; the ADR is the ruling.
 
@@ -27,16 +31,3 @@ prototypes/NNNN-YYYY-MM-DD-short-name/
 | # | Date | Prototype | Question it settles | Status |
 |---|------|-----------|---------------------|--------|
 | 0001 | 2026-08-08 | referencer-bakeoff | Python (VirtualiZarr) vs pure-Rust for legacy virtual-reference generation | Concluded 2026-08-08 → ADR 0006 confirmed, ADR 0008 |
-
-## Template
-
-Each prototype README should contain:
-
-1. **Question** — the single decision this settles.
-2. **Why it's uncertain / why now** — the risk it buys down.
-3. **Hypotheses** — what we expect, stated before running.
-4. **Method** — exactly how to reproduce, including data.
-5. **Metrics** — what we measure and why (tie to the north star where possible).
-6. **Success criteria** — what result would decide it each way.
-7. **Results** — filled in when run (dated).
-8. **Decision** — the ruling, and a link to the ADR that records it.
