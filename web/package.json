@@ -18,7 +18,9 @@
     "lint": "biome ci . && node scripts/check-ui-dry.mjs",
     "lint:fix": "biome check --write .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "cd .. && just e2e-web",
+    "screenshots": "cd .. && just screenshots"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",

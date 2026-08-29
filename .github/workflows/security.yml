@@ -28,9 +28,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # The version is the justfile's (`deny_version`), the one place every
+      # tool is pinned and Renovate bumps (#357).
+      - id: pins
+        run: echo "deny=$(grep -oE '^deny_version := "[0-9.]+"' justfile | grep -oE '[0-9.]+')" >> "$GITHUB_OUTPUT"
       - uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
         with:
-          tool: cargo-deny@0.20.2
+          tool: cargo-deny@${{ steps.pins.outputs.deny }}
 
       - name: Check RustSec advisories
         id: advisories
