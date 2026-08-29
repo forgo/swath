@@ -157,15 +157,11 @@ where
         .map_err(|e| catalog_error(&e))?
         .is_some()
     {
-        return Err(ApiError {
-            status: StatusCode::CONFLICT,
-            title: "Conflict".to_owned(),
-            detail: format!(
-                "dataset `{id}` already exists — registration never overwrites; \
-                 re-definition is config territory",
-                id = body.id
-            ),
-        });
+        return Err(ApiError::conflict(format!(
+            "dataset `{id}` already exists — registration never overwrites; \
+             re-definition is config territory",
+            id = body.id
+        )));
     }
 
     let dataset = Dataset {

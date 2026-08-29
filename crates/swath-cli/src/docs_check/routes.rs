@@ -25,7 +25,7 @@ pub(super) const DOC: &str = "docs/ENDPOINTS.md";
 const ROUTERS: [(&str, &str); 4] = [
     ("crates/swath-api/src/routes.rs", "always"),
     ("crates/swath-api/src/granules.rs", "catalog mode"),
-    ("crates/swath-api/src/openeo.rs", "catalog mode"),
+    ("crates/swath-api/src/openeo/mod.rs", "catalog mode"),
     ("crates/swath-api/src/datasets.rs", "catalog mode"),
 ];
 
