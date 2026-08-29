@@ -233,7 +233,7 @@ one granule, one format** (§7); **CI runners are slower and noisier** (the 10 s
 for that).
 
 Several of these gaps are intended future work, not permanent posture — real-ingress behavior,
-multi-node scale, and larger-than-fixture datasets are on the M7+ candidate list in
+multi-node scale, and larger-than-fixture datasets are on the candidate list in
 [`ROADMAP.md`](ROADMAP.md).
 
 ## 11. Regenerating this document

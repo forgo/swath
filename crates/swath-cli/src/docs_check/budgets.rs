@@ -26,12 +26,20 @@ use super::repo_root;
 /// The committed budgets: (repo-relative doc, max whitespace-delimited
 /// words). Values are the post-sweep counts plus ~10%, rounded up to 25.
 const BUDGETS: [(&str, usize); 17] = [
-    ("README.md", 1025),
+    // 1025 → 1250 on 2026-08-29 (#331, the product-language pass): the hero is
+    // the product-loop diagram and the README carries three captioned
+    // screenshots instead of one — alt text and captions are the growth; the
+    // prose itself shrank (the milestone paragraph went). Measured at 1216.
+    ("README.md", 1250),
     ("docs/ARCHITECTURE.md", 2125),
     ("docs/CHARTER.md", 1350),
-    ("docs/COMPARISON.md", 1600),
+    // 1600 → 1700 on 2026-08-29 (#331): the wedge diagram and its alt moved
+    // here from the README, where the reader-facing hero replaced it.
+    ("docs/COMPARISON.md", 1700),
     ("docs/CONFIG.md", 1775),
-    ("docs/DEMO.md", 775),
+    // 775 → 875 on 2026-08-29 (#331): six screenshot embeds (x-ray, slider,
+    // compare) — alt text, not prose.
+    ("docs/DEMO.md", 875),
     // 1700 → 1760 on 2026-08-28: the merge_cubes join and its preview framing
     // (ADR 0022) — three sentences the process list could not carry; → 1800
     // the same day for the tileset metadata's window and branch count (#301).
@@ -45,7 +53,9 @@ const BUDGETS: [(&str, usize); 17] = [
     // regrowth — re-measured at 2372 + the usual headroom.
     ("docs/PERFORMANCE.md", 2425),
     ("docs/PITCH.md", 225),
-    ("docs/QUICKSTART.md", 850),
+    // 850 → 900 on 2026-08-29 (#331): the tracks show their screenshots
+    // instead of linking them.
+    ("docs/QUICKSTART.md", 900),
     // Raised 525 -> 545 with #194's evidence screenshot: the QGIS recipe
     // gained its capture note and image line (an acceptance criterion,
     // not prose regrowth), re-measured at 534 + the usual headroom.

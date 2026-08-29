@@ -1,6 +1,6 @@
 # docs/media — technical diagrams
 
-Four diagrams (docs audit ranks 2–5, issue #113). Conventions:
+Five diagrams (the product loop, plus the four of the docs audit, issue #113). Conventions:
 
 - **Hand-crafted SVG, canonical.** All four diagrams are hand-crafted SVGs (plan decision #3
   set the style with the virtual-reference figure; maintainer review extended it to all four).
@@ -10,12 +10,17 @@ Four diagrams (docs audit ranks 2–5, issue #113). Conventions:
 - **Every figure is traceable.** Each diagram has a `*.notes.md` sidecar listing the committed
   artifact (bench file, load artifact, trace capture, test, prototype record) backing every
   number and every solid/dashed choice. No hand-typed figures.
+- **Reader-facing words.** Milestone names (`M<n>`, "Phase-<n> exit") and ADR numbers belong in
+  `docs/ROADMAP.md`, `docs/decisions/`, and PR/issue text. A diagram's labels, a screenshot's
+  caption, and a document's first screen say what exists, in the reader's vocabulary; an ADR
+  is cited as provenance in the sidecar or later in the body, never as the headline.
 - **Theme legibility.** Every SVG paints its own opaque light background and carries an inline
   SPDX header, so it reads identically on GitHub light and dark themes (and is REUSE-clean
   both by header and by the `docs/**` aggregate annotation).
 
 | Diagram | Page | SVG (canonical source) | Sidecar |
 |---|---|---|---|
+| The product loop (README hero) | [`product-loop.md`](product-loop.md) | [`product-loop.svg`](product-loop.svg) | [`product-loop.notes.md`](product-loop.notes.md) |
 | Ingest-to-pixel flow, measured stage timings | [`ingest-to-pixel-flow.md`](ingest-to-pixel-flow.md) | [`ingest-to-pixel-flow.svg`](ingest-to-pixel-flow.svg) | [`ingest-to-pixel-flow.notes.md`](ingest-to-pixel-flow.notes.md) |
 | Planner decision loop, real `plan.considered` | [`planner-decision-loop.md`](planner-decision-loop.md) | [`planner-decision-loop.svg`](planner-decision-loop.svg) | [`planner-decision-loop.notes.md`](planner-decision-loop.notes.md) |
 | Legacy virtual-reference mechanism | [`virtual-reference.md`](virtual-reference.md) | [`virtual-reference.svg`](virtual-reference.svg) | [`virtual-reference.notes.md`](virtual-reference.notes.md) |

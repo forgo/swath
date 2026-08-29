@@ -83,6 +83,8 @@ tile; every tile response carries a one-line `x-swath-trace` summary
 layers, cache, CORS, and watch dir; the ingest loop logs every granule's
 latency.
 
+![Trace analytics in the viewer: rolling p50/p95 render latency, plan mix, and cache hit rate over the session's tiles — the /traces stream, consumed.](media/screenshots/12-analytics-under-load.png)
+
 ## 6. CORS and serving the UI
 
 **Same-origin is the default story and needs no configuration.** The binary
