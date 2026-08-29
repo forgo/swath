@@ -155,6 +155,10 @@ mod tests {
 
     /// A minimal in-memory catalog enforcing the dataset-must-exist
     /// contract, so the orchestrator's error path is testable without I/O.
+    /// The workspace's shared double (`swath_testsupport::catalog`) cannot
+    /// be used here: a dev-dependency of `swath-core` on a crate that
+    /// depends on `swath-core` builds two instances of this crate, and the
+    /// shared impl targets the other one — so this copy stays (#348).
     #[derive(Default)]
     struct MemoryCatalog {
         datasets: Mutex<Vec<Dataset>>,

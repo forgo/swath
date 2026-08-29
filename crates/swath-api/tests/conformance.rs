@@ -7,10 +7,6 @@
 //! standard's structural requirements — required links, required list
 //! fields, the honest conformance declaration — are asserted directly.
 
-#[allow(
-    dead_code,
-    reason = "shared between the API test targets; not every helper is used in each"
-)]
 mod common;
 
 use axum::http::StatusCode;

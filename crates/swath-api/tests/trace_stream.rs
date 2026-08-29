@@ -14,10 +14,6 @@
 //! relying on TCP backpressure alone would leave lag at the mercy of
 //! kernel socket buffer sizes.
 
-#[allow(
-    dead_code,
-    reason = "shared between the API test targets; not every helper is used in each"
-)]
 mod common;
 
 use std::net::SocketAddr;

@@ -12,87 +12,31 @@
 //! registry's `NotFound` at preview time; a window that can never select
 //! anything is `ProcessParameterInvalid` at validation time.
 
-#[allow(
-    dead_code,
-    reason = "shared between the API test targets; not every helper is used in each"
-)]
 mod common;
+
+use swath_testsupport::fixtures::{FIRE_DAYS, park_fire};
+use swath_testsupport::http::publish;
+
+/// The served tile must match the committed oracle golden for `day`.
+fn assert_matches_golden(tile: &[u8], day: &str) {
+    let served = image::load_from_memory(tile)
+        .expect("served PNG decodes")
+        .into_rgba8();
+    let golden = format!("ndvi-{day}-13-1326-3100.png");
+    swath_testsupport::pdiff::assert_matches_golden(
+        &golden,
+        &served,
+        &common::render_goldens_dir().join(&golden),
+    );
+}
 
 use axum::http::StatusCode;
 use serde_json::{Value, json};
-use swath_core::catalog::{
-    Bbox, Dataset, DatasetId, Datetime, Extent, Granule, GranuleAsset, GranuleId, TimeRange,
-};
-use swath_testkit::{DiffPolicy, diff, load_png};
-
-/// The Park Fire series: sensing dates of the six committed T10TFK
-/// acquisitions (tests/fixtures/README.md, "Fire-event series").
-const FIRE_DAYS: [(&str, &str); 6] = [
-    ("2024159", "2024-06-07T19:03:00Z"),
-    ("2024204", "2024-07-22T19:03:00Z"),
-    ("2024229", "2024-08-16T19:03:00Z"),
-    ("2024249", "2024-09-05T19:03:00Z"),
-    ("2024274", "2024-09-30T19:03:00Z"),
-    ("2024289", "2024-10-15T19:03:00Z"),
-];
-
-/// The fixture window's CRS84 footprint (README: EPSG:32610 easting
-/// 607680–615360, northing 4427040–4434720).
-fn fire_bbox() -> Bbox {
-    Bbox {
-        west: -121.7388,
-        south: 39.9866,
-        east: -121.6474,
-        north: 40.0549,
-    }
-}
-
-/// The Park Fire dataset: NDVI bands only, no config-defined layers —
-/// every served layer in these tests is authored through the openEO
-/// surface.
-fn fire_dataset() -> Dataset {
-    Dataset {
-        id: DatasetId::new("park-fire"),
-        title: "HLS S30 Park Fire series".to_owned(),
-        description: "Six T10TFK acquisitions across the 2024 Park Fire.".to_owned(),
-        license: "CC0-1.0".to_owned(),
-        extent: Extent {
-            bbox: fire_bbox(),
-            interval: TimeRange {
-                start: Some(Datetime::new("2024-06-07T19:03:00Z").unwrap()),
-                end: Some(Datetime::new("2024-10-15T19:03:00Z").unwrap()),
-            },
-        },
-        bands: ["b04", "b8a"].map(str::to_owned).into_iter().collect(),
-        layers: Vec::new(),
-    }
-}
-
-/// One committed fire granule: assets are the bare fixture file names the
-/// local store root resolves, acquisition datetime per the fixture README.
-fn fire_granule(day: &str, datetime: &str) -> Granule {
-    let asset = |band: &str| GranuleAsset::raster(format!("hlss30-t10tfk-{day}-{band}.tif"));
-    Granule {
-        id: GranuleId::new(format!("hlss30-t10tfk-{day}")),
-        dataset: DatasetId::new("park-fire"),
-        bbox: fire_bbox(),
-        datetime: Datetime::new(datetime).unwrap(),
-        assets: [
-            ("b04".to_owned(), asset("b04")),
-            ("b8a".to_owned(), asset("b8a")),
-        ]
-        .into(),
-        ingested_at: Some(Datetime::new("2024-11-01T00:00:00Z").unwrap()),
-    }
-}
 
 /// The app over the full six-acquisition series.
 fn fire_app() -> axum::Router {
-    let granules = FIRE_DAYS
-        .iter()
-        .map(|(day, datetime)| fire_granule(day, datetime))
-        .collect();
-    common::openeo_app_seeded(fire_dataset(), granules).0
+    let (dataset, granules) = park_fire(&FIRE_DAYS);
+    common::openeo_app_seeded(dataset, granules).0
 }
 
 /// The grayscale NDVI service request (the oracle golden's math:
@@ -122,39 +66,12 @@ fn ndvi_service(temporal_extent: &Value) -> Value {
     })
 }
 
-/// Publishes `request` and returns the service id.
-async fn publish(app: &axum::Router, request: Value) -> String {
-    let response = common::request_on(app, "POST", "/services", Some(request)).await;
-    assert_eq!(response.status(), StatusCode::CREATED);
-    response.headers()["openeo-identifier"]
-        .to_str()
-        .expect("identifier header")
-        .to_owned()
-}
-
 /// Serves the z13 tile fully inside the fixture window from `service`.
 async fn fire_tile(app: &axum::Router, service: &str) -> Vec<u8> {
     let path = format!("/tilesets/{service}/tiles/13/3100/1326");
     let response = common::request_on(app, "GET", &path, None).await;
     assert_eq!(response.status(), StatusCode::OK, "GET {path}");
     common::body_bytes(response).await
-}
-
-/// Asserts `tile` passes the default perceptual-diff policy against the
-/// per-timestamp oracle golden of `day`.
-fn assert_matches_golden(tile: &[u8], day: &str) {
-    let golden =
-        load_png(&common::render_goldens_dir().join(format!("ndvi-{day}-13-1326-3100.png")))
-            .expect("golden loads");
-    let served = image::load_from_memory(tile)
-        .expect("PNG decodes")
-        .into_rgba8();
-    let report = diff(&served, &golden).expect("dimensions match");
-    assert!(
-        report.passes(&DiffPolicy::default()),
-        "served tile fails the oracle policy vs day {day}: max |diff| {}",
-        report.max_abs_channel_diff
-    );
 }
 
 // --- The correctly dated granule, per timestamp -------------------------

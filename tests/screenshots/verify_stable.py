@@ -15,7 +15,7 @@ cache state. The gate proves the shots are reproducible, not hand-made:
   scenes (the #211 review found shots frozen on an unpainted canvas), so
   each image is also judged alone — the single most common color may cover
   at most MAX_MODAL_FRAC of the map region (everything right of the rail),
-- every pair passes swath-testkit's pdiff under the per-shot policy the
+- every pair passes swath-testsupport's pdiff under the per-shot policy the
   capture suite declared in shots.json (a dimension mismatch is always a
   hard pdiff failure, so geometry is covered too).
 
@@ -28,7 +28,7 @@ import pathlib
 import subprocess
 import sys
 
-PDIFF = ["cargo", "run", "--quiet", "-p", "swath-testkit", "--bin", "pdiff", "--"]
+PDIFF = ["cargo", "run", "--quiet", "-p", "swath-testsupport", "--bin", "pdiff", "--"]
 
 # The entry page's rail width in the pinned 1528px viewport
 # (the `screenshots` project of web/playwright.config.ts: rail 248px + a

@@ -12,7 +12,7 @@
 //! pre-drop 404, the granule drop (via the shared
 //! `tests/e2e/drop-granule.sh`), poll-to-live, trace-header and SSE
 //! assertions against the typed [`swath_core::trace::Trace`] (no string
-//! re-parsing), golden comparisons through `swath-testkit`'s pdiff
+//! re-parsing), golden comparisons through `swath-testsupport`'s pdiff
 //! library, the openEO authoring round trip, and the declared-bounds
 //! check. Every check has a name; every failure names the endpoint, the
 //! expectation, and what was actually observed.
@@ -36,7 +36,7 @@ use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use swath_core::trace::{Strategy, TemporalRule, Trace};
-use swath_testkit::{DiffPolicy, diff, load_png};
+use swath_testsupport::{DiffPolicy, diff, load_png};
 
 /// The proven tile, OGC request order (`z/row/col`).
 const TILE: &str = "/tilesets/truecolor/tiles/12/1561/848";
@@ -1178,7 +1178,7 @@ fn second_fetch_is_cache_hit_with_identical_bytes(first_body: &[u8]) -> Result<(
     Ok(())
 }
 
-/// Perceptual comparison through the `swath-testkit` library (same
+/// Perceptual comparison through the `swath-testsupport` library (same
 /// policy the pdiff bin defaults to).
 fn pdiff_check(
     check: &'static str,
@@ -1213,7 +1213,7 @@ fn pdiff_check(
     Ok(())
 }
 
-/// Was: `cargo run -p swath-testkit --bin pdiff -- tile.png <golden>` —
+/// Was: `cargo run -p swath-testsupport --bin pdiff -- tile.png <golden>` —
 /// the correctness oracle: a CORRECT tile is visible (§3), not just any
 /// tile.
 fn truecolor_matches_oracle_golden() -> Result<(), Failure> {

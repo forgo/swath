@@ -17,10 +17,6 @@
 //! serves — or see the exact fuel/trap diagnostic as a 400 in the
 //! registry's vocabulary, before anything is published.
 
-#[allow(
-    dead_code,
-    reason = "shared between the API test targets; not every helper is used in each"
-)]
 mod common;
 
 use axum::http::StatusCode;

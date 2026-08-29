@@ -11,10 +11,6 @@
 //! and the preview; a module that exhausts its fuel answers a pinned
 //! RFC 7807 problem.
 
-#[allow(
-    dead_code,
-    reason = "shared between the API test targets; not every helper is used in each"
-)]
 mod common;
 
 use std::collections::BTreeMap;
@@ -32,7 +28,7 @@ use swath_render::udf::UdfStage;
 use swath_render::{NodataPolicy, Resampling};
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
-use swath_testkit::{DiffPolicy, diff, load_png};
+use swath_testsupport::{DiffPolicy, diff, load_png};
 use swath_udf_wasmtime::WasmtimeUdf;
 
 use common::{NDVI_WASM as NDVI, NoFetch, wasm_data_url as data_url};
@@ -75,13 +71,11 @@ fn band_math_graph() -> Value {
 }
 
 async fn publish(app: &Router, process: Value) -> String {
-    let body = json!({ "type": "xyz", "title": "ndvi", "process": process });
-    let response = common::request_on(app, "POST", "/services", Some(body)).await;
-    assert_eq!(response.status(), StatusCode::CREATED);
-    response.headers()["openeo-identifier"]
-        .to_str()
-        .expect("ascii id")
-        .to_owned()
+    swath_testsupport::http::publish(
+        app,
+        json!({ "type": "xyz", "title": "ndvi", "process": process }),
+    )
+    .await
 }
 
 /// GET one tile: the PNG bytes, the parsed `X-Swath-Trace` header, and

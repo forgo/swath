@@ -7,10 +7,6 @@
 //! exactly those bytes — upload-then-register is one loop, proven here
 //! over an in-memory store seeded from the committed fixture COG.
 
-#[allow(
-    dead_code,
-    reason = "this binary uses a subset of the shared test plumbing"
-)]
 mod common;
 
 use std::sync::Arc;

@@ -19,10 +19,6 @@
 //!   minimal broken graph; the Display strings are UX and are pinned by
 //!   insta snapshots.
 
-#[allow(
-    dead_code,
-    reason = "shared with golden.rs; not every helper is used here"
-)]
 mod common;
 
 use serde_json::{Value as Json, json};
@@ -30,7 +26,7 @@ use swath_render::ir::{BandInput, Colormap, Expr, OutputSpec, PixelOp, RenderPla
 use swath_render::{
     CompileContext, CompileError, NoUdf, NodataPolicy, Resampling, WarpedBuffer, eval,
 };
-use swath_testkit::{DiffPolicy, RgbaImage, diff, load_png};
+use swath_testsupport::RgbaImage;
 
 const B02: &str = "hlss30-t13sdd-2024158-b02.tif";
 const B03: &str = "hlss30-t13sdd-2024158-b03.tif";
@@ -171,21 +167,10 @@ async fn assert_compiled_matches_oracle(graph_file: &str, fixtures: &[&str], gol
     }
     let tile = eval(&product.plan, &warped, &NoUdf).expect("compiled plan evaluates");
     let ours = RgbaImage::from_raw(tile.width, tile.height, tile.pixels).expect("tile buffer");
-    let reference = load_png(&common::goldens_dir().join(golden)).expect("golden loads");
-    let report = diff(&ours, &reference).expect("dimensions match");
-    let policy = DiffPolicy::default();
-    let bad_pct = report.pct_pixels_exceeding_tolerance(policy.per_channel_tolerance) * 100.0;
-    println!(
-        "{graph_file} -> {golden}: max |diff| {max}, mean |diff| {mean:.4}, bad pixels {bad_pct:.4}%",
-        max = report.max_abs_channel_diff,
-        mean = report.mean_abs_diff,
-    );
-    assert!(
-        report.passes(&policy),
-        "{graph_file}: compiled plan fails default policy vs {golden} — max |diff| {}, \
-         {bad_pct:.4}% pixels over tolerance {}",
-        report.max_abs_channel_diff,
-        policy.per_channel_tolerance,
+    swath_testsupport::pdiff::assert_matches_golden(
+        &format!("{graph_file} -> {golden}"),
+        &ours,
+        &common::goldens_dir().join(golden),
     );
 }
 

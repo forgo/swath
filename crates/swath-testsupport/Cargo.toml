@@ -3,7 +3,7 @@
 
 [package]
 name = "swath-testsupport"
-description = "Test-only shared plumbing: truth-table schema/loader, parallel-safe temp dirs, gated-test skip. Only ever a [dev-dependencies] entry (never shipped)."
+description = "Test-only shared plumbing: the perceptual diff against the oracle (+ the pdiff CLI), truth-table schema/loader, parallel-safe temp dirs, gated-test skip. Never published, never in the product binary."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,9 +13,13 @@ authors.workspace = true
 publish = false
 
 [dependencies]
+axum = { workspace = true }
+http-body-util = { workspace = true }
+image = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+tower = { workspace = true }
 swath-core = { path = "../swath-core", version = "0.1.0-alpha.1" }
 
 [lints]

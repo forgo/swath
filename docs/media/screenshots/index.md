@@ -5,7 +5,7 @@ Every image is captured from the fixture compose stack (tests/e2e/stack-up.sh, c
 HLS granule, no third-party basemap) at a pinned viewport (1528x928, DPR 1 — a 1280x860 canvas beside the 248px rail, under the 44px top bar); every shot must
 show a painted map (`pdiff --content`: the map region is never near-uniform), and a second
 capture run must reproduce each shot within its perceptual-diff policy
-(tests/screenshots/verify_stable.py + swath-testkit pdiff) before the recipe passes.
+(tests/screenshots/verify_stable.py + swath-testsupport pdiff) before the recipe passes.
 
 - capture sha: `53f0f87062c1218d06d0f58ce421d0ed9bec37d4`
 - captured: 2026-08-29T08:36:23.851Z

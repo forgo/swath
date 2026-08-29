@@ -69,9 +69,9 @@ oracle-verify:
     echo "render 1 sha256: $sha_a"
     echo "render 2 sha256: $sha_b"
     [ "$sha_a" = "$sha_b" ] || { echo "FAIL: renders are not byte-stable"; exit 1; }
-    cargo run --quiet -p swath-testkit --bin pdiff -- "$dir/a.png" "$dir/b.png"
-    cargo run --quiet -p swath-testkit --bin pdiff -- --corrupt "$dir/a.png" "$dir/corrupt.png"
-    if cargo run --quiet -p swath-testkit --bin pdiff -- --tolerance 0 --max-bad-frac 0 "$dir/a.png" "$dir/corrupt.png"; then
+    cargo run --quiet -p swath-testsupport --bin pdiff -- "$dir/a.png" "$dir/b.png"
+    cargo run --quiet -p swath-testsupport --bin pdiff -- --corrupt "$dir/a.png" "$dir/corrupt.png"
+    if cargo run --quiet -p swath-testsupport --bin pdiff -- --tolerance 0 --max-bad-frac 0 "$dir/a.png" "$dir/corrupt.png"; then
         echo "FAIL: pdiff missed the seeded single-pixel error"; exit 1
     fi
     echo "seeded error caught at tolerance 0"
@@ -281,7 +281,7 @@ test-virtual:
         --expression "(b1 - b2) / (b1 + b2)" --rescale=-1,1 \
         --resampling bilinear --no-overviews --exact-grid
     # Perceptual diff, default policy — the same bar the render goldens meet.
-    cargo run -q -p swath-testkit --bin pdiff -- "$dir/swath-ndvi.png" "$dir/oracle-ndvi.png"
+    cargo run -q -p swath-testsupport --bin pdiff -- "$dir/swath-ndvi.png" "$dir/oracle-ndvi.png"
     # Icechunk read-back demo (#193, ADR 0017): the SAME tile served from
     # an Icechunk commit, byte-identical to the manifest path, provenance
     # into the original .h5 asserted inside the test.

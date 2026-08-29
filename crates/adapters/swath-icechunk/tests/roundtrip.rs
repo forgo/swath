@@ -12,8 +12,8 @@
 //! `just test-referencer` (`tests/referencer/icechunk_check.py`).
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
+use swath_testsupport::paths::referencer_data_dir as data_dir;
 
 use icechunk::config::Credentials;
 use icechunk::format::ByteRange;
@@ -22,13 +22,6 @@ use icechunk::store::Store;
 use icechunk::{Repository, new_local_filesystem_storage};
 use swath_icechunk::{CommitError, commit_manifest};
 use swath_referencer::SwathReferencer;
-
-/// The tiny committed HDF-EOS fixture (swath-referencer's known-answer
-/// truth): 8×7 `int16` `nir` with `shuffle` + `zlib:4`, a float array, and
-/// a `|S18` metadata blob that must be skipped loudly.
-fn data_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../swath-referencer/tests/data")
-}
 
 const NIR: &str = "HDFEOS/GRIDS/TinyGrid/Data Fields/nir";
 

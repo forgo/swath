@@ -12,8 +12,8 @@
 //! `just test-virtual`) additionally pins the rendered-PNG equality on a
 //! real VNP09GA NDVI tile.
 
-use std::path::PathBuf;
 use std::sync::Arc;
+use swath_testsupport::paths::referencer_data_dir as data_dir;
 
 use object_store::ObjectStoreExt as _;
 use object_store::memory::InMemory;
@@ -25,10 +25,6 @@ use swath_referencer::SwathReferencer;
 use swath_source_virtual::VirtualSource;
 
 const NIR: &str = "HDFEOS/GRIDS/TinyGrid/Data Fields/nir";
-
-fn data_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../swath-referencer/tests/data")
-}
 
 #[tokio::test]
 async fn icechunk_and_manifest_paths_serve_identical_bytes() {

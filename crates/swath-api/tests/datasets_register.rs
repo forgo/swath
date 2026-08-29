@@ -9,10 +9,6 @@
 //! fixtures. Plus the refusal taxonomy: RFC 7807 on bad assets, unknown
 //! bands, unknown datasets, ambiguous bodies, and duplicate ids.
 
-#[allow(
-    dead_code,
-    reason = "this binary uses a subset of the shared test plumbing"
-)]
 mod common;
 
 use std::sync::Arc;

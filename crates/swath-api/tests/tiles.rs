@@ -6,10 +6,6 @@
 //! oracle goldens, the Trace exposure seam (#28), and the documented
 //! error taxonomy.
 
-#[allow(
-    dead_code,
-    reason = "shared between the API test targets; not every helper is used in each"
-)]
 mod common;
 
 use std::sync::Arc;
@@ -21,7 +17,7 @@ use swath_core::tile::TileCoord;
 use swath_render::{NoUdf, render_tile};
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
-use swath_testkit::{DiffPolicy, RgbaImage, diff, load_png};
+use swath_testsupport::{DiffPolicy, RgbaImage, diff, load_png};
 
 /// Renders a layer tile directly through `render_tile` — the reference
 /// the API-served bytes must equal. `x`/`y` are XYZ-named (col/row).

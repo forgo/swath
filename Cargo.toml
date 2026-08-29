@@ -23,7 +23,6 @@ members = [
     "crates/swath-planner",
     "crates/swath-referencer",
     "crates/swath-render",
-    "crates/swath-testkit",
     "crates/swath-testsupport",
     "crates/swath-udf-guest",
     "crates/swath-warp",

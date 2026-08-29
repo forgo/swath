@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Perceptual-diff utilities for validating Swath renders against the
+//! `pdiff` — perceptual-diff utilities for validating Swath renders against the
 //! GDAL/rio-tiler correctness oracle (ADR 0002: GDAL lives only in the test
 //! suite; `tests/oracle/render_reference.py` produces the reference tiles).
 //!
@@ -212,6 +212,29 @@ pub fn diff(a: &RgbaImage, b: &RgbaImage) -> Result<DiffReport, DiffError> {
         mean_abs_diff,
         pixel_max_diff_histogram: histogram,
     })
+}
+
+/// Asserts `ours` matches the committed golden PNG at `golden` under the
+/// default policy, printing the diff metrics (the test's report) either
+/// way. `label` names the case in the output. The tail every oracle and
+/// served-tile golden test shared (#348).
+#[allow(clippy::print_stdout, reason = "diff metrics are the test's report")]
+pub fn assert_matches_golden(label: &str, ours: &RgbaImage, golden: &Path) {
+    let reference =
+        load_png(golden).unwrap_or_else(|err| panic!("golden {}: {err}", golden.display()));
+    let report = diff(ours, &reference).expect("dimensions match");
+    let policy = DiffPolicy::default();
+    let bad_pct = report.pct_pixels_exceeding_tolerance(policy.per_channel_tolerance) * 100.0;
+    println!(
+        "{label}: max |diff| {}, mean {:.4}, {bad_pct:.4}% pixels over tolerance {}",
+        report.max_abs_channel_diff, report.mean_abs_diff, policy.per_channel_tolerance
+    );
+    assert!(
+        report.passes(&policy),
+        "{label}: fails default policy — max |diff| {}, {bad_pct:.4}% pixels over tolerance {}",
+        report.max_abs_channel_diff,
+        policy.per_channel_tolerance
+    );
 }
 
 #[cfg(test)]

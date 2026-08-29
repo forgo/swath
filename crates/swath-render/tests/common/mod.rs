@@ -1,10 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+// `mod common` is compiled once per test binary and each binary uses a
+// subset of it — one allow here instead of one per binary (#348).
+#![allow(
+    dead_code,
+    reason = "compiled once per test binary; each uses a subset"
+)]
+
 //! Shared plumbing for the golden tests: the full fixture → tile pipeline
 //! (COG read → reproject → warp → oracle-identical grayscale encode).
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use object_store::local::LocalFileSystem;
@@ -16,17 +22,12 @@ use swath_core::tile::TileCoord;
 use swath_render::{Resampling, TargetGrid, WarpedBuffer, source_window, warp};
 use swath_reproject_proj4rs::Proj4rsReproject;
 use swath_source_cog::CogSource;
-use swath_testkit::RgbaImage;
-
-/// The committed HLS fixture directory (tests/fixtures/README.md, ADR 0004).
-pub(crate) fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
-}
-
-/// The committed oracle golden tiles for this crate.
-pub(crate) fn goldens_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data")
-}
+use swath_testsupport::RgbaImage;
+#[allow(
+    unused_imports,
+    reason = "shared between the render test binaries; not every one uses each"
+)]
+pub(crate) use swath_testsupport::paths::{fixtures_dir, render_goldens_dir as goldens_dir};
 
 /// Pixel margin used for source windows: the resampling support. Bilinear
 /// needs 1 pixel at scale >= 1, and `ceil(1/scale) + 1` when the warp

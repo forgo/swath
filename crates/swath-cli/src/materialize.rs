@@ -274,12 +274,9 @@ fn collect_assets(
 #[cfg(test)]
 mod tests {
     use swath_testsupport::TempDir;
+    use swath_testsupport::paths::fixtures_dir;
 
     use super::{MaterializeArgs, MaterializeCliError, run};
-
-    fn fixtures_dir() -> std::path::PathBuf {
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
-    }
 
     /// A static NDVI config over a temp store preloaded with the two
     /// committed HLS fixture bands the layer needs.

@@ -836,7 +836,6 @@ impl swath_core::ingest::IngestReferencer for ReferencerShim {
 mod tests {
     use std::collections::BTreeMap;
     use std::future::ready;
-    use std::sync::{Arc, Mutex};
 
     use object_store::ObjectStoreExt as _;
 
@@ -846,78 +845,13 @@ mod tests {
     };
     use swath_core::events::{EventError, EventSource, GranuleEvent};
     use swath_testsupport::TempDir;
+    use swath_testsupport::catalog::MemoryCatalog;
 
     use super::{
         ServeArgs, ServeError, Shared, build_store, ingest_loop, now_unix_millis,
         rehydrate_service, run, serve, serve_catalog_on,
     };
     use crate::config::{self, ConfigError, LayerSource};
-
-    /// A minimal in-memory [`Catalog`] enforcing the dataset-must-pre-exist
-    /// contract, shared by clones like pgstac in production.
-    #[derive(Debug, Clone, Default)]
-    struct MemoryCatalog {
-        datasets: Arc<Mutex<BTreeMap<String, Dataset>>>,
-        granules: Arc<Mutex<Vec<Granule>>>,
-    }
-
-    impl Catalog for MemoryCatalog {
-        async fn upsert_dataset(&self, dataset: &Dataset) -> Result<(), CatalogError> {
-            self.datasets
-                .lock()
-                .unwrap()
-                .insert(dataset.id.as_str().to_owned(), dataset.clone());
-            Ok(())
-        }
-
-        async fn upsert_granules(&self, granules: &[Granule]) -> Result<(), CatalogError> {
-            for granule in granules {
-                if !self
-                    .datasets
-                    .lock()
-                    .unwrap()
-                    .contains_key(granule.dataset.as_str())
-                {
-                    return Err(CatalogError::DatasetNotFound {
-                        id: granule.dataset.clone(),
-                    });
-                }
-                self.granules.lock().unwrap().push(granule.clone());
-            }
-            Ok(())
-        }
-
-        async fn get_dataset(&self, id: &DatasetId) -> Result<Option<Dataset>, CatalogError> {
-            Ok(self.datasets.lock().unwrap().get(id.as_str()).cloned())
-        }
-
-        async fn list_datasets(&self) -> Result<Vec<Dataset>, CatalogError> {
-            Ok(self.datasets.lock().unwrap().values().cloned().collect())
-        }
-
-        async fn find_granules(
-            &self,
-            dataset: &DatasetId,
-            _query: &GranuleQuery,
-        ) -> Result<Vec<Granule>, CatalogError> {
-            // Like pgstac: querying a collection that was never
-            // registered is a hard error, not an empty set — the
-            // startup registration order depends on this contract.
-            if !self.datasets.lock().unwrap().contains_key(dataset.as_str()) {
-                return Err(CatalogError::DatasetNotFound {
-                    id: dataset.clone(),
-                });
-            }
-            Ok(self
-                .granules
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|granule| granule.dataset == *dataset)
-                .cloned()
-                .collect())
-        }
-    }
 
     /// A finite replay [`EventSource`]: yields the scripted results, then
     /// reports exhaustion (`Ok(None)`).

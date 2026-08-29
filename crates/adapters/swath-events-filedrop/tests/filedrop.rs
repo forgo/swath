@@ -7,17 +7,17 @@
 //! test-catalog`'s gated suite).
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::time::Duration;
 
 use swath_core::catalog::{
-    AssetKind, Bbox, Catalog, CatalogError, Dataset, DatasetId, Datetime, Extent, Granule,
-    GranuleId, GranuleQuery, TimeRange,
+    AssetKind, Bbox, Catalog, CatalogError, Dataset, DatasetId, Datetime, Extent, GranuleId,
+    GranuleQuery, TimeRange,
 };
 use swath_core::events::{EventError, EventSource as _, GranuleEvent};
 use swath_core::ingest::ingest_granule;
 use swath_events_filedrop::FiledropEvents;
 use swath_testsupport::TempDir;
+use swath_testsupport::catalog::MemoryCatalog;
 
 /// Fast-polling watcher over `dir` (tests should not wait real cadences).
 fn watcher(dir: &Path) -> FiledropEvents {
@@ -178,69 +178,6 @@ async fn name_mismatch_and_empty_assets_are_malformed() {
 }
 
 // --- the orchestrator path: drop -> event -> catalog upsert, end to end ---
-
-/// A minimal in-memory catalog enforcing the dataset-must-exist contract.
-#[derive(Default)]
-struct MemoryCatalog {
-    datasets: Mutex<Vec<Dataset>>,
-    granules: Mutex<Vec<Granule>>,
-}
-
-impl Catalog for MemoryCatalog {
-    async fn upsert_dataset(&self, dataset: &Dataset) -> Result<(), CatalogError> {
-        self.datasets.lock().unwrap().push(dataset.clone());
-        Ok(())
-    }
-
-    async fn upsert_granules(&self, granules: &[Granule]) -> Result<(), CatalogError> {
-        for granule in granules {
-            let known = self
-                .datasets
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|d| d.id == granule.dataset);
-            if !known {
-                return Err(CatalogError::DatasetNotFound {
-                    id: granule.dataset.clone(),
-                });
-            }
-            let mut stored = self.granules.lock().unwrap();
-            stored.retain(|g| g.id != granule.id || g.dataset != granule.dataset);
-            stored.push(granule.clone());
-        }
-        Ok(())
-    }
-
-    async fn get_dataset(&self, id: &DatasetId) -> Result<Option<Dataset>, CatalogError> {
-        Ok(self
-            .datasets
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|d| d.id == *id)
-            .cloned())
-    }
-
-    async fn list_datasets(&self) -> Result<Vec<Dataset>, CatalogError> {
-        Ok(self.datasets.lock().unwrap().clone())
-    }
-
-    async fn find_granules(
-        &self,
-        dataset: &DatasetId,
-        _query: &GranuleQuery,
-    ) -> Result<Vec<Granule>, CatalogError> {
-        Ok(self
-            .granules
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|g| g.dataset == *dataset)
-            .cloned()
-            .collect())
-    }
-}
 
 fn hls_dataset() -> Dataset {
     Dataset {

@@ -7,10 +7,6 @@
 //! unknown dataset, 400 malformed parameters), and the no-host-paths
 //! leakage check.
 
-#[allow(
-    dead_code,
-    reason = "shared between the API test targets; not every helper is used in each"
-)]
 mod common;
 
 use std::sync::Arc;

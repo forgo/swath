@@ -63,7 +63,7 @@ All nodes are implemented (per-module detail lives in each crate's rustdoc); the
 `VirtualiZarr` sidecar is deliberately absent — the conformance *reference* for
 `swath-referencer` (ADR 0006), not a runtime component.
 
-_Last verified against sources `7f5a11855aef`._
+_Last verified against sources `ae16b5eafb25`._
 
 ## 5. The Core (pure logic)
 
@@ -154,7 +154,7 @@ planner crate, ADR 0016 — re-exported at `swath_core::planner`; `PlanChoice` i
 `run_udf` executor as a `dyn` port (ADR 0018); the cached variant owns the probe +
 write-through.
 
-_Last verified against sources `9429e272f4b0`._
+_Last verified against sources `98dec53cf6bf`._
 
 ## 7. Adapters and inbound APIs
 
@@ -242,7 +242,7 @@ immutable once concluded), and `docs/`. Phase-1 adapters are direct dependencies
 embedded UI and HDF5 weight, not adapter selection (§14 covers extension beyond compile
 time).
 
-_Last verified against sources `7f5a11855aef`._
+_Last verified against sources `ae16b5eafb25`._
 
 ## 13. Frontend architecture
 

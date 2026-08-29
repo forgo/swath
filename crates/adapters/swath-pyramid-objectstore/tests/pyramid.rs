@@ -9,6 +9,8 @@
 
 use std::sync::Arc;
 
+use swath_testsupport::paths::fixtures_dir;
+
 use object_store::memory::InMemory;
 use object_store::path::Path;
 use object_store::{ObjectStore, ObjectStoreExt as _, PutPayload};
@@ -25,10 +27,6 @@ const B04: &str = "hlss30-t13sdd-2024158-b04.tif";
 /// The categorical Fmask fixture: uint8, nodata 255, one embedded x2
 /// overview (nearest).
 const FMASK: &str = "hlss30-t13sdd-2024158-fmask.tif";
-
-fn fixtures_dir() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tests/fixtures")
-}
 
 /// An in-memory store preloaded with the named fixtures, and the pyramid
 /// overlay over a COG source reading from it.
