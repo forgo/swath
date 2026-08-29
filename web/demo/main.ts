@@ -39,6 +39,7 @@ import { buildCommands } from "../src/commands.js";
 //   `cinematic`): the bare URL stays bare until the user takes over.
 import { GranuleFootprints } from "../src/granule-footprints.js";
 import { formatCrs, formatIngest, formatLonLat, formatZoomCell } from "../src/status-model.js";
+import { safeLocalStorage } from "../src/storage.js";
 import { defineSwathAddDataPanel, SwathAddDataPanel } from "../src/swath-add-data-panel.js";
 import { defineSwathAuthoringPanel, SwathAuthoringPanel } from "../src/swath-authoring-panel.js";
 import { defineSwathCatalog, SwathCatalog } from "../src/swath-catalog.js";
@@ -60,7 +61,6 @@ import {
   parseTime,
   parseViewState,
   resolveInitialState,
-  safeLocalStorage,
   saveViewState,
   shareUrl,
   type ViewState,

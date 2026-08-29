@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+import { fixed } from "./format";
 /**
  * The status bar's cell text (issue #287): pure formatting beside
  * `view-state.ts`. lat/lon · zoom · CRS · ingest→pixel — the glass-box
@@ -22,17 +23,13 @@ export interface Cursor {
   source: "pointer" | "center";
 }
 
-function trim(value: number, decimals: number): string {
-  return value.toFixed(decimals).replace(/\.?0+$/, "");
-}
-
 /** "lon, lat" with the cursor precision; longitude wrapped to ±180. */
 export function formatLonLat(lng: number, lat: number): string {
   let wrapped = ((((lng + 180) % 360) + 360) % 360) - 180;
   if (Object.is(wrapped, -0)) {
     wrapped = 0;
   }
-  return `${trim(wrapped, CURSOR_DECIMALS)}, ${trim(lat, CURSOR_DECIMALS)}`;
+  return `${fixed(wrapped, CURSOR_DECIMALS)}, ${fixed(lat, CURSOR_DECIMALS)}`;
 }
 
 /** Zoom with view-state's precision (2 decimals, trailing zeros trimmed). */

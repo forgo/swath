@@ -1,3 +1,4 @@
+export { formatMib } from "./format";
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
@@ -330,15 +331,6 @@ export function wasmDataUrl(bytes: Uint8Array): string {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk));
   }
   return `data:application/wasm;base64,${btoa(binary)}`;
-}
-
-/** `bytes` in the user's units: "1.5 MiB" / "820 KiB". */
-export function formatMib(bytes: number): string {
-  const mib = bytes / (1024 * 1024);
-  if (mib >= 1) {
-    return `${Number.isInteger(mib) ? mib : mib.toFixed(1)} MiB`;
-  }
-  return `${Math.max(1, Math.round(bytes / 1024))} KiB`;
 }
 
 /** What blocks the module's `context` field, or `""`: it passes through
