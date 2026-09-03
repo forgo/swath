@@ -113,8 +113,12 @@ impl Catalog for MemoryCatalog {
     }
 }
 
-/// Whether `granule` satisfies `query` — the filter semantics the pgstac
-/// adapter delegates to STAC search.
+/// Whether `granule` satisfies `query` — closed on both ends, matching the
+/// domain's inclusive [`TimeRange`] and the pgstac adapter, whose search
+/// compares inclusively against its window end (#431 corrected the one case
+/// where it could not: a zero-width window, which pgstac parses to an empty
+/// range). The boundary the two must agree on is asserted here and in the
+/// live suite (`a_granule_exactly_on_the_window_end_is_inside_it`).
 fn matches_query(query: &GranuleQuery, granule: &Granule) -> bool {
     if let Some(bbox) = query.bbox {
         let g = granule.bbox;
@@ -132,4 +136,56 @@ fn matches_query(query: &GranuleQuery, granule: &Granule) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use swath_core::catalog::{
+        Bbox, DatasetId, Datetime, Granule, GranuleId, GranuleQuery, TimeRange,
+    };
+
+    use super::matches_query;
+
+    fn granule(datetime: &str) -> Granule {
+        Granule {
+            id: GranuleId::new("g"),
+            dataset: DatasetId::new("d"),
+            bbox: Bbox {
+                west: -1.0,
+                south: -1.0,
+                east: 1.0,
+                north: 1.0,
+            },
+            datetime: Datetime::new(datetime).unwrap(),
+            assets: std::collections::BTreeMap::new(),
+            ingested_at: None,
+        }
+    }
+
+    #[test]
+    fn the_window_is_closed_on_both_ends() {
+        let at = "2024-06-06T17:54:00Z";
+        let g = granule(at);
+        let window = |start: Option<&str>, end: Option<&str>| GranuleQuery {
+            bbox: None,
+            datetime: Some(TimeRange {
+                start: start.map(|s| Datetime::new(s).unwrap()),
+                end: end.map(|s| Datetime::new(s).unwrap()),
+            }),
+        };
+        // Exactly on either end is inside (#431) — the property the pgstac
+        // adapter had to be corrected to share.
+        assert!(matches_query(&window(None, Some(at)), &g));
+        assert!(matches_query(&window(Some(at), None), &g));
+        assert!(matches_query(&window(Some(at), Some(at)), &g));
+        // One millisecond outside either end is outside.
+        assert!(!matches_query(
+            &window(None, Some("2024-06-06T17:53:59.999Z")),
+            &g
+        ));
+        assert!(!matches_query(
+            &window(Some("2024-06-06T17:54:00.001Z"), None),
+            &g
+        ));
+    }
 }
