@@ -11,6 +11,7 @@
  * scope is shared by every instance — no per-instance `<style>` nodes.
  */
 import baseCss from "./base.css?inline";
+import { facesCss } from "./fonts.js";
 import themeCss from "./theme-high-contrast.css?inline";
 import tokensCss from "./tokens.css?inline";
 
@@ -36,6 +37,10 @@ export function css(
   return sheet(String.raw({ raw: strings }, ...values));
 }
 
+/** The `@font-face` sheet for the two self-hosted faces (#379); adopted at
+ * document level ahead of the tokens that name them. */
+export const faces: CSSStyleSheet = sheet(facesCss);
+
 /** The token sheet — one `:root` block; adopted at document level. */
 export const tokens: CSSStyleSheet = sheet(tokensCss);
 
@@ -59,7 +64,7 @@ export function adoptTokens(doc: Document = document): void {
   }
   adopted.add(doc);
   if (doc === document) {
-    doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, tokens, highContrast];
+    doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, faces, tokens, highContrast];
     return;
   }
   const Realm = doc.defaultView?.CSSStyleSheet;
@@ -68,11 +73,13 @@ export function adoptTokens(doc: Document = document): void {
     copy.replaceSync(tokensCss);
     const theme = new Realm();
     theme.replaceSync(themeCss);
-    doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, copy, theme];
+    const faceCopy = new Realm();
+    faceCopy.replaceSync(facesCss);
+    doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, faceCopy, copy, theme];
     return;
   }
   const style = doc.createElement("style");
-  style.textContent = `${tokensCss}\n${themeCss}`;
+  style.textContent = `${facesCss}\n${tokensCss}\n${themeCss}`;
   doc.head.append(style);
 }
 

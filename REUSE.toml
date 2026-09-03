@@ -69,6 +69,16 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Elliott Richerson <elliott.richerson@gmail.com>"
 SPDX-License-Identifier = "Apache-2.0"
 
+# The two self-hosted typefaces, subset from upstream (provenance and the
+# exact reproduction command: web/src/ui/fonts/README.md). Their designers'
+# copyright and the SIL Open Font License, not ours. ADR 0021 forbids a font
+# CDN, not a font: these ship inside the binary like every other asset.
+[[annotations]]
+path = ["web/src/ui/fonts/*.woff2"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2020 The Space Grotesk Project Authors; 2016 The Space Mono Project Authors"
+SPDX-License-Identifier = "OFL-1.1"
+
 # Official OGC JSON schemas committed as conformance-test data (provenance:
 # crates/swath-api/tests/data/ogc/README.md). OGC's copyright and license,
 # not ours — committed byte-identical to schemas.opengis.net.
