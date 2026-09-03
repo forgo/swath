@@ -86,6 +86,11 @@
   --swath-size-statusbar: 24px;
   --swath-size-target: 44px;
   --swath-size-icon: 16px;
+  /* The two other icon steps swath-icon offers. They lived as literals in
+   * icon.ts, where no gate could see them: the DRY check polices colour and
+   * font literals, not lengths (#386). */
+  --swath-size-icon-sm: 12px;
+  --swath-size-icon-lg: 24px;
 
   /* stacking */
   --swath-z-overlay: 1;

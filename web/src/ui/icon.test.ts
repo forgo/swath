@@ -5,6 +5,7 @@
 // redraw every glyph; renaming or dropping one fails here.
 import { afterEach, beforeAll, expect, test } from "vitest";
 import { iconNames, SwathIcon } from "./icon.js";
+import iconSource from "./icon.ts?raw";
 
 const NAMES = [
   "layers",
@@ -105,4 +106,13 @@ test("an unknown name renders an empty frame, never throws", async () => {
   document.body.append(icon);
   await icon.updateComplete;
   expect(icon.shadowRoot?.querySelector("svg")?.childElementCount).toBe(0);
+});
+
+test("no length literal survives in icon.ts — the sizes are tokens", () => {
+  // The 12px/24px steps lived here, where no gate could see them: the DRY
+  // check polices colour and font literals, not lengths (#386). Until it
+  // covers lengths too (#378), this pins the one file that had them.
+  const styles = /static override styles = \[([\s\S]*?)\n {2}\];/.exec(iconSource)?.[1] ?? "";
+  expect(styles, "icon.ts must still declare styles").not.toBe("");
+  expect(styles.match(/\b\d+(?:\.\d+)?(?:px|rem|em)\b/g)).toBeNull();
 });
