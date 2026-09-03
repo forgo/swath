@@ -187,3 +187,41 @@ test("the chip row is the URL made visible; removing a chip drops its param (#39
   await expect(page).toHaveURL(/[?&]xray(&|=|$)/);
   await expect(chips.locator('[part="chip"][data-chip="xray"]')).toBeVisible();
 });
+
+test("the icon strip reaches every mode, and new layer stands in the footer (#398)", async ({
+  page,
+}) => {
+  await page.goto(demoUrl({ layer: "park-fire-ndvi" }));
+
+  // The strip is icons: the labels stay as the accessible names, not as a
+  // column of uppercase words.
+  const item = page.locator('swath-rail [part="item"][data-mode="author"]');
+  await expect(item).toHaveAttribute("aria-label", "Author");
+  await expect(item.locator("swath-icon")).toBeVisible();
+  // Clipped to a point rather than hidden: it must stay in the accessibility
+  // tree as the button's name, so it is 1px wide, not `display: none`.
+  const labelBox = await item.locator("span").boundingBox();
+  expect(labelBox?.width ?? 99).toBeLessThanOrEqual(1);
+  // And the strip really is a strip: the button is as wide as the icon
+  // column, not as wide as its word.
+  const itemBox = await item.boundingBox();
+  expect(itemBox?.width ?? 999).toBeLessThan(60);
+
+  // Every mode is still one click away from the strip.
+  for (const mode of ["data", "author", "xray", "layers"]) {
+    await page.locator(`swath-rail [part="item"][data-mode="${mode}"]`).click();
+    await expect(page.locator(`swath-rail [part="item"][data-mode="${mode}"]`)).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  }
+
+  // The standing action is available from a mode that is not authoring —
+  // which is the whole point of moving it out of the Layers panel.
+  await page.locator('swath-rail [part="item"][data-mode="data"]').click();
+  const newLayer = page.locator("#swath-new-layer");
+  await expect(newLayer).toBeVisible();
+  await newLayer.click();
+  await expect(page).toHaveURL(/[?&]view=author(&|$)/);
+  await expect(page.locator("swath-authoring-panel")).toBeVisible();
+});

@@ -30,8 +30,13 @@ export class SwathRail extends SwathElement {
         box-sizing: border-box;
         display: flex;
         flex-direction: column;
-        inline-size: var(--swath-size-rail);
-        min-inline-size: var(--swath-size-rail);
+        /* The strip plus the panel (#398): --swath-size-rail is the
+         * PANEL's width, and the icon strip sits beside it rather than
+         * inside it. Taking the strip out of the 248 left every layer title
+         * truncated — a panel that cannot show a layer's name is not a
+         * panel. Collapsed, the strip alone remains. */
+        inline-size: calc(var(--swath-size-rail-icon) + var(--swath-size-rail));
+        min-inline-size: calc(var(--swath-size-rail-icon) + var(--swath-size-rail));
         block-size: 100%;
         background: var(--swath-color-bg);
         color: var(--swath-color-fg);
@@ -44,24 +49,46 @@ export class SwathRail extends SwathElement {
         inline-size: var(--swath-size-rail-icon);
         min-inline-size: var(--swath-size-rail-icon);
       }
-      [part="base"] { display: flex; flex-direction: column; block-size: 100%; min-block-size: 0; }
-      [part="brand"] { padding: var(--swath-space-3) var(--swath-space-3) var(--swath-space-2); }
+      /* A thin icon STRIP beside one panel (#398), rather than a stack of
+       * labelled tabs above the content. The strip is the mode vocabulary
+       * and never scrolls; the panel is whatever that mode is showing.
+       * Collapsing hides the panel and leaves the strip, so every mode
+       * stays one click away at any width. */
+      [part="base"] {
+        display: grid;
+        grid-template-columns: var(--swath-size-rail-icon) var(--swath-size-rail);
+        grid-template-areas:
+          "brand brand"
+          "nav content"
+          "nav footer"
+          "nav collapse";
+        grid-template-rows: auto 1fr auto auto;
+        block-size: 100%;
+        min-block-size: 0;
+      }
+      :host([collapsed]) [part="base"] { grid-template-columns: var(--swath-size-rail-icon); }
+      [part="brand"] {
+        grid-area: brand;
+        padding: var(--swath-space-3) var(--swath-space-3) var(--swath-space-2);
+      }
       :host([collapsed]) [part="brand"] { display: none; }
       [part="nav"] {
+        grid-area: nav;
         display: flex;
         flex-direction: column;
         gap: var(--swath-space-1);
         margin: 0;
-        padding: var(--swath-space-1) var(--swath-space-2);
+        padding: var(--swath-space-1) var(--swath-space-1);
         list-style: none;
+        align-content: start;
       }
       [part="item"] {
         display: flex;
         align-items: center;
-        gap: var(--swath-space-2);
+        justify-content: center;
         inline-size: 100%;
         min-block-size: var(--swath-space-8);
-        padding: 0 var(--swath-space-2);
+        padding: 0;
         border: var(--swath-border-hairline);
         border-color: transparent;
         border-radius: var(--swath-radius-sm);
@@ -81,18 +108,32 @@ export class SwathRail extends SwathElement {
         background: var(--swath-color-accent-bg);
         color: var(--swath-color-accent);
       }
-      :host([collapsed]) [part="item"] { justify-content: center; padding: 0; }
-      :host([collapsed]) [part="item"] span { display: none; }
+      /* The label stays in the DOM as the button's own text — it is the
+       * accessible name, and aria-label/title carry it to a pointer —
+       * but the strip shows the glyph. A 56px column of uppercase mono
+       * words is not a strip. */
+      [part="item"] span {
+        position: absolute;
+        inline-size: 1px;
+        block-size: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
       [part="content"] {
-        flex: 1;
+        grid-area: content;
         min-block-size: 0;
         overflow-y: auto;
         padding: var(--swath-space-2) var(--swath-space-3);
       }
       :host([collapsed]) [part="content"] { display: none; }
-      [part="footer"] { padding: var(--swath-space-2) var(--swath-space-3); }
-      [part="collapse"] { align-self: flex-end; margin: 0 var(--swath-space-2) var(--swath-space-2); }
-      :host([collapsed]) [part="collapse"] { align-self: center; margin-inline: 0; }
+      [part="footer"] { grid-area: footer; padding: var(--swath-space-2) var(--swath-space-3); }
+      [part="collapse"] {
+        grid-area: collapse;
+        justify-self: end;
+        margin: 0 var(--swath-space-2) var(--swath-space-2);
+      }
+      :host([collapsed]) [part="collapse"] { justify-self: center; margin-inline: 0; }
       :host([collapsed]) [part="footer"] { display: none; }
       /* 640–1279: an icon rail regardless of preference (the content goes
        * to a drawer the host opens). */

@@ -74,8 +74,9 @@ export default defineConfig({
             retries: 0,
             timeout: 120_000,
             use: {
-              // Pinned shot geometry: rail (248px) + a 1280px-wide canvas, DPR 1.
-              viewport: { width: 1528, height: 928 }, // shell: 44 top bar + 860 canvas + 24 status bar (#284)
+              // Pinned shot geometry: rail (56px icon strip + 248px panel,
+              // #398) + a 1280px-wide canvas, DPR 1.
+              viewport: { width: 1584, height: 928 }, // shell: 44 top bar + 860 canvas + 24 status bar (#284)
               deviceScaleFactor: 1,
             },
           },
@@ -84,13 +85,14 @@ export default defineConfig({
   ],
   use: {
     baseURL: binaryMode ? "http://localhost:8080" : "http://localhost:5173",
-    // The entry page (issue #108) spends 248px on the layer rail, which
+    // The entry page (issue #108) spends 304px on the layer rail — a 56px
+    // icon strip beside a 248px panel since #398 — which
     // used to shrink the map canvas below Playwright's 1280px default —
     // narrow enough that the x-ray suite's badge clicks could land under
     // the trace-feed overlay (seen on CI: "subtree intercepts pointer
     // events"). Widen by exactly the rail so the canvas keeps its
     // historical 1280x720 geometry in both modes.
-    viewport: { width: 1528, height: 788 }, // shell: 44 top bar + 720 canvas + 24 status bar (#284)
+    viewport: { width: 1584, height: 788 }, // shell: 44 top bar + 720 canvas + 24 status bar (#284)
   },
   ...(binaryMode
     ? {}
