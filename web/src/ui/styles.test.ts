@@ -52,3 +52,21 @@ test("readToken bridges a token to code that can't read custom properties", () =
   expect(readToken("--swath-color-accent")).toMatch(/^#[0-9a-f]{6}$/i);
   expect(readToken("--swath-nope")).toBe("");
 });
+
+test("every SwathElement gets tabular figures and the product's selection colour", async () => {
+  // Numbers that change while you watch them must not re-lay-out (#382).
+  // Asserted on real primitives rather than a probe: these are the two
+  // shapes that carry the fastest-changing readouts in the product.
+  const { SwathIcon } = await import("./icon.js");
+  const { SwathSlider } = await import("./slider.js");
+  SwathIcon.define();
+  SwathSlider.define();
+  const slider = document.createElement("swath-slider");
+  document.body.append(slider);
+  await (slider as unknown as { updateComplete: Promise<void> }).updateComplete;
+  expect(getComputedStyle(slider).fontVariantNumeric).toBe("tabular-nums");
+
+  // The selection colour is a token, not a literal — a theme must be able
+  // to move it (the high-contrast theme, #389).
+  expect(readToken("--swath-color-selection-bg")).not.toBe("");
+});

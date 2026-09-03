@@ -40,7 +40,6 @@ export class SwathSlider extends SwathElement {
         font-family: var(--swath-font-mono);
         font-size: var(--swath-text-xs);
         color: var(--swath-color-fg-muted);
-        font-variant-numeric: tabular-nums;
       }
       @media (pointer: coarse) {
         [part="control"] { min-block-size: var(--swath-size-target); }

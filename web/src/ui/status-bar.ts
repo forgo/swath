@@ -66,7 +66,8 @@ export class SwathStatusCell extends SwathElement {
         text-transform: uppercase;
       }
       [part="label"]:empty { display: none; }
-      [part="value"] { color: var(--swath-color-fg); font-variant-numeric: tabular-nums; }
+      /* tabular figures come from base.css :host and inherit (#382). */
+      [part="value"] { color: var(--swath-color-fg); }
       :host([mono]) [part="value"] { font-family: var(--swath-font-mono); }
       [part="value"]:empty::before { content: "—"; color: var(--swath-color-fg-muted); }
     `,

@@ -21,6 +21,7 @@ const NAMES = [
     "accent",
     "accent-bg",
     "accent-border",
+    "selection-bg",
     "warn",
     "danger",
     "info",
