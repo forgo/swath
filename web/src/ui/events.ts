@@ -27,6 +27,9 @@ export interface SwathEventMap {
   /** Alias of `swath-layer-change` for one milestone. */
   layerchange: { layer: string; layers: SwathLayer[]; visible: boolean; opacity: number };
   "swath-layer-select": { layer: string };
+  /** A breadcrumb chip's remove button (`<swath-chip-row>`, #393); the host
+   * decides which parameter that drops. */
+  "swath-chip-remove": { chip: string };
   /** The eye on a layer row (`<swath-layer-item>`). */
   "swath-layer-visibility": { layer: string; visible: boolean };
   /** The opacity slider on a layer row, live. */

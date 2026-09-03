@@ -19,6 +19,8 @@ import { SwathButton } from "./button.js";
 import buttonSource from "./button.ts?raw";
 import { SwathCard } from "./card.js";
 import cardSource from "./card.ts?raw";
+import { SwathChipRow } from "./chip-row.js";
+import chipRowSource from "./chip-row.ts?raw";
 import { SwathCommandPalette } from "./command-palette.js";
 import commandPaletteSource from "./command-palette.ts?raw";
 import { SwathDrawer } from "./drawer.js";
@@ -139,6 +141,7 @@ test("every primitive is in the contract table", () => {
 const SOURCES: Record<string, string> = {
   "swath-button": buttonSource,
   "swath-card": cardSource,
+  "swath-chip-row": chipRowSource,
   "swath-command-palette": commandPaletteSource,
   "swath-drawer": drawerSource,
   "swath-field": fieldSource,

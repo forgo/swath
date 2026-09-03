@@ -84,11 +84,29 @@ test("rail collapse is a device preference: storage remembers it, a rail=collaps
   await fresh?.close();
 });
 
-test("the back button walks artifacts, and a pan never buries them (#392)", async ({ page }) => {
-  await page.goto(DEMO_PATH);
+/** Steps back until `view=` reads `mode`, bounded. Deliberately not "back
+ * exactly once": a mode can legitimately push more than one entry (entering
+ * `author` also writes `sel=` once a step is selected), and this test is
+ * about whether history *walks the artifacts*, not about how many entries
+ * each one costs. The no-extra-entries property is asserted precisely, on
+ * `history.length`, by the pan test below. */
+async function backTo(page: Page, mode: string | null): Promise<void> {
+  for (let step = 0; step < 8; step += 1) {
+    await page.goBack();
+    if (new URL(page.url()).searchParams.get("view") === mode) {
+      return;
+    }
+  }
+  throw new Error(`back never reached view=${String(mode)}; stopped at ${page.url()}`);
+}
+
+test("the back button walks artifacts (#392)", async ({ page }) => {
+  // An explicit deep link, so the cinematic landing loop is not playing:
+  // its frame advances rewrite the current entry in place (by design), which
+  // would make the URLs under test move while they are being read.
+  await page.goto(`${DEMO_PATH}?layer=park-fire-ndvi`);
   await pressed(page, "layers");
 
-  // Three artifact changes: three history entries.
   await modeButton(page, "data").click();
   await expect(page).toHaveURL(/[?&]view=data(&|$)/);
   await modeButton(page, "author").click();
@@ -98,19 +116,18 @@ test("the back button walks artifacts, and a pan never buries them (#392)", asyn
 
   // Back returns to the view you were just looking at, without a reload —
   // the shell is driven from the URL by `popstate`, the same path a cold
-  // load takes.
-  await page.goBack();
-  await expect(page).toHaveURL(/[?&]view=author(&|$)/);
+  // load takes, so the panels follow.
+  await backTo(page, "author");
   await pressed(page, "author");
   await expect(page.locator("swath-authoring-panel")).toBeVisible();
 
-  await page.goBack();
-  await expect(page).toHaveURL(/[?&]view=data(&|$)/);
+  await backTo(page, "data");
   await pressed(page, "data");
+  await expect(page.locator("swath-catalog")).toBeVisible();
 
-  await page.goBack();
-  await expect(page).not.toHaveURL(/[?&]view=/);
+  await backTo(page, null);
   await pressed(page, "layers");
+  await expect(page.locator("swath-layer-list")).toBeVisible();
 
   // Forward walks back up: history is real, not a one-way trip.
   await page.goForward();
@@ -119,7 +136,7 @@ test("the back button walks artifacts, and a pan never buries them (#392)", asyn
 });
 
 test("panning replaces rather than pushes: the camera adds no history (#392)", async ({ page }) => {
-  await page.goto(DEMO_PATH);
+  await page.goto(`${DEMO_PATH}?layer=park-fire-ndvi`);
   await modeButton(page, "data").click();
   await expect(page).toHaveURL(/[?&]view=data(&|$)/);
 
@@ -147,4 +164,23 @@ test("panning replaces rather than pushes: the camera adds no history (#392)", a
   // ...without adding a single entry. This is the whole point of the split:
   // forty pans must not bury the view you were looking at.
   expect(await page.evaluate(() => history.length)).toBe(before);
+});
+
+test("the chip row is the URL made visible; removing a chip drops its param (#393)", async ({
+  page,
+}) => {
+  await page.goto(`${DEMO_PATH}?layer=park-fire-ndvi&xray`);
+  const chips = page.locator("swath-chip-row");
+  await expect(chips.locator('[part="chip"][data-chip="layer"]')).toContainText("park-fire-ndvi");
+  const xray = chips.locator('[part="chip"][data-chip="xray"]');
+  await expect(xray).toBeVisible();
+
+  // Dropping the chip drops the parameter — and pushes, so back restores it.
+  await xray.locator('[part="remove"]').click();
+  await expect(page).not.toHaveURL(/[?&]xray(&|=|$)/);
+  await expect(xray).toBeHidden();
+
+  await page.goBack();
+  await expect(page).toHaveURL(/[?&]xray(&|=|$)/);
+  await expect(chips.locator('[part="chip"][data-chip="xray"]')).toBeVisible();
 });

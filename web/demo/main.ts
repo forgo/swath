@@ -50,6 +50,7 @@ import { defineSwathLayerList, SwathLayerList } from "../src/swath-layer-list.js
 import { defineSwathMap, SwathMap } from "../src/swath-map.js";
 import { defineSwathShell, SwathShell } from "../src/swath-shell.js";
 import { SwathButton } from "../src/ui/button.js";
+import { type Chip, SwathChipRow } from "../src/ui/chip-row.js";
 import { SwathCommandPalette } from "../src/ui/command-palette.js";
 import { SwathDrawer } from "../src/ui/drawer.js";
 import { SwathHudDock } from "../src/ui/hud-dock.js";
@@ -80,6 +81,7 @@ SwathRail.define();
 SwathHudDock.define();
 SwathDrawer.define();
 SwathCommandPalette.define();
+SwathChipRow.define();
 SwathStatusBar.define();
 SwathStatusCell.define();
 defineSwathShell();
@@ -281,6 +283,56 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
   let appState: AppState = initialApp;
   /** The artifact half of the last state written to the URL (#392). */
   let lastArtifact: ViewState | undefined;
+
+  // The chip row IS the URL, rendered (#393): one chip per thing the view is
+  // of. It is derived from the same snapshot the URL is written from, so the
+  // two can never disagree — there is no second source of truth to drift.
+  const chipRow = document.querySelector<SwathChipRow>("#swath-chips");
+  const renderChips = (): void => {
+    if (!chipRow) {
+      return;
+    }
+    const state = snapshot();
+    const chips: Chip[] = [];
+    if (state.layer !== undefined) {
+      // Not removable: with no layer there is no view to show.
+      chips.push({ id: "layer", label: "layer", value: state.layer });
+    }
+    if (state.time !== undefined) {
+      chips.push({ id: "time", label: "date", value: state.time, removable: true });
+    }
+    if (state.compareLayer !== undefined) {
+      chips.push({ id: "compare", label: "vs", value: state.compareLayer, removable: true });
+    } else if (state.compareTime !== undefined) {
+      chips.push({ id: "compare", label: "vs", value: state.compareTime, removable: true });
+    }
+    if (state.xray) {
+      chips.push({ id: "xray", label: "x-ray", value: "on", removable: true });
+    }
+    chipRow.chips = chips;
+  };
+  chipRow?.addEventListener("swath-chip-remove", (event) => {
+    // Removing a chip is a state change like any other: it goes through the
+    // same write path, so it pushes history and the back button restores it.
+    switch (event.detail.chip) {
+      case "time":
+        map.removeAttribute("datetime");
+        break;
+      case "compare":
+        map.removeAttribute("compare-layer");
+        map.removeAttribute("compare-datetime");
+        map.removeAttribute("swipe");
+        break;
+      case "xray":
+        map.removeAttribute("xray");
+        break;
+      default:
+        return;
+    }
+    interact();
+    syncUrl();
+    renderChips();
+  });
   /** `transient: true` forces a replace even when the artifact changed — for
    * state the app is driving rather than the person: the cinematic loop's
    * frame advances (#392). A loop that pushed a frame per second would fill
@@ -323,6 +375,7 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     } else {
       history.replaceState(null, "", url);
     }
+    renderChips();
   };
 
   // `popstate` drives the shell from the URL, which is the same thing a cold
@@ -362,6 +415,7 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     } finally {
       restoring = false;
     }
+    renderChips();
   });
 
   // Modes over the rail's content (#283/#284): `layers` is the full rail
@@ -583,6 +637,7 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
       // pan and not "the URL learned the layer's name" (#392).
       lastArtifact = snapshot();
     }
+    renderChips();
     if (changed) {
       interact();
     }
