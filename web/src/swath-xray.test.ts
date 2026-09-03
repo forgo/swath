@@ -1130,3 +1130,17 @@ test("with a chrome inspector container, the why-view opens there and closes as 
   dialog?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   expect(inspector.querySelector(".swath-xray-inspector")).toBeNull();
 });
+
+test("the analytics counters are the badge legend: same decisions, same tokens", async () => {
+  // They reached for accent/warn/info, which matched only while those values
+  // coincided with the decision colours — and stopped matching for cache when
+  // the decision blue moved (#383, #433). A counter that disagrees with the
+  // badges it counts is worse than no counter.
+  const source = (await import("./swath-xray.ts?raw")).default;
+  for (const decision of ["live", "overview", "cache"]) {
+    const rule = new RegExp(
+      `\\.swath-xray-analytics-${decision}\\s*\\{[^}]*color:\\s*var\\(--swath-color-decision-${decision}\\)`,
+    );
+    expect(rule.test(source), `analytics-${decision} must read the decision token`).toBe(true);
+  }
+});

@@ -559,9 +559,13 @@ const OVERLAY_SHEET = css`
 .swath-xray-analytics-frame[hidden] { display: none; }
 .swath-xray-analytics-udf { color: var(--swath-color-udf); }
 .swath-xray-analytics-udf[hidden] { display: none; }
-.swath-xray-analytics-live { color: var(--swath-color-accent); }
-.swath-xray-analytics-overview { color: var(--swath-color-warn); }
-.swath-xray-analytics-cache { color: var(--swath-color-info); }
+/* The counters are the badge legend in words, so they read the SAME decision
+ * tokens the badges do (#433). They used to reach for accent/warn/info, which
+ * happened to match while those values coincided — and stopped matching for
+ * cache the moment the decision blue moved (#383). */
+.swath-xray-analytics-live { color: var(--swath-color-decision-live); }
+.swath-xray-analytics-overview { color: var(--swath-color-decision-overview); }
+.swath-xray-analytics-cache { color: var(--swath-color-decision-cache); }
 .swath-xray-analytics-hit { font-weight: 700; }
 /* Hosted by a shell (a HUD card or the rail) instead of floating in the
  * map: the same chrome, flow layout (#286). */
