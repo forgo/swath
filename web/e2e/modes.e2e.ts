@@ -5,7 +5,7 @@
 // a deep link is honoured byte-for-byte, a switch writes it, storage
 // restores it on a bare visit. No shell yet: today's panels show or hide.
 import { expect, type Page, test } from "@playwright/test";
-import { DEMO_PATH, railMode as modeButton } from "./support";
+import { DEMO_PATH, demoUrl, railMode as modeButton } from "./support";
 
 const APP_KEY = "swath.app-state.v1";
 
@@ -13,7 +13,7 @@ const pressed = (page: Page, mode: string) =>
   expect(modeButton(page, mode)).toHaveAttribute("aria-current", "page");
 
 test("/?view=data lands in Data mode with the URL untouched", async ({ page }) => {
-  await page.goto(`${DEMO_PATH}?view=data`);
+  await page.goto(demoUrl({ view: "data" }));
   await pressed(page, "data");
   await expect(page.locator("swath-layer-list")).toBeHidden();
   await expect(page.locator("swath-catalog")).toBeVisible();
@@ -76,6 +76,9 @@ test("rail collapse is a device preference: storage remembers it, a rail=collaps
   if (!link) {
     throw new Error("no context");
   }
+  // The one URL still spelled out (#399): `rail=` is read-only — the app
+  // honours it from a link and never writes it — so `demoUrl` cannot
+  // produce it, and should not. The builder writes what the app writes.
   await link.goto(`${DEMO_PATH}?rail=collapsed&view=data`);
   await expect(link.locator("swath-rail")).toHaveAttribute("collapsed", "");
   await link.locator('swath-rail [part="item"][data-mode="author"]').click();
@@ -104,7 +107,7 @@ test("the back button walks artifacts (#392)", async ({ page }) => {
   // An explicit deep link, so the cinematic landing loop is not playing:
   // its frame advances rewrite the current entry in place (by design), which
   // would make the URLs under test move while they are being read.
-  await page.goto(`${DEMO_PATH}?layer=park-fire-ndvi`);
+  await page.goto(demoUrl({ layer: "park-fire-ndvi" }));
   await pressed(page, "layers");
 
   await modeButton(page, "data").click();
@@ -136,7 +139,7 @@ test("the back button walks artifacts (#392)", async ({ page }) => {
 });
 
 test("panning replaces rather than pushes: the camera adds no history (#392)", async ({ page }) => {
-  await page.goto(`${DEMO_PATH}?layer=park-fire-ndvi`);
+  await page.goto(demoUrl({ layer: "park-fire-ndvi" }));
   await modeButton(page, "data").click();
   await expect(page).toHaveURL(/[?&]view=data(&|$)/);
 
@@ -169,7 +172,7 @@ test("panning replaces rather than pushes: the camera adds no history (#392)", a
 test("the chip row is the URL made visible; removing a chip drops its param (#393)", async ({
   page,
 }) => {
-  await page.goto(`${DEMO_PATH}?layer=park-fire-ndvi&xray`);
+  await page.goto(demoUrl({ layer: "park-fire-ndvi", xray: true }));
   const chips = page.locator("swath-chip-row");
   await expect(chips.locator('[part="chip"][data-chip="layer"]')).toContainText("park-fire-ndvi");
   const xray = chips.locator('[part="chip"][data-chip="xray"]');

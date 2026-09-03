@@ -33,6 +33,7 @@ import { expect, type Page, test } from "@playwright/test";
 import {
   chip,
   DEMO_PATH,
+  demoUrl,
   fieldById,
   gotoAndWaitForTiles,
   openAuthoringPanel,
@@ -44,7 +45,7 @@ import {
 
 /** The demo viewpoint (same center `just demo` opens on) and the proven
  * fixture tile (z/y/x) the stack polls live before capture starts. */
-const CENTER = "-105.4475,39.2650";
+const CENTER = [-105.4475, 39.265] as const;
 const OUT_DIR = process.env.SWATH_SHOTS_DIR ?? "";
 if (OUT_DIR === "") {
   throw new Error("SWATH_SHOTS_DIR is required (run via `just screenshots`)");
@@ -173,7 +174,7 @@ test.describe("landing", () => {
 });
 
 test("colormapped NDVI at z12", async ({ page }) => {
-  await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`, "ndvi");
+  await gotoAndWaitForTiles(page, demoUrl({ layer: "ndvi", center: CENTER, zoom: 12 }), "ndvi");
   await capture(
     page,
     "02-ndvi-colormapped.png",
@@ -184,7 +185,7 @@ test("colormapped NDVI at z12", async ({ page }) => {
 test("true color at the same view", async ({ page }) => {
   await gotoAndWaitForTiles(
     page,
-    `${DEMO_PATH}?layer=truecolor&center=${CENTER}&zoom=12`,
+    demoUrl({ layer: "truecolor", center: CENTER, zoom: 12 }),
     "truecolor",
   );
   await capture(
@@ -199,7 +200,7 @@ test("x-ray decisions + why-view inspector", async ({ page }) => {
   // per-run cache every badge shows a real live-render decision.
   await gotoAndWaitForTiles(
     page,
-    `${DEMO_PATH}?xray&view=xray&layer=truecolor&center=${CENTER}&zoom=13`,
+    demoUrl({ xray: true, view: "xray", layer: "truecolor", center: CENTER, zoom: 13 }),
     "truecolor",
   );
   await waitForXRay(page);
@@ -236,7 +237,7 @@ test("x-ray bytes heatmap + trace feed", async ({ page }) => {
   // bytes_read, so the log-scale heatmap has an actual range to show.
   await gotoAndWaitForTiles(
     page,
-    `${DEMO_PATH}?xray&view=xray&layer=ndvi&center=${CENTER}&zoom=13`,
+    demoUrl({ xray: true, view: "xray", layer: "ndvi", center: CENTER, zoom: 13 }),
     "ndvi",
   );
   await waitForXRay(page);
@@ -264,7 +265,7 @@ test("x-ray bytes heatmap + trace feed", async ({ page }) => {
 });
 
 test("authoring panel: the always-valid canvas with field help", async ({ page }) => {
-  await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`, "ndvi");
+  await gotoAndWaitForTiles(page, demoUrl({ layer: "ndvi", center: CENTER, zoom: 12 }), "ndvi");
   await openAuthoringPanel(page);
 
   // Compose the first NDVI steps on the Model B canvas (issue #168):
@@ -288,7 +289,7 @@ test("authoring panel: the always-valid canvas with field help", async ({ page }
 });
 
 test("authoring panel: template narrative + advanced fields open", async ({ page }) => {
-  await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`, "ndvi");
+  await gotoAndWaitForTiles(page, demoUrl({ layer: "ndvi", center: CENTER, zoom: 12 }), "ndvi");
   await openAuthoringPanel(page);
 
   await page.locator(".swath-authoring-template").click();
@@ -304,7 +305,7 @@ test("authoring panel: template narrative + advanced fields open", async ({ page
 });
 
 test("authoring publish: the authored layer serves immediately", async ({ page }) => {
-  await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=12`, "ndvi");
+  await gotoAndWaitForTiles(page, demoUrl({ layer: "ndvi", center: CENTER, zoom: 12 }), "ndvi");
   await openAuthoringPanel(page);
   await page.locator(".swath-authoring-template").click();
   await expect(page.locator(".swath-authoring-submit")).toBeEnabled();
@@ -361,7 +362,7 @@ test("authoring publish: the authored layer serves immediately", async ({ page }
 test("change detection: the first DAG product on the canvas", async ({ page }) => {
   await gotoAndWaitForTiles(
     page,
-    `${DEMO_PATH}?layer=park-fire-ndvi&center=-121.6931,40.0208&zoom=13`,
+    demoUrl({ layer: "park-fire-ndvi", center: [-121.6931, 40.0208], zoom: 13 }),
     "park-fire-ndvi",
   );
   await openAuthoringPanel(page);
@@ -384,7 +385,7 @@ test("compare swipe: NDVI against true color, one handle", async ({ page }) => {
   );
   await gotoAndWaitForTiles(
     page,
-    `${DEMO_PATH}?layer=ndvi&cl=truecolor&center=${CENTER}&zoom=12&swipe=0.5`,
+    demoUrl({ layer: "ndvi", compareLayer: "truecolor", center: CENTER, zoom: 12, swipe: 0.5 }),
     "ndvi",
   );
   await truecolorTile;
@@ -403,7 +404,7 @@ test("compare swipe: NDVI against true color, one handle", async ({ page }) => {
 test("command palette: ⌘K, type, jump", async ({ page }) => {
   await gotoAndWaitForTiles(
     page,
-    `${DEMO_PATH}?layer=truecolor&center=${CENTER}&zoom=12`,
+    demoUrl({ layer: "truecolor", center: CENTER, zoom: 12 }),
     "truecolor",
   );
   await page.keyboard.press("ControlOrMeta+k");
@@ -425,7 +426,7 @@ test("command palette: ⌘K, type, jump", async ({ page }) => {
 test("dataset browser: granule footprints on the map", async ({ page }) => {
   await gotoAndWaitForTiles(
     page,
-    `${DEMO_PATH}?view=data&layer=ndvi&center=${CENTER}&zoom=12`,
+    demoUrl({ view: "data", layer: "ndvi", center: CENTER, zoom: 12 }),
     "ndvi",
   );
   await page.locator('swath-catalog [part="dataset"] select').selectOption("hls-s30");
@@ -463,7 +464,7 @@ test("dataset browser: granule footprints on the map", async ({ page }) => {
 test("trace analytics panel under load", async ({ page }) => {
   await gotoAndWaitForTiles(
     page,
-    `${DEMO_PATH}?xray&view=xray&layer=ndvi&center=${CENTER}&zoom=12`,
+    demoUrl({ xray: true, view: "xray", layer: "ndvi", center: CENTER, zoom: 12 }),
     "ndvi",
   );
   await waitForXRay(page);
@@ -512,7 +513,13 @@ test("time slider: first pass live, second pass cached (issue #182)", async ({ p
 
   await gotoAndWaitForTiles(
     page,
-    `${DEMO_PATH}?xray&view=xray&layer=park-fire-ndvi&center=-121.6932,40.0208&zoom=12`,
+    demoUrl({
+      xray: true,
+      view: "xray",
+      layer: "park-fire-ndvi",
+      center: [-121.6932, 40.0208],
+      zoom: 12,
+    }),
     "park-fire-ndvi",
   );
   await waitForXRay(page);
@@ -623,7 +630,7 @@ test.describe("phone", () => {
   const PHONE = { railWidth: 0, maxBadFrac: 0.03 };
 
   test("m01 landing on a phone: tab bar, dock chip", async ({ page }) => {
-    await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=11`, "ndvi");
+    await gotoAndWaitForTiles(page, demoUrl({ layer: "ndvi", center: CENTER, zoom: 11 }), "ndvi");
     await expect(page.locator("swath-shell")).toHaveAttribute("tier", "phone");
     await page.locator('swath-rail [part="item"][data-mode="layers"]').tap(); // fold the sheet away
     await expect(page.locator("#swath-rail-drawer")).not.toHaveAttribute("open", "");
@@ -637,7 +644,7 @@ test.describe("phone", () => {
   });
 
   test("m02 layers sheet", async ({ page }) => {
-    await gotoAndWaitForTiles(page, `${DEMO_PATH}?layer=ndvi&center=${CENTER}&zoom=11`, "ndvi");
+    await gotoAndWaitForTiles(page, demoUrl({ layer: "ndvi", center: CENTER, zoom: 11 }), "ndvi");
     await expect(page.locator("#swath-rail-drawer")).toHaveAttribute("open", "");
     await expect(page.locator('swath-layer-item[data-layer="ndvi"] [part="row"]')).toBeVisible();
     await waitForMapIdle(page);
@@ -652,7 +659,7 @@ test.describe("phone", () => {
   test("m03 data sheet with the catalog", async ({ page }) => {
     await gotoAndWaitForTiles(
       page,
-      `${DEMO_PATH}?view=data&layer=ndvi&center=${CENTER}&zoom=11`,
+      demoUrl({ view: "data", layer: "ndvi", center: CENTER, zoom: 11 }),
       "ndvi",
     );
     await page.locator('swath-catalog [part="dataset"] select').selectOption("hls-s30");
@@ -671,7 +678,7 @@ test.describe("phone", () => {
   test("m04 x-ray on a phone", async ({ page }) => {
     await gotoAndWaitForTiles(
       page,
-      `${DEMO_PATH}?xray&view=xray&layer=truecolor&center=${CENTER}&zoom=13`,
+      demoUrl({ xray: true, view: "xray", layer: "truecolor", center: CENTER, zoom: 13 }),
       "truecolor",
     );
     await page.locator('swath-rail [part="item"][data-mode="xray"]').tap(); // fold the sheet away

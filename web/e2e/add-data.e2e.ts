@@ -12,7 +12,7 @@
 // capabilities hiding the form (#198 — a second server flavor the compose
 // stack does not run, so the capabilities document is the fixture).
 import { expect, type Page, test } from "@playwright/test";
-import { DEMO_PATH, TILE } from "./support";
+import { DEMO_PATH, demoUrl, TILE } from "./support";
 
 /** A fixture COG key the stack's store really holds (stack-up drops it). */
 const FIXTURE_COG = "hlss30-t13sdd-2024158-b04.tif";
@@ -136,7 +136,9 @@ test("the /?stac= deep link pre-fills the flow and registers nothing", async ({ 
     }
   });
 
-  const entry = `${DEMO_PATH}?stac=${encodeURIComponent(itemUrl)}`;
+  // The builder percent-encodes passthrough values itself (URLSearchParams),
+  // so the raw URL goes in — encoding it here would double-encode it.
+  const entry = demoUrl({ passthrough: { stac: itemUrl } });
   await page.goto(entry);
 
   // Open, pre-filled from the fetched item — registering stays a click.

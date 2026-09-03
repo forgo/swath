@@ -20,6 +20,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import {
   DEMO_PATH,
+  demoUrl,
   FIRE_LAYER as FIRE,
   granuleFrames,
   mapView,
@@ -323,7 +324,7 @@ test("URL params beat storage, and the deep link stays byte-stable", async ({ pa
     [STORAGE_KEY, JSON.stringify({ layer: "truecolor", center: [8.5, 47.4], zoom: 6, xray: true })],
   );
 
-  const deepLink = `${DEMO_PATH}?layer=ndvi&center=-106.05,39.35&zoom=12`;
+  const deepLink = demoUrl({ layer: "ndvi", center: [-106.05, 39.35], zoom: 12 });
   await page.goto(deepLink);
 
   // The URL wins on every field: layer, viewport, and x-ray (off — the
@@ -348,7 +349,12 @@ test("URL params beat storage, and the deep link stays byte-stable", async ({ pa
 
   // The same holds for a deep link INTO the playable layer: the frame
   // and view are honored, nothing plays on its own.
-  const fireLink = `${DEMO_PATH}?layer=${FIRE}&center=-121.6932,40.0208&zoom=12&t=2024-06-07T19:03:00Z`;
+  const fireLink = demoUrl({
+    layer: FIRE,
+    center: [-121.6932, 40.0208],
+    zoom: 12,
+    time: "2024-06-07T19:03:00Z",
+  });
   await page.goto(fireLink);
   await expect(slider(page)).toHaveAttribute("data-datetime", "2024-06-07T19:03:00Z");
   await expect(landingCard(page)).toBeHidden();

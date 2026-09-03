@@ -22,7 +22,7 @@ import { expect, type Page, test } from "@playwright/test";
 import {
   compareHandle,
   FIRE_DATASET as DATASET,
-  DEMO_PATH,
+  demoUrl,
   type Envelope,
   granuleFrames,
   FIRE_LAYER as LAYER,
@@ -38,8 +38,8 @@ import {
  * display tiles; the against-binary pass dives one zoom deeper (z14) so
  * its first pass over the shared stack's cache is still cold — the same
  * one-stack convention as swath-xray.e2e.ts. */
-const CENTER = "-121.6932,40.0208";
-const ZOOM = process.env.SWATH_E2E_MODE === "binary" ? "13" : "12";
+const CENTER = [-121.6932, 40.0208] as const;
+const ZOOM = process.env.SWATH_E2E_MODE === "binary" ? 13 : 12;
 
 /** The signature-loop test's OWN zoom, one deeper than everything else
  * in this file (and than the other mode's signature pass — one stack
@@ -50,7 +50,7 @@ const ZOOM = process.env.SWATH_E2E_MODE === "binary" ? "13" : "12";
  * left the proxy completes (and caches) server-side regardless — which
  * turned the signature's first pass into cache hits on CI while local
  * runs (whose queued requests die with the page) stayed live. */
-const SIGNATURE_ZOOM = process.env.SWATH_E2E_MODE === "binary" ? "14" : "13";
+const SIGNATURE_ZOOM = process.env.SWATH_E2E_MODE === "binary" ? 14 : 13;
 
 /**
  * Polls until every painted badge of the fire layer at the displayed
@@ -150,7 +150,7 @@ test("slider domain is the granules API's datetimes; single-date layers hide it"
   const frames = await granuleFrames(page);
   expect(frames.length).toBeGreaterThanOrEqual(2); // the six-date series
 
-  await page.goto(`${DEMO_PATH}?layer=${LAYER}&center=${CENTER}&zoom=${ZOOM}`);
+  await page.goto(demoUrl({ layer: LAYER, center: CENTER, zoom: ZOOM }));
   await waitForFittedView(page);
   await expect(slider(page)).toBeVisible();
   await expect(slider(page)).toHaveAttribute("data-frames", String(frames.length));
@@ -160,7 +160,7 @@ test("slider domain is the granules API's datetimes; single-date layers hide it"
 
   // The single-granule fixture layer has one date — nothing to scrub,
   // control hidden: the zero-config landing page is visually untouched.
-  await page.goto(`${DEMO_PATH}?layer=ndvi&center=-105.4475,39.2650&zoom=12`);
+  await page.goto(demoUrl({ layer: "ndvi", center: [-105.4475, 39.265], zoom: 12 }));
   await waitForFittedView(page);
   await expect(slider(page)).toBeHidden();
 });
@@ -175,7 +175,7 @@ test("scrubbing re-points tiles with datetime=; t joins the deep link, byte-stab
     throw new Error("fire series has fewer than two frames");
   }
 
-  await page.goto(`${DEMO_PATH}?layer=${LAYER}&center=${CENTER}&zoom=${ZOOM}`);
+  await page.goto(demoUrl({ layer: LAYER, center: CENTER, zoom: ZOOM }));
   await waitForFittedView(page);
   // Scrubbing needs the domain: wait for the slider to have its frames
   // (the granules fetch rides the layer apply, after the fitted view).
@@ -225,7 +225,7 @@ test("the signature loop: first pass renders live, second pass replays from cach
   test.setTimeout(600_000);
   const frames = await granuleFrames(page);
 
-  await page.goto(`${DEMO_PATH}?xray&layer=${LAYER}&center=${CENTER}&zoom=${SIGNATURE_ZOOM}`);
+  await page.goto(demoUrl({ xray: true, layer: LAYER, center: CENTER, zoom: SIGNATURE_ZOOM }));
   await expect(page.locator("swath-map canvas.maplibregl-canvas")).toBeVisible();
   await subscribeToTraces(page);
   await waitForFittedView(page);
@@ -290,7 +290,7 @@ test("play advances frames and prefetches the next frame before showing it", asy
   }
 
   // Start on the OLDEST frame so the play order is deterministic.
-  await page.goto(`${DEMO_PATH}?layer=${LAYER}&center=${CENTER}&zoom=${ZOOM}&t=${first}`);
+  await page.goto(demoUrl({ layer: LAYER, center: CENTER, zoom: ZOOM, time: first }));
   await waitForFittedView(page);
   await expect(slider(page)).toHaveAttribute("data-datetime", first);
 
@@ -345,7 +345,7 @@ test("switching to the off-screen fire layer auto-frames it; deep links are hono
   page,
 }) => {
   // Start on the Colorado fixture view (an explicit, URL-carried view).
-  await page.goto(`${DEMO_PATH}?layer=ndvi&center=-105.4475,39.2650&zoom=11`);
+  await page.goto(demoUrl({ layer: "ndvi", center: [-105.4475, 39.265], zoom: 11 }));
   await waitForFittedView(page);
 
   // The user picks the fire layer in the rail: its footprint is nowhere
@@ -364,7 +364,7 @@ test("switching to the off-screen fire layer auto-frames it; deep links are hono
 
   // A deep link with an explicit view is HONORED — no auto-frame stomp,
   // and the pasted URL survives byte-for-byte (the issue #108 contract).
-  const deepLink = `${DEMO_PATH}?layer=${LAYER}&center=-105.4475,39.265&zoom=11`;
+  const deepLink = demoUrl({ layer: LAYER, center: [-105.4475, 39.265], zoom: 11 });
   await page.goto(deepLink);
   // The apply has fully settled once the slider carries its domain.
   await expect(slider(page)).toHaveAttribute("data-frames", /\d+/);
@@ -393,7 +393,7 @@ test("switching to the off-screen fire layer auto-frames it; deep links are hono
 
 /** The compare tests' own style zoom: display tiles z12 (vite) / z13
  * (binary) — never the signature loop's z14/z15. */
-const COMPARE_ZOOM = process.env.SWATH_E2E_MODE === "binary" ? "12" : "11";
+const COMPARE_ZOOM = process.env.SWATH_E2E_MODE === "binary" ? 12 : 11;
 
 test("date-vs-date: t and ct split one layer across the handle, byte-stably", async ({
   page,
@@ -407,7 +407,7 @@ test("date-vs-date: t and ct split one layer across the handle, byte-stably", as
   }
 
   const deepLink =
-    `${DEMO_PATH}?layer=${LAYER}&center=${CENTER}&zoom=${COMPARE_ZOOM}` +
+    demoUrl({ layer: LAYER, center: CENTER, zoom: COMPARE_ZOOM }) +
     `&t=${left}&ct=${right}&swipe=0.5`;
   // Both sides fetch their OWN frame: the primary map the left `t`, the
   // clipped right map the compare `ct`.
@@ -490,7 +490,7 @@ test("per-side x-ray badges: the trace stream's requested= splits the sides", as
   // opens at connect (before any fire tile is fetched), so every render
   // both sides trigger below is provably published while it listens —
   // the same fresh-renders-after-load convention as swath-xray.e2e.ts.
-  await page.goto(`${DEMO_PATH}?xray&layer=${LAYER}&center=${CENTER}&zoom=${COMPARE_ZOOM}`);
+  await page.goto(demoUrl({ xray: true, layer: LAYER, center: CENTER, zoom: COMPARE_ZOOM }));
   await waitForFittedView(page);
   await page.evaluate(
     ({ left, right }) => {
@@ -520,7 +520,7 @@ test("the compare control starts before-vs-after and dismisses it", async ({ pag
     throw new Error("fire series has fewer than two frames");
   }
 
-  await page.goto(`${DEMO_PATH}?layer=${LAYER}&center=${CENTER}&zoom=${COMPARE_ZOOM}`);
+  await page.goto(demoUrl({ layer: LAYER, center: CENTER, zoom: COMPARE_ZOOM }));
   await waitForFittedView(page);
   const button = page.getByRole("button", { name: "Toggle compare swipe" });
   // The control appears once the layer's time series (>= 2 frames) is

@@ -22,17 +22,22 @@
 // renders, so its cold-cache premises stay untouched.
 import { expect, type Page, test } from "@playwright/test";
 import {
-  DEMO_PATH,
+  demoUrl,
   compareHandle as handle,
   waitForFittedView as waitForSettledView,
 } from "./support";
 
 /** The Colorado fixture viewpoint shared by ndvi and truecolor. */
-const CO_CENTER = "-105.4475,39.265";
-const CO_ZOOM = "10";
+const CO_CENTER = [-105.4475, 39.265] as const;
+const CO_ZOOM = 10;
 
 test("layer-vs-layer: cl puts the second layer's tiles on the right side", async ({ page }) => {
-  const deepLink = `${DEMO_PATH}?layer=ndvi&cl=truecolor&center=${CO_CENTER}&zoom=${CO_ZOOM}`;
+  const deepLink = demoUrl({
+    layer: "ndvi",
+    compareLayer: "truecolor",
+    center: CO_CENTER,
+    zoom: CO_ZOOM,
+  });
   const ndviTile = page.waitForRequest((request) =>
     request.url().includes("/tilesets/ndvi/tiles/"),
   );

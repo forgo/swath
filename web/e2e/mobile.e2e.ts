@@ -5,7 +5,7 @@
 // sheet with 40/90 snaps, the dock chip, the toggles in the dock, author
 // entry — the same product, both modes.
 import { expect, type Page, test } from "@playwright/test";
-import { DEMO_PATH, railMode as tab } from "./support";
+import { DEMO_PATH, demoUrl, railMode as tab } from "./support";
 
 test.skip(({ isMobile }) => !isMobile, "the phone tier runs on the mobile project");
 
@@ -32,7 +32,7 @@ test("landing: the tab bar sits at the bottom, the status chip in the dock, the 
 test("layers: the Layers tab opens the sheet; a row switches the layer; the 90% snap makes the map inert", async ({
   page,
 }) => {
-  await page.goto(`${DEMO_PATH}?layer=truecolor`);
+  await page.goto(demoUrl({ layer: "truecolor" }));
   await landed(page);
   await expect(sheet(page)).toHaveAttribute("presentation", "bottom");
   await expect(sheet(page)).toHaveAttribute("open", "");

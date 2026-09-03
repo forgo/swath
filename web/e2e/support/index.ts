@@ -9,12 +9,21 @@
  * stream to open, `granuleFrames` sorting by instant) survives here as the
  * superset. */
 import { expect, type Locator, type Page } from "@playwright/test";
+import { type DemoLink, demoSearch } from "./url.js";
 
 /** `SWATH_E2E_MODE=binary` runs the suites against the embedded UI in the
  * release binary (`/` on :8080) instead of vite (`/demo/` on :5173);
  * `playwright.config.ts` derives `SWATH_DEMO_PATH` from it per mode. */
 export const BINARY_MODE = process.env.SWATH_E2E_MODE === "binary";
+export type { DemoLink };
+
 export const DEMO_PATH = process.env.SWATH_DEMO_PATH ?? "/demo/";
+
+/** A demo deep link naming `link`'s state, built by the app's own URL
+ * writers rather than typed out (issue #399). */
+export function demoUrl(link: DemoLink = {}): string {
+  return `${DEMO_PATH}${demoSearch(link)}`;
+}
 
 /** The fixture stack's fire-season layer and the dataset behind it. */
 export const FIRE_LAYER = "park-fire-ndvi";
