@@ -148,3 +148,22 @@ test("panning replaces rather than pushes: the camera adds no history (#392)", a
   // forty pans must not bury the view you were looking at.
   expect(await page.evaluate(() => history.length)).toBe(before);
 });
+
+test("the chip row is the URL made visible; removing a chip drops its param (#393)", async ({
+  page,
+}) => {
+  await page.goto(`${DEMO_PATH}?layer=park-fire-ndvi&xray`);
+  const chips = page.locator("swath-chip-row");
+  await expect(chips.locator('[part="chip"][data-chip="layer"]')).toContainText("park-fire-ndvi");
+  const xray = chips.locator('[part="chip"][data-chip="xray"]');
+  await expect(xray).toBeVisible();
+
+  // Dropping the chip drops the parameter — and pushes, so back restores it.
+  await xray.locator('[part="remove"]').click();
+  await expect(page).not.toHaveURL(/[?&]xray(&|=|$)/);
+  await expect(xray).toBeHidden();
+
+  await page.goBack();
+  await expect(page).toHaveURL(/[?&]xray(&|=|$)/);
+  await expect(chips.locator('[part="chip"][data-chip="xray"]')).toBeVisible();
+});
