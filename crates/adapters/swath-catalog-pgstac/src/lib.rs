@@ -38,7 +38,7 @@ use swath_core::catalog::stac::{
     granule_to_stac_item,
 };
 use swath_core::catalog::{
-    Catalog, CatalogError, Dataset, DatasetId, Granule, GranuleQuery, TimeRange,
+    Catalog, CatalogError, Dataset, DatasetId, Datetime, Granule, GranuleQuery, TimeRange,
 };
 
 /// Search page size: internal only — `find_granules` pages exhaustively and
@@ -214,9 +214,36 @@ impl Catalog for PgstacCatalog {
 }
 
 /// The STAC API interval string for a range: `start/end`, `..` for open ends.
+///
+/// One correction, for one degenerate case (#431). pgstac's `parse_dtrange`
+/// builds a half-open `[start, end)`, but its search compares inclusively
+/// against it, so a granule sitting exactly on a window's end is returned —
+/// which is what the domain's inclusive [`TimeRange`] means. The exception
+/// is `start == end`: a zero-width half-open range is `empty`, and an empty
+/// range matches nothing at all.
+///
+/// ```text
+/// parse_dtrange('"…T17:54:00Z/…T17:54:00Z"')  -> empty      (0 items)
+/// parse_dtrange('"…T17:53:59.999Z/…T17:54:00Z"')            (1 item)
+/// ```
+///
+/// So a window naming a single instant — how a caller pins one granule —
+/// silently selected nothing. Its end is rendered one millisecond later,
+/// which is the same window at the domain's own millisecond resolution and
+/// leaves every other range untouched.
+///
+/// At the representable maximum the step cannot be taken; the raw end is
+/// then rendered as before, which is the pre-existing behaviour.
 fn datetime_filter(range: &TimeRange) -> String {
     let start = range.start.as_ref().map_or("..", |d| d.as_str());
-    let end = range.end.as_ref().map_or("..", |d| d.as_str());
+    let end = match (&range.start, &range.end) {
+        (_, None) => "..".to_owned(),
+        (Some(from), Some(to)) if from.to_unix_millis() == to.to_unix_millis() => {
+            Datetime::from_unix_millis(to.to_unix_millis() + 1)
+                .map_or_else(|_| to.as_str().to_owned(), |next| next.as_str().to_owned())
+        }
+        (_, Some(to)) => to.as_str().to_owned(),
+    };
     format!("{start}/{end}")
 }
 
@@ -266,19 +293,49 @@ fn backend(detail: &str, e: sqlx::Error) -> CatalogError {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use swath_core::catalog::{Datetime, TimeRange};
+    use swath_core::catalog::TimeRange;
+
+    use super::Datetime;
 
     use super::{datetime_filter, next_token};
 
     #[test]
     fn datetime_filter_renders_open_and_closed_ends() {
         let dt = |s: &str| Datetime::new(s).unwrap();
+        // An ordinary range is rendered verbatim: pgstac's search compares
+        // inclusively against its end, which is what the domain means.
         assert_eq!(
             datetime_filter(&TimeRange {
                 start: Some(dt("2024-06-01T00:00:00Z")),
                 end: Some(dt("2024-06-30T00:00:00Z")),
             }),
             "2024-06-01T00:00:00Z/2024-06-30T00:00:00Z"
+        );
+        // The one exception (#431): equal bounds would parse to an `empty`
+        // range and match nothing, so the end steps forward a millisecond —
+        // the same window at the domain's resolution.
+        assert_eq!(
+            datetime_filter(&TimeRange {
+                start: Some(dt("2024-06-06T17:54:00Z")),
+                end: Some(dt("2024-06-06T17:54:00Z")),
+            }),
+            "2024-06-06T17:54:00Z/2024-06-06T17:54:00.001Z"
+        );
+        // Equal to the millisecond counts as equal, however written.
+        assert_eq!(
+            datetime_filter(&TimeRange {
+                start: Some(dt("2024-06-06T17:54:00Z")),
+                end: Some(dt("2024-06-06T17:54:00.000Z")),
+            }),
+            "2024-06-06T17:54:00Z/2024-06-06T17:54:00.001Z"
+        );
+        // An open start with a named end is untouched.
+        assert_eq!(
+            datetime_filter(&TimeRange {
+                start: None,
+                end: Some(dt("2024-06-06T17:54:00.999Z")),
+            }),
+            "../2024-06-06T17:54:00.999Z"
         );
         assert_eq!(
             datetime_filter(&TimeRange {

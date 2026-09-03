@@ -316,6 +316,70 @@ async fn find_granules_filters_by_bbox_and_datetime() {
 
 #[tokio::test]
 #[ignore = "needs live pgstac (just test-catalog)"]
+async fn a_granule_exactly_on_the_window_end_is_inside_it() {
+    // `TimeRange` is inclusive on both sides; pgstac's `parse_dtrange` is
+    // half-open, so an unadjusted end silently dropped the granule sitting
+    // exactly on it, and a single-instant window parsed to `empty` and
+    // matched nothing at all (#431). The in-memory catalog was inclusive all
+    // along, which is why nothing but the live stack could see this.
+    let Some(catalog) = catalog().await else {
+        return;
+    };
+    let id = "swath-it-window-end";
+    reset(&catalog, id).await;
+    catalog.upsert_dataset(&dataset(id)).await.unwrap();
+
+    let at = "2024-06-06T17:54:00Z";
+    let on_end = granule(id, "t13sdd-2024158", hls_bbox(), at);
+    let later = granule(id, "t13sdd-2024165", hls_bbox(), "2024-06-13T17:54:00Z");
+    catalog
+        .upsert_granules(&[on_end.clone(), later.clone()])
+        .await
+        .unwrap();
+
+    let find = async |range: TimeRange| {
+        catalog
+            .find_granules(
+                &DatasetId::new(id),
+                &GranuleQuery {
+                    bbox: None,
+                    datetime: Some(range),
+                },
+            )
+            .await
+            .unwrap()
+    };
+
+    // The end is inclusive: a granule exactly on it is inside the window.
+    let ending_on_it = find(TimeRange {
+        start: Some(Datetime::new("2024-06-01T00:00:00Z").unwrap()),
+        end: Some(Datetime::new(at).unwrap()),
+    })
+    .await;
+    assert_eq!(ids(&ending_on_it), ["t13sdd-2024158"]);
+
+    // A window naming exactly one instant selects exactly that granule —
+    // what pinning a preview to one granule needs (#406).
+    let one_instant = find(TimeRange {
+        start: Some(Datetime::new(at).unwrap()),
+        end: Some(Datetime::new(at).unwrap()),
+    })
+    .await;
+    assert_eq!(ids(&one_instant), ["t13sdd-2024158"]);
+
+    // And the inclusivity does not leak: one millisecond earlier excludes it.
+    let just_before = find(TimeRange {
+        start: Some(Datetime::new("2024-06-01T00:00:00Z").unwrap()),
+        end: Some(Datetime::new("2024-06-06T17:53:59.999Z").unwrap()),
+    })
+    .await;
+    assert!(just_before.is_empty(), "got {:?}", ids(&just_before));
+
+    reset(&catalog, id).await;
+}
+
+#[tokio::test]
+#[ignore = "needs live pgstac (just test-catalog)"]
 async fn find_granules_pages_past_the_search_limit() {
     let Some(catalog) = catalog().await else {
         return;
