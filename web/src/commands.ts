@@ -19,12 +19,17 @@ export interface CommandContext {
   mode: ViewMode;
   xray: boolean;
   compareAvailable: boolean;
+  /** Whether a compare swipe is currently on — the picker offers "stop"
+   * instead of another pairing (#397). */
+  compareActive: boolean;
   /** Granules of the dataset open in the catalog (Data mode only). */
   granules?: readonly { dataset: string; granule: CatalogGranule }[] | undefined;
   setLayer(id: string): void;
   setMode(mode: ViewMode): void;
   toggleXray(): void;
   toggleCompare(): void;
+  /** Compare the viewed layer against another one (`cl=`). */
+  compareWith(layer: string): void;
   zoomToData(): void;
   share(): void;
   zoomToGranule(dataset: string, granule: CatalogGranule): void;
@@ -70,15 +75,52 @@ export function buildCommands(ctx: CommandContext): Command[] {
     keywords: ["overlay", "traces", "decisions"],
     run: () => ctx.toggleXray(),
   });
-  if (ctx.compareAvailable) {
+  // Compare ARMS A PICKER rather than toggling one fixed pairing (#397):
+  // with several layers loaded, the interesting comparison is rarely the
+  // default one. The palette is the picker — every choice by name, which is
+  // what it exists for — so this needs no new surface.
+  if (ctx.compareActive) {
     commands.push({
-      id: "compare",
-      label: "Toggle compare swipe",
+      id: "compare-stop",
+      label: "Stop comparing",
       hint: "compare",
       group: "Map",
-      keywords: ["swipe", "before", "after"],
+      keywords: ["swipe", "close", "off"],
       run: () => ctx.toggleCompare(),
     });
+  } else {
+    if (ctx.compareAvailable) {
+      commands.push({
+        id: "compare",
+        // Named for what it actually does, rather than "toggle compare".
+        label: "Compare the oldest and newest frames",
+        hint: "compare",
+        group: "Map",
+        keywords: ["swipe", "before", "after", "time"],
+        run: () => ctx.toggleCompare(),
+      });
+    }
+    for (const layer of ctx.layers) {
+      if (layer.id === ctx.activeLayer) {
+        continue;
+      }
+      commands.push({
+        id: `compare-layer:${layer.id}`,
+        // "Swipe against", not "Compare with": switching to a layer is far
+        // commoner than comparing against it, and `matchCommands` breaks a
+        // score tie alphabetically — "Compare…" beat "Show layer…" for the
+        // query "ndvi". This also names the gesture the control performs.
+        label: `Swipe against ${layer.title}`,
+        hint: `cl=${layer.id}`,
+        group: "Map",
+        // Deliberately NOT keyworded with the layer id: switching to a
+        // layer is far commoner than comparing against it, and adding the id
+        // here ranked "Compare with HLS NDVI" above "Show layer: HLS NDVI"
+        // for the query "ndvi". The title in the label keeps it findable.
+        keywords: ["swipe", "against", "versus"],
+        run: () => ctx.compareWith(layer.id),
+      });
+    }
   }
   commands.push({
     id: "zoom-to-data",

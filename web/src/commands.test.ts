@@ -15,10 +15,12 @@ function context(overrides: Partial<CommandContext> = {}): CommandContext {
     mode: "layers",
     xray: false,
     compareAvailable: true,
+    compareActive: false,
     setLayer: vi.fn(),
     setMode: vi.fn(),
     toggleXray: vi.fn(),
     toggleCompare: vi.fn(),
+    compareWith: vi.fn(),
     zoomToData: vi.fn(),
     share: vi.fn(),
     zoomToGranule: vi.fn(),
@@ -37,6 +39,9 @@ test("layers, the other modes, map toggles and share; 'ndvi' ranks the NDVI laye
     "mode:xray",
     "xray",
     "compare",
+    // Compare arms a picker (#397): one entry per layer you could compare
+    // the viewed one against, beside the frame pairing.
+    "compare-layer:ndvi",
     "zoom-to-data",
     "share",
   ]);
@@ -98,4 +103,44 @@ test("no command promises something the suite cannot assert", () => {
     expect(banned.test(command.label), `"${command.label}" makes a claim`).toBe(false);
     expect(banned.test(command.hint ?? ""), `"${command.hint}" makes a claim`).toBe(false);
   }
+});
+
+test("compare offers the choices, not one fixed pairing (#397)", () => {
+  const ctx = context();
+  const ids = buildCommands(ctx).map((c) => c.id);
+  // The viewed layer is never offered as its own comparison.
+  expect(ids).toContain("compare-layer:ndvi");
+  expect(ids).not.toContain("compare-layer:truecolor");
+  // Named for what it does rather than "toggle compare".
+  expect(buildCommands(ctx).find((c) => c.id === "compare")?.label).toBe(
+    "Compare the oldest and newest frames",
+  );
+
+  // Typing a layer's name still ranks SWITCHING to it above comparing
+  // against it — the common act wins. Pinned as a property, because the
+  // ranking that delivers it is a tie-break rather than a rule.
+  expect(matchCommands(buildCommands(ctx), "ndvi")[0]?.command.id).toBe("layer:ndvi");
+
+  // Picking a layer runs the layer-vs-layer path, not the frame toggle.
+  const pick = buildCommands(ctx).find((c) => c.id === "compare-layer:ndvi");
+  pick?.run();
+  expect(ctx.compareWith).toHaveBeenCalledWith("ndvi");
+  expect(ctx.toggleCompare).not.toHaveBeenCalled();
+});
+
+test("while comparing, the only compare command is the way out (#397)", () => {
+  const active = buildCommands(context({ compareActive: true }));
+  const ids = active.map((c) => c.id);
+  expect(ids).toContain("compare-stop");
+  // No second pairing is offered mid-compare: the two modes are mutually
+  // exclusive, so the picker would be offering an ambiguous state.
+  expect(ids.filter((id) => id.startsWith("compare-layer:"))).toEqual([]);
+  expect(ids).not.toContain("compare");
+  expect(active.find((c) => c.id === "compare-stop")?.label).toBe("Stop comparing");
+});
+
+test("with no frames to compare, only the layer choices are offered (#397)", () => {
+  const ids = buildCommands(context({ compareAvailable: false })).map((c) => c.id);
+  expect(ids).not.toContain("compare");
+  expect(ids).toContain("compare-layer:ndvi");
 });

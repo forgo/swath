@@ -79,7 +79,13 @@ import {
   resolveCompare,
   sideLabels,
 } from "./compare-model.js";
-import { type GranuleBbox, parseBbox, unionBbox } from "./granule-footprints.js";
+import {
+  type DatedFootprint,
+  frameBounds,
+  type GranuleBbox,
+  parseBbox,
+  unionBbox,
+} from "./granule-footprints.js";
 import { CompareView } from "./swath-compare.js";
 import {
   type EventSourceFactory,
@@ -172,7 +178,10 @@ const CINEMATIC_SCAN_MAX = 8;
 /** The temporal domain + footprint a granules listing yields. */
 interface LayerDomain {
   frames: string[];
-  footprints: GranuleBbox[];
+  /** Each granule's footprint WITH its instant, so the bounds can be
+   * narrowed the same way the frames are: by the layer's compiled window,
+   * and by the frame currently being viewed (#397). */
+  footprints: DatedFootprint[];
 }
 
 const EMPTY_DOMAIN: LayerDomain = { frames: [], footprints: [] };
@@ -739,6 +748,9 @@ export class SwathMap extends HTMLElement {
    * metadata bounds (static layers), else unknown. What `zoomToData`
    * frames and the auto-frame-on-switch checks against. */
   #dataBounds: LonLatBounds | undefined;
+  /** The layer's footprints, already bounded by its window — what
+   * [`zoomToData`] narrows further to the viewed frame (#397). */
+  #footprints: readonly DatedFootprint[] = [];
   /** Set by [`setLayer`] — a USER-initiated switch: the one path that
    * may auto-frame the new layer's data. Attribute-driven applies (deep
    * links, programmatic sets) never auto-frame — a shared URL's view is
@@ -1327,7 +1339,12 @@ export class SwathMap extends HTMLElement {
    * across the world, and it is deterministic for tests. */
   #frameData(): void {
     const map = this.#map;
-    const bounds = this.#dataBounds;
+    // The viewed frame's own footprint when there is one, else the whole
+    // layer — so fit never becomes a no-op (#397).
+    const frame = frameBounds(this.#frames, this.#footprints, this.getAttribute("datetime"));
+    const bounds = frame
+      ? { west: frame[0], south: frame[1], east: frame[2], north: frame[3] }
+      : this.#dataBounds;
     if (!map || !bounds) {
       return;
     }
@@ -1782,9 +1799,14 @@ export class SwathMap extends HTMLElement {
       const body: unknown = await response.json();
       return {
         frames: parseGranuleDatetimes(body),
-        footprints: ((body as { granules?: { bbox?: unknown }[] }).granules ?? [])
-          .map((granule) => parseBbox(granule.bbox))
-          .filter((bbox): bbox is GranuleBbox => bbox !== undefined),
+        footprints: (
+          (body as { granules?: { bbox?: unknown; datetime?: unknown }[] }).granules ?? []
+        )
+          .map((granule) => ({
+            datetime: typeof granule.datetime === "string" ? granule.datetime : "",
+            bbox: parseBbox(granule.bbox),
+          }))
+          .filter((f): f is DatedFootprint => f.bbox !== undefined),
       };
     } catch {
       return EMPTY_DOMAIN;
@@ -1810,7 +1832,15 @@ export class SwathMap extends HTMLElement {
     if (epoch !== this.#epoch) {
       return;
     }
-    const union = unionBbox(domain.footprints);
+    // Footprints are bounded by the SAME window that bounds the frames
+    // (#397). They were not, so the data bounds could include granules the
+    // layer will never render — and "zoom to data" would fit an area the
+    // map cannot fill.
+    const inWindow = new Set(boundDomain(domain.frames, metadata?.window));
+    this.#footprints = domain.footprints.filter(
+      (f) => f.datetime === "" || inWindow.has(f.datetime),
+    );
+    const union = unionBbox(this.#footprints.map((f) => f.bbox));
     this.#dataBounds = union
       ? { west: union[0], south: union[1], east: union[2], north: union[3] }
       : metadata?.bounds;

@@ -69,6 +69,49 @@ export function unionBbox(bboxes: readonly GranuleBbox[]): GranuleBbox | undefin
 }
 
 /** The one granule slice the footprint paint needs. */
+/** One granule's footprint, with the instant it was acquired. */
+export interface DatedFootprint {
+  datetime: string;
+  bbox: GranuleBbox;
+}
+
+/** The bounds of the frame a `datetime=` instant actually displays.
+ *
+ * The backing frame is the latest at or before `viewed` — the server's own
+ * resolution rule (ADR 0015), not a string match, because `datetime=` need
+ * not equal any granule's instant. Returns `undefined` when nothing is
+ * viewed, nothing is known, or the instant precedes every frame; the caller
+ * then falls back to the layer's whole extent, so "fit" is never a no-op.
+ *
+ * Fitting the whole layer while you are looking at one granule throws away
+ * the view you were building — the granule is what is on screen, so the
+ * granule is what fit should mean (#397).
+ */
+export function frameBounds(
+  frames: readonly string[],
+  footprints: readonly DatedFootprint[],
+  viewed: string | null,
+): GranuleBbox | undefined {
+  if (viewed === null || footprints.length === 0) {
+    return undefined;
+  }
+  const t = Date.parse(viewed);
+  if (Number.isNaN(t)) {
+    return undefined;
+  }
+  let backing: string | undefined;
+  for (const frame of frames) {
+    const instant = Date.parse(frame);
+    if (!Number.isNaN(instant) && instant <= t) {
+      backing = frame;
+    }
+  }
+  if (backing === undefined) {
+    return undefined;
+  }
+  return unionBbox(footprints.filter((f) => f.datetime === backing).map((f) => f.bbox));
+}
+
 export interface FootprintGranule {
   id: string;
   bbox: GranuleBbox;
