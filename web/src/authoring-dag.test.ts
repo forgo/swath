@@ -15,6 +15,7 @@ import {
   branchWindows,
   changeTemplate,
   type Dag,
+  type DagNode,
   defaultParams,
   edgeAllowed,
   halves,
@@ -26,6 +27,7 @@ import {
   orphans,
   resultIssue,
   splice,
+  truncatedAt,
   typer,
   wellTyped,
 } from "./authoring-dag";
@@ -381,4 +383,96 @@ test("B15: the change template carries one window per branch, and halves() split
     { node: "s4", window: ["2024-08-01T00:00:00Z", "2024-09-01T00:00:00Z"] },
   ]);
   expect(branchWindows(ndvi())).toEqual([{ node: "s1", window: [null, null] }]);
+});
+
+test("truncatedAt: the preview answers what THIS step produces (#401)", () => {
+  // load → ndvi → scale → save
+  const dag: Dag = {
+    nodes: [
+      { id: "s1", process: "load_collection", params: { id: "hls-s30" } },
+      { id: "s2", process: "ndvi", params: {} },
+      { id: "s3", process: "linear_scale_range", params: { inputMax: 4000 } },
+      { id: "out", process: "save_result", params: { format: "png" } },
+    ],
+    edges: [
+      { from: { node: "s1", port: "" }, to: { node: "s2", port: "data" } },
+      { from: { node: "s2", port: "" }, to: { node: "s3", port: "x" } },
+      { from: { node: "s3", port: "" }, to: { node: "out", port: "data" } },
+    ],
+  };
+  const save = dag.nodes[3] as DagNode;
+
+  const atNdvi = truncatedAt(dag, "s2", save);
+  expect(atNdvi?.nodes.map((n) => n.id)).toEqual(["s1", "s2", "out"]);
+  // The step after it is gone, and the output is wired to the selection.
+  expect(atNdvi?.edges).toContainEqual({
+    from: { node: "s2", port: "" },
+    to: { node: "out", port: "data" },
+  });
+  expect(atNdvi?.edges.some((e) => e.to.node === "s3")).toBe(false);
+
+  // The output keeps the author's own format and colormap — the preview
+  // shows what they chose, not a substitute.
+  expect(atNdvi?.nodes.at(-1)?.params).toEqual({ format: "png" });
+
+  // Lowering it produces a graph that still ends in save_result.
+  const graph = lower(atNdvi as Dag);
+  expect(Object.keys(graph)).toEqual(["s1", "s2", "out"]);
+  expect((graph["out"] as { result?: boolean }).result).toBe(true);
+  expect((graph["out"] as { arguments: Record<string, unknown> }).arguments["data"]).toEqual({
+    from_node: "s2",
+  });
+});
+
+test("truncatedAt: selecting the first step previews just it", () => {
+  const dag: Dag = {
+    nodes: [
+      { id: "s1", process: "load_collection", params: {} },
+      { id: "s2", process: "ndvi", params: {} },
+      { id: "out", process: "save_result", params: {} },
+    ],
+    edges: [
+      { from: { node: "s1", port: "" }, to: { node: "s2", port: "data" } },
+      { from: { node: "s2", port: "" }, to: { node: "out", port: "data" } },
+    ],
+  };
+  expect(truncatedAt(dag, "s1", dag.nodes[2] as DagNode)?.nodes.map((n) => n.id)).toEqual([
+    "s1",
+    "out",
+  ]);
+});
+
+test("truncatedAt: a join keeps BOTH branches, not just one", () => {
+  // Two loads joined — the truncation must not drop the branch that does
+  // not happen to be listed first.
+  const dag: Dag = {
+    nodes: [
+      { id: "a", process: "load_collection", params: {} },
+      { id: "b", process: "load_collection", params: {} },
+      { id: "j", process: "merge_cubes", params: {} },
+      { id: "out", process: "save_result", params: {} },
+    ],
+    edges: [
+      { from: { node: "a", port: "" }, to: { node: "j", port: "cube1" } },
+      { from: { node: "b", port: "" }, to: { node: "j", port: "cube2" } },
+      { from: { node: "j", port: "" }, to: { node: "out", port: "data" } },
+    ],
+  };
+  const cut = truncatedAt(dag, "j", dag.nodes[3] as DagNode);
+  expect(cut?.nodes.map((n) => n.id).sort()).toEqual(["a", "b", "j", "out"]);
+  expect(cut?.edges).toHaveLength(3);
+});
+
+test("truncatedAt: the output and an unknown node have nothing to truncate", () => {
+  const dag: Dag = {
+    nodes: [
+      { id: "s1", process: "load_collection", params: {} },
+      { id: "out", process: "save_result", params: {} },
+    ],
+    edges: [{ from: { node: "s1", port: "" }, to: { node: "out", port: "data" } }],
+  };
+  const save = dag.nodes[1] as DagNode;
+  // Selecting the output IS the whole graph; the caller previews that.
+  expect(truncatedAt(dag, "out", save)).toBeUndefined();
+  expect(truncatedAt(dag, "nope", save)).toBeUndefined();
 });

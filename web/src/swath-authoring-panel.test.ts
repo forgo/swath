@@ -13,6 +13,7 @@
 // a real browser, like the rest of the suite.
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import { SwathApi } from "./api.js";
+import { OUT } from "./authoring-dag.js";
 import {
   defineSwathAuthoringPanel,
   type ProcessDefinition,
@@ -1605,4 +1606,69 @@ test("a join inserted on a gray edge leaves its second input free; the branch st
   expect(graph[merge ?? ""]?.arguments["cube2"]).toEqual({ from_node: ndviB });
   const [, loadB] = idsOf(panel, "load_collection");
   expect(graph[loadB ?? ""]?.arguments["bands"]).toEqual(["b8a", "b04"]);
+});
+
+test("the preview follows the selected step (#401)", async () => {
+  const stub = fetchStub({});
+  const panel = await mount(stub);
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-template")?.click();
+  await expect.poll(() => previewPosts(stub).length).toBe(1);
+
+  // Nothing selected: the preview is the pipeline, ending in the Output card.
+  const whole = previewPosts(stub)[0]?.body as {
+    process: { process_graph: Record<string, unknown> };
+  };
+  const wholeIds = Object.keys(whole.process.process_graph);
+  expect(wholeIds.length).toBeGreaterThan(2);
+
+  // Selecting an earlier step asks a different question — what does THIS
+  // produce — so it is a different graph, truncated there.
+  panel.sel = "s3";
+  await panel.updateComplete;
+  await expect.poll(() => previewPosts(stub).length).toBe(2);
+  const cut = previewPosts(stub)[1]?.body as {
+    process: { process_graph: Record<string, { process_id: string; result?: boolean }> };
+  };
+  const ids = Object.keys(cut.process.process_graph);
+  expect(ids).toContain("s3");
+  // Everything after the selection is gone…
+  expect(ids.length).toBeLessThan(wholeIds.length);
+  // …and it still ends in a save_result marked as the result, so the
+  // server is asked a well-formed question (ADR 0014's bounded preview).
+  const result = Object.values(cut.process.process_graph).find((node) => node.result === true);
+  expect(result?.process_id).toBe("save_result");
+
+  // Selecting the Output card is the whole pipeline again, not a truncation
+  // of it — there is nothing after the output to cut.
+  panel.sel = OUT;
+  await panel.updateComplete;
+  await expect.poll(() => previewPosts(stub).length).toBe(3);
+  const again = previewPosts(stub)[2]?.body as typeof whole | undefined;
+  expect(Object.keys(again?.process.process_graph ?? {})).toEqual(wholeIds);
+});
+
+test("a step whose output does not render is not truncated to (#401)", async () => {
+  const stub = fetchStub({});
+  const panel = await mount(stub);
+  panel.querySelector<HTMLButtonElement>(".swath-authoring-template")?.click();
+  await expect.poll(() => previewPosts(stub).length).toBe(1);
+  const first = previewPosts(stub)[0]?.body as
+    | { process: { process_graph: Record<string, unknown> } }
+    | undefined;
+  const whole = Object.keys(first?.process.process_graph ?? {});
+  expect(whole.length).toBeGreaterThan(2);
+
+  // The load step's output is a raw two-band cube: saving that is a
+  // refusal, not a preview. Entering author mode selects the first step
+  // for the inspector, so without this rule the DEFAULT selection would
+  // ask the server a question it can only reject (caught by the real-stack
+  // e2e, not by a mock).
+  panel.sel = "s1";
+  await panel.updateComplete;
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  const posts = previewPosts(stub);
+  const latest = posts[posts.length - 1]?.body as {
+    process: { process_graph: Record<string, unknown> };
+  };
+  expect(Object.keys(latest.process.process_graph)).toEqual(whole);
 });
