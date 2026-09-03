@@ -159,6 +159,9 @@ or bring the stack up yourself and `pnpm exec vite dev`.
            even with the x-ray off (issue #287). -->
       <swath-map slot="map" switcher="off" traces></swath-map>
       <swath-hud-dock slot="hud"></swath-hud-dock>
+      <!-- The publish receipt and the explain card are one component
+           (issue #394/#395): tethered, dismissible, never over the map. -->
+      <swath-explain-card id="swath-explain"></swath-explain-card>
       <!-- Author mode (issue #291): the step strip over the map, the
            selected step's fields in the inspector column. M11 swaps the
            strip for the DAG editor — a content change, not a layout one. -->

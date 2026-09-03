@@ -53,6 +53,7 @@ import { SwathButton } from "../src/ui/button.js";
 import { type Chip, SwathChipRow } from "../src/ui/chip-row.js";
 import { SwathCommandPalette } from "../src/ui/command-palette.js";
 import { SwathDrawer } from "../src/ui/drawer.js";
+import { SwathExplainCard } from "../src/ui/explain-card.js";
 import { SwathHudDock } from "../src/ui/hud-dock.js";
 import { SwathRail } from "../src/ui/rail.js";
 import { SwathStatusBar, SwathStatusCell } from "../src/ui/status-bar.js";
@@ -82,6 +83,7 @@ SwathHudDock.define();
 SwathDrawer.define();
 SwathCommandPalette.define();
 SwathChipRow.define();
+SwathExplainCard.define();
 SwathStatusBar.define();
 SwathStatusCell.define();
 defineSwathShell();
@@ -157,7 +159,11 @@ if (mapElement instanceof SwathMap && panelElement instanceof SwathLayerList) {
   wire(mapElement, panelElement);
 }
 if (mapElement instanceof SwathMap && authoringElement instanceof SwathAuthoringPanel) {
-  wireAuthoring(mapElement, authoringElement);
+  wireAuthoring(
+    mapElement,
+    authoringElement,
+    document.querySelector<SwathExplainCard>("#swath-explain"),
+  );
 }
 
 if (mapElement instanceof SwathMap && datasetElement instanceof SwathCatalog) {
