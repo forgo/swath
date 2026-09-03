@@ -69,3 +69,33 @@ test("x-ray label follows state; compare hidden when unavailable; granule jumps 
     ),
   ).toBe(false);
 });
+
+test("every command label is sentence case — the content fundamentals, enforced", () => {
+  // design-language.md §2: menu items and prose are sentence case; Title Case
+  // appears nowhere; `Swath` is the one capitalised word. The palette is the
+  // product's largest single catalog of user-facing labels, so it is where a
+  // regression would land first (#391).
+  const labels = buildCommands(context()).map((c) => c.label);
+  expect(labels.length).toBeGreaterThan(5);
+  for (const label of labels) {
+    // Everything after a `: ` is server or user data (a layer title, a granule
+    // id) and is not ours to case.
+    const ours = label.split(": ")[0] as string;
+    const words = ours.split(" ").slice(1);
+    const titleCased = words.filter(
+      (w) => /^[A-Z][a-z]/.test(w) && w !== "Swath" && !/^X-/.test(w),
+    );
+    expect(titleCased, `"${label}" is Title Case, not sentence case`).toEqual([]);
+  }
+});
+
+test("no command promises something the suite cannot assert", () => {
+  // design-language.md §3: no adjective the test suite cannot assert. "Fast",
+  // "instantly", "seamless" are claims; a number with a unit is a measurement.
+  const banned =
+    /\b(fast|instant|instantly|blazing|lightning|seamless|effortless|powerful|simple|easy|quick|quickly|smooth|smoothly)\b/i;
+  for (const command of buildCommands(context())) {
+    expect(banned.test(command.label), `"${command.label}" makes a claim`).toBe(false);
+    expect(banned.test(command.hint ?? ""), `"${command.hint}" makes a claim`).toBe(false);
+  }
+});
