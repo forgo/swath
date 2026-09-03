@@ -284,6 +284,9 @@ when introduced (#278), blocking everywhere since every organism migrated (#350)
 holds exactly those two reasoned `swath-map.ts` entries, and a stale entry fails the gate, so the
 escape hatch can only shrink.
 
+It also fails a `css` template left with an unclosed `/*` — the signature of a backtick inside a
+comment, which silently ends the template (#456).
+
 ## 10. Honest risks
 
 - **Shadow DOM vs the harnesses.** Playwright CSS locators pierce shadow roots;
