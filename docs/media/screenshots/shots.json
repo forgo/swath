@@ -1,7 +1,7 @@
 {
   "schema": "swath-screenshots/1",
-  "git_sha": "53f0f87062c1218d06d0f58ce421d0ed9bec37d4",
-  "captured": "2026-08-29T08:36:23.851Z",
+  "git_sha": "f04c770049718386b0a37333b6f7d44ba4d91cc3",
+  "captured": "2026-09-03T12:19:30.866Z",
   "viewport": {
     "width": 1528,
     "height": 928,
@@ -15,7 +15,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "06c6ea11f3392f646f49393395284acd8fd8da0f0bea84ed3da3e6581301820e"
+      "sha256": "d7d88348dcc139992c4d61d20c81cd31cb1f66ddde16b9163a693229a5cc1bf6"
     },
     {
       "file": "02-ndvi-colormapped.png",
@@ -23,7 +23,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "8aae1499a6dd86fcde40672b75618c6be1d4166d6168ddbad0645a3c782df7de"
+      "sha256": "25758b67a9c51e24610da311dc7cb2d4bae3b006b8352ec4bf7297ab417e9b46"
     },
     {
       "file": "03-truecolor-live.png",
@@ -31,7 +31,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "97c29b1c82fc54446a4e74cc2094135d85c335b8abbcb4ff220d99876aa562b6"
+      "sha256": "bb9a9efa74c2a09549a43291e07f934c105d1bfbbf65467a1d4e5e8e4505f311"
     },
     {
       "file": "04-xray-decisions.png",
@@ -39,7 +39,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "0a221c8b76416dac154702fdc87380941ea771c34d93b28d4a9414a337621c5d"
+      "sha256": "18f21d50d83b890ec980616ccbb18ea25fb6e73b4a0eeef9146d44fb2f4b8ee5"
     },
     {
       "file": "05-xray-why-view.png",
@@ -47,7 +47,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "5ffed0e8ba07b3d74712540e95202bd52d51ed7f6983e4874b08bf03a9f16626"
+      "sha256": "b998de5de734a999fad2584a0ee30ab9cf18d07ad295c8491c3caf86928d8778"
     },
     {
       "file": "06-xray-heatmap.png",
@@ -55,7 +55,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "3400a15543c8401a2c516ca0c4d388c2e7cc83aed42a58b49b7719db970c4b11"
+      "sha256": "d7f0b94bc32c2b8fdda6fef5e7d788eac2f552895e50fdc2c0fc0eb1e72ed9b6"
     },
     {
       "file": "07-xray-trace-feed.png",
@@ -63,7 +63,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.06,
       "railWidth": 248,
-      "sha256": "02f1e809eef7c7c0b279c4d132ef50b15530f049b6cc8066b14737cbf239e231"
+      "sha256": "4e4c9b5707166da464d843df4fccbab0a7de875c9fd6f035d11abb9fbda6967e"
     },
     {
       "file": "08-authoring-form.png",
@@ -71,7 +71,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "cc7f494ebe937249fc1374610f55dacc31c137c0cf16946b879456354af425ac"
+      "sha256": "28c7cea8116b63d5ce5de65b4e9e745c93dfb334cac6625e65498d03711087c9"
     },
     {
       "file": "09-authoring-narrative-advanced.png",
@@ -79,7 +79,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "0a31353693154ff0beaccde5900affa87539e822fdaccd7b843fdfebe8a17840"
+      "sha256": "d18a8dce2ea36e85dc6c694536aeebcfe70c302396fa576484f8304b0215f426"
     },
     {
       "file": "10-authoring-published.png",
@@ -87,7 +87,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.02,
       "railWidth": 248,
-      "sha256": "9dbdde7780b3f99d71cef14b38eee88c96ba5589528384c8e49212a6d1594b74"
+      "sha256": "fce12fd215f8646063c0593fbc303771ef82b5a426d423abb5cdad075b411778"
     },
     {
       "file": "15-change-detection.png",
@@ -95,7 +95,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "dba0e380d7a0364f671d2940acf150284b1afb078e49608268a27767ef0de4a6"
+      "sha256": "69ea64b9e92877d1e3339d61ac3a538e3a491c9c8a42b1c50165b0f58b2650d8"
     },
     {
       "file": "16-compare-swipe.png",
@@ -103,7 +103,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "e31277586aac52e3b835048d5cc6295086ef2c1f5a62d5b3ac665c7a3a608952"
+      "sha256": "bfcc0789e7df9f2e8d91025a7e3c23d9b5db2257e7a102ec17b19fa30ebf75e9"
     },
     {
       "file": "17-command-palette.png",
@@ -111,7 +111,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "199d2a84731cf90649f97cf8938ee164cf48003f6d5f13ef0f399a50188ca82e"
+      "sha256": "e3f6d529313666e8110dfc4847c13d05aded154cc560a5e9f74ac1c4dee16f83"
     },
     {
       "file": "11-dataset-footprints.png",
@@ -119,7 +119,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.005,
       "railWidth": 248,
-      "sha256": "1c9d8a274bbc2835fe84aa89965b7a9dac2b316936304f18cb3cbf7245ad4b91"
+      "sha256": "309eaba613171e2daef3737778f0db251705f5607aaf7c7e84324d68f6745da0"
     },
     {
       "file": "12-analytics-under-load.png",
@@ -127,7 +127,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "7772ec8496dce4c1785ef378676eee9d6f5bab43735ad2e69b73e4a207fe9049"
+      "sha256": "cf7a6fbcfe14c124635a45bf52f9f9e7e74fbaee5f87e21c21faadbd567b4542"
     },
     {
       "file": "13-time-slider-live.png",
@@ -135,7 +135,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.04,
       "railWidth": 248,
-      "sha256": "df1ec4c2e6109dd81f5b54fb80b95edac5162ac0f4b44ba650cfc721fbc5c5fc"
+      "sha256": "72e2347ff7821015c5e1b6f9a1b8236432540d986a56468ab96eb445edc13702"
     },
     {
       "file": "14-time-slider-cached.png",
@@ -143,7 +143,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 248,
-      "sha256": "372050e4685ddbfa1960bfe3811bf69d70e6702f91e450ccd3c840a3b3ad26ba"
+      "sha256": "55acc983830d955a61dd58dfdf09ae27c5e6b1ada40d1f9f5ba8a42fef8925f4"
     },
     {
       "file": "m01-phone-landing.png",
@@ -151,7 +151,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 0,
-      "sha256": "952fcef92afda156968a8b3bad6db1657e5ee9f34f882ffae39ee6fe2add5b8d"
+      "sha256": "dbc3fe51f10ec07ced96230087059e7101d67066cab25fc09e57c9451e16370e"
     },
     {
       "file": "m02-phone-layers-sheet.png",
@@ -159,7 +159,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 0,
-      "sha256": "26a6ac8f1fbc2dd0adc2ce9ce173698e968c26265b42bc160185cdf35d2d74f1"
+      "sha256": "38011496afdeaff6720de8544efc32d25d021fcd7f89ff40cbe3bff107351761"
     },
     {
       "file": "m03-phone-data-sheet.png",
@@ -167,7 +167,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 0,
-      "sha256": "be7bcd387342f66840561bf24b011a95e162565598444e76ec67585cf33ca580"
+      "sha256": "f54a16a58ca12e23fad99c952f7e82f6bcbb103c71a638ad131b6297160df2b1"
     },
     {
       "file": "m04-phone-xray.png",
@@ -175,7 +175,7 @@
       "tolerance": 2,
       "maxBadFrac": 0.03,
       "railWidth": 0,
-      "sha256": "3fdc8229babe4a7443ec012f1ed1fbfe6623b75ab1695aee976e3a9cf9796fe1"
+      "sha256": "bd7c37823f39db4ca893677931476838ef6ca9c854e9667556063408fbd5a902"
     }
   ]
 }
