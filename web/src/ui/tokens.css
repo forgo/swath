@@ -62,14 +62,25 @@
   --swath-color-heat-5: #7c2d12;
 
   /* type */
-  --swath-font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --swath-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* The two self-hosted faces (#379), each ahead of the platform stack that
+   * used to be the whole value — the stacks stay as real fallbacks, so a
+   * glyph outside the subset (or a face that fails to load) still renders. */
+  --swath-font-ui: "Space Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --swath-font-mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --swath-text-xs: 11px;
   --swath-text-sm: 12px;
   --swath-text-md: 13px;
   --swath-text-lg: 16px;
   --swath-leading-tight: 1.25;
   --swath-leading-normal: 1.5;
+  /* Reviewed against Space Mono when it landed (#379) and left where it was.
+   * 0.06em was tuned for ui-monospace (SF Mono, Consolas — narrow); Space
+   * Mono is already wide, so the argument for reducing it is real. It is the
+   * uppercase 11px chrome recipe, and at that size the tracking is doing
+   * legibility work rather than styling: judged on the rail modes and on the
+   * status bar at its extremes, the wide setting still reads better than
+   * 0.04em. Revisit with the mono turn-down (#380), which changes the weight
+   * this was judged at. */
   --swath-tracking-wide: 0.06em;
 
   /* space — a 4 px grid */

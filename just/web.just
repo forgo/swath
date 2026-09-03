@@ -124,3 +124,28 @@ screenshots:
     echo "screenshots: $(ls "$out"/*.png | wc -l | tr -d ' ') shots in docs/media/screenshots (capture sha $sha)"
 
 # --- benchmarks (issue #100; ENGINEERING.md §2 criterion mandate) ---
+
+# Rebuild the two self-hosted typefaces from upstream (issue #379). Not part
+# of `just check` — the woff2 files are committed artifacts and change only
+# when the upstream fonts or the character set do. Needs `uv`; provenance and
+# the character-set rationale are in web/src/ui/fonts/README.md.
+fonts:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Google Fonts' own `latin` range PLUS U+2192: the right arrow is not in
+    # it (only U+2191/U+2193 are) and `ingest→pixel` needs it in mono.
+    range="U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191-2193,U+2212,U+2215,U+FEFF,U+FFFD"
+    src="$(mktemp -d)"
+    trap 'rm -rf "$src"' EXIT
+    base="https://raw.githubusercontent.com/google/fonts/main/ofl"
+    curl -sSf --max-time 60 -o "$src/grotesk.ttf" "$base/spacegrotesk/SpaceGrotesk%5Bwght%5D.ttf"
+    curl -sSf --max-time 60 -o "$src/mono-400.ttf" "$base/spacemono/SpaceMono-Regular.ttf"
+    curl -sSf --max-time 60 -o "$src/mono-700.ttf" "$base/spacemono/SpaceMono-Bold.ttf"
+    curl -sSf --max-time 60 -o LICENSES/OFL-1.1.txt "$base/spacegrotesk/OFL.txt"
+    out=web/src/ui/fonts
+    sub() { uvx --from 'fonttools[woff]==4.60.1' pyftsubset "$1" \
+        --unicodes="$range" --layout-features='*' --flavor=woff2 --output-file="$2"; }
+    sub "$src/grotesk.ttf"  "$out/space-grotesk-latin.woff2"
+    sub "$src/mono-400.ttf" "$out/space-mono-latin-400.woff2"
+    sub "$src/mono-700.ttf" "$out/space-mono-latin-700.woff2"
+    ls -l "$out"/*.woff2
