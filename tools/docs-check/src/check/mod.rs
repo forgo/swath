@@ -26,6 +26,8 @@
 //! - [`mutation`] — the acceptance bar: each of the six documentation
 //!   drifts fixed by the #172 sweep (PR #214) is re-introduced in memory
 //!   and the gate must fail on every one.
+//! - [`glossary`] — `web/src/glossary.ts`'s cited sources must exist and
+//!   still use the term they define (issue #396).
 //! - [`budgets`] — per-doc word budgets (issue #177): the word-reduction
 //!   sweep's committed ceilings over `README.md` + `docs/*.md`, measured
 //!   exactly as `just docs-words` measures (`wc -w`).
@@ -52,6 +54,7 @@
 mod budgets;
 mod claims;
 mod deferrals;
+mod glossary;
 mod mutation;
 mod numbers;
 mod routes;
