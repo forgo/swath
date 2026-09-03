@@ -1494,6 +1494,19 @@ export class SwathAuthoringPanel extends SwathElement {
     if (selected === undefined || selected === "" || save === undefined) {
       return lower(dag);
     }
+    // Only a step whose output RENDERS is worth truncating to. A raw load
+    // is a multi-band cube — two bands on the NDVI template — and asking
+    // the server to save that is a refusal, not a preview. The panel
+    // entering author mode selects the first step for the inspector, so
+    // without this the default selection would preview a graph the server
+    // rejects. Same rule the submit gate applies to the output stage.
+    const stage = typer(this.#dagLite())(selected);
+    const bands = this.#bandsOf(this.#cards().find((card) => card.id === selected));
+    const renders =
+      stage !== null && (stage.kind !== "multi" || (bands.length === 3 && stage.scaled));
+    if (!renders) {
+      return lower(dag);
+    }
     const cut = truncatedAt(dag, selected, {
       id: save.id,
       process: "save_result",
