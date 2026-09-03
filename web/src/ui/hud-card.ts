@@ -24,6 +24,7 @@ export class SwathHudCard extends SwathElement {
         border: var(--swath-border-hairline);
         border-radius: var(--swath-radius-md);
         background: var(--swath-color-bg-hud);
+        backdrop-filter: var(--swath-blur-hud);
         color: var(--swath-color-fg);
         box-shadow: var(--swath-shadow-hud);
         overflow: hidden;

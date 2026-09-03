@@ -27,6 +27,7 @@ export class SwathCommandPalette extends SwathElement {
         place-items: start center;
         padding-block-start: 12vh;
         background: color-mix(in srgb, var(--swath-color-bg) 60%, transparent);
+        backdrop-filter: var(--swath-blur-hud);
       }
       :host(:not([open])) { display: none; }
       :host([presentation="sheet"]) { place-items: end stretch; padding: 0; }

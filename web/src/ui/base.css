@@ -43,6 +43,16 @@
   outline-offset: var(--swath-space-0);
 }
 
+/* Depth is a convenience; legibility is not. Where the viewer has asked for
+ * less transparency, the blur goes to zero and every HUD surface goes opaque —
+ * set here on :host so no component has to remember it (#388). */
+@media (prefers-reduced-transparency: reduce) {
+  :host {
+    --swath-blur-hud: none;
+    --swath-color-bg-hud: var(--swath-color-bg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
