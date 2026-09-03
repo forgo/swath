@@ -13,7 +13,7 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
 import {
-  DEMO_PATH,
+  demoUrl,
   type Envelope,
   latestByKey,
   type ReceivedPlan,
@@ -31,7 +31,7 @@ const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
  * fresh-render premises need a still, single-date view. An explicit
  * `layer` is deep-link state (never animated over); the bounds fit
  * still lands, so `waitForFittedView` applies unchanged. */
-const STATIC_LANDING = `${DEMO_PATH}?layer=ndvi`;
+const STATIC_LANDING = demoUrl({ layer: "ndvi" });
 
 test("overlay paints decisions matching the traces the test received over SSE", async ({
   page,

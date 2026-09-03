@@ -5,7 +5,7 @@
 // act on the viewed layer's raster in the real map; kebab delete lives in
 // authoring.e2e.ts (it needs a published service).
 import { expect, type Page, test } from "@playwright/test";
-import { DEMO_PATH, FIRE_LAYER as FIRE, layerRow as row } from "./support";
+import { DEMO_PATH, demoUrl, FIRE_LAYER as FIRE, layerRow as row } from "./support";
 
 /** The raster layer's paint on the primary map. */
 async function paint(page: Page): Promise<{ visibility: string; opacity: number }> {
@@ -35,7 +35,7 @@ test("switching layers through the list updates the URL and the pressed row", as
 test("the eye hides the viewed raster and shows it again; the URL never learns", async ({
   page,
 }) => {
-  await page.goto(`${DEMO_PATH}?layer=truecolor`);
+  await page.goto(demoUrl({ layer: "truecolor" }));
   await expect(row(page, "truecolor")).toHaveAttribute("aria-pressed", "true");
   const eye = page.locator('swath-layer-item[data-layer="truecolor"] [part="eye"] button');
   await expect(eye).toHaveAttribute("aria-pressed", "true");
@@ -48,7 +48,7 @@ test("the eye hides the viewed raster and shows it again; the URL never learns",
 });
 
 test("the opacity slider on the active row drives raster-opacity", async ({ page }) => {
-  await page.goto(`${DEMO_PATH}?layer=truecolor`);
+  await page.goto(demoUrl({ layer: "truecolor" }));
   const range = page.locator('swath-layer-item[data-layer="truecolor"] [part="opacity"] input');
   await expect(range).toBeVisible();
   await range.focus();

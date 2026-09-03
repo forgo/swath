@@ -6,7 +6,7 @@
 // ingest guidance, and thumbnails that are previews the ENGINE rendered
 // (`POST /result`) — never a client-side decode (ADR 0019).
 import { expect, type Page, test } from "@playwright/test";
-import { DEMO_PATH, railMode, waitForFittedView } from "./support";
+import { DEMO_PATH, demoUrl, railMode, waitForFittedView } from "./support";
 
 const dataMode = (page: Page) => railMode(page, "data");
 
@@ -83,7 +83,7 @@ test("cards carry engine-rendered thumbnails (POST /result), never a client deco
       previews.push(request.postData() ?? "");
     }
   });
-  await page.goto(`${DEMO_PATH}?view=data`);
+  await page.goto(demoUrl({ view: "data" }));
   await waitForFittedView(page);
   await datasetSelect(page).selectOption("hls-s30");
   const first = cards(page).first();
@@ -97,7 +97,7 @@ test("cards carry engine-rendered thumbnails (POST /result), never a client deco
 });
 
 test("choosing a dataset renders footprint outlines as a MapLibre layer", async ({ page }) => {
-  await page.goto(`${DEMO_PATH}?view=data`);
+  await page.goto(demoUrl({ view: "data" }));
   await waitForFittedView(page);
   await datasetSelect(page).selectOption("hls-s30");
   await expect(cards(page).first()).toBeVisible();
@@ -126,7 +126,7 @@ test("activating a card zooms the map to its footprint (fixtures); filters narro
   await page.route("**/datasets/hls-s30/granules*", (route) =>
     route.fulfill({ json: FIXTURE_GRANULES }),
   );
-  await page.goto(`${DEMO_PATH}?view=data`);
+  await page.goto(demoUrl({ view: "data" }));
   await waitForFittedView(page);
   await datasetSelect(page).selectOption("hls-s30");
   await expect(card(page, "FIX.A.2026")).toBeVisible();
@@ -162,7 +162,7 @@ test("activating a card zooms the map to its footprint (fixtures); filters narro
 
 test("a dataset with no granules shows the ingest guidance (fixtures)", async ({ page }) => {
   await page.route("**/datasets/hls-s30/granules*", (route) => route.fulfill({ json: EMPTY_PAGE }));
-  await page.goto(`${DEMO_PATH}?view=data`);
+  await page.goto(demoUrl({ view: "data" }));
   await waitForFittedView(page);
   await datasetSelect(page).selectOption("hls-s30");
   const empty = page.locator('swath-catalog [part="empty"]');

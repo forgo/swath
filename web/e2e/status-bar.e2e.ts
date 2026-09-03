@@ -5,14 +5,14 @@
 // ingest→pixel reads a real value after the first traced tile with the
 // x-ray OFF; the cursor cell follows the mouse and copies on click.
 import { expect, type Page, test } from "@playwright/test";
-import { DEMO_PATH } from "./support";
+import { demoUrl } from "./support";
 
 const cell = (page: Page, id: string) => page.locator(`#swath-status-${id} [part="value"]`);
 
 test("ingest→pixel reads a number after the first traced tile, x-ray off; CRS names the scheme", async ({
   page,
 }) => {
-  await page.goto(`${DEMO_PATH}?layer=truecolor&center=-106.0,39.3&zoom=13`);
+  await page.goto(demoUrl({ layer: "truecolor", center: [-106.0, 39.3], zoom: 13 }));
   await expect(page.locator("swath-map .swath-xray")).toHaveCount(0); // overlay off
   await expect(cell(page, "crs")).toHaveText("WebMercatorQuad · EPSG:3857");
   await expect(cell(page, "ingest")).toHaveText(/^\d+ ms$/, { timeout: 60_000 });
@@ -20,7 +20,7 @@ test("ingest→pixel reads a number after the first traced tile, x-ray off; CRS 
 
 test("the cursor cell follows the mouse and copies on click", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.goto(`${DEMO_PATH}?layer=truecolor&center=-106.0,39.3&zoom=13`);
+  await page.goto(demoUrl({ layer: "truecolor", center: [-106.0, 39.3], zoom: 13 }));
   const map = page.locator("swath-map");
   const box = await map.boundingBox();
   if (!box) {

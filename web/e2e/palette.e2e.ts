@@ -4,11 +4,11 @@
 // The command palette (issue #292): open with ⌘K / Ctrl-K or the top bar's
 // button, type, Enter — the layer switches and `layer=` joins the URL.
 import { expect, type Page, test } from "@playwright/test";
-import { DEMO_PATH, layerRow as row } from "./support";
+import { DEMO_PATH, demoUrl, layerRow as row } from "./support";
 
 const palette = (page: Page) => page.locator("swath-command-palette");
 test("Ctrl-K opens; 'ndvi' + Enter switches the layer and writes layer=", async ({ page }) => {
-  await page.goto(`${DEMO_PATH}?layer=truecolor`);
+  await page.goto(demoUrl({ layer: "truecolor" }));
   await expect(row(page, "truecolor")).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("ControlOrMeta+k");
   await expect(palette(page)).toHaveAttribute("open", "");
