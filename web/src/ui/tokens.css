@@ -24,6 +24,10 @@
   --swath-color-accent: #4ade80;
   --swath-color-accent-bg: rgb(74 222 128 / 10%);
   --swath-color-accent-border: rgb(74 222 128 / 45%);
+  /* Text selection: heavier than accent-bg (10%, a fill behind a whole
+   * card) and lighter than accent-border, so selected text keeps the
+   * page foreground and still reads as selected. */
+  --swath-color-selection-bg: rgb(74 222 128 / 30%);
   --swath-color-warn: #fbbf24;
   --swath-color-danger: #f87171;
   --swath-color-info: #60a5fa;

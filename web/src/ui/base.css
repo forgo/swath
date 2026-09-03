@@ -16,6 +16,20 @@
   font-size: var(--swath-text-sm);
   line-height: var(--swath-leading-normal);
   color: var(--swath-color-fg);
+  /* Every readout in this product is a number that changes while you watch
+   * it — per-tile bytes and timings, rolling p50/p95, the frame label under
+   * the time slider. Proportional digits re-lay-out on each change, which
+   * reads as instability in a tool whose claim is that it measures itself
+   * honestly. Set once here rather than per organism (#382). */
+  font-variant-numeric: tabular-nums;
+}
+
+/* Operators select granule ids and byte ranges constantly, to paste into a
+ * ticket. The UA default paints its own blue over the dark surface and is
+ * close to unreadable there (#382). */
+::selection {
+  background: var(--swath-color-selection-bg);
+  color: var(--swath-color-fg);
 }
 
 :host([hidden]),
