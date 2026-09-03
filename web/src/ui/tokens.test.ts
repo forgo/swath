@@ -135,9 +135,9 @@ test("no decision colour is another decision colour, or the link colour", () => 
   // A decision badge the colour of a link cannot be read as a decision —
   // which is why #383 raised cache to blue-500 and not blue-400.
   //
-  // `warn` is deliberately outside this set for now: it is byte-identical to
-  // `decision-overview`, a real collision that wants a palette decision
-  // rather than a drive-by change (#433). Widen this list when that lands.
+  // `warn` is deliberately outside this set: it is byte-identical to
+  // `decision-overview` and allowed to be, because the two never co-occur —
+  // the reason is written beside both tokens in tokens.css (#433).
   const named = ["decision-live", "decision-overview", "decision-cache", "info", "danger"];
   const values = named.map((n) => readToken(`--swath-color-${n}`).trim().toLowerCase());
   expect(new Set(values).size, `duplicated among ${named.join(", ")}`).toBe(named.length);

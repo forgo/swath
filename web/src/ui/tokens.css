@@ -34,6 +34,13 @@
    * card) and lighter than accent-border, so selected text keeps the
    * page foreground and still reads as selected. */
   --swath-color-selection-bg: rgb(74 222 128 / 30%);
+  /* Byte-identical to --swath-color-decision-overview, and allowed to be
+   * (#433). They are one hue with two jobs and they do not co-occur: the
+   * decision colours are the x-ray's badge vocabulary and its counters; warn
+   * is chrome (a paused feed, a dropped event, a granule note). The one place
+   * they DID meet was the analytics overview counter, which was reaching for
+   * warn when it meant the decision — a wrong reference, now fixed, not a
+   * palette problem. Revisit if a warning ever has to sit beside a badge. */
   --swath-color-warn: #fbbf24;
   --swath-color-danger: #f87171;
   --swath-color-info: #60a5fa;
