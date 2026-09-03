@@ -97,3 +97,27 @@ test("slots exist synchronously on upgrade: a slotted child has its size before 
   expect(Math.round(map.getBoundingClientRect().width)).toBe(1280);
   expect(Math.round(map.getBoundingClientRect().height)).toBe(860);
 });
+
+test("composing gives the canvas the region and the map a preview column (#400)", async () => {
+  const shell = await mount();
+  const map = document.querySelector("#map") as HTMLElement;
+  const full = Math.round(map.getBoundingClientRect().width);
+
+  shell.compose = true;
+  await shell.updateComplete;
+  const preview = Math.round(map.getBoundingClientRect().width);
+
+  // ADR 0028's amended rule: the map is always present AND never smaller
+  // than a live preview. It shrinks to the preview column — it does not
+  // disappear, and nothing is drawn over it.
+  expect(preview).toBe(320);
+  expect(preview).toBeLessThan(full);
+  expect(getComputedStyle(map).display).not.toBe("none");
+  // It is on the far side: the canvas takes everything left of it.
+  const box = map.getBoundingClientRect();
+  expect(Math.round(box.right)).toBe(Math.round(window.innerWidth));
+
+  shell.compose = false;
+  await shell.updateComplete;
+  expect(Math.round(map.getBoundingClientRect().width)).toBe(full);
+});

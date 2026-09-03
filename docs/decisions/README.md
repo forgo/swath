@@ -40,6 +40,7 @@ prepare or carry the mechanics of a decision; the ADR is the ruling.
 | 0025 | 2026-08-29 | Authoring model B: the always-valid canvas (records `design/authoring-ux.md` §8, 2026-08-11) | Accepted | Extended by 0022 |
 | 0026 | 2026-09-03 | The M12 freeze is contract-asserted, not path-asserted (amends 0021) | Accepted | Amends 0021 |
 | 0027 | 2026-09-03 | Artifacts push history, the camera replaces it (amends 0021 decision 3) | Accepted | Amends 0021 |
+| 0028 | 2026-09-03 | Composing inverts the slots; the map is never smaller than a preview (amends 0021 §1) | Accepted | Amends 0021 |
 
 Historical pointers: ADRs 0002, 0003 and 0005 each say they supersede a note in "CHARTER.md §8";
 the charter has since been rewritten and those notes no longer exist — the ADRs are the record.
