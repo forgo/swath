@@ -690,3 +690,30 @@ test("UDF stage: a fuel bomb's refusal reads in plain words on the module and ne
   const tile = await page.request.get(`/tilesets/${id}/tiles/${TILE}`);
   expect(tile.status()).toBe(200);
 });
+
+test("publishing shows a receipt whose numbers come from the server (#395)", async ({ page }) => {
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+  await authorNdvi(page, "255", "rdylgn");
+  await fieldById(page, "title").fill("NDVI (receipt)");
+  const id = await publish(page);
+
+  const receipt = page.locator("#swath-explain");
+  await expect(receipt).toHaveAttribute("open", "");
+  await expect(receipt).toHaveAttribute("density", "published");
+
+  const rows = receipt.locator('[part="rows"]');
+  // The addresses are the server's own links for the service just created.
+  await expect(rows).toContainText(`/tilesets/${id}`);
+  // A real render happened: the timing is a number with a unit, not a dash.
+  await expect(rows).toContainText(/\d+ ms/);
+
+  // The per-stage breakdown is NOT invented: `x-swath-trace` is a summary,
+  // so read/warp/encode are em dashes rather than a fabricated split.
+  const text = (await rows.textContent()) ?? "";
+  expect(text).toContain("—");
+
+  // It dismisses like any other explain card, and stays dismissed.
+  await page.keyboard.press("Escape");
+  await expect(receipt).not.toHaveAttribute("open", "");
+});

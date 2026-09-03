@@ -5,6 +5,8 @@
  * out of the entry script (#355). */
 import type { SwathAuthoringPanel } from "../swath-authoring-panel";
 import type { SwathMap } from "../swath-map";
+import type { SwathExplainCard } from "../ui/explain-card.js";
+import { showReceipt } from "./receipt.js";
 
 // The authoring panel (issue #109) is a pure openEO client; the shell
 // only routes its outcomes to the map. A created service becomes the
@@ -12,10 +14,20 @@ import type { SwathMap } from "../swath-map";
 // lists it immediately — no reload); a deleted one falls back to the
 // server's default layer when it was the viewed one, else just refreshes
 // the layer list.
-export function wireAuthoring(map: SwathMap, authoring: SwathAuthoringPanel): void {
+export function wireAuthoring(
+  map: SwathMap,
+  authoring: SwathAuthoringPanel,
+  receipt?: SwathExplainCard | null,
+): void {
   authoring.addEventListener("swath-service-created", (event) => {
     const id = event.detail.id;
     map.setLayer(id).catch(() => undefined);
+    // The receipt is proof, not a step (#395): publishing has already
+    // succeeded, so a failure to render it leaves the card closed and
+    // changes nothing else.
+    if (receipt) {
+      void showReceipt(map.api, receipt, id, window.location.origin);
+    }
   });
   authoring.addEventListener("swath-service-deleted", (event) => {
     onServiceDeleted(map, event.detail.id);
