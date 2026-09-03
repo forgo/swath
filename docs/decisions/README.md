@@ -38,6 +38,7 @@ prepare or carry the mechanics of a decision; the ADR is the ruling.
 | 0023 | 2026-08-29 | Catalog domain model: Dataset / Granule / Layer over a lossless STAC mapping (records `design/catalog-domain.md`, 2026-08-09) | Accepted | Resolves ARCHITECTURE §16.5 |
 | 0024 | 2026-08-29 | Planner v1: explicit per-layer knobs, transparent byte estimates, every candidate explained (records `design/materialization-planner.md`) | Accepted | Resolves ARCHITECTURE §16.4 |
 | 0025 | 2026-08-29 | Authoring model B: the always-valid canvas (records `design/authoring-ux.md` §8, 2026-08-11) | Accepted | Extended by 0022 |
+| 0026 | 2026-09-03 | The M12 freeze is contract-asserted, not path-asserted (amends 0021) | Accepted | Amends 0021 |
 
 Historical pointers: ADRs 0002, 0003 and 0005 each say they supersede a note in "CHARTER.md §8";
 the charter has since been rewritten and those notes no longer exist — the ADRs are the record.
