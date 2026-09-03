@@ -71,17 +71,22 @@
   --swath-text-sm: 12px;
   --swath-text-md: 13px;
   --swath-text-lg: 16px;
+  /* The uppercase label recipe's weight, in one place instead of seven
+   * (#380). 700 was tuned for ui-monospace; Space Mono is already wide and
+   * heavy enough, and one loud recipe on rail modes, card headers, field
+   * labels, buttons, badges and status labels alike means nothing recedes.
+   * The sites that never set a weight already inherit 400 and are unchanged. */
+  --swath-weight-label: 400;
   --swath-leading-tight: 1.25;
   --swath-leading-normal: 1.5;
-  /* Reviewed against Space Mono when it landed (#379) and left where it was.
-   * 0.06em was tuned for ui-monospace (SF Mono, Consolas — narrow); Space
-   * Mono is already wide, so the argument for reducing it is real. It is the
-   * uppercase 11px chrome recipe, and at that size the tracking is doing
-   * legibility work rather than styling: judged on the rail modes and on the
-   * status bar at its extremes, the wide setting still reads better than
-   * 0.04em. Revisit with the mono turn-down (#380), which changes the weight
-   * this was judged at. */
-  --swath-tracking-wide: 0.06em;
+  /* Turned down with the label weight (#380). 0.06em was tuned for
+   * ui-monospace (SF Mono, Consolas — narrow) at weight 700, where the
+   * tracking was holding heavy uppercase glyphs apart. Space Mono is already
+   * wide and the labels are now 400, so the same value reads as spacing for
+   * its own sake: one recipe applied to rail modes, card headers, field
+   * labels, buttons, badges and status labels alike, none of which recede.
+   * At 0.02em the chrome reads as chrome. */
+  --swath-tracking-wide: 0.02em;
 
   /* space — a 4 px grid */
   --swath-space-0: 0;

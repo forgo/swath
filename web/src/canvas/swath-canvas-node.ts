@@ -44,7 +44,7 @@ export class SwathCanvasNode extends SwathElement {
         padding: var(--swath-space-1) var(--swath-space-2);
         font-family: var(--swath-font-mono);
         font-size: var(--swath-text-xs);
-        font-weight: 700;
+        font-weight: var(--swath-weight-label);
         letter-spacing: var(--swath-tracking-wide);
         text-transform: uppercase;
         color: var(--swath-color-fg-muted);

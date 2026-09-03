@@ -45,7 +45,7 @@ export class SwathShell extends SwathElement {
         border-block-end: var(--swath-border-hairline);
         font-family: var(--swath-font-mono);
         font-size: var(--swath-text-xs);
-        font-weight: 700;
+        font-weight: var(--swath-weight-label);
         letter-spacing: var(--swath-tracking-wide);
         text-transform: uppercase;
         color: var(--swath-color-fg-muted);
