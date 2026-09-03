@@ -256,6 +256,32 @@ export function shareUrl(href: string, state: ViewState): string {
 
 /** Semantic equality within the write precision — the "don't rewrite a
  * URL that already says this" guard behind byte-stable deep links. */
+/** Whether two states name the same ARTIFACT — everything a person
+ * navigated *to*: the layer, the frame, the compare pairing and its handle,
+ * and whether the x-ray is on. The camera (`center`, `zoom`) is excluded on
+ * purpose.
+ *
+ * That split is what lets history be useful (#392): an artifact change is a
+ * `pushState`, so `back` returns to the view you were just looking at, while
+ * a pan or a zoom is a `replaceState` and forty of them do not bury it.
+ */
+export function viewArtifactsEqual(a: ViewState, b: ViewState): boolean {
+  if (a.layer !== b.layer || a.xray !== b.xray || a.time !== b.time) {
+    return false;
+  }
+  if (a.compareTime !== b.compareTime || a.compareLayer !== b.compareLayer) {
+    return false;
+  }
+  if ((a.swipe === undefined) !== (b.swipe === undefined)) {
+    return false;
+  }
+  return !(
+    a.swipe !== undefined &&
+    b.swipe !== undefined &&
+    Math.abs(a.swipe - b.swipe) > SWIPE_EPSILON
+  );
+}
+
 export function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.layer !== b.layer || a.xray !== b.xray || a.time !== b.time) {
     return false;
