@@ -57,6 +57,7 @@ const NAMES = [
     "rail",
     "rail-icon",
     "inspector",
+    "preview",
     "topbar",
     "statusbar",
     "target",

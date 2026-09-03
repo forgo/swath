@@ -52,6 +52,30 @@ export class SwathShell extends SwathElement {
       }
       [part="main"] { grid-area: main; position: relative; min-inline-size: 0; min-block-size: 0; }
       ::slotted([slot="map"]) { position: absolute; inset: 0; block-size: 100%; }
+      /* Composing (#400): the canvas takes the screen and the map becomes a
+       * live preview column beside it — never under it. ADR 0028 amends ADR
+       * 0021 §1 to "the map is always present AND never smaller than a live
+       * preview", which is what this column is. Below the medium tier there
+       * is no room for two columns, so the map keeps the region and the
+       * canvas returns to a sheet over it. */
+      :host([compose]) ::slotted([slot="map"]) {
+        inset-inline-start: auto;
+        inline-size: var(--swath-size-preview);
+        /* Slotted content is light DOM, so the shadow sheet's box-sizing
+         * reset does not reach it: without this the hairline would make the
+         * preview 321px and quietly steal a pixel from the canvas. */
+        box-sizing: border-box;
+        border-inline-start: var(--swath-border-hairline);
+      }
+      :host([compose]) ::slotted([slot="main"]) { inset-inline-end: var(--swath-size-preview); }
+      @media (max-width: 1023px) {
+        :host([compose]) ::slotted([slot="map"]) {
+          inset-inline-start: 0;
+          inline-size: auto;
+          border-inline-start: 0;
+        }
+        :host([compose]) ::slotted([slot="main"]) { inset-inline-end: 0; }
+      }
       [part="inspector"] {
         grid-area: inspector;
         inline-size: var(--swath-size-inspector);
@@ -89,6 +113,9 @@ export class SwathShell extends SwathElement {
   static override properties = {
     view: { type: "string", reflect: true },
     inspector: { type: "boolean", reflect: true },
+    /** Composing: the canvas takes the main region and the map becomes the
+     * live preview column beside it (#400, ADR 0028). */
+    compose: { type: "boolean", reflect: true },
     /** The layout tier (`wide | medium | narrow | phone`), reflected for
      * hosts and tests; the shell computes it from its own width. */
     tier: { type: "string", reflect: true },
@@ -96,6 +123,7 @@ export class SwathShell extends SwathElement {
 
   declare view: string | undefined;
   declare inspector: boolean;
+  declare compose: boolean;
   declare tier: string | undefined;
 
   #observer: ResizeObserver | undefined;

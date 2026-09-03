@@ -212,19 +212,24 @@ client decode (ADR 0019); a refused preview explains itself in plain words.
 scope and every `document.querySelector("swath-map")` in the e2e suite keeps working:
 
 ```
-┌ rail (248 / 56 / tab bar) ┬ top bar (44; spans right of the rail) ─────────────────────┐
-│ brand · Share             │ mode title · search (⌘K) · x-ray toggle                    │
-│ mode switcher (4)         ├ main ───────────────────────────────────┬ inspector (320) ─┤
-│ mode content              │  <slot name="map">  — swath-map          │ author only      │
-│  layers|data|author|xray  │  swath-hud-dock (overlay, 8 slots)       │ (drawer, right)  │
-│ footer                    │  [author: drawer, bottom — the canvas]   │                  │
-│                           ├ status bar (24) ────────────────────────┴──────────────────┤
-└───────────────────────────┴ lat/lon · zoom · CRS · ingest→pixel ──────────────────────┘
+┌ rail (56 strip + 248 panel) ┬ top bar (44; spans right of the rail) ───────────────────┐
+│ brand · Share               │ mode title · chips · search (⌘K)                         │
+│ icon strip (4) │ panel      ├ main ───────────────────────────────────┬ inspector (320)┤
+│                │ content    │  <slot name="map">  — swath-map          │ author only    │
+│                │ new layer  │  swath-hud-dock (overlay, 8 slots)       │ (drawer, right)│
+│                │            │  [compose: canvas | map preview (320)]   │                │
+│ footer                      ├ status bar (24) ────────────────────────┴────────────────┤
+└─────────────────────────────┴ lat/lon · zoom · CRS · ingest→pixel ────────────────────┘
 ```
 
-The top bar spans only right of the rail so `tests/screenshots/verify_stable.py`'s
-`RAIL_WIDTH = 248` and its "content right of the rail" gate stay valid; the shell issue (#284)
-is the single viewport re-pin (1528 × 788 e2e, 1528 × 928 screenshots) that keeps the canvas at
+**Composing inverts the slots** (ADR 0028, amending ADR 0021 §1): the canvas takes main, the map
+becomes a live preview column beside it (`--swath-size-preview`). The amended rule is *always
+present **and never smaller than a live preview*** — the old bottom drawer satisfied "present" while
+covering ~327px of map. Below the medium tier the map keeps main and the canvas returns to a sheet.
+
+The top bar spans only right of the rail so `verify_stable.py`'s `RAIL_WIDTH` (304 since #398:
+a 56px strip beside the 248px panel) and its "content right of the rail" gate stay valid; the
+viewports are re-pinned to 1584 × 788 (e2e) and 1584 × 928 (shots), keeping the canvas at
 1280 × 720 / 860.
 
 HUD dock assignment: `top-center` landing card; `top-right` x-ray / compare / zoom-to-data;

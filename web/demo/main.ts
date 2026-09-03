@@ -499,6 +499,12 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     // inspector column shows once a step is selected.
     if (authorDock instanceof SwathDrawer) {
       authorDock.open = mode === "author";
+      // Composing inverts the slot relationship (#400): the dock stops being
+      // a strip over the map and fills the region beside the preview column.
+      authorDock.size = mode === "author" ? "100%" : "38%";
+    }
+    if (shellElement instanceof SwathShell) {
+      shellElement.compose = mode === "author";
     }
     // Entering author mode with no `sel=`: the panel's own selection (its
     // first step) becomes the state, so the inspector opens on it.

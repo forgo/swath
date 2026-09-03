@@ -116,6 +116,10 @@
   --swath-size-rail: 248px;
   --swath-size-rail-icon: 56px;
   --swath-size-inspector: 320px;
+  /* The live preview column while composing (#400). The map is always
+   * present and never smaller than this — ADR 0028's amendment to ADR 0021
+   * §1 — so the canvas can take the screen without the pixels leaving it. */
+  --swath-size-preview: 320px;
   --swath-size-topbar: 44px;
   --swath-size-statusbar: 24px;
   --swath-size-target: 44px;
