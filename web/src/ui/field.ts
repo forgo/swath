@@ -54,7 +54,7 @@ export class SwathField extends SwathElement {
         padding: var(--swath-space-1) var(--swath-space-2);
         border: var(--swath-border-hairline);
         border-radius: var(--swath-radius-sm);
-        background: var(--swath-color-bg);
+        background: var(--swath-color-bg-input);
         color: var(--swath-color-fg);
         font: inherit;
         accent-color: var(--swath-color-accent);

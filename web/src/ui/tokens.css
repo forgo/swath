@@ -18,6 +18,12 @@
   --swath-color-bg: #0f172a;
   --swath-color-bg-raised: #1e293b;
   --swath-color-bg-hud: rgb(15 23 42 / 92%);
+  /* The recessed well: an input, a media placeholder, the canvas surface.
+   * Identical to bg today — on the dark theme a page-dark inset inside a
+   * bg-raised panel reads correctly, which is why three components reached
+   * for bg directly. That is an accident of this palette and inverts under
+   * high contrast, so the role gets its own name (#387). */
+  --swath-color-bg-input: #0f172a;
   --swath-color-fg: #e2e8f0;
   --swath-color-fg-muted: #94a3b8;
   --swath-color-line: rgb(148 163 184 / 30%);
