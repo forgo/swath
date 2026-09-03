@@ -57,14 +57,27 @@ build-full:
 # canvas shows actual pixels, the layer switcher re-points requests, and
 # the x-ray overlay agrees with the SSE trace stream — in both modes.
 # Needs `just setup-web` first (deps + chromium).
-e2e-web:
+# `modes` selects which of the two serving paths run: `both` (default, and
+# what push-to-main CI uses), `dev` (vite dev server only) or `binary`
+# (the embedded production bundle only). PRs run `dev` (#426) — binary
+# mode re-runs the same specs against a different serving path, so it
+# catches embedding and same-origin regressions, not spec regressions.
+e2e-web modes="both":
     #!/usr/bin/env bash
     set -euo pipefail
+    case "{{ modes }}" in
+        both|dev|binary) ;;
+        *) echo "FAIL: modes must be both, dev or binary (got '{{ modes }}')"; exit 1 ;;
+    esac
     trap 'docker compose down -v' EXIT
     tests/e2e/stack-up.sh
     cd web
-    pnpm exec playwright test
-    SWATH_E2E_MODE=binary pnpm exec playwright test
+    if [ "{{ modes }}" != "binary" ]; then
+        pnpm exec playwright test
+    fi
+    if [ "{{ modes }}" != "dev" ]; then
+        SWATH_E2E_MODE=binary pnpm exec playwright test
+    fi
 
 # --- tests/load (HTTP load harness, issue #101 / ARCHITECTURE §16.7) ---
 
