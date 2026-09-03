@@ -50,6 +50,26 @@ test("the sheet defines exactly the contract's icon names", () => {
   expect([...iconNames()].sort()).toEqual([...NAMES].sort());
 });
 
+// Two names for one drawing is a UI that cannot say two things (#384):
+// `share` and `link` shipped byte-identical path data, so the rail's
+// "copy a deep link to this view" and a tileset's "here is a reference"
+// were the same chain glyph. A closed set of 29 cannot afford a duplicate.
+test("no two icons are the same drawing", async () => {
+  const drawings = new Map<string, string[]>();
+  for (const name of iconNames()) {
+    const icon = document.createElement("swath-icon");
+    icon.name = name;
+    document.body.append(icon);
+    await icon.updateComplete;
+    const drawn = icon.shadowRoot?.querySelector("svg")?.innerHTML ?? "";
+    const key = drawn.replace(/\s+/g, " ").trim();
+    expect(key).not.toBe("");
+    drawings.set(key, [...(drawings.get(key) ?? []), name]);
+  }
+  const shared = [...drawings.values()].filter((names) => names.length > 1);
+  expect(shared).toEqual([]);
+});
+
 test("clones the symbol into its own root, drawn in currentColor at the icon size", async () => {
   const icon = document.createElement("swath-icon");
   icon.name = "eye";
