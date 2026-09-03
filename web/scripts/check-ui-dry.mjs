@@ -118,6 +118,79 @@ function lineOf(text, index) {
   return line;
 }
 
+/** Every `css` tagged template's extent, as `[start, end)` offsets into the
+ * source — `start` just past the opening backtick, `end` at the closing one.
+ *
+ * A backtick inside one of these ENDS the template, so a comment written
+ * with backticks around an identifier silently turns CSS into JavaScript.
+ * The failure that produces is arbitrary and points elsewhere: it has broken
+ * the build three times (#382, #385, #398), and in #398 `tsc` and the whole
+ * vitest suite passed while only the production bundle failed, because the
+ * stray backticks happened to re-balance into valid TypeScript.
+ *
+ * This is a scan rather than a regex because the rule is about a region, not
+ * a token: everything between `css\`` and its terminator, honouring `\${…}`
+ * interpolations and backslash escapes.
+ */
+function cssTemplates(text) {
+  const spans = [];
+  const open = /\bcss`/g;
+  for (;;) {
+    const match = open.exec(text);
+    if (match === null) {
+      break;
+    }
+    const start = match.index + match[0].length;
+    let i = start;
+    let depth = 0;
+    for (; i < text.length; i += 1) {
+      const ch = text[i];
+      if (ch === "\\") {
+        i += 1;
+      } else if (ch === "$" && text[i + 1] === "{") {
+        depth += 1;
+        i += 1;
+      } else if (ch === "}" && depth > 0) {
+        depth -= 1;
+      } else if (ch === "`" && depth === 0) {
+        break;
+      }
+    }
+    spans.push([start, i]);
+    open.lastIndex = i + 1;
+  }
+  return spans;
+}
+
+/** A `css` template that was cut short by a stray backtick.
+ *
+ * The naive check — "a backtick inside the template" — cannot work: the
+ * stray backtick IS the terminator, so it is never inside. What it leaves
+ * behind is the real signature: the template's text ends part-way through a
+ * CSS comment, so it contains an unclosed `/*`.
+ *
+ * That is sound rather than heuristic. An unterminated comment is invalid
+ * CSS in its own right, so a template containing one is broken whether or
+ * not a backtick caused it.
+ */
+function truncatedTemplates(file, text) {
+  const out = [];
+  for (const [start, end] of cssTemplates(text)) {
+    const css = text.slice(start, end);
+    const opens = (css.match(/\/\*/g) ?? []).length;
+    const closes = (css.match(/\*\//g) ?? []).length;
+    if (opens > closes) {
+      out.push({
+        file,
+        rule: "css-backtick",
+        line: lineOf(text, start + css.lastIndexOf("/*")),
+        text: "unclosed comment — a backtick in it ended the css template",
+      });
+    }
+  }
+  return out;
+}
+
 const findings = [];
 const allowHits = new Map(ALLOW.map((entry) => [`${entry.file}::${entry.rule}`, 0]));
 
@@ -126,6 +199,7 @@ for (const dir of SCANNED) {
     const file = relative(ROOT, path).split(sep).join("/");
     const isTest = file.endsWith(".test.ts");
     const text = readFileSync(path, "utf8");
+    findings.push(...truncatedTemplates(file, text));
     for (const rule of RULES) {
       if (
         rule.homes.includes(file) ||
