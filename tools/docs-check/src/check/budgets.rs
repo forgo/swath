@@ -37,7 +37,7 @@ use super::repo_root;
 /// the second ratchet (2026-08-29, #344) applied the same rule after phase 4 —
 /// a ratchet only moves down. Raising one is a reviewed edit with a dated
 /// reason, in the same diff as the words.
-const BUDGETS: [(&str, usize); 23] = [
+const BUDGETS: [(&str, usize); 24] = [
     ("README.md", 1250),
     ("docs/ARCHITECTURE.md", 2125),
     ("docs/CHARTER.md", 1350),
@@ -58,6 +58,9 @@ const BUDGETS: [(&str, usize); 23] = [
     ("docs/SUPPLY-CHAIN.md", 1100),
     ("docs/design/authoring-dag.md", 2250),
     ("docs/design/authoring-ux.md", 3025),
+    // New on 2026-09-03 (#390): the voice/elevation/closed-set companion to
+    // ui-system.md — measured 952, budget 1000.
+    ("docs/design/design-language.md", 1000),
     ("docs/design/catalog-domain.md", 1925),
     ("docs/design/extraction-boundary.md", 675),
     ("docs/design/materialization-planner.md", 1675),
