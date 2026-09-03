@@ -118,6 +118,7 @@ import {
   orphans,
   resolverGraph,
   topological,
+  truncatedAt,
   typer,
 } from "./authoring-dag.js";
 import {
@@ -1284,9 +1285,15 @@ export class SwathAuthoringPanel extends SwathElement {
   // --- The draft preview (B11's countermeasure) ---
 
   /** Schedules (or clears) the draft preview: whenever the pipeline is
-   * complete — the same gate as publish — the composed graph is
-   * debounced into the preview-bounded `POST /result`; anything less
-   * shows no preview and makes no request. */
+   * complete — the same gate as publish — the graph is debounced into the
+   * preview-bounded `POST /result`; anything less shows no preview and
+   * makes no request.
+   *
+   * WHICH graph follows the selection (#401): a selected step previews
+   * itself, truncated. The completeness gate is deliberately still the whole
+   * pipeline's, so ADR 0025's B11 — incomplete drafts show no preview and
+   * make no request — holds exactly as before; only the question being asked
+   * of a previewable draft changes. */
   #schedulePreview(): void {
     if (!this.#find("#swath-authoring-preview")) {
       return; // the canvas is not rendered (collapsed / unavailable)
@@ -1299,7 +1306,7 @@ export class SwathAuthoringPanel extends SwathElement {
       this.#reflectPreview();
       return;
     }
-    const body = JSON.stringify({ process: { process_graph: this.buildGraph() } });
+    const body = JSON.stringify({ process: { process_graph: this.#previewGraph() } });
     if (body === this.#previewedBody) {
       this.#reflectPreview(); // a re-render, not a new draft
       return;
@@ -1471,6 +1478,28 @@ export class SwathAuthoringPanel extends SwathElement {
    * with nothing dangling, by construction (B1/B10). */
   buildGraph(): Record<string, unknown> {
     return lower(this.#dag());
+  }
+
+  /** The graph the PREVIEW should render: truncated at the selected step
+   * when one is selected, else the whole pipeline (#401).
+   *
+   * Selecting a step asks "what does this produce", which is a different
+   * question from what publish sends — so it is a different graph, built by
+   * `truncatedAt` and lowered the same way. Selecting the Output card, or
+   * nothing, previews the pipeline itself. */
+  #previewGraph(): Record<string, unknown> {
+    const dag = this.#dag();
+    const save = this.#saveCard;
+    const selected = this.sel;
+    if (selected === undefined || selected === "" || save === undefined) {
+      return lower(dag);
+    }
+    const cut = truncatedAt(dag, selected, {
+      id: save.id,
+      process: "save_result",
+      params: this.#nodeParams(save),
+    });
+    return cut === undefined ? lower(dag) : lower(cut);
   }
 
   /** The pipeline as the DAG model's graph: one node per

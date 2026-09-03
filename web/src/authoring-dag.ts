@@ -539,6 +539,39 @@ export const CHILD_SEP = ".";
  * prefixed with the owning node's id, so `locateDagError` can map a
  * server diagnostic inside a child back to the canvas node.
  */
+/** The graph truncated at `node`: that node, everything feeding it, and a
+ * `save_result` in place of whatever came after.
+ *
+ * This is what "the preview follows the selected step" means (#401) — the
+ * preview answers *what does this step produce*, which is a different graph
+ * from the one publish sends. Building it here rather than in the panel
+ * keeps the semantics testable without a DOM, and keeps one definition of
+ * "everything feeding a node".
+ *
+ * `save` supplies the output node's id and params (the panel's own Output
+ * card, so the format and any colormap are the ones the author chose).
+ * Returns `undefined` when `node` is not in the graph, or when it IS the
+ * output — there is nothing to truncate then, and the caller should preview
+ * the whole graph.
+ */
+export function truncatedAt(dag: Dag, node: string, save: DagNode): Dag | undefined {
+  const target = nodeOf(dag, node);
+  if (target === undefined || target.process === "save_result") {
+    return undefined;
+  }
+  // Everything that reaches the target, the target included. `reaches` is
+  // the same relation the orphan check uses, so "feeds it" means one thing.
+  const kept = dag.nodes.filter((candidate) => reaches(dag, candidate.id, node));
+  const ids = new Set(kept.map((n) => n.id));
+  const edges = dag.edges.filter((edge) => ids.has(edge.from.node) && ids.has(edge.to.node));
+  const output: DagNode = { id: save.id, process: "save_result", params: { ...save.params } };
+  const port = CUBE_PORTS["save_result"]?.inputs[0] ?? "data";
+  return {
+    nodes: [...kept, output],
+    edges: [...edges, { from: { node, port: "" }, to: { node: save.id, port } }],
+  };
+}
+
 export function lower(dag: Dag): Record<string, unknown> {
   const out = outputNode(dag);
   const graph: Record<string, unknown> = {};
