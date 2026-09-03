@@ -1,0 +1,98 @@
+/* SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0 */
+
+/* The high-contrast theme (design-language.md §10).
+ *
+ * It exists for an accessibility need, not as a second look: the dark
+ * instrument palette stays the product's identity, and there is no light
+ * theme. What changes is separation — grounds go to black, hairlines go
+ * opaque, translucency goes off, the focus ring thickens.
+ *
+ * An override layer, not a replacement palette: it declares the tokens whose
+ * VALUES carry contrast, and inherits the rest (spacing, radii, type scale,
+ * z-order, motion) from tokens.css, which is adopted before it. A theme that
+ * restated the whole set would drift from it silently; tokens.test.ts asserts
+ * instead that every name declared here exists, and that every contrast-
+ * bearing name is declared.
+ *
+ * Two entry points, one palette: the media query is the viewer's own
+ * OS-level request; the attribute is an explicit choice the app can set, and
+ * applies only when the OS has not already asked. CSS cannot union a media
+ * query with a selector, so the declarations appear twice — tokens.test.ts
+ * asserts the two blocks are identical, which is what stops them drifting. */
+@media (prefers-contrast: more) {
+  :root {
+    --swath-color-bg: #000000;
+    --swath-color-bg-raised: #1a1a1a;
+    /* Opaque: a HUD over a live render must not borrow the render's pixels. */
+    --swath-color-bg-hud: #000000;
+    /* Distinguishable from BOTH bg and bg-raised — a well that matches its
+     * panel is not a well, and this is the theme #387 was written for. */
+    --swath-color-bg-input: #2e2e2e;
+    --swath-color-fg: #ffffff;
+    /* "Muted" cannot mean "below the readable threshold" here. */
+    --swath-color-fg-muted: #d4d4d4;
+    /* Hairlines at full opacity: the 30% line is the first thing to vanish. */
+    --swath-color-line: #ffffff;
+    --swath-color-focus: #ffffff;
+    --swath-color-accent: #4ade80;
+    --swath-color-accent-bg: rgb(74 222 128 / 22%);
+    --swath-color-accent-border: #4ade80;
+    --swath-color-selection-bg: rgb(74 222 128 / 45%);
+    --swath-color-warn: #fcd34d;
+    --swath-color-danger: #fca5a5;
+    --swath-color-info: #bfdbfe;
+    --swath-color-udf: #d8b4fe;
+    --swath-color-compare: #f9a8d4;
+    --swath-color-decision-live: #4ade80;
+    --swath-color-decision-overview: #fcd34d;
+    /* Still distinct from info, which is lighter here for the same reason. */
+    --swath-color-decision-cache: #60a5fa;
+    --swath-color-heat-1: #ffedd5;
+    --swath-color-heat-2: #fdba74;
+    --swath-color-heat-3: #fb923c;
+    --swath-color-heat-4: #f97316;
+    --swath-color-heat-5: #ea580c;
+    /* The indirections are kept: a theme moves the colour, not the shape. */
+    --swath-border-hairline: 1px solid var(--swath-color-line);
+    --swath-border-focus: 3px solid var(--swath-color-focus);
+    --swath-shadow-hud: none;
+    /* Depth by translucency is exactly what this theme removes. */
+    --swath-blur-hud: none;
+  }
+}
+
+@media not (prefers-contrast: more) {
+  :root[data-theme="high-contrast"] {
+    --swath-color-bg: #000000;
+    --swath-color-bg-raised: #1a1a1a;
+    --swath-color-bg-hud: #000000;
+    --swath-color-bg-input: #2e2e2e;
+    --swath-color-fg: #ffffff;
+    --swath-color-fg-muted: #d4d4d4;
+    --swath-color-line: #ffffff;
+    --swath-color-focus: #ffffff;
+    --swath-color-accent: #4ade80;
+    --swath-color-accent-bg: rgb(74 222 128 / 22%);
+    --swath-color-accent-border: #4ade80;
+    --swath-color-selection-bg: rgb(74 222 128 / 45%);
+    --swath-color-warn: #fcd34d;
+    --swath-color-danger: #fca5a5;
+    --swath-color-info: #bfdbfe;
+    --swath-color-udf: #d8b4fe;
+    --swath-color-compare: #f9a8d4;
+    --swath-color-decision-live: #4ade80;
+    --swath-color-decision-overview: #fcd34d;
+    --swath-color-decision-cache: #60a5fa;
+    --swath-color-heat-1: #ffedd5;
+    --swath-color-heat-2: #fdba74;
+    --swath-color-heat-3: #fb923c;
+    --swath-color-heat-4: #f97316;
+    --swath-color-heat-5: #ea580c;
+    /* The indirections are kept: a theme moves the colour, not the shape. */
+    --swath-border-hairline: 1px solid var(--swath-color-line);
+    --swath-border-focus: 3px solid var(--swath-color-focus);
+    --swath-shadow-hud: none;
+    --swath-blur-hud: none;
+  }
+}

@@ -19,6 +19,9 @@ test("a windowless document gets the tokens as one <style>", () => {
   expect(doc.adoptedStyleSheets).toHaveLength(0);
   expect(doc.head.querySelectorAll("style")).toHaveLength(1);
   expect(doc.head.querySelector("style")?.textContent).toContain("--swath-color-bg:");
+  // The one <style> carries the theme too, so a windowless document is not
+  // silently stuck on the default palette (#389).
+  expect(doc.head.querySelector("style")?.textContent).toContain("prefers-contrast");
 });
 
 test("an iframe's document adopts a sheet constructed in its own realm", () => {
@@ -30,7 +33,9 @@ test("an iframe's document adopts a sheet constructed in its own realm", () => {
   }
   adoptTokens(doc);
   adoptTokens(doc);
-  expect(doc.adoptedStyleSheets).toHaveLength(1);
+  // Two sheets since #389: the tokens, then the high-contrast overrides
+  // that narrow them. Both built in the frame's own realm.
+  expect(doc.adoptedStyleSheets).toHaveLength(2);
   expect(doc.adoptedStyleSheets[0]).not.toBe(tokens);
   expect(getComputedStyle(doc.documentElement).getPropertyValue("--swath-size-icon").trim()).toBe(
     "16px",
@@ -69,4 +74,16 @@ test("every SwathElement gets tabular figures and the product's selection colour
   // The selection colour is a token, not a literal — a theme must be able
   // to move it (the high-contrast theme, #389).
   expect(readToken("--swath-color-selection-bg")).not.toBe("");
+});
+
+test("the high-contrast overrides are adopted immediately after the tokens", async () => {
+  const { highContrast } = await import("./styles.js");
+  adoptTokens(document);
+  const sheets = document.adoptedStyleSheets;
+  const tokensAt = sheets.indexOf(tokens);
+  const themeAt = sheets.indexOf(highContrast);
+  expect(tokensAt).toBeGreaterThanOrEqual(0);
+  // Order is the whole mechanism: the theme narrows values tokens.css set,
+  // so a sheet adopted before it would win (#389).
+  expect(themeAt).toBe(tokensAt + 1);
 });
