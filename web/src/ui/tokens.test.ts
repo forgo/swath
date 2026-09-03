@@ -49,9 +49,17 @@ const NAMES = [
   "--swath-border-hairline",
   "--swath-border-focus",
   "--swath-shadow-hud",
-  ...["rail", "rail-icon", "inspector", "topbar", "statusbar", "target", "icon"].map(
-    (s) => `--swath-size-${s}`,
-  ),
+  ...[
+    "rail",
+    "rail-icon",
+    "inspector",
+    "topbar",
+    "statusbar",
+    "target",
+    "icon",
+    "icon-sm",
+    "icon-lg",
+  ].map((s) => `--swath-size-${s}`),
   ...["overlay", "controls", "hud", "drawer", "palette"].map((z) => `--swath-z-${z}`),
   ...["fast", "normal", "ease"].map((m) => `--swath-motion-${m}`),
 ].sort();
@@ -79,6 +87,8 @@ test("fixed shell sizes are the geometry ui-system.md §4.1 names", () => {
   expect(readToken("--swath-size-statusbar")).toBe("24px");
   expect(readToken("--swath-size-target")).toBe("44px");
   expect(readToken("--swath-size-icon")).toBe("16px");
+  expect(readToken("--swath-size-icon-sm")).toBe("12px");
+  expect(readToken("--swath-size-icon-lg")).toBe("24px");
 });
 
 test("the breakpoints comment in tokens.css mirrors breakpoints.ts", () => {

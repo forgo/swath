@@ -43,8 +43,8 @@ export class SwathIcon extends SwathElement {
         vertical-align: middle;
         color: inherit;
       }
-      :host([size="sm"]) { inline-size: 12px; block-size: 12px; }
-      :host([size="lg"]) { inline-size: 24px; block-size: 24px; }
+      :host([size="sm"]) { inline-size: var(--swath-size-icon-sm); block-size: var(--swath-size-icon-sm); }
+      :host([size="lg"]) { inline-size: var(--swath-size-icon-lg); block-size: var(--swath-size-icon-lg); }
       svg {
         inline-size: 100%;
         block-size: 100%;
