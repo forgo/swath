@@ -133,3 +133,25 @@ test("readonly reflects to the control (a STAC-named dataset id is not editable)
   await field.updateComplete;
   expect(control<HTMLInputElement>(field).readOnly).toBe(false);
 });
+
+test("help text is prose, not a label: it reads at the body size (#385)", async () => {
+  const { field } = await mount(
+    '<swath-field name="when" label="When" help="the dates to show — leave both empty to use everything available"></swath-field>',
+  );
+  const help = field.shadowRoot?.querySelector('[part="help"]');
+  const label = field.shadowRoot?.querySelector('[part="label"]');
+  if (!(help instanceof HTMLElement) || !(label instanceof HTMLElement)) {
+    throw new Error("field must render both a label and its help");
+  }
+  const size = (el: HTMLElement): number => Number.parseFloat(getComputedStyle(el).fontSize);
+  // The whole point: it is no longer the same size as the label above it.
+  expect(size(help)).toBeGreaterThan(size(label));
+  // Errors stay at the label size — short, and annotation rather than prose.
+  field.error = "unknown dataset";
+  await field.updateComplete;
+  const error = field.shadowRoot?.querySelector('[part="error"]');
+  if (!(error instanceof HTMLElement)) {
+    throw new Error("field must render its error");
+  }
+  expect(size(error)).toBe(size(label));
+});

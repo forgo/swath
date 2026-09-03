@@ -67,7 +67,12 @@ export class SwathField extends SwathElement {
       }
       textarea[part="control"] { min-block-size: calc(var(--swath-space-8) * 2); resize: vertical; }
       :host([error]) [part="control"] { border-color: var(--swath-color-danger); }
-      [part="help"], [part="error"] { font-size: var(--swath-text-xs); color: var(--swath-color-fg-muted); }
+      /* help carries the authoring inspector's plain-language prose — the
+       * one text in the UI whose whole job is to be read — so it takes the
+       * body size, not the label size (#385). error stays xs: errors are
+       * short and want to read as annotation. */
+      [part="help"] { font-size: var(--swath-text-sm); color: var(--swath-color-fg-muted); }
+      [part="error"] { font-size: var(--swath-text-xs); color: var(--swath-color-fg-muted); }
       [part="error"] { color: var(--swath-color-danger); }
       [part="help"]:empty, [part="error"]:empty { display: none; }
     `,
