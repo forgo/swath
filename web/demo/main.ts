@@ -538,6 +538,13 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     savePreference();
     syncUrl();
   };
+  // The standing "new layer" control (#398): available from every mode, so
+  // authoring is never something you have to find your way back to.
+  const newLayer = document.querySelector<SwathButton>("#swath-new-layer");
+  newLayer?.addEventListener("click", () => {
+    setMode("author");
+  });
+
   applyMode(appState.view);
   if (railElement instanceof SwathRail) {
     railElement.items = [

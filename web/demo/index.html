@@ -104,6 +104,11 @@ or bring the stack up yourself and `pnpm exec vite dev`.
         font-size: var(--swath-text-xs);
         color: var(--swath-color-fg-muted);
       }
+      /* The footer holds a standing action above the provenance line. */
+      #swath-new-layer {
+        display: flex;
+        margin-block-end: var(--swath-space-2);
+      }
     </style>
     <script type="module" src="./main.ts"></script>
   </head>
@@ -146,6 +151,17 @@ or bring the stack up yourself and `pnpm exec vite dev`.
           <div id="swath-xray-modes"></div>
           <div id="swath-xray-analytics"></div>
         </section>
+        <!-- The one action that should never be more than a click away
+             (issue #398): standing in the panel footer, not buried in the
+             Layers panel where only one mode could reach it. -->
+        <swath-button
+          slot="footer"
+          id="swath-new-layer"
+          icon="plus"
+          size="sm"
+          label="Author a new layer"
+          >new layer</swath-button
+        >
         <span slot="footer" class="swath-rail-footer">granule → pixel</span>
       </swath-rail>
       <span slot="topbar" id="swath-mode-title">Layers</span>

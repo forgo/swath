@@ -31,11 +31,17 @@ import sys
 PDIFF = ["cargo", "run", "--quiet", "-p", "swath-testsupport", "--bin", "pdiff", "--"]
 
 # The entry page's rail width in the pinned 1528px viewport
-# (the `screenshots` project of web/playwright.config.ts: rail 248px + a
-# 1280px canvas); the
+# (the `screenshots` project of web/playwright.config.ts: the rail's icon
+# strip 56px + its panel 248px, then a 1280px canvas); the
 # content gate inspects the canvas only, so a rail full of text never
 # rescues a blank map.
-RAIL_WIDTH = 248
+#
+# 248 -> 304 on 2026-09-03 (#398): the mode tabs became a thin icon strip
+# BESIDE the panel rather than a labelled column above its content. Keeping
+# the old total would have taken the strip's 56px out of the panel, which
+# truncated every layer title and clipped the date fields — 56px of map is
+# the cheaper loss.
+RAIL_WIDTH = 304
 
 # Blank canvases measure > 0.99 (one color plus the viewer's few white
 # controls); the sparsest committed shot (the x-ray time-slider views, a

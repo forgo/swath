@@ -154,7 +154,10 @@ test("rail: items + mode → aria-current; a pick emits swath-mode-change once; 
   expect(rail.shadowRoot?.activeElement).toBe(items()[2]);
   await userEvent.keyboard("{ArrowDown}");
   expect(rail.shadowRoot?.activeElement).toBe(items()[0]);
-  expect(Math.round(rail.getBoundingClientRect().width)).toBe(248);
+  // 56px icon strip + 248px panel (#398): the strip sits BESIDE the panel
+  // rather than inside it, so the panel keeps its full width and layer
+  // titles stop truncating. Collapsed, the strip alone remains.
+  expect(Math.round(rail.getBoundingClientRect().width)).toBe(304);
   rail.style.transition = "none"; // the width animates (motion tokens); read the end state
   const collapsed: boolean[] = [];
   rail.addEventListener("swath-toggle", (e) => collapsed.push(e.detail.pressed));

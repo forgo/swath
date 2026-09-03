@@ -7,8 +7,8 @@ show a painted map (`pdiff --content`: the map region is never near-uniform), an
 capture run must reproduce each shot within its perceptual-diff policy
 (tests/screenshots/verify_stable.py + swath-testsupport pdiff) before the recipe passes.
 
-- capture sha: `f04c770049718386b0a37333b6f7d44ba4d91cc3`
-- captured: 2026-09-03T12:19:30.866Z
+- capture sha: `406ab2a980394561bd6e58e883de867932a244fd`
+- captured: 2026-09-03T18:13:34.350Z
 - machine-readable manifest (per-shot sha256 + pdiff policy): [`shots.json`](shots.json)
 
 | shot | evidences |
