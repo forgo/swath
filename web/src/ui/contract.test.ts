@@ -27,6 +27,8 @@ import { SwathDrawer } from "./drawer.js";
 import drawerSource from "./drawer.ts?raw";
 import type { SwathElement } from "./element.js";
 import eventsSource from "./events.ts?raw";
+import { SwathExplainCard } from "./explain-card.js";
+import explainCardSource from "./explain-card.ts?raw";
 import { SwathField } from "./field.js";
 import fieldSource from "./field.ts?raw";
 import { SwathGranuleCard } from "./granule-card.js";
@@ -144,6 +146,7 @@ const SOURCES: Record<string, string> = {
   "swath-chip-row": chipRowSource,
   "swath-command-palette": commandPaletteSource,
   "swath-drawer": drawerSource,
+  "swath-explain-card": explainCardSource,
   "swath-field": fieldSource,
   "swath-granule-card": granuleCardSource,
   "swath-hud-card": hudCardSource,

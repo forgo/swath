@@ -27,6 +27,9 @@ export interface SwathEventMap {
   /** Alias of `swath-layer-change` for one milestone. */
   layerchange: { layer: string; layers: SwathLayer[]; visible: boolean; opacity: number };
   "swath-layer-select": { layer: string };
+  /** The explain card was dismissed (Escape, an outside click, or its own
+   * close button); the host owns what that means for its state (#394). */
+  "swath-explain-dismiss": Record<string, never>;
   /** A breadcrumb chip's remove button (`<swath-chip-row>`, #393); the host
    * decides which parameter that drops. */
   "swath-chip-remove": { chip: string };

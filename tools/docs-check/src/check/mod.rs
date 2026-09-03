@@ -28,6 +28,8 @@
 //!   and the gate must fail on every one.
 //! - [`glossary`] — `web/src/glossary.ts`'s cited sources must exist and
 //!   still use the term they define (issue #396).
+//! - [`web_quotes`] — server wording the web reacts to must still be
+//!   emitted by the Rust that owns it (issue #394).
 //! - [`budgets`] — per-doc word budgets (issue #177): the word-reduction
 //!   sweep's committed ceilings over `README.md` + `docs/*.md`, measured
 //!   exactly as `just docs-words` measures (`wc -w`).
@@ -59,6 +61,7 @@ mod mutation;
 mod numbers;
 mod routes;
 mod stamps;
+mod web_quotes;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
