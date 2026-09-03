@@ -40,7 +40,7 @@ export class SwathHudCard extends SwathElement {
         color: var(--swath-color-fg-muted);
         font-family: var(--swath-font-mono);
         font-size: var(--swath-text-xs);
-        font-weight: 700;
+        font-weight: var(--swath-weight-label);
         letter-spacing: var(--swath-tracking-wide);
         text-transform: uppercase;
         text-align: start;

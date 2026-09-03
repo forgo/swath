@@ -35,7 +35,7 @@ export class SwathButton extends SwathElement {
         color: var(--swath-color-fg-muted);
         font-family: var(--swath-font-mono);
         font-size: var(--swath-text-xs);
-        font-weight: 700;
+        font-weight: var(--swath-weight-label);
         line-height: var(--swath-leading-normal);
         letter-spacing: var(--swath-tracking-wide);
         text-transform: uppercase;

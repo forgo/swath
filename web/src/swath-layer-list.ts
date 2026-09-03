@@ -31,7 +31,7 @@ export class SwathLayerList extends SwathElement {
         margin: 0 0 var(--swath-space-2);
         font-family: var(--swath-font-mono);
         font-size: var(--swath-text-xs);
-        font-weight: 700;
+        font-weight: var(--swath-weight-label);
         letter-spacing: var(--swath-tracking-wide);
         text-transform: uppercase;
         color: var(--swath-color-fg-muted);

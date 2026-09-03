@@ -43,6 +43,7 @@ const NAMES = [
   "--swath-font-ui",
   "--swath-font-mono",
   ...["xs", "sm", "md", "lg"].map((size) => `--swath-text-${size}`),
+  "--swath-weight-label",
   "--swath-leading-tight",
   "--swath-leading-normal",
   "--swath-tracking-wide",
@@ -243,4 +244,12 @@ test("under high contrast, foreground and accent clear WCAG AA on every ground",
   const decisions = ["live", "overview", "cache"].map((d) => value(`--swath-color-decision-${d}`));
   expect(new Set(decisions).size).toBe(3);
   expect(decisions).not.toContain(value("--swath-color-info"));
+});
+
+test("the label recipe is quiet chrome, and has one home", () => {
+  // #380: 700/0.06em was one loud recipe applied to rail modes, card headers,
+  // field labels, buttons, badges and status labels alike, so nothing
+  // receded. Both values live here now, not in seven component sheets.
+  expect(readToken("--swath-weight-label")).toBe("400");
+  expect(readToken("--swath-tracking-wide")).toBe("0.02em");
 });
