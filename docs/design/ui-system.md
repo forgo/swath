@@ -257,12 +257,18 @@ handle and swipe down to close.
 
 ## 8. What M12 may touch — the freeze
 
-M12 changes **values, glyphs and themes**, not structure: `web/src/ui/tokens.css`, `base.css`,
-`icons.svg`, an optional `theme-*.css` (light / high-contrast under the same token names) adopted
-after tokens, and a one-time regeneration of `docs/media/screenshots/`. Frozen for M12: every
-token *name* (`tokens.test.ts`), every icon *name*, the part vocabulary, slot names, attributes
-and events in §5, and the region layout in §6. A CI path check on M12 PRs makes it mechanical: a
-diff outside those files fails.
+M12 changes **values, glyphs and themes**, not structure: `tokens.css`, `base.css`, `icons.svg`,
+`theme-high-contrast.css` (the same token names under `prefers-contrast: more`) adopted after
+tokens, and a one-time regeneration of `docs/media/screenshots/`. Frozen for M12: every token
+*name* (`tokens.test.ts`), every icon *name* (`icon.test.ts`), the part vocabulary, attributes
+and events in §5 (`contract.test.ts`), and the region layout in §6.
+
+The freeze is **asserted, not enumerated** (ADR 0026). A primitive may be edited only to replace a
+literal with a token reference or to consume one; `contract.test.ts` pins each primitive's parts,
+observed attributes and the event catalog's names, so a structural change fails wherever it is
+written. An earlier draft of this section claimed a CI path check on M12 PRs; none existed, and a
+path fence would have forbidden the value-extraction edits M12 needs while permitting structural
+change inside the files it allowed.
 
 ## 9. The DRY gate — `web/scripts/check-ui-dry.mjs`
 
