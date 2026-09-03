@@ -15,6 +15,7 @@ const NAMES = [
     "bg",
     "bg-raised",
     "bg-hud",
+    "bg-input",
     "fg",
     "fg-muted",
     "line",
@@ -138,4 +139,12 @@ test("no decision colour is another decision colour, or the link colour", () => 
   const named = ["decision-live", "decision-overview", "decision-cache", "info", "danger"];
   const values = named.map((n) => readToken(`--swath-color-${n}`).trim().toLowerCase());
   expect(new Set(values).size, `duplicated among ${named.join(", ")}`).toBe(named.length);
+});
+
+test("the input well is its own role, identical to the page today", () => {
+  // #387: three components used --swath-color-bg as a recessed well because
+  // on this palette the accident reads correctly. Naming the role is what
+  // lets a theme move one without moving the other; the values stay equal
+  // here so the dark theme does not shift.
+  expect(readToken("--swath-color-bg-input")).toBe(readToken("--swath-color-bg"));
 });

@@ -68,7 +68,7 @@ export class SwathCanvas extends SwathElement {
         overflow: hidden;
         touch-action: none;
         user-select: none;
-        background-color: var(--swath-color-bg);
+        background-color: var(--swath-color-bg-input);
         background-image:
           linear-gradient(var(--swath-color-line) 1px, transparent 1px),
           linear-gradient(90deg, var(--swath-color-line) 1px, transparent 1px);

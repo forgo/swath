@@ -23,7 +23,7 @@ export class SwathGranuleCard extends SwathElement {
         display: block;
         aspect-ratio: 1;
         inline-size: 100%;
-        background: var(--swath-color-bg);
+        background: var(--swath-color-bg-input);
         object-fit: cover;
       }
       [part="pending"], [part="note"] {
@@ -35,7 +35,7 @@ export class SwathGranuleCard extends SwathElement {
         font-size: var(--swath-text-xs);
         color: var(--swath-color-fg-muted);
         text-align: center;
-        background: var(--swath-color-bg);
+        background: var(--swath-color-bg-input);
       }
       [part="note"] { color: var(--swath-color-warn); }
       [part="title"] { font-size: var(--swath-text-sm); color: var(--swath-color-fg); }
