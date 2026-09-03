@@ -132,6 +132,30 @@ export function sortGranules(
   }
 }
 
+/** The openEO temporal interval that selects exactly one instant.
+ *
+ * Intervals are left-closed and right-open — the server compiles
+ * `[start, end)` to the inclusive `end - 1ms` — so the smallest window
+ * containing `datetime` and nothing after it is `[datetime, datetime +
+ * 1ms)`. Naming both bounds (rather than leaving the start open) is what
+ * makes a missing granule a refusal instead of a silent render of an
+ * older one.
+ *
+ * Resolution is milliseconds throughout, matching the server's own
+ * `to_unix_millis`. A granule with no datetime, or one whose datetime the
+ * platform cannot parse, returns `null`: an open window the server
+ * resolves as it always did, rather than a fabricated bound. */
+export function instantWindow(datetime: string): [string, string] | null {
+  if (datetime === "") {
+    return null;
+  }
+  const ms = Date.parse(datetime);
+  if (Number.isNaN(ms)) {
+    return null;
+  }
+  return [new Date(ms).toISOString(), new Date(ms + 1).toISOString()];
+}
+
 /** The bounded preview graph for one granule: the dataset's quick look
  * (RGB when red/green/blue bands are declared, else the first band in
  * gray), saved as PNG, with NO extent named — the server then frames the
@@ -139,10 +163,14 @@ export function sortGranules(
  * tile at least as large as the footprint, around its centre), where a
  * named bbox straddling a tile boundary would fall onto a far shallower
  * containing tile and render the granule sub-pixel. ADR 0014's budget
- * and refusal apply; a refusal comes back as a plain-words note. NOTE:
- * previews render the dataset's *latest* granule (`temporal_extent` is
- * accepted-and-ignored until ADR 0015's graph half, #181), so the picture
- * is the current frame, not necessarily this granule's own pixels. */
+ * and refusal apply; a refusal comes back as a plain-words note.
+ *
+ * The preview is pinned to THIS granule's instant (#406): the compiled
+ * `temporal_extent` is intersected with the request window and resolved
+ * latest-at-or-before (ADR 0015 composition, `resolve_branch`), so a
+ * one-instant window selects the one granule. A granule with no datetime
+ * keeps the open window — the dataset's latest is then the only answer
+ * there is, and it is the honest one. */
 export function previewGraph(
   dataset: CatalogDataset,
   granule: CatalogGranule,
@@ -153,7 +181,7 @@ export function previewGraph(
     arguments: {
       id: dataset.id,
       spatial_extent: null,
-      temporal_extent: null,
+      temporal_extent: instantWindow(granule.datetime),
       bands: picked.length === 0 ? null : picked,
     },
   };
