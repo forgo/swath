@@ -583,7 +583,7 @@ export function decisionKind(decision: TraceDecision): "live" | "cache_hit" | "o
   return "cache_hit" in decision ? "cache_hit" : "overview";
 }
 
-function decisionLabel(decision: TraceDecision): string {
+export function decisionLabel(decision: TraceDecision): string {
   if (typeof decision === "string") return decision;
   if ("cache_hit" in decision) {
     return `cache_hit (${decision.cache_hit.key.slice(0, 8)}…)`;
@@ -594,7 +594,7 @@ function decisionLabel(decision: TraceDecision): string {
 /** Human label for a plan candidate strategy: `"live"`, `"cache_hit"`,
  * or `"overview (factor N)"`. Doubles as the identity the chosen-row
  * match compares on — the vocabulary has no other distinguishing field. */
-function plannedLabel(strategy: PlannedStrategy): string {
+export function plannedLabel(strategy: PlannedStrategy): string {
   if (typeof strategy === "string") {
     return strategy;
   }
