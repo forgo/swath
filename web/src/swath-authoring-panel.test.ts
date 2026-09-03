@@ -1652,10 +1652,11 @@ test("a step whose output does not render is not truncated to (#401)", async () 
   const panel = await mount(stub);
   panel.querySelector<HTMLButtonElement>(".swath-authoring-template")?.click();
   await expect.poll(() => previewPosts(stub).length).toBe(1);
-  const whole = Object.keys(
-    (previewPosts(stub)[0]?.body as { process: { process_graph: Record<string, unknown> } }).process
-      .process_graph,
-  );
+  const first = previewPosts(stub)[0]?.body as
+    | { process: { process_graph: Record<string, unknown> } }
+    | undefined;
+  const whole = Object.keys(first?.process.process_graph ?? {});
+  expect(whole.length).toBeGreaterThan(2);
 
   // The load step's output is a raw two-band cube: saving that is a
   // refusal, not a preview. Entering author mode selects the first step
