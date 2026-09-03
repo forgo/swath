@@ -83,6 +83,11 @@
   --swath-border-hairline: 1px solid var(--swath-color-line);
   --swath-border-focus: 2px solid var(--swath-color-focus);
   --swath-shadow-hud: none;
+  /* Elevation is translucency, never shadow: a shadow over a live render
+   * reads as dirt on the glass, and letting the map show through keeps the
+   * promise that the pixels are always present. Zeroed under
+   * prefers-reduced-transparency, where bg-hud goes opaque instead (#388). */
+  --swath-blur-hud: blur(6px);
 
   /* fixed dimensions of the shell geometry (§6) */
   --swath-size-rail: 248px;

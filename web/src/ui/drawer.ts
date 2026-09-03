@@ -39,6 +39,7 @@ export class SwathDrawer extends SwathElement {
         position: absolute;
         inset: 0;
         background: var(--swath-color-bg-hud);
+        backdrop-filter: var(--swath-blur-hud);
         opacity: 0.6;
         pointer-events: auto;
       }

@@ -50,6 +50,7 @@ const NAMES = [
   "--swath-border-hairline",
   "--swath-border-focus",
   "--swath-shadow-hud",
+  "--swath-blur-hud",
   ...[
     "rail",
     "rail-icon",
@@ -147,4 +148,12 @@ test("the input well is its own role, identical to the page today", () => {
   // lets a theme move one without moving the other; the values stay equal
   // here so the dark theme does not shift.
   expect(readToken("--swath-color-bg-input")).toBe(readToken("--swath-color-bg"));
+});
+
+test("elevation is translucency: the blur is a token, and the shadow stays none", () => {
+  // #388. --swath-shadow-hud is deliberately `none`; the depth cue is the
+  // map showing through. A component that reaches for a shadow instead is
+  // reintroducing the thing this token was set to none to prevent.
+  expect(readToken("--swath-shadow-hud")).toBe("none");
+  expect(readToken("--swath-blur-hud")).toContain("blur(");
 });

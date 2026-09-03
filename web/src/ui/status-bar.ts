@@ -27,6 +27,7 @@ export class SwathStatusBar extends SwathElement {
         border: var(--swath-border-hairline);
         border-radius: var(--swath-radius-pill);
         background: var(--swath-color-bg-hud);
+        backdrop-filter: var(--swath-blur-hud);
         gap: var(--swath-space-2);
       }
       :host([chip]) ::slotted(:not([chip-keep])) { display: none; }
