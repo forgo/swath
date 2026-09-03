@@ -35,7 +35,11 @@
   --swath-color-compare: #f472b6;
   --swath-color-decision-live: #4ade80;
   --swath-color-decision-overview: #fbbf24;
-  --swath-color-decision-cache: #2563eb;
+  /* blue-500, not blue-600: the three decision colours are a set and read
+   * as one only if they sit at the same level as their siblings (green-400,
+   * amber-400). Not blue-400 either — #60a5fa is --swath-color-info, and a
+   * decision badge the colour of a link is worse than a dim one (#383). */
+  --swath-color-decision-cache: #3b82f6;
   --swath-color-focus: #93c5fd;
   /* the x-ray's bytes-read heat ramp, coolest → hottest (#286) */
   --swath-color-heat-1: #ffedd5;
