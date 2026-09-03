@@ -83,3 +83,68 @@ test("rail collapse is a device preference: storage remembers it, a rail=collaps
   expect(new URL(link.url()).search).toContain("rail=collapsed");
   await fresh?.close();
 });
+
+test("the back button walks artifacts, and a pan never buries them (#392)", async ({ page }) => {
+  await page.goto(DEMO_PATH);
+  await pressed(page, "layers");
+
+  // Three artifact changes: three history entries.
+  await modeButton(page, "data").click();
+  await expect(page).toHaveURL(/[?&]view=data(&|$)/);
+  await modeButton(page, "author").click();
+  await expect(page).toHaveURL(/[?&]view=author(&|$)/);
+  await modeButton(page, "xray").click();
+  await expect(page).toHaveURL(/[?&]view=xray(&|$)/);
+
+  // Back returns to the view you were just looking at, without a reload —
+  // the shell is driven from the URL by `popstate`, the same path a cold
+  // load takes.
+  await page.goBack();
+  await expect(page).toHaveURL(/[?&]view=author(&|$)/);
+  await pressed(page, "author");
+  await expect(page.locator("swath-authoring-panel")).toBeVisible();
+
+  await page.goBack();
+  await expect(page).toHaveURL(/[?&]view=data(&|$)/);
+  await pressed(page, "data");
+
+  await page.goBack();
+  await expect(page).not.toHaveURL(/[?&]view=/);
+  await pressed(page, "layers");
+
+  // Forward walks back up: history is real, not a one-way trip.
+  await page.goForward();
+  await expect(page).toHaveURL(/[?&]view=data(&|$)/);
+  await pressed(page, "data");
+});
+
+test("panning replaces rather than pushes: the camera adds no history (#392)", async ({ page }) => {
+  await page.goto(DEMO_PATH);
+  await modeButton(page, "data").click();
+  await expect(page).toHaveURL(/[?&]view=data(&|$)/);
+
+  const map = page.locator("swath-map");
+  await expect(map).toBeVisible();
+  // Let the landing settle so an artifact resolving mid-test (the layer the
+  // server picks) is not counted as a pan.
+  await page.waitForTimeout(1_000);
+  const before = await page.evaluate(() => history.length);
+
+  for (const [x, y] of [
+    [480, 340],
+    [340, 330],
+    [440, 250],
+  ] as const) {
+    await map.hover();
+    await page.mouse.down();
+    await page.mouse.move(x, y, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+  }
+
+  // The camera moved and the URL followed it...
+  await expect(page).toHaveURL(/[?&](center|zoom)=/);
+  // ...without adding a single entry. This is the whole point of the split:
+  // forty pans must not bury the view you were looking at.
+  expect(await page.evaluate(() => history.length)).toBe(before);
+});

@@ -65,6 +65,7 @@ import {
   resolveInitialState,
   saveViewState,
   type ViewState,
+  viewArtifactsEqual,
   viewStatesEqual,
   withViewState,
 } from "../src/view-state.js";
@@ -278,8 +279,14 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
   // params through byte-for-byte, and a write that changes nothing is
   // skipped for both.
   let appState: AppState = initialApp;
-  const syncUrl = (): void => {
-    if (!interacted) {
+  /** The artifact half of the last state written to the URL (#392). */
+  let lastArtifact: ViewState | undefined;
+  /** `transient: true` forces a replace even when the artifact changed — for
+   * state the app is driving rather than the person: the cinematic loop's
+   * frame advances (#392). A loop that pushed a frame per second would fill
+   * history with a slideshow and make `back` useless. */
+  const syncUrl = (options: { transient?: boolean } = {}): void => {
+    if (!interacted || restoring) {
       return;
     }
     const state = snapshot();
@@ -294,8 +301,68 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     if (next === current) {
       return;
     }
-    history.replaceState(null, "", `${location.pathname}${next}${location.hash}`);
+    // Artifacts push, the camera replaces (#392, amending ADR 0021 decision
+    // 3 at its own recorded reopen condition). A layer, a frame, a compare
+    // pairing or the x-ray is something a person navigated *to*, so `back`
+    // should return to it; a pan is not, and forty of them must not bury the
+    // view you were looking at before.
+    // Compared against the last state WE wrote, not against the URL. On the
+    // first interaction the URL gains fields that were implicit all along —
+    // the layer the server picked, the frame it opened on — and a pan that
+    // merely makes them explicit is not navigation. `lastArtifact` is seeded
+    // the moment the map reports its initial layer, so every comparison
+    // after that is resolved-against-resolved.
+    const previous = lastArtifact ?? parseViewState(current);
+    const artifactChanged =
+      options.transient !== true &&
+      (!viewArtifactsEqual(previous, state) || !appStatesEqual(parseAppState(current), appState));
+    lastArtifact = state;
+    const url = `${location.pathname}${next}${location.hash}`;
+    if (artifactChanged) {
+      history.pushState(null, "", url);
+    } else {
+      history.replaceState(null, "", url);
+    }
   };
+
+  // `popstate` drives the shell from the URL, which is the same thing a cold
+  // load does — a restored state is indistinguishable from a pasted one.
+  // Guarded so the applied attributes do not immediately write history back.
+  let restoring = false;
+  const applyViewState = (state: ViewState): void => {
+    const attr = (name: string, value: string | undefined): void => {
+      if (value === undefined) {
+        map.removeAttribute(name);
+      } else {
+        map.setAttribute(name, value);
+      }
+    };
+    attr("layer", state.layer);
+    attr("datetime", state.time);
+    attr("compare-datetime", state.compareTime);
+    attr("compare-layer", state.compareLayer);
+    attr("swipe", state.swipe === undefined ? undefined : formatSwipe(state.swipe));
+    attr("center", state.center === undefined ? undefined : formatCenter(state.center));
+    attr("zoom", state.zoom === undefined ? undefined : formatZoom(state.zoom));
+    attr("xray", state.xray ? "" : undefined);
+  };
+  window.addEventListener("popstate", () => {
+    restoring = true;
+    try {
+      const search = location.search;
+      const restored = parseViewState(search);
+      applyViewState(restored);
+      lastArtifact = restored;
+      const next = parseAppState(search);
+      appState = next;
+      applyMode(next.view);
+      if (next.view === "xray") {
+        map.setAttribute("xray", "");
+      }
+    } finally {
+      restoring = false;
+    }
+  });
 
   // Modes over the rail's content (#283/#284): `layers` is the full rail
   // as it always was; the others narrow it. Entering `xray` turns the
@@ -508,6 +575,14 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     // this page (the rail, an authored or added layer, a deletion).
     const changed = appliedLayer !== undefined && appliedLayer !== detail.layer;
     appliedLayer = detail.layer;
+    if (!changed) {
+      // The INITIAL apply is where the implicit becomes known — the layer
+      // the server picked, the frame it opened on. Seed the artifact
+      // baseline from it (overwriting any earlier one: a mode switch can
+      // land before the map has reported a layer), so the first pan is a
+      // pan and not "the URL learned the layer's name" (#392).
+      lastArtifact = snapshot();
+    }
     if (changed) {
       interact();
     }
@@ -608,7 +683,9 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
       interact();
     }
     persist();
-    syncUrl();
+    // A cinematic frame advance is the app playing, not the person
+    // navigating: it updates the URL in place (#392).
+    syncUrl({ transient: event.detail.cinematic });
   });
 
   // Compare swipe (issue #210): the map announces every compare-state

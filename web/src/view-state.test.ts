@@ -19,6 +19,7 @@ import {
   saveViewState,
   shareUrl,
   type ViewState,
+  viewArtifactsEqual,
   viewStatesEqual,
   withViewState,
 } from "./view-state.js";
@@ -276,4 +277,22 @@ test("storage codec survives corruption and junk shapes", () => {
   expect(loadViewState(localStorage)).toEqual({ xray: false });
   localStorage.removeItem(STORAGE_KEY);
   expect(loadViewState(localStorage)).toBeUndefined();
+});
+
+test("viewArtifactsEqual: the camera is not an artifact (#392)", () => {
+  const base: ViewState = { layer: "ndvi", xray: false, center: [10, 45], zoom: 8 };
+  // Panning and zooming are not navigation — they must not push history.
+  expect(viewArtifactsEqual(base, { ...base, center: [11, 46] })).toBe(true);
+  expect(viewArtifactsEqual(base, { ...base, zoom: 12 })).toBe(true);
+  expect(viewArtifactsEqual(base, { layer: "ndvi", xray: false })).toBe(true);
+  // Everything a person navigated *to* is.
+  expect(viewArtifactsEqual(base, { ...base, layer: "truecolor" })).toBe(false);
+  expect(viewArtifactsEqual(base, { ...base, xray: true })).toBe(false);
+  expect(viewArtifactsEqual(base, { ...base, time: "2024-06-06T17:54:00Z" })).toBe(false);
+  expect(viewArtifactsEqual(base, { ...base, compareLayer: "truecolor" })).toBe(false);
+  expect(viewArtifactsEqual(base, { ...base, compareTime: "2024-06-06T17:54:00Z" })).toBe(false);
+  expect(viewArtifactsEqual(base, { ...base, swipe: 0.25 })).toBe(false);
+  // A swipe nudge below the epsilon is the same handle, as everywhere else.
+  const swiped: ViewState = { ...base, swipe: 0.5 };
+  expect(viewArtifactsEqual(swiped, { ...swiped, swipe: 0.5000001 })).toBe(true);
 });

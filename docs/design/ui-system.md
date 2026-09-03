@@ -152,8 +152,11 @@ storage key `swath.app-state.v1`. The contract extends view-state's and never co
 - The overlay flag `xray` (view-state's) and the analytics mode `view=xray` are distinct: entering
   the mode turns the overlay on (a user act, so `xray` is written); leaving leaves it alone.
 - Writes compose `withViewState` then `withAppState` on one search string through the same
-  interaction gate and **`history.replaceState`** — no `pushState`, no path rewrite (ADR 0011:
-  unknown paths stay 404). No back-button between modes; that is the same trade view-state made.
+  interaction gate. **Artifacts push, the camera replaces** (ADR 0027): a layer, frame, compare
+  pairing, mode or selection is navigation and gets `pushState`; `center`/`zoom` get
+  `replaceState`, as does anything the app drives rather than the person (the cinematic loop's
+  frames). `popstate` drives the shell from the URL — the same path a cold load takes. Still no
+  path rewrite (ADR 0011: unknown paths stay 404), and `location.pathname` is preserved verbatim.
 - `stac=` and `basemap=` remain pass-through page config.
 
 ### 4.6 Icons — `web/src/ui/icons.svg` + `<swath-icon>`
