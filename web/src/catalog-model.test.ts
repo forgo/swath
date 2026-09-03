@@ -6,6 +6,7 @@ import {
   type CatalogDataset,
   type CatalogGranule,
   filterGranules,
+  instantWindow,
   parseCollections,
   parseGranules,
   previewGraph,
@@ -87,7 +88,8 @@ test("previewGraph: RGB quick look, extent left to the server (footprint-framed)
   expect((rgb["load"] as { arguments: Record<string, unknown> }).arguments).toEqual({
     id: "hls-s30",
     spatial_extent: null,
-    temporal_extent: null,
+    // Pinned to GRANULES[1]'s own instant, not left open (#406).
+    temporal_extent: ["2026-06-01T10:00:00.000Z", "2026-06-01T10:00:00.001Z"],
     bands: ["b04", "b03", "b02"],
   });
   expect(previewKind(hls)).toBe("rgb");
@@ -95,4 +97,45 @@ test("previewGraph: RGB quick look, extent left to the server (footprint-framed)
   const gray = previewGraph(single, GRANULES[0] as CatalogGranule);
   expect(Object.keys(gray)).toEqual(["load", "gray", "scale", "save"]);
   expect(previewKind(single)).toBe("gray");
+});
+
+test("previewGraph: two granules of one dataset ask for two different instants (#406)", () => {
+  const hls = parseCollections({ collections: [HLS] })[0] as CatalogDataset;
+  const windowOf = (granule: CatalogGranule): unknown =>
+    (previewGraph(hls, granule)["load"] as { arguments: Record<string, unknown> }).arguments[
+      "temporal_extent"
+    ];
+  // The bug this replaces: every card rendered the dataset's LATEST
+  // granule, so a grid of cards was N copies of one picture.
+  expect(windowOf(GRANULES[0] as CatalogGranule)).not.toEqual(
+    windowOf(GRANULES[1] as CatalogGranule),
+  );
+});
+
+test("instantWindow: left-closed, right-open, one millisecond wide", () => {
+  // The server compiles [start, end) to the inclusive end-1ms, so this is
+  // the smallest window that contains the instant and nothing after it.
+  expect(instantWindow("2026-05-24T10:12:00Z")).toEqual([
+    "2026-05-24T10:12:00.000Z",
+    "2026-05-24T10:12:00.001Z",
+  ]);
+  // Sub-second precision survives to the millisecond the server resolves at.
+  expect(instantWindow("2026-05-24T10:12:00.500Z")).toEqual([
+    "2026-05-24T10:12:00.500Z",
+    "2026-05-24T10:12:00.501Z",
+  ]);
+  // A window is never fabricated: no datetime, or an unparseable one,
+  // keeps the open query the provider always sent.
+  expect(instantWindow("")).toBeNull();
+  expect(instantWindow("not a datetime")).toBeNull();
+});
+
+test("previewGraph: an undated granule keeps the open window", () => {
+  const hls = parseCollections({ collections: [HLS] })[0] as CatalogDataset;
+  const undated = GRANULES.find((g) => g.datetime === "") as CatalogGranule | undefined;
+  expect(undated).toBeDefined();
+  const graph = previewGraph(hls, undated as CatalogGranule);
+  expect(
+    (graph["load"] as { arguments: Record<string, unknown> }).arguments["temporal_extent"],
+  ).toBeNull();
 });
