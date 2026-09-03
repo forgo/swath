@@ -35,6 +35,7 @@ export function wirePalette(deps: PaletteDeps): void {
         mode: currentView(),
         xray: map.hasAttribute("xray"),
         compareAvailable: map.querySelector(".swath-map-compare-toggle:not([hidden])") !== null,
+        compareActive: map.hasAttribute("compare-layer") || map.hasAttribute("compare-datetime"),
         granules:
           catalog instanceof SwathCatalog && catalog.selected !== ""
             ? catalog.granules.map((granule) => ({
@@ -54,6 +55,13 @@ export function wirePalette(deps: PaletteDeps): void {
           }
         },
         toggleCompare: () => map.toggleCompare(),
+        compareWith: (layer) => {
+          // Layer-vs-layer and date-vs-date are mutually exclusive (ADR
+          // 0022); setting one clears the other rather than producing an
+          // ambiguous URL the parser would have to degrade.
+          map.removeAttribute("compare-datetime");
+          map.setAttribute("compare-layer", layer);
+        },
         zoomToData: () => map.zoomToData(),
         share: () => share?.click(),
         zoomToGranule: (_dataset, granule) => {

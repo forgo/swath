@@ -12,6 +12,8 @@ import {
   FOOTPRINT_SOURCE_ID,
   type FootprintCollection,
   footprintCollection,
+  frameBounds,
+  type GranuleBbox,
   GranuleFootprints,
   parseBbox,
   unionBbox,
@@ -203,4 +205,37 @@ test("unionBbox: the envelope of footprints; empty stays unknown, not [0,0,0,0]"
       [-121.72, 39.9, -121.6, 40.02],
     ]),
   ).toEqual([-121.8, 39.9, -121.6, 40.1]);
+});
+
+test("frameBounds: fit means the granule you are looking at, not the whole layer (#397)", () => {
+  const frames = ["2024-06-07T19:03:00Z", "2024-07-22T19:03:00Z", "2024-08-16T19:03:00Z"];
+  const footprints = [
+    { datetime: frames[0] as string, bbox: [0, 0, 1, 1] as GranuleBbox },
+    { datetime: frames[1] as string, bbox: [10, 10, 11, 11] as GranuleBbox },
+    { datetime: frames[2] as string, bbox: [20, 20, 21, 21] as GranuleBbox },
+  ];
+  // Exactly on a frame: that frame's footprint.
+  expect(frameBounds(frames, footprints, frames[1] as string)).toEqual([10, 10, 11, 11]);
+  // Between frames: the latest AT OR BEFORE, the server's own rule — a
+  // `datetime=` need not equal any granule's instant.
+  expect(frameBounds(frames, footprints, "2024-08-01T00:00:00Z")).toEqual([10, 10, 11, 11]);
+  // After every frame: the last one, which is what the map is showing.
+  expect(frameBounds(frames, footprints, "2025-01-01T00:00:00Z")).toEqual([20, 20, 21, 21]);
+  // Before every frame: nothing is backing the view, so the caller falls
+  // back to the layer's extent rather than fitting an empty box.
+  expect(frameBounds(frames, footprints, "2020-01-01T00:00:00Z")).toBeUndefined();
+  // No frame viewed, nothing known, or an unparseable instant: same.
+  expect(frameBounds(frames, footprints, null)).toBeUndefined();
+  expect(frameBounds(frames, [], frames[0] as string)).toBeUndefined();
+  expect(frameBounds(frames, footprints, "not a datetime")).toBeUndefined();
+});
+
+test("frameBounds: several granules at one instant are one footprint", () => {
+  const frames = ["2024-06-07T19:03:00Z"];
+  const footprints = [
+    { datetime: frames[0] as string, bbox: [0, 0, 1, 1] as GranuleBbox },
+    { datetime: frames[0] as string, bbox: [2, 2, 3, 3] as GranuleBbox },
+  ];
+  // A pass can cover an area with more than one granule; fit shows all of it.
+  expect(frameBounds(frames, footprints, frames[0] as string)).toEqual([0, 0, 3, 3]);
 });
