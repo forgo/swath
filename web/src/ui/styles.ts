@@ -11,6 +11,7 @@
  * scope is shared by every instance — no per-instance `<style>` nodes.
  */
 import baseCss from "./base.css?inline";
+import themeCss from "./theme-high-contrast.css?inline";
 import tokensCss from "./tokens.css?inline";
 
 const sheets = new Map<string, CSSStyleSheet>();
@@ -38,6 +39,11 @@ export function css(
 /** The token sheet — one `:root` block; adopted at document level. */
 export const tokens: CSSStyleSheet = sheet(tokensCss);
 
+/** The high-contrast overrides; adopted immediately after `tokens`, whose
+ * values it narrows. Always adopted — it is inert until the viewer asks for
+ * more contrast, or the app sets `data-theme="high-contrast"`. */
+export const highContrast: CSSStyleSheet = sheet(themeCss);
+
 /** The shared shadow-root reset; adopted into every `SwathElement`. */
 export const base: CSSStyleSheet = sheet(baseCss);
 
@@ -53,18 +59,20 @@ export function adoptTokens(doc: Document = document): void {
   }
   adopted.add(doc);
   if (doc === document) {
-    doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, tokens];
+    doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, tokens, highContrast];
     return;
   }
   const Realm = doc.defaultView?.CSSStyleSheet;
   if (Realm) {
     const copy = new Realm();
     copy.replaceSync(tokensCss);
-    doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, copy];
+    const theme = new Realm();
+    theme.replaceSync(themeCss);
+    doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, copy, theme];
     return;
   }
   const style = doc.createElement("style");
-  style.textContent = tokensCss;
+  style.textContent = `${tokensCss}\n${themeCss}`;
   doc.head.append(style);
 }
 

@@ -8,6 +8,7 @@
 import { expect, test } from "vitest";
 import { BREAKPOINTS } from "./breakpoints.js";
 import { readToken } from "./styles.js";
+import themeCss from "./theme-high-contrast.css?inline";
 import tokensCss from "./tokens.css?inline";
 
 const NAMES = [
@@ -156,4 +157,90 @@ test("elevation is translucency: the blur is a token, and the shadow stays none"
   // reintroducing the thing this token was set to none to prevent.
   expect(readToken("--swath-shadow-hud")).toBe("none");
   expect(readToken("--swath-blur-hud")).toContain("blur(");
+});
+
+/** The declaration block of one CSS rule, normalised for comparison. */
+function declarations(css: string, selector: string): string {
+  const start = css.indexOf(selector);
+  if (start < 0) {
+    return "";
+  }
+  const open = css.indexOf("{", start);
+  let depth = 0;
+  let i = open;
+  for (; i < css.length; i += 1) {
+    if (css[i] === "{") depth += 1;
+    if (css[i] === "}") {
+      depth -= 1;
+      if (depth === 0) break;
+    }
+  }
+  return css
+    .slice(open + 1, i)
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+test("the high-contrast theme's two entry points declare the same palette", () => {
+  // CSS cannot union a media query with a selector, so the declarations
+  // appear twice: once under prefers-contrast, once under the explicit
+  // attribute. Identical by assertion, not by discipline (#389).
+  const byPreference = declarations(themeCss, "@media (prefers-contrast: more)");
+  const byAttribute = declarations(themeCss, ':root[data-theme="high-contrast"]');
+  expect(byPreference).not.toBe("");
+  expect(declarations(byPreference, ":root")).toBe(byAttribute);
+});
+
+test("the high-contrast theme declares every contrast-bearing token, and only real ones", () => {
+  const declared = new Set([...themeCss.matchAll(/--swath-[a-z0-9-]+(?=\s*:)/g)].map((m) => m[0]));
+  // No typos and no stale names: a theme token that is not in the contract
+  // is a value nothing reads.
+  for (const name of declared) {
+    expect(NAMES, `${name} is not a contract token`).toContain(name);
+  }
+  // Everything whose value carries contrast must be overridden. Spacing,
+  // radii, type scale, z-order and motion are deliberately inherited — a
+  // theme that restated them would drift from tokens.css silently.
+  const mustOverride = NAMES.filter(
+    (n) =>
+      n.startsWith("--swath-color-") ||
+      n === "--swath-border-hairline" ||
+      n === "--swath-border-focus" ||
+      n === "--swath-blur-hud" ||
+      n === "--swath-shadow-hud",
+  );
+  for (const name of mustOverride) {
+    expect(declared, `${name} must be themed`).toContain(name);
+  }
+});
+
+test("under high contrast, foreground and accent clear WCAG AA on every ground", () => {
+  const block = declarations(themeCss, ':root[data-theme="high-contrast"]');
+  const value = (name: string): string => {
+    const found = new RegExp(`${name}\\s*:\\s*(#[0-9a-f]{6})`).exec(block)?.[1] ?? "";
+    expect(found, `${name} must be a hex value in the theme`).not.toBe("");
+    return found;
+  };
+  const grounds = ["--swath-color-bg", "--swath-color-bg-raised", "--swath-color-bg-input"];
+  for (const ground of grounds) {
+    expect(contrast(value("--swath-color-fg"), value(ground)), `fg on ${ground}`).toBeGreaterThan(
+      4.5,
+    );
+    expect(
+      contrast(value("--swath-color-fg-muted"), value(ground)),
+      `fg-muted on ${ground}`,
+    ).toBeGreaterThan(4.5);
+    expect(
+      contrast(value("--swath-color-accent"), value(ground)),
+      `accent on ${ground}`,
+    ).toBeGreaterThan(3);
+  }
+  // The well must be a well: distinguishable from both the page and a panel.
+  expect(value("--swath-color-bg-input")).not.toBe(value("--swath-color-bg"));
+  expect(value("--swath-color-bg-input")).not.toBe(value("--swath-color-bg-raised"));
+  // And the decision set stays a set, and stays clear of the link colour.
+  const decisions = ["live", "overview", "cache"].map((d) => value(`--swath-color-decision-${d}`));
+  expect(new Set(decisions).size).toBe(3);
+  expect(decisions).not.toContain(value("--swath-color-info"));
 });

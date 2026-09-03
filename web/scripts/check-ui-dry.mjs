@@ -21,49 +21,60 @@ const SCANNED = ["src", "demo"];
 const EXTENSIONS = new Set([".ts", ".css", ".html"]);
 
 /**
- * Rules: `home` is the one file allowed to match. `tests: false` skips
+ * Rules: `homes` lists the files allowed to match — usually one, and never
+ * more than the design says a value may live in. `tests: false` skips
  * `*.test.ts` — a test may legitimately pin a computed `rgb(…)` from
  * `getComputedStyle`; production code may not write one.
  */
 const RULES = [
   {
     id: "color-literal",
-    home: "src/ui/tokens.css",
+    // Two homes since #389: the palette, and the high-contrast theme that
+    // narrows it. A theme IS a set of colour literals — that is what a theme
+    // is — so the rule is "colours live in a palette file", not "colours live
+    // in exactly one file".
+    homes: ["src/ui/tokens.css", "src/ui/theme-high-contrast.css"],
     tests: false,
     // A hex colour: one with a letter anywhere (`#4ade80`, `#fff`) unless it
     // is a private field (`#fade =`, `#bed(`, `#feed:`, `#cab in`); an all-digit one
     // (`#210`, also an issue number) only in CSS value position (`: #210`).
+    //
+    // `;` is NOT in the exclusion list, though it was until #389: excluding it
+    // made `color: #ff00aa;` — the ordinary shape of a CSS colour declaration —
+    // invisible to this gate, while the all-digit `#000000;` was still caught.
+    // Verified when it was removed: the theme file added in that PR was the
+    // only place in `src/` and `demo/` the corrected pattern newly matched.
     pattern:
-      /(?<![\w#.&])#(?=[0-9a-f]*[a-f])(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})\b(?!\s*(?:=|\(|:|;|in\b))|(?<=:\s*)#(?:\d{3,4}|\d{6}|\d{8})\b|\b(?:rgb|hsl)a?\(/gi,
+      /(?<![\w#.&])#(?=[0-9a-f]*[a-f])(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})\b(?!\s*(?:=|\(|:|in\b))|(?<=:\s*)#(?:\d{3,4}|\d{6}|\d{8})\b|\b(?:rgb|hsl)a?\(/gi,
   },
   {
     id: "font-literal",
-    home: "src/ui/tokens.css",
+    homes: ["src/ui/tokens.css"],
     tests: false,
     pattern:
       /\bfont(?:-family)?\s*:\s*(?!inherit\b|var\(|initial\b|unset\b)[^;"`}]*(?:sans-serif|serif|monospace|system-ui)/g,
   },
   {
     id: "style-injection",
-    home: "src/ui/element.ts",
+    homes: ["src/ui/element.ts"],
     tests: true,
     pattern: /\binjectStyles\b|\bSTYLE_ELEMENT_ID\b|customElements\.define\(/g,
   },
   {
     id: "custom-event",
-    home: "src/ui/events.ts",
+    homes: ["src/ui/events.ts"],
     tests: true,
     pattern: /new CustomEvent\(/g,
   },
   {
     id: "bare-fetch",
-    home: "src/api.ts",
+    homes: ["src/api.ts"],
     tests: true,
     pattern: /(?<![\w.#])fetch\(/g,
   },
   {
     id: "ui-reaches-out",
-    home: null,
+    homes: [],
     tests: true,
     only: /^src\/ui\//,
     // A value import creates the dependency; `import type` is erased and
@@ -116,7 +127,11 @@ for (const dir of SCANNED) {
     const isTest = file.endsWith(".test.ts");
     const text = readFileSync(path, "utf8");
     for (const rule of RULES) {
-      if (rule.home === file || (isTest && !rule.tests) || (rule.only && !rule.only.test(file))) {
+      if (
+        rule.homes.includes(file) ||
+        (isTest && !rule.tests) ||
+        (rule.only && !rule.only.test(file))
+      ) {
         continue;
       }
       for (const match of text.matchAll(rule.pattern)) {
