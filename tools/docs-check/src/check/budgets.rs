@@ -64,7 +64,12 @@ const BUDGETS: [(&str, usize); 24] = [
     ("docs/design/catalog-domain.md", 1925),
     ("docs/design/extraction-boundary.md", 675),
     ("docs/design/materialization-planner.md", 1675),
-    ("docs/design/ui-system.md", 3425),
+    // 3425 -> 3475 on 2026-09-03: ADR 0028's compose amendment (#400) and
+    // the css-template rule (#456) each landed under the old ceiling, and
+    // together broke it — #400 had trimmed to EXACTLY 3425, leaving no room
+    // for a concurrent PR. Raised to the measured 3451 plus a small margin,
+    // which is what the ceiling is supposed to carry.
+    ("docs/design/ui-system.md", 3475),
 ];
 
 /// Directory ceilings: (repo-relative directory, max words summed over its
