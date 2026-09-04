@@ -717,3 +717,49 @@ test("publishing shows a receipt whose numbers come from the server (#395)", asy
   await page.keyboard.press("Escape");
   await expect(receipt).not.toHaveAttribute("open", "");
 });
+
+test("a drag off an output port opens the same typed menu as the sentence (#402)", async ({
+  page,
+}) => {
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+  await page.locator(".swath-authoring-template").click();
+
+  // The sentence's chip group for the edge leaving the first step.
+  const group = page.locator('.swath-authoring-insert[data-gap="0"]');
+  await expect(group).toBeVisible();
+  const offered = await group
+    .locator("button")
+    .evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset["process"] ?? ""));
+  expect(offered.length).toBeGreaterThan(0);
+
+  // Served-driven, not hard-coded: everything offered is a process the
+  // server actually lists, so one leaving `GET /processes` leaves both
+  // entry points at once.
+  const served = await page.evaluate(async () => {
+    const response = await fetch("/processes", { headers: { accept: "application/json" } });
+    const body = (await response.json()) as { processes?: { id?: string }[] };
+    return (body.processes ?? []).map((p) => p.id ?? "");
+  });
+  for (const id of offered) {
+    expect(served).toContain(id);
+  }
+
+  // Releasing a drag from the first step's OUTPUT port on empty canvas
+  // reaches that same group — one menu, so the two entry points cannot
+  // offer different lists for the same edge.
+  await page.evaluate(() => {
+    const canvas = document.querySelector("swath-canvas");
+    canvas?.dispatchEvent(
+      new CustomEvent("swath-port-connect-end", {
+        bubbles: true,
+        composed: true,
+        detail: { from: { node: "s1", port: "", side: "output" }, to: null },
+      }),
+    );
+  });
+  const focusedIn = await page.evaluate(() =>
+    document.activeElement?.closest(".swath-authoring-insert")?.getAttribute("data-gap"),
+  );
+  expect(focusedIn).toBe("0");
+});
