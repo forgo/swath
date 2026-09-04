@@ -7,6 +7,8 @@ import { expect, test } from "vitest";
 import { publishedContent, UNMEASURED } from "./explain-model.js";
 import {
   envelopeFromHeader,
+  joinLabelDiffers,
+  publishedJoin,
   receiptFrom,
   receiptTile,
   type TilesetDocument,
@@ -115,4 +117,37 @@ test("a missing or malformed trace header yields no envelope at all", () => {
   );
   expect(rows["bytes read"]).toBe(UNMEASURED);
   expect(rows["ingest→pixel"]).toBe(UNMEASURED);
+});
+
+test("publishedJoin: the server's window and source count, or nothing (#405)", () => {
+  expect(
+    publishedJoin({
+      "swath:window": ["2024-06-01T00:00:00Z", "2024-09-30T00:00:00Z"],
+      "swath:sources": 2,
+    }),
+  ).toEqual({ window: ["2024-06-01T00:00:00Z", "2024-09-30T00:00:00Z"], branches: 2 });
+
+  // A window with an open end is read as open, not filled in.
+  expect(publishedJoin({ "swath:window": ["2024-06-01T00:00:00Z", null] })?.window).toEqual([
+    "2024-06-01T00:00:00Z",
+    null,
+  ]);
+  // A static layer carries neither, and gets no label at all — rather than
+  // a default that would read as a claim.
+  expect(publishedJoin({})).toBeUndefined();
+  expect(publishedJoin({ "swath:window": "not an interval" })).toBeUndefined();
+});
+
+test("joinLabelDiffers: a correction is a difference, an absent guess is not (#405)", () => {
+  const server = { window: ["2024-06-01", "2024-09-30"] as [string, string], branches: 2 };
+  expect(joinLabelDiffers({ ...server }, server)).toBe(false);
+  // The server compiled a narrower window than the client guessed.
+  expect(joinLabelDiffers({ window: ["2024-05-01", "2024-09-30"], branches: 2 }, server)).toBe(
+    true,
+  );
+  // Or joined a different number of sources.
+  expect(joinLabelDiffers({ window: server.window, branches: 1 }, server)).toBe(true);
+  // Nothing was claimed, so nothing was corrected — the note must not
+  // announce an update that never happened.
+  expect(joinLabelDiffers(undefined, server)).toBe(false);
 });

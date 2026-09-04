@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Elliott Richerson <elliott.richerson@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PublishReceipt } from "./explain-model.js";
 /**
  * The publish receipt's pure model (issue #395).
  *
@@ -15,6 +14,8 @@ import type { PublishReceipt } from "./explain-model.js";
  * the graph the client just sent: a client-side guess that happens to agree
  * with the server is still a guess.
  */
+import type { JoinLabel } from "./authoring-dag.js";
+import type { PublishReceipt } from "./explain-model.js";
 import type { GranuleBbox } from "./granule-footprints.js";
 import type { TraceEnvelope, TraceJson } from "./swath-xray.js";
 import { centerTile } from "./tms.js";
@@ -161,4 +162,42 @@ export function envelopeFromHeader(
     plan: null,
   } satisfies TraceJson;
   return { tile: `${tile.z}/${tile.x}/${tile.y}`, layer, trace };
+}
+
+/** What the SERVER says a published layer's join is (#405): its compiled
+ * window and how many sources it joined, read from the tileset document.
+ *
+ * The client infers both while composing (`inferredJoin`); this replaces
+ * that inference the moment there is a published layer, because the label
+ * is the claim an operator will quote. A guess that happens to agree with
+ * the server is still a guess.
+ *
+ * `undefined` when the document carries neither field — a static layer, or
+ * one the server did not compile a window for.
+ */
+export function publishedJoin(doc: TilesetDocument): JoinLabel | undefined {
+  const raw = doc["swath:window"];
+  const window: [string | null, string | null] | undefined =
+    Array.isArray(raw) && raw.length === 2
+      ? [typeof raw[0] === "string" ? raw[0] : null, typeof raw[1] === "string" ? raw[1] : null]
+      : undefined;
+  const sources = doc["swath:sources"];
+  const branches = typeof sources === "number" && Number.isFinite(sources) ? sources : undefined;
+  if (window === undefined && branches === undefined) {
+    return undefined;
+  }
+  return { window: window ?? [null, null], branches: branches ?? 1 };
+}
+
+/** Whether the server's answer differs from what the client inferred — the
+ * cue to say the label was updated rather than silently swapping it. */
+export function joinLabelDiffers(inferred: JoinLabel | undefined, published: JoinLabel): boolean {
+  if (inferred === undefined) {
+    return false; // nothing was claimed, so nothing was corrected
+  }
+  return (
+    inferred.branches !== published.branches ||
+    inferred.window[0] !== published.window[0] ||
+    inferred.window[1] !== published.window[1]
+  );
 }

@@ -818,6 +818,9 @@ test("a join computing backwards says so, and the warning can be accepted (#404)
 }) => {
   await page.goto(DEMO_PATH);
   await openPanel(page);
+  // The template builds on the chosen collection: the fire series is the
+  // one with granules in the months these windows pin.
+  await fieldById(page, "s1-id").selectOption("hls-s30-fire");
   await page.locator(".swath-authoring-template-change").click();
 
   const warning = page.locator(".swath-authoring-order-warning");
@@ -861,4 +864,43 @@ test("a join computing backwards says so, and the warning can be accepted (#404)
   await setWindow(page, cube2Branch, "2024-09-01", "2024-10-01");
   await setWindow(page, cube1Branch, "2024-06-01", "2024-07-01");
   await expect(warning).toBeVisible();
+});
+
+test("after publish the join's label is the server's, not the client's guess (#405)", async ({
+  page,
+}) => {
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+  // The template builds on the chosen collection: the fire series is the
+  // one with granules in the months these windows pin.
+  await fieldById(page, "s1-id").selectOption("hls-s30-fire");
+  await page.locator(".swath-authoring-template-change").click();
+  const filters = await page
+    .locator('.swath-authoring-steps [data-step][data-process="filter_temporal"]')
+    .evaluateAll((steps) => steps.map((step) => (step as HTMLElement).dataset["step"] ?? ""));
+  const [cube2Branch, cube1Branch] = filters as [string, string];
+  await setWindow(page, cube2Branch, "2024-07-01", "2024-08-01");
+  await setWindow(page, cube1Branch, "2024-08-01", "2024-09-01");
+  await fieldById(page, "s2-options").selectOption("");
+
+  const id = await publish(page);
+  const note = page.locator(".swath-authoring-published-join");
+  await expect(note).toBeVisible();
+
+  // Every field traces to the tileset document the server serves — the
+  // label is not a client inference that happens to agree.
+  const doc = await (await page.request.get(`/tilesets/${id}`)).json();
+  const sources = (doc as { "swath:sources"?: number })["swath:sources"];
+  expect(typeof sources).toBe("number");
+  await expect(note).toHaveAttribute("data-branches", String(sources));
+  await expect(note).toHaveAttribute("data-service", id);
+
+  const window = (doc as { "swath:window"?: [string | null, string | null] })["swath:window"];
+  expect(Array.isArray(window)).toBe(true);
+  for (const bound of window ?? []) {
+    if (typeof bound === "string") {
+      // Dates as the server compiled them, to the day.
+      await expect(note).toContainText(bound.slice(0, 10));
+    }
+  }
 });

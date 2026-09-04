@@ -761,6 +761,53 @@ export function changeTemplate(
  * says nothing about time. The time slider's domain for a two-source
  * layer is their hull; a `datetime=` that leaves either branch without
  * a granule is the tile route's 404 (B15, in words). */
+/** What the CLIENT infers a join produces, before anything is published
+ * (#405): the hull of its branches' windows, and how many branches feed it.
+ *
+ * The server recompiles all of this, so it is a guess — useful while
+ * composing, and replaced by `swath:window` / `swath:sources` the moment
+ * there is a published layer to read them from. `undefined` when the graph
+ * has no join.
+ */
+export interface JoinLabel {
+  window: [string | null, string | null];
+  branches: number;
+}
+
+export function inferredJoin(dag: Dag): JoinLabel | undefined {
+  const join = dag.nodes.find((node) => (CUBE_PORTS[node.process]?.inputs.length ?? 0) >= 2);
+  if (join === undefined) {
+    return undefined;
+  }
+  const windows = new Map(branchWindows(dag).map((entry) => [entry.node, entry.window]));
+  const branches = (CUBE_PORTS[join.process]?.inputs ?? [])
+    .map((port) => feeding(dag, join.id, port)?.from.node)
+    .map((node) => (node === undefined ? undefined : branchHeadOf(dag, node)))
+    .map((head) => (head === undefined ? undefined : windows.get(head)))
+    .filter((window): window is [string | null, string | null] => window !== undefined);
+  const first = branches[0];
+  if (first === undefined) {
+    return undefined;
+  }
+  // The hull: earliest start, latest end — what the layer as a whole spans.
+  const hull = branches.reduce<[string | null, string | null]>(
+    (acc, window) => [earlierOf(acc[0], window[0]), laterOf(acc[1], window[1])],
+    first,
+  );
+  return { window: hull, branches: branches.length };
+}
+
+/** An open end swallows the hull: "before June" plus "September" is not a
+ * bounded span, and saying it is would be the invention this exists to
+ * avoid. */
+function earlierOf(a: string | null, b: string | null): string | null {
+  return a === null || b === null ? null : Date.parse(a) <= Date.parse(b) ? a : b;
+}
+
+function laterOf(a: string | null, b: string | null): string | null {
+  return a === null || b === null ? null : Date.parse(a) >= Date.parse(b) ? a : b;
+}
+
 /** Resolvers whose result does not depend on which cube is which. */
 const COMMUTATIVE_RESOLVERS = new Set(["add", "multiply"]);
 
