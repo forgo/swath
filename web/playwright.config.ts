@@ -43,6 +43,27 @@ export default defineConfig({
   testDir: "e2e",
   testMatch: /.*\.e2e\.ts/,
   reporter: [["list"]],
+  // Assertions wait 15s, not Playwright's 5s (#447).
+  //
+  // Five tests across four files had been failing only in the concurrent
+  // run — always green in isolation and on rerun — and produced two wrong
+  // diagnoses (a MapLibre resize theory, #461; a compose-layout theory,
+  // #463) before being measured. Measured, on a fresh stack each time:
+  //
+  //   1 worker                   66 passed
+  //   2 workers                  66 passed
+  //   6 workers (this machine)    2 failed  — layer-list, palette
+  //   6 workers + 20s timeout    66 passed
+  //
+  // and the swath container logged no error in the failing runs. So it is
+  // neither a race nor a dropped interaction: a layer switch simply takes
+  // longer than 5s when N browsers and the compose stack share the CPU.
+  // CI sees the same thing for a different reason — one worker, but only
+  // two cores shared with swath + pgstac + MinIO.
+  //
+  // Raising the ceiling costs nothing while tests pass; it only lengthens
+  // how long a genuinely failing assertion waits before reporting.
+  expect: { timeout: 15_000 },
   projects: [
     { name: "suites", grepInvert: RESTART_TEST },
     { name: "restart", grep: RESTART_TEST, dependencies: ["suites"] },
