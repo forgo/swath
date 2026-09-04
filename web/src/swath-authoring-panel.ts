@@ -111,7 +111,9 @@ import {
   type Edge,
   feeding,
   halves,
+  inferredJoin,
   insertableOn,
+  type JoinLabel,
   joinOrder,
   loadHead,
   lower,
@@ -160,6 +162,7 @@ import {
   parseLiteral,
   typesOf,
 } from "./openeo-schema";
+import { joinLabelDiffers, publishedJoin } from "./receipt-model.js";
 import { readJson } from "./storage";
 import { temporalBounds, temporalPhrase, temporalValue } from "./temporal";
 import { PANEL_SHEET } from "./ui/authoring-sheet";
@@ -615,6 +618,10 @@ export class SwathAuthoringPanel extends SwathElement {
    * order they accepted — so it stays accepted through unrelated edits and
    * is re-raised if the order itself changes (#404). */
   #acceptedOrder = new Map<string, string>();
+  /** The server's own account of the published layer's join (#405): its
+   * compiled window and source count, read from the tileset document. Null
+   * until something is published. */
+  #publishedJoin: { id: string; label: JoinLabel; corrected: boolean } | undefined;
 
   /** Base URL of a Swath API (no trailing slash); same origin when the
    * `server` attribute is absent — mirroring `<swath-map>`. */
@@ -1690,6 +1697,10 @@ export class SwathAuthoringPanel extends SwathElement {
       this.#error = "";
       this.#render();
       if (id !== "") {
+        // The label stops being a guess here (#405): what the server
+        // compiled replaces what the client inferred, before the event that
+        // switches the map to it.
+        await this.#readPublishedJoin(id);
         this.dispatchEvent(createSwathEvent("swath-service-created", { id }));
       }
       await this.#refreshServices();
@@ -1972,6 +1983,10 @@ export class SwathAuthoringPanel extends SwathElement {
     for (const warning of form.querySelectorAll(".swath-authoring-order-warning")) {
       inserts.append(warning);
     }
+    const publishedNote = form.querySelector(".swath-authoring-published-join");
+    if (publishedNote !== null) {
+      inserts.append(publishedNote);
+    }
     requestAnimationFrame(() => canvas.fit());
     const narrative = form.querySelector("#swath-authoring-narrative");
     const preview = form.querySelector("#swath-authoring-preview");
@@ -2110,6 +2125,11 @@ export class SwathAuthoringPanel extends SwathElement {
     const join = this.#renderJoin();
     if (join !== undefined) {
       list.append(join);
+    }
+    // What the server said about what was published (#405).
+    const published = this.#renderPublishedJoin();
+    if (published !== undefined) {
+      list.append(published);
     }
     form.append(list);
 
@@ -2321,6 +2341,58 @@ export class SwathAuthoringPanel extends SwathElement {
       this.#render();
     });
     note.append(said, accept);
+    return note;
+  }
+
+  /** Reads the published layer's join from the server and records whether
+   * it corrects what was inferred (#405).
+   *
+   * A failure leaves the inference in place rather than clearing the label:
+   * "we could not check" and "there is no join" are different statements,
+   * and only one of them is true. */
+  async #readPublishedJoin(id: string): Promise<void> {
+    try {
+      const response = await this.api.fetch(`/tilesets/${encodeURIComponent(id)}`, {
+        headers: { accept: "application/json" },
+      });
+      if (!response.ok) {
+        return;
+      }
+      const doc = (await response.json()) as Parameters<typeof publishedJoin>[0];
+      const label = publishedJoin(doc);
+      if (label === undefined) {
+        return;
+      }
+      this.#publishedJoin = {
+        id,
+        label,
+        corrected: joinLabelDiffers(inferredJoin(this.#dag()), label),
+      };
+      this.#render();
+    } catch {
+      // Same rule: an unreachable server does not get to erase the label.
+    }
+  }
+
+  /** The published layer's join, in the server's words. */
+  #renderPublishedJoin(): Element | undefined {
+    const published = this.#publishedJoin;
+    if (published === undefined) {
+      return undefined;
+    }
+    const note = document.createElement("p");
+    note.className = "swath-authoring-published-join";
+    note.dataset["service"] = published.id;
+    note.dataset["branches"] = String(published.label.branches);
+    const sources =
+      published.label.branches === 1 ? "1 source" : `${published.label.branches} sources`;
+    const said = `Published: the server compiled ${describeWindow(published.label.window)} across ${sources}.`;
+    // When the server disagrees with what was shown while composing, say so
+    // — and show only the server's answer. Keeping both would leave the
+    // operator to guess which one to quote.
+    note.textContent = published.corrected
+      ? `${said} The label was updated from the server.`
+      : said;
     return note;
   }
 
