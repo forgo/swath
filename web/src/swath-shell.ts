@@ -55,25 +55,17 @@ export class SwathShell extends SwathElement {
       /* Composing (#400): the canvas takes the screen and the map becomes a
        * live preview column beside it — never under it. ADR 0028 amends ADR
        * 0021 §1 to "the map is always present AND never smaller than a live
-       * preview", which is what this column is. Below the medium tier there
-       * is no room for two columns, so the map keeps the region and the
-       * canvas returns to a sheet over it. */
-      :host([compose]) ::slotted([slot="map"]) {
-        inset-inline-start: auto;
-        inline-size: var(--swath-size-preview);
-        /* Slotted content is light DOM, so the shadow sheet's box-sizing
-         * reset does not reach it: without this the hairline would make the
-         * preview 321px and quietly steal a pixel from the canvas. */
-        box-sizing: border-box;
-        border-inline-start: var(--swath-border-hairline);
-      }
+       * preview", which is what this column is.
+       *
+       * The shell reserves the column by insetting everything else; it does
+       * NOT position the map itself. It cannot: the map is light DOM (so
+       * MapLibre keeps document scope), and document styles beat a shadow
+       * tree's ::slotted() in the cascade — the consumer's own
+       * swath-map[slot=map] rule wins, which is where the map's position
+       * already lives. #463 learned that the hard way. Below the medium tier
+       * there is no room for two columns and the reservation is dropped. */
       :host([compose]) ::slotted([slot="main"]) { inset-inline-end: var(--swath-size-preview); }
       @media (max-width: 1023px) {
-        :host([compose]) ::slotted([slot="map"]) {
-          inset-inline-start: 0;
-          inline-size: auto;
-          border-inline-start: 0;
-        }
         :host([compose]) ::slotted([slot="main"]) { inset-inline-end: 0; }
       }
       [part="inspector"] {
