@@ -1861,7 +1861,19 @@ export class SwathAuthoringPanel extends SwathElement {
       this.#positions.set(event.detail.id, { x: event.detail.x, y: event.detail.y });
       this.#saveLayout();
     });
-    canvas.addEventListener("swath-port-connect-end", () => canvas.cancelConnect());
+    canvas.addEventListener("swath-port-connect-end", (event) => {
+      canvas.cancelConnect();
+      // Dragging off an OUTPUT port onto empty canvas is the second entry
+      // point into the typed menu (#402): the same candidates the
+      // sentence's chips offer for that edge, from the place a person
+      // reaches for when they are looking at the graph rather than reading
+      // it. Released on a port, it is a connection and the canvas has it.
+      const { from, to } = event.detail;
+      if (to !== null || from.side !== "output") {
+        return;
+      }
+      this.#offerInsertFrom(from.node);
+    });
     canvas.addEventListener("swath-delete-request", (event) => {
       // Delete on a middle step's node removes it (the permanent head
       // and tail refuse, as their cards do).
@@ -2010,16 +2022,7 @@ export class SwathAuthoringPanel extends SwathElement {
         if (edge.from.node !== card.id) {
           continue;
         }
-        const fits: string[] = insertableOn(dag, edge, served, `s${this.#nextId + 1}`);
-        const target = this.#card(edge.to.node);
-        if (
-          served.has("merge_cubes") &&
-          typeOf(card.id)?.kind === "gray" &&
-          !typeOf(card.id)?.scaled &&
-          target?.process.id !== "merge_cubes"
-        ) {
-          fits.push("merge_cubes");
-        }
+        const fits = this.#insertCandidates(edge);
         if (fits.length > 0) {
           list.append(this.#renderInsert(gap, fits));
         }
@@ -2079,6 +2082,56 @@ export class SwathAuthoringPanel extends SwathElement {
   }
 
   /** One insert gap: a chip per process the stage table admits here. */
+  /** What can be inserted on `edge`, in evaluation order (#402).
+   *
+   * ONE definition, so the sentence's chips and a drag off an output port
+   * cannot offer different menus for the same edge — which is the whole
+   * point of the second entry point. `insertableOn` filters by what
+   * `GET /processes` serves and by whether the graph still types, so
+   * nothing here is hard-coded: a process the server stops serving leaves
+   * both menus at once. */
+  #insertCandidates(edge: Edge): string[] {
+    const dag = this.#dag();
+    const served = new Set(this.#processes.map((process) => process.id));
+    const typeOf = typer(dag);
+    const fits: string[] = insertableOn(dag, edge, served, `s${this.#nextId + 1}`);
+    // The join is offered where the server serves it and the cube is gray;
+    // `insertableOn` excludes it because splicing cannot wire two inputs.
+    const target = this.#card(edge.to.node);
+    const from = typeOf(edge.from.node);
+    if (
+      served.has("merge_cubes") &&
+      from?.kind === "gray" &&
+      from.scaled !== true &&
+      target?.process.id !== "merge_cubes"
+    ) {
+      fits.push("merge_cubes");
+    }
+    return fits;
+  }
+
+  /** Opens the typed menu for the edge leaving `node` (#402).
+   *
+   * The menu IS the sentence's chip group for that edge — the same element,
+   * scrolled to and focused — rather than a second widget rendering the same
+   * list. Two menus is how they start disagreeing; the acceptance criterion
+   * is that they cannot. A node whose edge has no candidates offers nothing,
+   * silently: an empty menu is a worse answer than none.
+   */
+  #offerInsertFrom(node: string): void {
+    const gap = this.#chainEdges().findIndex((edge) => edge.from.node === node);
+    if (gap < 0) {
+      return;
+    }
+    const group = this.#find(`.swath-authoring-insert[data-gap="${gap}"]`);
+    const first = group?.querySelector("button");
+    if (!(first instanceof HTMLButtonElement)) {
+      return;
+    }
+    group?.scrollIntoView({ block: "nearest" });
+    first.focus();
+  }
+
   #renderInsert(gap: number, fits: readonly string[]): Element {
     const item = document.createElement("li");
     item.className = "swath-authoring-insert";
