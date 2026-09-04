@@ -42,6 +42,26 @@ or bring the stack up yourself and `pnpm exec vite dev`.
         inset: 0;
         height: 100%;
       }
+      /* Composing (#400, ADR 0028): the map becomes the live preview column
+       * beside the canvas. Sized HERE for the same reason as above — the
+       * shell's ::slotted() rule loses to this document rule's `inset: 0`,
+       * so a shell-side attempt at it applied the width and silently left
+       * the column at the wrong edge, empty (#463). The shell reserves the
+       * space; the consumer places the map in it. */
+      swath-shell[compose] swath-map[slot="map"] {
+        left: auto;
+        right: 0;
+        width: var(--swath-size-preview);
+        box-sizing: border-box;
+        border-inline-start: var(--swath-border-hairline);
+      }
+      @media (max-width: 1023px) {
+        swath-shell[compose] swath-map[slot="map"] {
+          left: 0;
+          width: auto;
+          border-inline-start: 0;
+        }
+      }
       .swath-rail-title {
         display: flex;
         align-items: center;

@@ -225,3 +225,45 @@ test("the icon strip reaches every mode, and new layer stands in the footer (#39
   await expect(page).toHaveURL(/[?&]view=author(&|$)/);
   await expect(page.locator("swath-authoring-panel")).toBeVisible();
 });
+
+test("composing puts the map in a preview column, painted, beside the canvas (#400/#463)", async ({
+  page,
+}) => {
+  await page.goto(demoUrl({ layer: "ndvi", center: [-105.4475, 39.265], zoom: 12 }));
+  const map = page.locator("swath-map");
+  await expect(map.locator("canvas.maplibregl-canvas")).toBeVisible();
+  const wide = (await map.boundingBox())?.width ?? 0;
+
+  await modeButton(page, "author").click();
+  await expect(page.locator("swath-shell")).toHaveAttribute("compose", "");
+
+  // ADR 0028: always present, and never smaller than a live preview. The
+  // shell reserves the column; the page's own `swath-map[slot="map"]` rule
+  // places the map in it — document styles beat the shell's `::slotted()`,
+  // which is why a shell-side attempt left it at the wrong edge (#463).
+  const column = await map.boundingBox();
+  expect(Math.round(column?.width ?? 0)).toBe(320);
+  expect(column?.width ?? 0).toBeLessThan(wide);
+
+  // Flush against the far edge, with the canvas taking everything left of
+  // it — not overlapping the canvas, and not hiding under the inspector.
+  const canvas = await page.locator("#swath-author-dock").boundingBox();
+  expect(Math.round(column?.x ?? 0)).toBeGreaterThanOrEqual(
+    Math.round((canvas?.x ?? 0) + (canvas?.width ?? 0)),
+  );
+
+  // And it is a live preview, not a reserved blank: the GL buffer follows
+  // the column rather than keeping its full-width size.
+  const buffer = await page.evaluate(() => {
+    const el = document.querySelector("swath-map canvas.maplibregl-canvas") as HTMLCanvasElement;
+    return Math.round(el.width / (window.devicePixelRatio || 1));
+  });
+  expect(buffer).toBeLessThanOrEqual(320);
+
+  // Leaving compose gives the region back.
+  await modeButton(page, "layers").click();
+  await expect(page.locator("swath-shell")).not.toHaveAttribute("compose", "");
+  await expect
+    .poll(async () => Math.round((await map.boundingBox())?.width ?? 0))
+    .toBe(Math.round(wide));
+});
