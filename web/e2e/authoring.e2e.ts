@@ -763,3 +763,52 @@ test("a drag off an output port opens the same typed menu as the sentence (#402)
   );
   expect(focusedIn).toBe("0");
 });
+
+test("selecting two steps offers the join, served-driven, and says why not (#403)", async ({
+  page,
+}) => {
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+  await page.locator(".swath-authoring-template").click();
+
+  // Step ids are assigned as cards are created, so read them rather than
+  // assume: a hard-coded `s1` silently selects nothing and the assertions
+  // pass for the wrong reason.
+  const steps = await page
+    .locator("[data-step]")
+    .evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset["step"] ?? ""));
+  expect(steps.length).toBeGreaterThanOrEqual(3);
+  const [load, middle] = steps as [string, string];
+  const output = steps[steps.length - 1] as string;
+
+  const select = async (nodes: string[]): Promise<void> => {
+    await page.evaluate((ids) => {
+      const canvas = document.querySelector("swath-canvas");
+      canvas?.dispatchEvent(
+        new CustomEvent("swath-canvas-select", {
+          bubbles: true,
+          composed: true,
+          detail: { nodes: ids, edges: [] },
+        }),
+      );
+    }, nodes);
+  };
+
+  await select([load, middle]);
+  const join = page.locator(".swath-authoring-join");
+  await expect(join).toBeVisible();
+
+  // Only processes taking TWO cubes, and only ones the server serves — so
+  // `mask` and band-wise merge (deferred, ROADMAP §2 rows 19-20) appear the
+  // day they ship and not before.
+  const offered = await join
+    .locator("button")
+    .evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset["process"] ?? ""));
+  expect(offered).toEqual(["merge_cubes"]);
+
+  // Pairing a step with the Output cannot be joined, and says why in the
+  // server's own parameter names rather than offering a refused action.
+  await select([load, output]);
+  await expect(page.locator(".swath-authoring-join button")).toBeDisabled();
+  await expect(page.locator(".swath-authoring-join-note")).toContainText(/cube1|cube2|no cube/);
+});

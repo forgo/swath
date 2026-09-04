@@ -592,6 +592,8 @@ export class SwathAuthoringPanel extends SwathElement {
    * diagnostics; a located compile diagnostic): cleared whenever
    * the next preview answers, so a fixed draft loses its stale note. */
   #previewNoteKeys = new Set<string>();
+  /** The two steps a canvas selection has offered to join (#403). */
+  #pair: string[] | undefined;
 
   /** Base URL of a Swath API (no trailing slash); same origin when the
    * `server` attribute is absent — mirroring `<swath-map>`. */
@@ -929,6 +931,34 @@ export class SwathAuthoringPanel extends SwathElement {
       { from: { node: card.id, port: OUT }, to: edge.to },
     );
     this.#extra.push(card);
+    this.#render();
+  }
+
+  /** Joins two selected steps (#403): a new join card takes both as its
+   * cube inputs, and whatever the FIRST one used to feed now comes from the
+   * join — so the pipeline stays the linear chain that ends in the Output
+   * (B1/B10), with the second step's branch merged into it.
+   *
+   * Called only where `#joinIssue` found nothing to object to. */
+  #joinPair(a: string, b: string, process: ProcessDefinition): void {
+    const ports = CUBE_PORTS[process.id]?.inputs ?? [];
+    const [first, second] = ports;
+    if (first === undefined || second === undefined) {
+      return;
+    }
+    const card = this.#newCard(process);
+    // Whatever `a` fed becomes what the join feeds; `b`'s old consumers are
+    // left alone, so a branch that fed nothing simply joins in.
+    const downstream = this.#edges.filter((edge) => edge.from.node === a);
+    this.#edges = this.#edges.filter((edge) => edge.from.node !== a);
+    this.#edges.push(
+      { from: { node: a, port: OUT }, to: { node: card.id, port: first } },
+      { from: { node: b, port: OUT }, to: { node: card.id, port: second } },
+      ...downstream.map((edge) => ({ from: { node: card.id, port: OUT }, to: edge.to })),
+    );
+    this.#extra.push(card);
+    this.#pair = undefined;
+    this.selectStep(card.id);
     this.#render();
   }
 
@@ -1852,10 +1882,14 @@ export class SwathAuthoringPanel extends SwathElement {
       this.selectStep(event.detail.id);
     });
     canvas.addEventListener("swath-canvas-select", (event) => {
+      // Two selected steps is a question — "join these" — so it is kept
+      // alongside `sel`, which stays the ONE step the inspector edits (#403).
+      this.#pair = event.detail.nodes.length === 2 ? [...event.detail.nodes] : undefined;
       const [first] = event.detail.nodes;
       if (first !== undefined) {
         this.selectStep(first);
       }
+      this.#render();
     });
     canvas.addEventListener("swath-node-move", (event) => {
       this.#positions.set(event.detail.id, { x: event.detail.x, y: event.detail.y });
@@ -1906,6 +1940,13 @@ export class SwathAuthoringPanel extends SwathElement {
         inserts.append(insert);
         insert = next;
       }
+    }
+    // The join offer rides with the insert chips: a two-step selection is
+    // the same kind of question as "add a step here" (#403), and the canvas
+    // view relocates those groups out of the hidden step list.
+    const joinGroup = form.querySelector(".swath-authoring-join");
+    if (joinGroup !== null) {
+      inserts.append(joinGroup);
     }
     requestAnimationFrame(() => canvas.fit());
     const narrative = form.querySelector("#swath-authoring-narrative");
@@ -2034,6 +2075,12 @@ export class SwathAuthoringPanel extends SwathElement {
         }
       }
     }
+    // The join offer sits with the insert chips: a two-step selection is the
+    // same kind of question as "add a step here" (#403).
+    const join = this.#renderJoin();
+    if (join !== undefined) {
+      list.append(join);
+    }
     form.append(list);
 
     const titleLabel = document.createElement("label");
@@ -2130,6 +2177,85 @@ export class SwathAuthoringPanel extends SwathElement {
     }
     group?.scrollIntoView({ block: "nearest" });
     first.focus();
+  }
+
+  /** The processes that take TWO cubes and are actually served (#403).
+   *
+   * Served-driven on purpose: `mask` and band-wise merge are deferred
+   * (ROADMAP §2 rows 19, 20), so they appear here the day `GET /processes`
+   * lists them and not before — no UI change, and no affordance that
+   * promises something the engine will refuse. Narrower than ADR 0022
+   * permits, which needs no ADR change: narrowing the UI below what a
+   * decision allows is always open to us. */
+  #joinProcesses(): ProcessDefinition[] {
+    return this.#processes.filter((process) => (CUBE_PORTS[process.id]?.inputs.length ?? 0) >= 2);
+  }
+
+  /** Why `a` and `b` cannot be joined, in the server's own parameter names —
+   * or `undefined` when they can. */
+  #joinIssue(a: string, b: string, process: ProcessDefinition): string | undefined {
+    const ports = CUBE_PORTS[process.id]?.inputs ?? [];
+    const dag = this.#dag();
+    const typeOf = typer(dag);
+    for (const id of [a, b]) {
+      const card = this.#card(id);
+      if (card === undefined) {
+        return `${id} is not a step in this pipeline.`;
+      }
+      if (CUBE_PORTS[card.process.id]?.output !== true) {
+        return `${card.id} produces no cube, so it cannot feed ${process.id}'s ${ports.join(" or ")}.`;
+      }
+      if (typeOf(id) === null) {
+        return `${card.id} has no result yet, so there is nothing to join.`;
+      }
+    }
+    // A join reads both branches at the same stage; mixing a scaled cube
+    // with an unscaled one is the mistake the server would reject.
+    const [left, right] = [typeOf(a), typeOf(b)];
+    if (left?.kind !== right?.kind) {
+      return `${a} and ${b} are different kinds of cube (${left?.kind} and ${right?.kind}), so ${process.id}'s ${ports.join(" and ")} cannot both take them.`;
+    }
+    return undefined;
+  }
+
+  /** The join offer for the current two-step selection, or nothing. */
+  #renderJoin(): Element | undefined {
+    const pair = this.#pair;
+    if (pair === undefined || pair.length !== 2) {
+      return undefined;
+    }
+    const [a, b] = pair as [string, string];
+    const processes = this.#joinProcesses();
+    if (processes.length === 0) {
+      return undefined; // nothing served can join; say nothing rather than tease
+    }
+    const item = document.createElement("li");
+    item.className = "swath-authoring-join";
+    item.dataset["pair"] = `${a},${b}`;
+    item.setAttribute("role", "group");
+    item.setAttribute("aria-label", `Join ${a} and ${b}`);
+    for (const process of processes) {
+      const issue = this.#joinIssue(a, b, process);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset["process"] = process.id;
+      button.textContent = `+ join ${a} and ${b}`;
+      if (issue !== undefined) {
+        button.disabled = true;
+        button.title = issue;
+        const note = document.createElement("span");
+        note.className = "swath-authoring-join-note";
+        note.textContent = issue;
+        item.append(button, note);
+        continue;
+      }
+      button.title = process.summary ?? `Join with ${process.id}`;
+      button.addEventListener("click", () => {
+        this.#joinPair(a, b, process);
+      });
+      item.append(button);
+    }
+    return item;
   }
 
   #renderInsert(gap: number, fits: readonly string[]): Element {
