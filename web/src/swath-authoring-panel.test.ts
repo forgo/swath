@@ -1608,6 +1608,19 @@ test("a join inserted on a gray edge leaves its second input free; the branch st
   expect(graph[loadB ?? ""]?.arguments["bands"]).toEqual(["b8a", "b04"]);
 });
 
+/** The panel's step ids, in pipeline order, read from the DOM.
+ *
+ * Ids are assigned as cards are created, so they are NOT `s1`, `s2`, `s3`.
+ * Two tests have now hard-coded an id that did not exist and passed for the
+ * wrong reason — a selection of an unknown node falls back to the whole
+ * graph, which is what those tests were asserting (#467). Read them. */
+function stepIds(panel: SwathAuthoringPanel, process?: string): string[] {
+  const selector = process === undefined ? "[data-step]" : `[data-step][data-process="${process}"]`;
+  return [...panel.querySelectorAll(selector)].map(
+    (step) => (step as HTMLElement).dataset["step"] ?? "",
+  );
+}
+
 test("the preview follows the selected step (#401)", async () => {
   const stub = fetchStub({});
   const panel = await mount(stub);
@@ -1622,8 +1635,14 @@ test("the preview follows the selected step (#401)", async () => {
   expect(wholeIds.length).toBeGreaterThan(2);
 
   // Selecting an earlier step asks a different question — what does THIS
-  // produce — so it is a different graph, truncated there.
-  panel.sel = "s3";
+  // produce — so it is a different graph, truncated there. The reducer is
+  // the one whose output renders (gray), so it is the one that truncates.
+  // The step AFTER the load: the template's reducer, whose gray output is
+  // what makes it truncatable. Positional rather than by process id, since
+  // the mocked process list differs from the real one.
+  const middle = stepIds(panel)[1];
+  expect(middle, "the template must have a step after the load").toBeTruthy();
+  panel.sel = middle as string;
   await panel.updateComplete;
   await expect.poll(() => previewPosts(stub).length).toBe(2);
   const cut = previewPosts(stub)[1]?.body as {
@@ -1663,7 +1682,9 @@ test("a step whose output does not render is not truncated to (#401)", async () 
   // for the inspector, so without this rule the DEFAULT selection would
   // ask the server a question it can only reject (caught by the real-stack
   // e2e, not by a mock).
-  panel.sel = "s1";
+  const [load] = stepIds(panel, "load_collection");
+  expect(load, "the template must have a load step to select").toBeTruthy();
+  panel.sel = load as string;
   await panel.updateComplete;
   await new Promise((resolve) => setTimeout(resolve, 450));
   const posts = previewPosts(stub);
