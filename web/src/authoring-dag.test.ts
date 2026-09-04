@@ -12,6 +12,7 @@ import { expect, test } from "vitest";
 import {
   apply,
   branchableInto,
+  branchHeadOf,
   branchWindows,
   changeTemplate,
   type Dag,
@@ -20,11 +21,13 @@ import {
   edgeAllowed,
   halves,
   insertableOn,
+  joinOrder,
   locateDagError,
   lower,
   ndviTemplate,
   OUT,
   orphans,
+  resolverGraph,
   resultIssue,
   splice,
   truncatedAt,
@@ -475,4 +478,82 @@ test("truncatedAt: the output and an unknown node have nothing to truncate", () 
   // Selecting the output IS the whole graph; the caller previews that.
   expect(truncatedAt(dag, "out", save)).toBeUndefined();
   expect(truncatedAt(dag, "nope", save)).toBeUndefined();
+});
+
+/** A join of two dated branches: `a` into cube1, `b` into cube2. */
+function joined(
+  aWindow: [string | null, string | null],
+  bWindow: [string | null, string | null],
+  op = "subtract",
+): Dag {
+  return {
+    nodes: [
+      { id: "a", process: "load_collection", params: { temporal_extent: aWindow } },
+      { id: "b", process: "load_collection", params: { temporal_extent: bWindow } },
+      { id: "j", process: "merge_cubes", params: resolverGraphParams(op) },
+      { id: "out", process: "save_result", params: {} },
+    ],
+    edges: [
+      { from: { node: "a", port: "" }, to: { node: "j", port: "cube1" } },
+      { from: { node: "b", port: "" }, to: { node: "j", port: "cube2" } },
+      { from: { node: "j", port: "" }, to: { node: "out", port: "data" } },
+    ],
+  };
+}
+
+function resolverGraphParams(op: string): Record<string, unknown> {
+  return { overlap_resolver: resolverGraph(op as "subtract") };
+}
+
+const JUNE: [string, string] = ["2024-06-01T00:00:00Z", "2024-06-30T00:00:00Z"];
+const SEPT: [string, string] = ["2024-09-01T00:00:00Z", "2024-09-30T00:00:00Z"];
+
+test("joinOrder: subtracting the newer FROM the older is backwards (#404)", () => {
+  // cube1 = June, cube2 = September → June − September, which is the
+  // opposite of "what changed".
+  expect(joinOrder(joined(JUNE, SEPT), "j")?.backwards).toBe(true);
+  // The other way round is what the author almost certainly meant.
+  expect(joinOrder(joined(SEPT, JUNE), "j")?.backwards).toBe(false);
+  // The windows come back verbatim, so the warning can name them.
+  expect(joinOrder(joined(JUNE, SEPT), "j")?.first).toEqual(JUNE);
+  expect(joinOrder(joined(JUNE, SEPT), "j")?.resolver).toBe("subtract");
+});
+
+test("joinOrder: divide cares about order too; add and multiply do not", () => {
+  expect(joinOrder(joined(JUNE, SEPT, "divide"), "j")?.backwards).toBe(true);
+  // Commutative: the order cannot change the answer, so there is nothing
+  // to warn about.
+  expect(joinOrder(joined(JUNE, SEPT, "add"), "j")).toBeUndefined();
+  expect(joinOrder(joined(JUNE, SEPT, "multiply"), "j")).toBeUndefined();
+});
+
+test("joinOrder: silence when it cannot know", () => {
+  // Two windows at the same instant: no order to get wrong.
+  expect(joinOrder(joined(JUNE, JUNE), "j")).toBeUndefined();
+  // An open end: nothing to compare. A warning that fires when it cannot
+  // know is worse than no warning.
+  expect(joinOrder(joined([null, null], SEPT), "j")).toBeUndefined();
+  expect(joinOrder(joined(JUNE, [null, null]), "j")).toBeUndefined();
+  // Unparseable dates are treated as unknown, not as year zero.
+  expect(joinOrder(joined(["nope", "nope"], SEPT), "j")).toBeUndefined();
+  // Not a join, and not a node.
+  expect(joinOrder(joined(JUNE, SEPT), "a")).toBeUndefined();
+  expect(joinOrder(joined(JUNE, SEPT), "nope")).toBeUndefined();
+});
+
+test("branchHeadOf: walks up single-input steps to the load", () => {
+  const dag: Dag = {
+    nodes: [
+      { id: "a", process: "load_collection", params: {} },
+      { id: "n", process: "ndvi", params: {} },
+      { id: "s", process: "linear_scale_range", params: {} },
+    ],
+    edges: [
+      { from: { node: "a", port: "" }, to: { node: "n", port: "data" } },
+      { from: { node: "n", port: "" }, to: { node: "s", port: "x" } },
+    ],
+  };
+  expect(branchHeadOf(dag, "s")).toBe("a");
+  expect(branchHeadOf(dag, "a")).toBe("a");
+  expect(branchHeadOf(dag, "nope")).toBeUndefined();
 });

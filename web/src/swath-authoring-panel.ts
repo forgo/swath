@@ -112,6 +112,7 @@ import {
   feeding,
   halves,
   insertableOn,
+  joinOrder,
   loadHead,
   lower,
   OUT,
@@ -248,6 +249,22 @@ const STEP_TITLES: Record<string, string> = {
 };
 
 /** The insert chips' plain wording, same curation. */
+/** A window in the words the author typed: "June 2024 to September 2024",
+ * or one open end named as such. Dates only — a window is not a figure and
+ * carries no unit (design-language.md §3). */
+function describeWindow(window: readonly [string | null, string | null]): string {
+  const day = (value: string | null): string | null =>
+    value === null || value === "" ? null : (value.slice(0, 10) ?? null);
+  const [from, to] = [day(window[0]), day(window[1])];
+  if (from !== null && to !== null) {
+    return `${from} to ${to}`;
+  }
+  if (from !== null) {
+    return `from ${from}`;
+  }
+  return to !== null ? `up to ${to}` : "every date available";
+}
+
 const INSERT_LABELS: Record<string, string> = {
   ndvi: "NDVI (vegetation health)",
   reduce_dimension: "combine bands with a formula",
@@ -594,6 +611,10 @@ export class SwathAuthoringPanel extends SwathElement {
   #previewNoteKeys = new Set<string>();
   /** The two steps a canvas selection has offered to join (#403). */
   #pair: string[] | undefined;
+  /** Join-order warnings the author has accepted, keyed by node id and the
+   * order they accepted — so it stays accepted through unrelated edits and
+   * is re-raised if the order itself changes (#404). */
+  #acceptedOrder = new Map<string, string>();
 
   /** Base URL of a Swath API (no trailing slash); same origin when the
    * `server` attribute is absent — mirroring `<swath-map>`. */
@@ -1948,6 +1969,9 @@ export class SwathAuthoringPanel extends SwathElement {
     if (joinGroup !== null) {
       inserts.append(joinGroup);
     }
+    for (const warning of form.querySelectorAll(".swath-authoring-order-warning")) {
+      inserts.append(warning);
+    }
     requestAnimationFrame(() => canvas.fit());
     const narrative = form.querySelector("#swath-authoring-narrative");
     const preview = form.querySelector("#swath-authoring-preview");
@@ -2055,6 +2079,12 @@ export class SwathAuthoringPanel extends SwathElement {
     const typeOf = typer(dag);
     for (const card of cards) {
       list.append(this.#renderStep(card, card.id));
+      // A join that computes the wrong way round says so, next to itself
+      // (#404). Never a gate: it explains and offers to be accepted.
+      const warning = this.#renderOrderWarning(card);
+      if (warning !== undefined) {
+        list.append(warning);
+      }
       // An insert group per edge leaving this card, showing only the
       // chips the graph still types with (B2/B3/B4: what does not fit is
       // not offered, anywhere) — plus the join where the server serves it
@@ -2256,6 +2286,42 @@ export class SwathAuthoringPanel extends SwathElement {
       item.append(button);
     }
     return item;
+  }
+
+  /** The join-order warning for `card`, or nothing (#404).
+   *
+   * A SEMANTIC warning, not an error: subtracting the older image from the
+   * newer is unusual, not invalid, and sometimes it is exactly what the
+   * author wants. So it explains, offers to be accepted, and never gates
+   * publish — the same posture the budget refusal takes toward the preview.
+   */
+  #renderOrderWarning(card: Card): Element | undefined {
+    const order = joinOrder(this.#dag(), card.id);
+    if (order === undefined) {
+      return undefined;
+    }
+    const signature = `${order.resolver}:${order.first.join("/")}:${order.second.join("/")}`;
+    if (!order.backwards || this.#acceptedOrder.get(card.id) === signature) {
+      return undefined;
+    }
+    const note = document.createElement("p");
+    note.className = "swath-authoring-order-warning";
+    note.dataset["step"] = card.id;
+    note.setAttribute("role", "note");
+    const said = document.createElement("span");
+    // Named in the windows' own words, so the author can check it against
+    // the dates they typed rather than trusting the adjective.
+    said.textContent = `This ${order.resolver}s the newer image from the older one: cube1 is ${describeWindow(order.first)} and cube2 is ${describeWindow(order.second)}. Swap them to compute what changed.`;
+    const accept = document.createElement("button");
+    accept.type = "button";
+    accept.className = "swath-authoring-order-accept";
+    accept.textContent = "keep this order";
+    accept.addEventListener("click", () => {
+      this.#acceptedOrder.set(card.id, signature);
+      this.#render();
+    });
+    note.append(said, accept);
+    return note;
   }
 
   #renderInsert(gap: number, fits: readonly string[]): Element {

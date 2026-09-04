@@ -761,6 +761,125 @@ export function changeTemplate(
  * says nothing about time. The time slider's domain for a two-source
  * layer is their hull; a `datetime=` that leaves either branch without
  * a granule is the tile route's 404 (B15, in words). */
+/** Resolvers whose result does not depend on which cube is which. */
+const COMMUTATIVE_RESOLVERS = new Set(["add", "multiply"]);
+
+/** The load head a node's branch starts at, walking upstream through
+ * single-input steps. `undefined` when the walk reaches a join (the branch
+ * is itself a join's output) or nothing. */
+export function branchHeadOf(dag: Dag, node: string): string | undefined {
+  const seen = new Set<string>();
+  let current: string | undefined = node;
+  while (current !== undefined && !seen.has(current)) {
+    seen.add(current);
+    const here = nodeOf(dag, current);
+    if (here === undefined) {
+      return undefined;
+    }
+    if (here.process === "load_collection") {
+      return here.id;
+    }
+    const inputs = CUBE_PORTS[here.process]?.inputs ?? [];
+    if (inputs.length !== 1) {
+      return undefined; // a join upstream: no single window to speak of
+    }
+    const port = inputs[0] as string;
+    current = feeding(dag, current, port)?.from.node;
+  }
+  return undefined;
+}
+
+/** Whether a join computes in the order its author probably meant (#404).
+ *
+ * A two-cube join is not symmetric: `subtract` and `divide` care which side
+ * is which, and getting it backwards produces a plausible-looking image that
+ * means the opposite of what was intended. openEO's `merge_cubes` passes
+ * `cube1` as the resolver's `x` and `cube2` as its `y`, so `subtract` is
+ * `cube1 - cube2` — and "what changed" is the NEWER minus the older.
+ *
+ * Returns the two branch windows and whether they are the wrong way round,
+ * or `undefined` when there is nothing to say: a commutative resolver, a
+ * branch whose window is open or unknown, or two windows at the same
+ * instant. Silence is the default — a warning that fires when it cannot
+ * know is worse than no warning.
+ */
+export interface JoinOrder {
+  /** The window feeding `cube1`, verbatim. */
+  first: [string | null, string | null];
+  /** The window feeding `cube2`, verbatim. */
+  second: [string | null, string | null];
+  resolver: string;
+  /** `cube1` is the EARLIER window, so an order-dependent resolver computes
+   * the older against the newer. */
+  backwards: boolean;
+}
+
+export function joinOrder(dag: Dag, joinId: string): JoinOrder | undefined {
+  const join = nodeOf(dag, joinId);
+  if (join === undefined || (CUBE_PORTS[join.process]?.inputs.length ?? 0) < 2) {
+    return undefined;
+  }
+  const resolver = resolverOpOf(join);
+  if (resolver === undefined || COMMUTATIVE_RESOLVERS.has(resolver)) {
+    return undefined; // order cannot change the answer
+  }
+  const [port1, port2] = CUBE_PORTS[join.process]?.inputs ?? [];
+  if (port1 === undefined || port2 === undefined) {
+    return undefined;
+  }
+  const windows = new Map(branchWindows(dag).map((entry) => [entry.node, entry.window]));
+  const windowFor = (port: string): [string | null, string | null] | undefined => {
+    const feed = feeding(dag, joinId, port)?.from.node;
+    const head = feed === undefined ? undefined : branchHeadOf(dag, feed);
+    return head === undefined ? undefined : windows.get(head);
+  };
+  const first = windowFor(port1);
+  const second = windowFor(port2);
+  if (first === undefined || second === undefined) {
+    return undefined;
+  }
+  const order = compareWindows(first, second);
+  if (order === undefined || order === 0) {
+    return undefined; // open-ended, unparseable, or the same instant
+  }
+  return { first, second, resolver, backwards: order < 0 };
+}
+
+/** The resolver a join carries, as its process id (`subtract`, …), read
+ * from the child graph the panel builds. */
+function resolverOpOf(join: DagNode): string | undefined {
+  const resolver = join.params["overlap_resolver"];
+  if (typeof resolver !== "object" || resolver === null) {
+    return undefined;
+  }
+  const graph = (resolver as { process_graph?: Record<string, { process_id?: unknown }> })
+    .process_graph;
+  const only = graph === undefined ? undefined : Object.values(graph)[0];
+  return typeof only?.process_id === "string" ? only.process_id : undefined;
+}
+
+/** `-1` when `a` is earlier than `b`, `1` when later, `0` when the same,
+ * `undefined` when either is open or unparseable. Compared on the window's
+ * END, which is the instant `datetime=` resolves against (ADR 0015). */
+function compareWindows(
+  a: [string | null, string | null],
+  b: [string | null, string | null],
+): number | undefined {
+  const instant = (w: [string | null, string | null]): number | undefined => {
+    const end = w[1] ?? w[0];
+    if (end === null) {
+      return undefined;
+    }
+    const t = Date.parse(end);
+    return Number.isNaN(t) ? undefined : t;
+  };
+  const [x, y] = [instant(a), instant(b)];
+  if (x === undefined || y === undefined) {
+    return undefined;
+  }
+  return x === y ? 0 : x < y ? -1 : 1;
+}
+
 export function branchWindows(
   dag: Dag,
 ): { node: string; window: [string | null, string | null] }[] {

@@ -812,3 +812,53 @@ test("selecting two steps offers the join, served-driven, and says why not (#403
   await expect(page.locator(".swath-authoring-join button")).toBeDisabled();
   await expect(page.locator(".swath-authoring-join-note")).toContainText(/cube1|cube2|no cube/);
 });
+
+test("a join computing backwards says so, and the warning can be accepted (#404)", async ({
+  page,
+}) => {
+  await page.goto(DEMO_PATH);
+  await openPanel(page);
+  await page.locator(".swath-authoring-template-change").click();
+
+  const warning = page.locator(".swath-authoring-order-warning");
+  const filters = await page
+    .locator('.swath-authoring-steps [data-step][data-process="filter_temporal"]')
+    .evaluateAll((steps) => steps.map((step) => (step as HTMLElement).dataset["step"] ?? ""));
+  expect(filters).toHaveLength(2);
+  // DOM order is the branch order, and the change template wires the SECOND
+  // branch to `cube1` (the later frame) — so `earlier`/`later` here name the
+  // ports, not the document.
+  const [cube2Branch, cube1Branch] = filters as [string, string];
+
+  // The product's own change template wires cube1 to the LATER branch, so
+  // it must not warn about itself — a false positive here would be worse
+  // than no warning at all.
+  await setWindow(page, cube2Branch, "2024-07-01", "2024-08-01");
+  await setWindow(page, cube1Branch, "2024-08-01", "2024-09-01");
+  await expect(warning).toHaveCount(0);
+
+  // Swap the windows and the join now subtracts the newer from the older.
+  await setWindow(page, cube2Branch, "2024-08-01", "2024-09-01");
+  await setWindow(page, cube1Branch, "2024-07-01", "2024-08-01");
+  await expect(warning).toBeVisible();
+  // Named in the windows' own dates, so it can be checked rather than
+  // trusted — and it never gates publish.
+  await expect(warning).toContainText("2024-08");
+  await expect(warning).toContainText("2024-07");
+  await expect(submitButton(page)).toBeEnabled();
+
+  // Accepting it is sticky: it stays accepted through an unrelated edit.
+  await warning.locator(".swath-authoring-order-accept").click();
+  await expect(warning).toHaveCount(0);
+  await fieldById(page, "s2-options").selectOption("");
+  await expect(warning).toHaveCount(0);
+
+  // Putting the order back is not a warning; a DIFFERENT backwards order
+  // is — acceptance is of that order, not of the node forever.
+  await setWindow(page, cube2Branch, "2024-07-01", "2024-08-01");
+  await setWindow(page, cube1Branch, "2024-08-01", "2024-09-01");
+  await expect(warning).toHaveCount(0);
+  await setWindow(page, cube2Branch, "2024-09-01", "2024-10-01");
+  await setWindow(page, cube1Branch, "2024-06-01", "2024-07-01");
+  await expect(warning).toBeVisible();
+});
