@@ -56,6 +56,7 @@
 mod budgets;
 mod claims;
 mod deferrals;
+mod e2e_intent;
 mod glossary;
 mod mutation;
 mod numbers;

@@ -37,7 +37,7 @@ use super::repo_root;
 /// the second ratchet (2026-08-29, #344) applied the same rule after phase 4 —
 /// a ratchet only moves down. Raising one is a reviewed edit with a dated
 /// reason, in the same diff as the words.
-const BUDGETS: [(&str, usize); 24] = [
+const BUDGETS: [(&str, usize); 25] = [
     ("README.md", 1250),
     ("docs/ARCHITECTURE.md", 2125),
     ("docs/CHARTER.md", 1350),
@@ -61,7 +61,9 @@ const BUDGETS: [(&str, usize); 24] = [
     // 2400 → 2450 on 2026-09-05 (#424): the sources row gains
     // requester-pays and its consent; → 2525 (#420) for the register route.
     ("docs/ENDPOINTS.md", 2525),
-    ("docs/ENGINEERING.md", 1000),
+    // Raised 1000 → 1150 on 2026-09-05 (#426): §6 records which jobs a PR
+    // runs and which only `main` does, as a decision rather than a leftover.
+    ("docs/ENGINEERING.md", 1150),
     ("docs/EXTENDING.md", 1475),
     ("docs/OPERATIONS.md", 975),
     ("docs/PERFORMANCE.md", 2425),
@@ -84,6 +86,9 @@ const BUDGETS: [(&str, usize); 24] = [
     // ui-system.md — measured 952, budget 1000.
     ("docs/design/design-language.md", 1000),
     ("docs/design/catalog-domain.md", 1925),
+    // The e2e intent list (#426): one row per browser spec, so it grows
+    // with the suite and is a reference table rather than prose.
+    ("docs/design/e2e-intent.md", 2700),
     ("docs/design/extraction-boundary.md", 675),
     ("docs/design/materialization-planner.md", 1675),
     // 3425 -> 3475 on 2026-09-03: ADR 0028's compose amendment (#400) and
