@@ -19,7 +19,9 @@
 //! in the config file.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use swath_api::SourcePublisher;
 use swath_core::catalog::Datetime;
@@ -193,6 +195,43 @@ fn wire_name(kind: SourceEventKind) -> &'static str {
     }
 }
 
+/// How long a reachability probe may take before the source is called
+/// unreachable. Stated rather than assumed (#417): a directory that does
+/// not answer in this long is not one an ingest task can use, and a probe
+/// that waited forever would report health it never measured.
+pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How often each source is probed. Slow on purpose: this is a
+/// heartbeat behind a live event stream, not the stream itself.
+pub(crate) const PROBE_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Probes `dir` forever, recording what it finds against `id` (#417).
+///
+/// The probe is what makes "watching" a measured fact: it either reads
+/// the directory within [`PROBE_TIMEOUT`] or records the reason it could
+/// not. It never records a success it did not observe.
+pub(crate) async fn probe_loop(registry: Arc<SourceRegistry>, id: SourceId, dir: PathBuf) {
+    loop {
+        tokio::time::sleep(PROBE_INTERVAL).await;
+        match probe_once(&dir).await {
+            Ok(()) => registry.record(&id, SourceEventKind::Polled, ""),
+            Err(detail) => registry.record(&id, SourceEventKind::Failed, detail),
+        }
+    }
+}
+
+/// One probe: the directory is readable, within the timeout.
+pub(crate) async fn probe_once(dir: &std::path::Path) -> Result<(), String> {
+    let target = dir.to_path_buf();
+    let read = tokio::task::spawn_blocking(move || std::fs::read_dir(&target).map(|_| ()));
+    match tokio::time::timeout(PROBE_TIMEOUT, read).await {
+        Ok(Ok(Ok(()))) => Ok(()),
+        Ok(Ok(Err(err))) => Err(err.to_string()),
+        Ok(Err(err)) => Err(format!("probe task failed: {err}")),
+        Err(_) => Err(format!("no answer within {}s", PROBE_TIMEOUT.as_secs())),
+    }
+}
+
 /// Wall-clock milliseconds since the Unix epoch.
 fn now_unix_millis() -> i64 {
     std::time::SystemTime::now()
@@ -204,6 +243,7 @@ fn now_unix_millis() -> i64 {
 mod tests {
     use swath_api::{BusEvent, TraceBus};
     use swath_core::catalog::Datetime;
+    use swath_core::sources::SourceStore as _;
     use swath_core::sources::{Source, SourceEventKind, SourceId, SourceKind, SourceOrigin};
 
     use super::SourceRegistry;
@@ -248,6 +288,62 @@ mod tests {
             recorded[0].1.last_event.as_ref().map(Datetime::as_str),
             Some(event.at.as_str())
         );
+    }
+
+    /// The probe measures rather than assumes (#417): a readable
+    /// directory answers, a missing one records why it could not, and
+    /// the timeout is a stated number rather than an unbounded wait.
+    #[tokio::test]
+    async fn the_probe_reports_what_it_found() {
+        let dir = swath_testsupport::TempDir::new("cli-source-probe");
+        assert_eq!(super::probe_once(dir.path()).await, Ok(()));
+
+        let missing = dir.path().join("not-here");
+        let err = super::probe_once(&missing)
+            .await
+            .expect_err("a missing directory is not reachable");
+        assert!(!err.is_empty(), "the reason is the origin's own words");
+
+        // Stated, not assumed: the timeout is a number this module owns
+        // and the API's docs quote.
+        assert_eq!(super::PROBE_TIMEOUT.as_secs(), 5);
+        assert!(super::PROBE_INTERVAL > super::PROBE_TIMEOUT);
+    }
+
+    /// A probe failure and a later recovery move the derived state,
+    /// which is what makes `reachable` on the API a measured fact rather
+    /// than a stored one.
+    #[tokio::test]
+    async fn probe_events_move_the_derived_state() {
+        let registry = SourceRegistry::with_sources([source("fire")]);
+        let at = |value: &str| Datetime::new(value).expect("a test instant");
+        let record = async |kind, when: &str| {
+            registry
+                .record_event(&swath_core::sources::SourceEvent {
+                    source: SourceId::new("fire"),
+                    at: at(when),
+                    kind,
+                    detail: String::new(),
+                })
+                .await
+                .expect("recorded");
+        };
+
+        record(SourceEventKind::Failed, "2026-09-04T10:00:00Z").await;
+        assert_eq!(registry.statuses()[0].1.failures, 1);
+        assert!(matches!(
+            registry.statuses()[0].1.state,
+            swath_core::sources::SourceState::Failing { .. }
+        ));
+
+        // One probe interval later the source answers again: reachable,
+        // and the failure still counted.
+        record(SourceEventKind::Polled, "2026-09-04T10:00:30Z").await;
+        assert!(matches!(
+            registry.statuses()[0].1.state,
+            swath_core::sources::SourceState::Watching { .. }
+        ));
+        assert_eq!(registry.statuses()[0].1.failures, 1);
     }
 
     /// A registry with no bus is a registry: recording still works, which

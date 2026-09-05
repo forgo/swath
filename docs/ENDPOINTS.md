@@ -36,6 +36,8 @@ survive.
 | GET | `/traces` | always | SSE stream: every render (`trace`) and every source event (`ingest`, #416) |
 | GET | `/healthz` | always | Liveness probe (process only) |
 | GET/HEAD | *fallback* | always | Embedded UI assets; unknown paths are plain 404 |
+| GET | `/sources` | catalog mode | Origins and their measured status (#417) |
+| GET | `/sources/{sourceId}` | catalog mode | One origin and its measured status |
 | GET | `/datasets/{datasetId}/counts` | catalog mode | Matched granules bucketed by calendar step or CRS84 cell (#410) |
 | GET | `/datasets/{datasetId}/facets` | catalog mode | What the granules in scope carry: discovered property keys with coverage, ranges and value counts (#409) |
 | GET, POST | `/datasets/{datasetId}/granules` | catalog mode | Granule browsing (paged, filterable); POST registers one (asset map or inline STAC Item — headers validated, extents derived, #196) |
@@ -189,6 +191,25 @@ bucket is a zero.
 one full scan per request, linear in matched rows. A bucketing that would
 return more than 2000 buckets is refused with a 400 naming the number and
 the way out, rather than answered slowly.
+
+## Sources (catalog mode)
+
+**`GET /sources`**, **`GET /sources/{sourceId}`** — what each origin is and
+how it is doing (ADR 0030). Each row carries `id`, `title`, `kind`, `origin`
+(`config` or `api`, so a config-owned source cannot look editable), the
+datasets it feeds, the credential profile's **name** when there is one, and a
+`status`.
+
+Every field of `status` is measured, derived from the recorded events: `state`,
+`reachable` (`null` until something has looked — never a reassuring default),
+`lastEvent`, `lastError` while a failure is still the last word, and the
+`ingested`/`failures` counts. The probe behind it reads the target within a
+5-second timeout every 30 seconds.
+
+Two things are deliberately absent: the target **path** (only its `scheme` is
+served — host paths do not leave the process, as with asset hrefs) and any
+secret (there is no field one could occupy). Read-only in this wave; mutating
+sources waits for the auth interlock.
 
 ## openEO surface (catalog mode)
 

@@ -116,6 +116,7 @@ pub mod openeo;
 mod provider;
 mod registry;
 mod routes;
+pub mod sources;
 mod temporal;
 pub mod traces;
 pub mod udf;
@@ -134,6 +135,7 @@ pub use openeo::{
 pub use provider::{CatalogLayer, CatalogLayers, LayerIdentity, LayerProvider, ResolvedLayer};
 pub use registry::{Layer, LayerRegistry};
 pub use routes::{ApiState, CONFORMANCE_CLASSES, TraceExtension, router};
+pub use sources::{SourceItem, SourceList, SourcesState, sources_router};
 pub use traces::{BusEvent, IngestEvent, SourcePublisher, TraceBus, TraceEvent};
 pub use udf::{RehydrateError, SharedUdfExecutor, UdfModules, UdfPublish};
 pub use ui::UiAssets;

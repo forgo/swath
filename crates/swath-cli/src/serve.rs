@@ -489,6 +489,14 @@ where
             SourceEventKind::Started,
             dir.display().to_string(),
         );
+        // The heartbeat behind "watching" (#417): a probe with a stated
+        // timeout, recorded as an event like everything else, so the
+        // status the API serves is measured rather than assumed.
+        tokio::spawn(crate::sources::probe_loop(
+            Arc::clone(&registry),
+            source.id.clone(),
+            dir.clone(),
+        ));
         tokio::spawn(ingest_loop(
             events,
             catalog.clone(),
@@ -501,6 +509,14 @@ where
     // `GET /datasets/{datasetId}/granules` over the same catalog.
     let granules = swath_api::granules_router(Arc::new(swath_api::GranulesState::new(
         catalog.clone(),
+        &cfg.base_url,
+    )));
+    // The read-only sources resource (#417): what each origin is and how
+    // it is doing, over the same registry the ingest tasks record into.
+    // Read-only in this wave — mutating sources waits for the auth
+    // interlock (#421).
+    let sources = swath_api::sources_router(Arc::new(swath_api::SourcesState::new(
+        Arc::clone(&registry),
         &cfg.base_url,
     )));
     let provider = CatalogLayers::new(catalog, mode.layers);
@@ -537,7 +553,9 @@ where
     let (extra, uploads) = if cfg.read_only {
         tracing::info!("read-only: write routes unmounted");
         (
-            swath_api::openeo_read_router(openeo_state).merge(granules),
+            swath_api::openeo_read_router(openeo_state)
+                .merge(granules)
+                .merge(sources),
             false,
         )
     } else {
@@ -545,6 +563,7 @@ where
         (
             swath_api::openeo_router(openeo_state)
                 .merge(granules)
+                .merge(sources)
                 .merge(writes),
             uploads,
         )
