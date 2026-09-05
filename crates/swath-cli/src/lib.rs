@@ -27,6 +27,7 @@ pub mod ingest;
 pub mod materialize;
 pub mod serve;
 pub mod source;
+pub(crate) mod sources;
 
 use std::process::ExitCode;
 

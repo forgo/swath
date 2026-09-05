@@ -103,7 +103,8 @@ a typo fails loudly at startup.
 | `cache` | string | none | Tile-cache root (same grammar as `store-root`). Absent: no cache. |
 | `udf-store` | string | none | `run_udf` module-store root (same grammar). Absent: `run_udf` not offered. |
 | `catalog` | string | none | Postgres URL of a pgstac database — presence selects catalog mode. |
-| `watch-dir` | string | none | Drop directory watched for granule manifests (catalog mode only). |
+| `watch-dir` | string | none | Drop directory watched for granule manifests (catalog mode only). Shorthand for one `[[sources]]` entry named `watch-dir`. |
+| `sources` | array of tables | `[]` | Named origins to watch (`[[sources]]`, keys below; catalog mode only). |
 | `cors-allowed-origins` | array of strings | `[]` (CORS off) | Origin allowlist; `["*"]` allows any origin. |
 | `budget` | table | all knobs default | Global default materialization budget (`[budget]`, keys below). |
 | `layers` | array of tables | `[]` | Static layer definitions (`[[layers]]`, keys below). Mutually exclusive with catalog mode. |
@@ -112,9 +113,31 @@ a typo fails loudly at startup.
 <!-- config-check:end file -->
 
 Validation at startup: catalog mode requires `[[datasets]]` (and vice
-versa, as does `watch-dir`); static `[[layers]]` and catalog mode are
-mutually exclusive; layer ids are unique across datasets (shared URL
-space), dataset ids unique.
+versa, as do `watch-dir` and `[[sources]]`); static `[[layers]]` and
+catalog mode are mutually exclusive; layer ids are unique across datasets
+(shared URL space), dataset ids unique, source ids unique.
+
+### `[[sources]]` — where data comes from
+
+Each entry is one watched origin with its own ingest task and its own
+error state, so an unreachable or malformed origin records its failure and
+its siblings keep running (ADR 0030).
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `id` | string | — (required) | Identifier, unique within the deployment. |
+| `title` | string | the id | Human title for the Sources screen. |
+| `watch-dir` | string | — (required) | Directory watched for `<granule-id>.json` manifests. |
+| `datasets` | array of strings | `[]` | Which datasets this source feeds. Declared, so a source that has ingested nothing still says what it is for. |
+
+Top-level `watch-dir` is the same thing said shorter: it becomes a source
+named `watch-dir`, and a one-directory deployment is unchanged.
+
+**Adding or removing a source needs a restart**, deliberately: sources
+declared in the file live in the file, and the process that reads it is
+the one that watches them. Observed state does not survive a restart
+either — a process that has just started has observed nothing, and says
+`unknown` rather than replaying a claim that may no longer be true.
 
 ### `[budget]` — and `[layers.budget]` / `[datasets.layers.budget]`
 
