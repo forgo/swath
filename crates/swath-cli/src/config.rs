@@ -32,6 +32,7 @@ use swath_api::{CatalogLayer, Layer, LayerRegistry};
 use swath_core::catalog as domain;
 use swath_core::planner::Budget;
 use swath_core::raster::AssetRef;
+use swath_core::sources::{Source, SourceId, SourceKind, SourceOrigin};
 use swath_render::ir::Colormap;
 use swath_render::{NodataPolicy, PlanSpec, Resampling, ndvi_expr, plan_for};
 
@@ -108,6 +109,13 @@ pub enum ConfigError {
     /// `[[datasets]]` requires a catalog to live in.
     #[error("[[datasets]] requires catalog mode (config `catalog`, --catalog, or SWATH_CATALOG)")]
     DatasetsNeedCatalog,
+    /// Two sources cannot share an id: every derived state would be
+    /// ambiguous.
+    #[error("duplicate source `{id}`")]
+    DuplicateSource {
+        /// The id declared twice.
+        id: String,
+    },
     /// A watch directory without a catalog has nowhere to register granules.
     #[error("watch-dir requires catalog mode (config `catalog`, --catalog, or SWATH_CATALOG)")]
     WatchDirNeedsCatalog,
@@ -173,12 +181,31 @@ pub(crate) enum LayerSource {
     Catalog(CatalogMode),
 }
 
+/// One `[[sources]]` entry: an origin to watch.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct SourceConfig {
+    /// Identifier, unique within the deployment.
+    pub id: String,
+    /// Human title; the id when absent.
+    pub title: Option<String>,
+    /// The directory to watch. Only `filedrop` sources exist today
+    /// (ADR 0030); a `stac` target waits for Wave C.
+    pub watch_dir: PathBuf,
+    /// The datasets this source feeds, for the Sources screen. Declared
+    /// rather than derived: a source that has ingested nothing yet still
+    /// says what it is for.
+    #[serde(default)]
+    pub datasets: Vec<String>,
+}
+
 /// Everything catalog mode needs at startup.
 pub(crate) struct CatalogMode {
     /// Postgres URL of the pgstac database.
     pub(crate) url: String,
-    /// Drop directory to watch for granule manifests (`None` = serve-only).
-    pub(crate) watch_dir: Option<PathBuf>,
+    /// The origins to watch, one ingest task each (#415). Empty means
+    /// serve-only. A `watch-dir` is the first entry.
+    pub(crate) sources: Vec<(Source, PathBuf)>,
     /// The datasets to register (upsert) at startup — config is the source
     /// of truth for dataset identity + serving layers (R2: operators write
     /// TOML, never STAC).
@@ -206,7 +233,15 @@ pub struct ConfigFile {
     /// Postgres URL of a pgstac database — presence selects catalog mode.
     catalog: Option<String>,
     /// Drop directory watched for granule manifests (catalog mode only).
+    /// Shorthand for a single `[[sources]]` entry, and still the whole
+    /// story for a one-directory deployment.
     watch_dir: Option<PathBuf>,
+    /// Named origins to watch (#415, ADR 0030). Each becomes its own
+    /// ingest task with its own error state, so one unreachable
+    /// directory cannot stop the others. `watch-dir` and `[[sources]]`
+    /// compose: the shorthand is simply one more source.
+    #[serde(default)]
+    sources: Vec<SourceConfig>,
     /// CORS origin allowlist; `["*"]` = any origin.
     cors_allowed_origins: Option<Vec<String>>,
     /// Global default materialization budget; per-layer
@@ -457,11 +492,11 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
         }
         LayerSource::Catalog(compile_catalog_mode(
             url,
-            watch_dir,
+            compile_sources(watch_dir, &file.sources)?,
             &file.datasets,
             &default_budget,
         )?)
-    } else if watch_dir.is_some() {
+    } else if watch_dir.is_some() || !file.sources.is_empty() {
         return Err(ConfigError::WatchDirNeedsCatalog);
     } else if !file.datasets.is_empty() {
         return Err(ConfigError::DatasetsNeedCatalog);
@@ -502,9 +537,57 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
 /// startup and the serving templates the catalog-backed provider resolves
 /// per tile — one config, two synchronized views (the persisted
 /// `swath:layers` and the compiled `RenderPlan` come from the same entry).
+/// The declared origins, watch-dir shorthand first (#415). Ids must be
+/// unique: two sources under one name would make every derived state
+/// ambiguous, which is exactly the drift ADR 0030 §2 exists to prevent.
+fn compile_sources(
+    watch_dir: Option<PathBuf>,
+    configs: &[SourceConfig],
+) -> Result<Vec<(Source, PathBuf)>, ConfigError> {
+    let mut out: Vec<(Source, PathBuf)> = Vec::new();
+    let mut ids = BTreeSet::new();
+    if let Some(dir) = watch_dir {
+        // The one-directory deployment keeps working unchanged: it is a
+        // source named `watch-dir`, and nothing else about it moved.
+        ids.insert("watch-dir".to_owned());
+        out.push((
+            Source {
+                id: SourceId::new("watch-dir"),
+                kind: SourceKind::Filedrop,
+                target: dir.display().to_string(),
+                title: "Watched directory".to_owned(),
+                bindings: Vec::new(),
+                origin: SourceOrigin::Config,
+                credential_profile: None,
+            },
+            dir,
+        ));
+    }
+    for config in configs {
+        if !ids.insert(config.id.clone()) {
+            return Err(ConfigError::DuplicateSource {
+                id: config.id.clone(),
+            });
+        }
+        out.push((
+            Source {
+                id: SourceId::new(&config.id),
+                kind: SourceKind::Filedrop,
+                target: config.watch_dir.display().to_string(),
+                title: config.title.clone().unwrap_or_else(|| config.id.clone()),
+                bindings: config.datasets.iter().map(domain::DatasetId::new).collect(),
+                origin: SourceOrigin::Config,
+                credential_profile: None,
+            },
+            config.watch_dir.clone(),
+        ));
+    }
+    Ok(out)
+}
+
 fn compile_catalog_mode(
     url: String,
-    watch_dir: Option<PathBuf>,
+    sources: Vec<(Source, PathBuf)>,
     configs: &[DatasetConfig],
     default_budget: &Budget,
 ) -> Result<CatalogMode, ConfigError> {
@@ -562,7 +645,7 @@ fn compile_catalog_mode(
 
     Ok(CatalogMode {
         url,
-        watch_dir,
+        sources,
         datasets,
         layers,
     })
@@ -749,7 +832,7 @@ impl LayerConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     use swath_core::planner::Budget;
 
@@ -1148,7 +1231,7 @@ mod tests {
         let file: ConfigFile = toml::from_str(CATALOG_TOML).expect("parses");
         let mode = super::compile_catalog_mode(
             file.catalog.clone().unwrap(),
-            None,
+            Vec::new(),
             &file.datasets,
             &Budget::default(),
         )
@@ -1171,6 +1254,98 @@ mod tests {
     }
 
     /// The catalog-mode config of the compose stack, in miniature.
+    /// `[[sources]]` and the `watch-dir` shorthand compose, ids must be
+    /// unique, and a one-directory deployment is unchanged (#415).
+    #[test]
+    fn sources_compose_with_the_watch_dir_shorthand() {
+        // The shorthand alone is one source, named for what it is.
+        let only_shorthand =
+            super::compile_sources(Some(PathBuf::from("/data/drop")), &[]).expect("compiles");
+        assert_eq!(only_shorthand.len(), 1);
+        assert_eq!(only_shorthand[0].0.id.as_str(), "watch-dir");
+        assert_eq!(only_shorthand[0].1, PathBuf::from("/data/drop"));
+        assert!(
+            only_shorthand[0].0.credential_profile.is_none(),
+            "a config source names no credential; there is no field for a value"
+        );
+
+        let file: ConfigFile = toml::from_str(
+            r#"
+            store-root = "/data"
+            catalog = "postgres://x"
+            watch-dir = "/data/drop"
+
+            [[sources]]
+            id = "fire"
+            title = "Fire drops"
+            watch-dir = "/data/fire"
+            datasets = ["hls-s30-fire"]
+
+            [[sources]]
+            id = "archive"
+            watch-dir = "/data/archive"
+            "#,
+        )
+        .expect("parses");
+        let compiled =
+            super::compile_sources(file.watch_dir.clone(), &file.sources).expect("compiles");
+        assert_eq!(
+            compiled
+                .iter()
+                .map(|(source, dir)| (source.id.to_string(), dir.clone()))
+                .collect::<Vec<_>>(),
+            [
+                ("watch-dir".to_owned(), PathBuf::from("/data/drop")),
+                ("fire".to_owned(), PathBuf::from("/data/fire")),
+                ("archive".to_owned(), PathBuf::from("/data/archive")),
+            ]
+        );
+        assert_eq!(compiled[1].0.title, "Fire drops");
+        assert_eq!(compiled[1].0.bindings.len(), 1);
+        // No title given: the id stands in rather than an empty string.
+        assert_eq!(compiled[2].0.title, "archive");
+
+        // Two sources under one id would make every derived state
+        // ambiguous, so it is refused outright.
+        let dupes: ConfigFile = toml::from_str(
+            r#"
+            store-root = "/data"
+            catalog = "postgres://x"
+
+            [[sources]]
+            id = "twin"
+            watch-dir = "/a"
+
+            [[sources]]
+            id = "twin"
+            watch-dir = "/b"
+            "#,
+        )
+        .expect("parses");
+        let err = super::compile_sources(None, &dupes.sources).expect_err("duplicate id");
+        assert!(matches!(&err, ConfigError::DuplicateSource { id } if id == "twin"));
+        assert_eq!(err.to_string(), "duplicate source `twin`");
+
+        // Ids are unique across the shorthand too: a `[[sources]]` entry
+        // may not take the shorthand's name.
+        let clash: ConfigFile = toml::from_str(
+            r#"
+            store-root = "/data"
+            catalog = "postgres://x"
+            watch-dir = "/a"
+
+            [[sources]]
+            id = "watch-dir"
+            watch-dir = "/b"
+            "#,
+        )
+        .expect("parses");
+        assert!(matches!(
+            super::compile_sources(clash.watch_dir.clone(), &clash.sources),
+            Err(ConfigError::DuplicateSource { .. })
+        ));
+    }
+
     const CATALOG_TOML: &str = r#"
         store-root = "/data"
         catalog = "postgres://swath@localhost/swath"
@@ -1203,7 +1378,7 @@ mod tests {
         let file: ConfigFile = toml::from_str(CATALOG_TOML).expect("parses");
         let mode = super::compile_catalog_mode(
             file.catalog.clone().unwrap(),
-            file.watch_dir.clone(),
+            super::compile_sources(file.watch_dir.clone(), &file.sources).expect("sources"),
             &file.datasets,
             &Budget::default(),
         )
@@ -1242,7 +1417,13 @@ mod tests {
             .map(|i| i.name.as_str())
             .collect();
         assert_eq!(inputs, ["b04", "b03", "b02"]);
-        assert_eq!(mode.watch_dir.as_deref(), Some(Path::new("/data/drop")));
+        assert_eq!(
+            mode.sources
+                .iter()
+                .map(|(source, dir)| (source.id.to_string(), dir.clone()))
+                .collect::<Vec<_>>(),
+            [("watch-dir".to_owned(), PathBuf::from("/data/drop"))]
+        );
     }
 
     #[test]
@@ -1278,7 +1459,7 @@ mod tests {
         assert!(matches!(
             super::compile_catalog_mode(
                 "postgres://x".to_owned(),
-                None,
+                Vec::new(),
                 &file.datasets,
                 &Budget::default(),
             ),
@@ -1293,7 +1474,7 @@ mod tests {
         file.datasets.push(twin_dataset);
         let err = super::compile_catalog_mode(
             "postgres://x".to_owned(),
-            None,
+            Vec::new(),
             &file.datasets,
             &Budget::default(),
         )

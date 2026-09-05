@@ -26,6 +26,7 @@ use swath_catalog_pgstac::PgstacCatalog;
 use swath_core::catalog::{Catalog, CatalogError, Dataset};
 use swath_core::events::EventSource;
 use swath_core::planner::Budget;
+use swath_core::sources::{SourceEventKind, SourceId};
 use swath_events_filedrop::FiledropEvents;
 use swath_pyramid_objectstore::PyramidSource;
 use swath_reproject_proj4rs::Proj4rsReproject;
@@ -33,6 +34,7 @@ use swath_store_objectstore::ObjectStoreTileCache;
 
 use crate::config::{self, CatalogMode, LayerSource, ResolvedConfig};
 use crate::source::CompositeSource;
+use crate::sources::SourceRegistry;
 
 /// Filedrop scan cadence. A quarter second is well under the noise floor
 /// of the ingest-to-pixel budget while keeping the idle cost negligible
@@ -438,8 +440,17 @@ where
         &cfg.budget,
     )
     .await;
-    if let Some(dir) = &mode.watch_dir {
-        tracing::info!("watching {} for granule manifests", dir.display());
+    // One ingest task per source (#415, ADR 0030). Each owns its own
+    // watch and its own error state, so an unreachable or malformed
+    // origin records its failure and its siblings keep running.
+    let registry =
+        SourceRegistry::with_sources(mode.sources.iter().map(|(source, _)| source.clone()));
+    for (source, dir) in &mode.sources {
+        tracing::info!(
+            "source {id}: watching {dir} for granule manifests",
+            id = source.id,
+            dir = dir.display(),
+        );
         let mut events = FiledropEvents::new(dir.clone(), WATCH_POLL);
         // The legacy path (ADR 0006): dropped granules whose assets are
         // legacy files (.h5/.nc/.grib2) get virtual manifests generated and
@@ -458,7 +469,17 @@ where
                 root = cfg.store_root,
             );
         }
-        tokio::spawn(ingest_loop(events, catalog.clone()));
+        registry.record(
+            &source.id,
+            SourceEventKind::Started,
+            dir.display().to_string(),
+        );
+        tokio::spawn(ingest_loop(
+            events,
+            catalog.clone(),
+            Arc::clone(&registry),
+            source.id.clone(),
+        ));
     }
     let layer_count = mode.layers.len();
     // The granule browsing surface: read-only
@@ -690,7 +711,12 @@ where
 /// outcome with its ingest latency. Errors never stop the loop — one bad
 /// manifest must not block the next granule (R1). Generic over the ports so
 /// the arrive→register flow is testable against in-memory fakes.
-async fn ingest_loop<S: EventSource, C: Catalog>(mut source: S, catalog: C) {
+async fn ingest_loop<S: EventSource, C: Catalog>(
+    mut source: S,
+    catalog: C,
+    registry: Arc<SourceRegistry>,
+    id: SourceId,
+) {
     loop {
         match source.next_event().await {
             Ok(Some(event)) => match swath_core::ingest::ingest_granule(&catalog, &event).await {
@@ -698,23 +724,34 @@ async fn ingest_loop<S: EventSource, C: Catalog>(mut source: S, catalog: C) {
                     let elapsed =
                         now_unix_millis().saturating_sub(event.arrived_at.to_unix_millis());
                     tracing::info!(
-                        "ingested granule {id} into dataset {dataset} \
+                        "source {id}: ingested granule {granule_id} into dataset {dataset} \
                              ({bands} band(s)) in {elapsed} ms",
-                        id = granule.id,
+                        granule_id = granule.id,
                         dataset = granule.dataset,
                         bands = granule.assets.len(),
                     );
+                    registry.record(&id, SourceEventKind::Ingested, granule.id.to_string());
                 }
-                Err(err) => tracing::error!(
-                    "ingest of granule {id} failed: {err}",
-                    id = event.granule.id,
-                ),
+                Err(err) => {
+                    tracing::error!(
+                        "source {id}: ingest of granule {granule_id} failed: {err}",
+                        granule_id = event.granule.id,
+                    );
+                    registry.record(&id, SourceEventKind::Failed, err.to_string());
+                }
             },
             Ok(None) => {
-                tracing::info!("event source exhausted; ingest loop exiting");
+                tracing::info!("source {id}: event source exhausted; ingest loop exiting");
+                registry.record(&id, SourceEventKind::Stopped, "event source exhausted");
                 break;
             }
-            Err(err) => tracing::warn!("event source: {err}"),
+            // One source's failure is its own: it is recorded against
+            // that source and the loop keeps going, so a sibling watching
+            // a healthy directory is untouched.
+            Err(err) => {
+                tracing::warn!("source {id}: {err}");
+                registry.record(&id, SourceEventKind::Failed, err.to_string());
+            }
         }
     }
 }
@@ -844,14 +881,20 @@ mod tests {
         GranuleQuery, TimeRange,
     };
     use swath_core::events::{EventError, EventSource, GranuleEvent};
+    use swath_core::sources::SourceStore as _;
     use swath_testsupport::TempDir;
     use swath_testsupport::catalog::MemoryCatalog;
+
+    use std::sync::Arc;
+
+    use swath_core::sources::{SourceEventKind, SourceId};
 
     use super::{
         ServeArgs, ServeError, Shared, build_store, ingest_loop, now_unix_millis,
         rehydrate_service, run, serve, serve_catalog_on,
     };
     use crate::config::{self, ConfigError, LayerSource};
+    use crate::sources::SourceRegistry;
 
     /// A finite replay [`EventSource`]: yields the scripted results, then
     /// reports exhaustion (`Ok(None)`).
@@ -1043,7 +1086,14 @@ mod tests {
             }),
         ]);
         // The scripted source then reports exhaustion, so the loop exits.
-        ingest_loop(events, catalog.clone()).await;
+        let registry = SourceRegistry::with_sources([]);
+        ingest_loop(
+            events,
+            catalog.clone(),
+            Arc::clone(&registry),
+            SourceId::new("drop"),
+        )
+        .await;
         let stored = catalog
             .find_granules(&DatasetId::new("hls-s30"), &GranuleQuery::default())
             .await
@@ -1054,6 +1104,102 @@ mod tests {
             Some(Datetime::new("2026-08-08T12:00:00Z").expect("valid datetime")),
             "ingested_at is stamped from the event's arrival time"
         );
+
+        // Every outcome is recorded against the source, so its state is
+        // read off what happened rather than off a field (ADR 0030 §2).
+        let recorded = registry
+            .events(&SourceId::new("drop"))
+            .await
+            .expect("events");
+        let kinds: Vec<SourceEventKind> = recorded.iter().map(|event| event.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                SourceEventKind::Ingested,
+                SourceEventKind::Failed,
+                SourceEventKind::Failed,
+                SourceEventKind::Stopped,
+            ],
+            "the good granule, the unknown dataset, the malformed event, the exhaustion"
+        );
+        // And the failures did not stop the loop: it ran to exhaustion.
+        assert!(
+            recorded
+                .iter()
+                .any(|event| event.detail.contains("not a manifest"))
+        );
+    }
+
+    /// A source that only ever fails records its failure and nothing
+    /// else — and, crucially, records it against **itself**: a sibling
+    /// watching a healthy directory reads clean (#415).
+    #[tokio::test]
+    async fn a_failing_source_does_not_colour_its_siblings() {
+        let catalog = MemoryCatalog::default();
+        catalog
+            .upsert_dataset(&dataset("hls-s30"))
+            .await
+            .expect("seed dataset");
+        let registry = SourceRegistry::with_sources([
+            config_source("broken", "/nope"),
+            config_source("healthy", "/srv/incoming"),
+        ]);
+
+        let broken = ScriptedEvents(vec![Err(EventError::Malformed {
+            detail: "not a manifest".to_owned(),
+        })]);
+        let healthy = ScriptedEvents(vec![Ok(Some(granule_event("hls-s30")))]);
+        // Both loops run to exhaustion, concurrently, as they do in serve.
+        let (a, b) = tokio::join!(
+            ingest_loop(
+                broken,
+                catalog.clone(),
+                Arc::clone(&registry),
+                SourceId::new("broken"),
+            ),
+            ingest_loop(
+                healthy,
+                catalog.clone(),
+                Arc::clone(&registry),
+                SourceId::new("healthy"),
+            ),
+        );
+        let () = a;
+        let () = b;
+
+        let statuses: std::collections::BTreeMap<String, swath_core::sources::SourceStatus> =
+            registry
+                .statuses()
+                .into_iter()
+                .map(|(source, status)| (source.id.to_string(), status))
+                .collect();
+        assert_eq!(statuses["broken"].failures, 1);
+        assert_eq!(statuses["broken"].ingested, 0);
+        // The healthy source is untouched by its sibling's failure.
+        assert_eq!(statuses["healthy"].failures, 0);
+        assert_eq!(statuses["healthy"].ingested, 1);
+        // And the good granule really did land.
+        assert_eq!(
+            catalog
+                .find_granules(&DatasetId::new("hls-s30"), &GranuleQuery::default())
+                .await
+                .expect("query succeeds")
+                .len(),
+            1
+        );
+    }
+
+    /// A config-declared filedrop source, for the registry tests.
+    fn config_source(id: &str, dir: &str) -> swath_core::sources::Source {
+        swath_core::sources::Source {
+            id: SourceId::new(id),
+            kind: swath_core::sources::SourceKind::Filedrop,
+            target: dir.to_owned(),
+            title: id.to_owned(),
+            bindings: Vec::new(),
+            origin: swath_core::sources::SourceOrigin::Config,
+            credential_profile: None,
+        }
     }
 
     #[tokio::test]
