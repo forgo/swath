@@ -1,6 +1,6 @@
 # Swath — Roadmap
 
-_Working document. August 2026. Three things, kept apart: what has shipped (§1, one line per
+_Working document. September 2026. Three things, kept apart: what has shipped (§1, one line per
 milestone with its evidence), what is deliberately **deferred** (§2 — the single deferral
 inventory; every "future work" note in the tree points here and nowhere else), and what is
 **next** (§3 — open candidates only). The regression rule: zero TODO/FIXME in the tree — a
@@ -26,7 +26,13 @@ reopen condition wins ([`decisions/`](decisions/)); the phase plan is
 | **M9** `run_udf` | User code as sandboxed, fuel-metered WASM in the tile path; deterministic, load-tested, deployable read-only | ADR 0018, `PERFORMANCE.md` §9, `deploy/README.md` |
 | **M10** UX product structure | One shell, shadow-DOM primitives on tokens, rail modes, palette, catalog thumbnails, canvas primitives, touch parity | ADR 0021, `design/ui-system.md` |
 | **M11** Earn the DAG | `merge_cubes` at the bounded profile; the canvas a constrained DAG; change detection its first product | ADR 0022, `design/authoring-dag.md` |
+| **M12** UX design language | Self-hosted type, tokens carrying colour/space/motion, a high-contrast theme, the icon set de-duplicated; the freeze re-grounded on an asserted contract, not a path fence | ADR 0026, `design/design-language.md`, #378–#433 |
 | **M13** Consolidate | One source of truth per fact: REQUIREMENTS owns the mission, CONTRIBUTING the workflow, ADRs 0023–0025 the design decisions; one test-support crate, one e2e support module, one object_store adapter, one API error type; `swath-cli` a library; the docs gates in `tools/docs-check` with budgets over design/ and media/ | #338–#357, the milestone's invariant contract in every PR |
+
+| **M14** Artifacts in the URL | Artifacts push history, the camera replaces it; chips as the URL made visible; one explain card at three densities; a receipt built from a real trace | ADR 0027, #392–#399 |
+| **M15** Compose, end to end | The canvas takes the screen, the map becomes the live preview; preview follows selection; typed add-a-step from a port; joins labelled from server truth | ADR 0028, `design/authoring-dag.md`, #400–#471 |
+| **M16** Find data | Granules carry every other STAC property opaquely; facets discovered from the items; a counts endpoint; the two-band timeline; an honest scope tag; hover footprints and a density surface | ADR 0029, #407–#414 |
+| **M17** Sources, managed | A `Source` domain whose state is derived from events, never stored; one ingest task per watch; a read-only resource and its screen; credentials by reference; egress behind an allowlist; requester-pays consent | ADR 0030/0031, #415–#424 |
 
 ## 2. Deferral inventory (canonical)
 
@@ -66,7 +72,11 @@ with a named revisit condition* — not forgotten.
 completeness: WASM plug-ins and sidecar-RPC adapters (ADR 0013); openEO
 jobs/batch/user-defined-processes/files and auth (ADR 0010 — also why no openEO conformance
 class is claimed); OGC API - Maps (`ARCHITECTURE.md` §7); GPU/GDAL warp offload
-(`ARCHITECTURE.md` §16.2 — GDAL stays test-oracle-only); deck.gl (ADR 0005).
+(`ARCHITECTURE.md` §16.2 — GDAL stays test-oracle-only); deck.gl (ADR 0005); a **mutating
+sources API** and any server-side fetch on an unauthenticated caller's say-so ([ADR
+0031](decisions/0031-credentialed-sources-wait-for-auth.md) — the routes are absent, not
+forbidden, and the lifting condition is OIDC plus an RBAC manage-sources role plus an audit
+trail).
 
 ### Icechunk (graduated: executed interop in M8)
 
@@ -76,8 +86,8 @@ plan. M8 ships the interop rather than an adapter wish: the referencer commits v
 references to an Icechunk repo instead of owning a private-only format (M8.7, #191, with an
 icechunk-python/xarray conformance gate), and Swath serves tiles back from an Icechunk commit,
 byte-identical to the manifest path and trace-visible (M8.9, #193; all executed), with the
-zarrs codec-chain adoption (M8.6, #190) as the enabling step. What remains demand-triggered (item 15 below): the
-versioned-layer product UX — time-travel surfacing, transactional multi-granule updates (which
+zarrs codec-chain adoption (M8.6, #190) as the enabling step. What remains demand-triggered (§3,
+"Versioned-layer product UX"): the versioned-layer product UX — time-travel surfacing, transactional multi-granule updates (which
 would also change row 3's story) — and the native-Zarr `RasterSource` adapter
 (`ARCHITECTURE.md` §7, which also reopens `RasterSource`-vs-`CubeSource`, §16.1).
 **Revisit when:** a user needs versioned/transactional layers surfaced, or the native Zarr
@@ -85,28 +95,28 @@ adapter lands.
 
 ## 3. Next (open candidates, proposed order — a maintainer decision)
 
-1. **#156 — openeo `save_result` profile-note drift** (smallest truth-telling fix).
-2. **#139 — linux/arm64 GHCR manifest** (the one-liner fails natively on Apple Silicon).
-3. **M12 — UX design language**: theme values, typography, motion, light/high-contrast —
-   mechanically a token-value swap (ADR 0021's freeze).
-4. **Dataset-creation API** — completes the "single pane of glass" claim.
-5. **Auth (OIDC/RBAC)** — Charter Phase 3; gates multi-tenancy, *writable* demos (maintainer
+Candidates leave this list as they ship, so the numbers shift. **Cite an item by name, not by
+number** — a positional pointer written today is wrong the moment something above it lands.
+
+1. **Auth (OIDC/RBAC)** — Charter Phase 3; gates multi-tenancy, *writable* demos (maintainer
    decision 2026-08-12), the openEO conformance class, and **credentialed sources** (ADR 0031,
    #421): the sources API stays read-only until this lands, because a mutating one would let
    anyone who can reach the port provision egress and spend the operator's credentials.
-6. **Hosted public demo** — the read-only recipe shipped and was exercised end to end
+   ([ADR 0031](decisions/0031-credentialed-sources-wait-for-auth.md) cites this row as "§3
+   item 5", its number before the shipped candidates above it were removed.)
+2. **Hosted public demo** — the read-only recipe shipped and was exercised end to end
    ([`deploy/README.md`](deploy/README.md), #212); the hosted URL is parked to the auth era —
-   the maintainer picks a host when (5) lands, and the CI-tested one-liner stays the demo until
+   the maintainer picks a host when (1) lands, and the CI-tested one-liner stays the demo until
    then (maintainer, 2026-08-25).
-7. **Performance beyond the laptop** — the gaps `PERFORMANCE.md` §10 declines to claim; the
+3. **Performance beyond the laptop** — the gaps `PERFORMANCE.md` §10 declines to claim; the
    #212 run's ops findings are the first input.
-8. **Cache operations bundle** (rows 2, 3, 5) — real together, with mosaics and storage
+4. **Cache operations bundle** (rows 2, 3, 5) — real together, with mosaics and storage
    pressure.
-9. **OGC API - EDR** — rides on the time dimension (ADR 0015).
-10. **OGC API - Records** — wants real dataset extents (row 15).
-11. **OGC API - Features** — vector/GeoParquet.
-12. **OGC API - Maps** — lowest-demand surface.
-13. **Versioned-layer product UX** — the Icechunk remainder (§2): time-travel surfacing,
+5. **OGC API - EDR** — rides on the time dimension (ADR 0015).
+6. **OGC API - Records** — wants real dataset extents (row 15).
+7. **OGC API - Features** — vector/GeoParquet.
+8. **OGC API - Maps** — lowest-demand surface.
+9. **Versioned-layer product UX** — the Icechunk remainder (§2): time-travel surfacing,
     transactional multi-granule updates, the native-Zarr `RasterSource` adapter.
 14. **Engine breadth bundle** (rows 8, 9, 10) — demand-triggered. *UDF operational deferrals
     (ADR 0018 §v2): halo/f32 ABI v2, Python UDFs, module-store GC, planner fuel feedback,

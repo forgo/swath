@@ -60,4 +60,4 @@ the supply-chain rehearsal), the referencer commits virtual chunk references to 
 repo with an icechunk-python/xarray conformance gate (#191, spec-version target recorded as an
 ADR addendum), and serving reads tiles back from an Icechunk commit byte-identical to the
 manifest path, trace-visible (#193). The versioned-layer product UX remainder stays
-demand-triggered in `docs/ROADMAP.md` item 15.
+demand-triggered in `docs/ROADMAP.md` §3, "Versioned-layer product UX".
