@@ -129,6 +129,15 @@ its siblings keep running (ADR 0030).
 | `title` | string | the id | Human title for the Sources screen. |
 | `watch-dir` | string | — (required) | Directory watched for `<granule-id>.json` manifests. |
 | `datasets` | array of strings | `[]` | Which datasets this source feeds. Declared, so a source that has ingested nothing still says what it is for. |
+| `credential-profile` | string | none | The **name** of a credential the operator provisions. Never a value. |
+
+Swath resolves a profile by name and reports whether it resolved; it never
+stores, logs, serves or traces the secret (ADR 0030). The environment
+convention is `SWATH_CREDENTIAL_<PROFILE>` — upper-cased, non-alphanumerics
+folded to `_` — and its presence is the whole answer. A profile that does not
+resolve makes the source read as failing, naming the profile so you are sent to
+the credential and not to the network. Putting a secret in `credential-profile`
+would put it in your config file, which is what the field exists to avoid.
 
 Top-level `watch-dir` is the same thing said shorter: it becomes a source
 named `watch-dir`, and a one-directory deployment is unchanged.

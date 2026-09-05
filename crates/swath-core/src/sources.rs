@@ -152,6 +152,14 @@ pub enum SourceEventKind {
     Failed,
     /// The source was deliberately stopped.
     Stopped,
+    /// The source's credential profile resolved (ADR 0030 §4, #423).
+    /// Recorded as an observation: `detail` names the **profile**, never
+    /// a value, because nothing in this crate can hold one.
+    CredentialResolved,
+    /// The credential profile did not resolve. `detail` names the profile
+    /// and says so; a source in this state cannot reach its target, and
+    /// the UI can say why without inventing a reason.
+    CredentialMissing,
 }
 
 /// What a source is doing, derived from its events. Never stored.
@@ -236,7 +244,7 @@ pub fn state_of(events: &[SourceEvent]) -> SourceStatus {
     // first event rather than claiming a start that is not recorded.
     let since = started.map_or_else(|| last.at.clone(), |event| event.at.clone());
     let state = match last.kind {
-        SourceEventKind::Failed => SourceState::Failing {
+        SourceEventKind::Failed | SourceEventKind::CredentialMissing => SourceState::Failing {
             since: last.at.clone(),
             detail: last.detail.clone(),
         },
@@ -253,6 +261,87 @@ pub fn state_of(events: &[SourceEvent]) -> SourceStatus {
         ingested,
         failures,
         last_event: Some(last.at.clone()),
+    }
+}
+
+/// Whether the source's credential profile resolved the last time
+/// anything checked (#423): `Some(true)`/`Some(false)`, or `None` when
+/// nothing has checked — which the UI renders as an em dash rather than
+/// as a reassuring default.
+///
+/// Like every other state here it is read off the events, so it cannot
+/// drift from what was observed.
+#[must_use]
+pub fn credential_resolution(events: &[SourceEvent]) -> Option<bool> {
+    let mut latest: Option<&SourceEvent> = None;
+    for event in events {
+        if !matches!(
+            event.kind,
+            SourceEventKind::CredentialResolved | SourceEventKind::CredentialMissing
+        ) {
+            continue;
+        }
+        if latest.is_none_or(|current| newer(event, current)) {
+            latest = Some(event);
+        }
+    }
+    latest.map(|event| event.kind == SourceEventKind::CredentialResolved)
+}
+
+/// What a credential profile lookup found. **There is no variant that
+/// carries a value** — that absence is the whole design (ADR 0030 §4):
+/// Swath stores and reports the profile's *name* and whether it
+/// resolved, and the secret stays where the operator put it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialResolution {
+    /// The profile resolved: something answered to that name.
+    Resolved,
+    /// It did not. The caller reports the **profile**, never a value.
+    Missing,
+}
+
+/// Resolves credential profiles by name (#423).
+///
+/// # Contract for implementors
+///
+/// An implementation may look anywhere the operator's platform puts
+/// credentials — the environment, an instance role, a mounted file — but
+/// it **must not return, log, store or trace the value it found**. The
+/// return type gives it nowhere to put one; the rest is the implementor's
+/// obligation, and the deployment's own audit is what checks it.
+pub trait CredentialResolver: Send + Sync {
+    /// Whether `profile` resolves right now.
+    fn resolve(
+        &self,
+        profile: &str,
+    ) -> impl core::future::Future<Output = CredentialResolution> + Send;
+}
+
+/// The event a resolution produces, ready to record. The detail names the
+/// profile and says what happened — the one sentence a UI can show, and
+/// the only place a profile name appears in the log.
+#[must_use]
+pub fn credential_event(
+    source: &SourceId,
+    profile: &str,
+    at: Datetime,
+    resolution: CredentialResolution,
+) -> SourceEvent {
+    let (kind, detail) = match resolution {
+        CredentialResolution::Resolved => (
+            SourceEventKind::CredentialResolved,
+            format!("credential profile `{profile}` resolved"),
+        ),
+        CredentialResolution::Missing => (
+            SourceEventKind::CredentialMissing,
+            format!("credential profile `{profile}` did not resolve"),
+        ),
+    };
+    SourceEvent {
+        source: source.clone(),
+        at,
+        kind,
+        detail,
     }
 }
 
@@ -277,10 +366,15 @@ fn newer(candidate: &SourceEvent, current: &SourceEvent) -> bool {
 fn rank(kind: SourceEventKind) -> u8 {
     match kind {
         SourceEventKind::Started => 0,
-        SourceEventKind::Polled => 1,
         SourceEventKind::Ingested => 2,
         SourceEventKind::Stopped => 3,
-        SourceEventKind::Failed => 4,
+        // As decisive as a failure: a source whose credential did not
+        // resolve is not working, and a poll recorded in the same
+        // millisecond must not hide that.
+        SourceEventKind::Failed | SourceEventKind::CredentialMissing => 4,
+        // Ordinary observations, and the fallback a kind added later gets
+        // until it says otherwise here (`non_exhaustive`).
+        _ => 1,
     }
 }
 

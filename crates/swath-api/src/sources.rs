@@ -42,7 +42,8 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::routing::get;
 use swath_core::sources::{
-    Source, SourceId, SourceState, SourceStatus, SourceStore, SourceStoreError, state_of,
+    Source, SourceId, SourceState, SourceStatus, SourceStore, SourceStoreError,
+    credential_resolution, state_of,
 };
 
 use crate::error::ApiError;
@@ -102,6 +103,13 @@ pub struct SourceItem {
     /// Omitted when there is none, and never a value.
     #[serde(rename = "credentialProfile", skip_serializing_if = "Option::is_none")]
     pub credential_profile: Option<String>,
+    /// Whether that profile resolved the last time anything checked
+    /// (#423). `null` until something has — an unchecked credential is
+    /// not a working one, and it is not a broken one either. Omitted
+    /// entirely for a source that names no profile: there is nothing to
+    /// resolve, so there is nothing to report.
+    #[serde(rename = "credentialResolved", skip_serializing_if = "Option::is_none")]
+    pub credential_resolved: Option<Option<bool>>,
     /// What the source is doing, derived from its events.
     pub status: SourceStatusItem,
 }
@@ -145,7 +153,8 @@ fn scheme_of(target: &str) -> String {
         .map_or_else(|| "file".to_owned(), |(scheme, _)| scheme.to_owned())
 }
 
-fn item(source: Source, status: &SourceStatus) -> SourceItem {
+fn item(source: Source, status: &SourceStatus, credential: Option<bool>) -> SourceItem {
+    let credential_resolved = source.credential_profile.as_ref().map(|_| credential);
     SourceItem {
         id: source.id.to_string(),
         title: source.title,
@@ -157,6 +166,7 @@ fn item(source: Source, status: &SourceStatus) -> SourceItem {
         },
         datasets: source.bindings.iter().map(ToString::to_string).collect(),
         credential_profile: source.credential_profile,
+        credential_resolved,
         status: status_item(status),
     }
 }
@@ -193,7 +203,8 @@ where
     for source in sources {
         let events = app.store.events(&source.id).await.map_err(store_error)?;
         let status = state_of(&events);
-        items.push(item(source, &status));
+        let credential = credential_resolution(&events);
+        items.push(item(source, &status, credential));
     }
     Ok(Json(SourceList {
         sources: items,
@@ -223,7 +234,8 @@ where
         .ok_or_else(|| ApiError::not_found(format!("no source `{id}`")))?;
     let events = app.store.events(&source_id).await.map_err(store_error)?;
     let status = state_of(&events);
-    Ok(Json(item(source, &status)))
+    let credential = credential_resolution(&events);
+    Ok(Json(item(source, &status, credential)))
 }
 
 /// Store failures, translated as every other backend failure is.

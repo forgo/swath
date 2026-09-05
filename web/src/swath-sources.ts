@@ -22,6 +22,7 @@ import { SwathApi } from "./api.js";
 import { describeReport, loadFixtureStack } from "./fixture-stack.js";
 import {
   countsLine,
+  credentialNote,
   freshness,
   isFirstRun,
   parseSources,
@@ -165,6 +166,10 @@ export class SwathSources extends SwathElement {
     );
     if (row.lastError !== undefined) {
       item.append(el("p", { part: "error", role: "alert" }, row.lastError));
+    }
+    const credential = credentialNote(row);
+    if (credential !== undefined) {
+      item.append(el("p", { part: "meta" }, credential));
     }
     if (row.datasets.length > 0) {
       item.append(el("p", { part: "meta" }, `feeds ${row.datasets.join(", ")}`));

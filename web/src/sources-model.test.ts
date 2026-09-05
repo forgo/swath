@@ -4,6 +4,7 @@
 import { expect, test } from "vitest";
 import {
   countsLine,
+  credentialNote,
   freshness,
   isFirstRun,
   parseSources,
@@ -114,4 +115,30 @@ test("the first-run offer stands while nothing has been ingested", () => {
   expect(isFirstRun([])).toBe(true);
   expect(isFirstRun([row({ ingested: 0 })])).toBe(true);
   expect(isFirstRun([row({ ingested: 0 }), row({ id: "b", ingested: 3 })])).toBe(false);
+});
+
+test("the credential note names the profile, and tells unchecked from broken", () => {
+  const [named] = parseSources(served({ state: "watching" }));
+  expect(named && credentialNote(named)).toBeUndefined();
+
+  const withProfile = { ...served({ state: "watching" }) } as {
+    sources: Record<string, unknown>[];
+  };
+  withProfile.sources[0] = {
+    ...withProfile.sources[0],
+    credentialProfile: "imagery-reader",
+    credentialResolved: null,
+  };
+  const [unchecked] = parseSources(withProfile);
+  expect(unchecked && credentialNote(unchecked)).toBe(
+    "credential imagery-reader · not checked yet",
+  );
+
+  withProfile.sources[0] = { ...withProfile.sources[0], credentialResolved: false };
+  const [missing] = parseSources(withProfile);
+  expect(missing && credentialNote(missing)).toBe("credential imagery-reader · did not resolve");
+
+  withProfile.sources[0] = { ...withProfile.sources[0], credentialResolved: true };
+  const [ok] = parseSources(withProfile);
+  expect(ok && credentialNote(ok)).toBe("credential imagery-reader · resolved");
 });

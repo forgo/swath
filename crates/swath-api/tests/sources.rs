@@ -337,3 +337,65 @@ async fn the_mutating_routes_are_absent_until_the_auth_interlock_lifts() {
     let (status, _) = get_json(&app, "/sources").await;
     assert_eq!(status, StatusCode::OK);
 }
+
+// --- Credentials by reference (#423, ADR 0030 §4) ---
+
+/// The credential's *resolution* is served and its value is not — and
+/// "unchecked" is a third answer, distinct from resolved and from
+/// missing.
+#[tokio::test]
+async fn the_credential_resolution_is_served_and_the_value_is_not() {
+    let mut credentialed = source("s3-imagery", SourceOrigin::Config, "s3://imagery");
+    credentialed.credential_profile = Some("imagery-reader".to_owned());
+    let mut unchecked = source("unchecked", SourceOrigin::Config, "s3://other");
+    unchecked.credential_profile = Some("other-reader".to_owned());
+
+    let app = app(
+        vec![
+            credentialed,
+            unchecked,
+            source("plain", SourceOrigin::Config, "/srv/incoming"),
+        ],
+        vec![event(
+            "s3-imagery",
+            SourceEventKind::CredentialMissing,
+            "2026-09-05T10:00:00Z",
+            "credential profile `imagery-reader` did not resolve",
+        )],
+    )
+    .await;
+    let (_, body) = get_json(&app, "/sources").await;
+    let by_id: BTreeMap<&str, &serde_json::Value> = body["sources"]
+        .as_array()
+        .expect("sources")
+        .iter()
+        .map(|row| (row["id"].as_str().expect("id"), row))
+        .collect();
+
+    // Checked and missing: the source is failing, and the reason names
+    // the profile so an operator is sent to the credential rather than to
+    // the network.
+    assert_eq!(by_id["s3-imagery"]["credentialResolved"], false);
+    assert_eq!(by_id["s3-imagery"]["status"]["state"], "failing");
+    assert_eq!(
+        by_id["s3-imagery"]["status"]["lastError"],
+        "credential profile `imagery-reader` did not resolve"
+    );
+
+    // Named but never checked: `null`, not `false`. An unchecked
+    // credential is not a broken one.
+    assert_eq!(
+        by_id["unchecked"]["credentialResolved"],
+        serde_json::Value::Null
+    );
+
+    // No profile: the field is absent entirely — there is nothing to
+    // resolve, so there is nothing to report.
+    assert!(by_id["plain"].get("credentialResolved").is_none());
+
+    // And the standing invariant, over the bytes.
+    let text = body.to_string();
+    for forbidden in ["secret", "token", "password", "AKIA", "access_key"] {
+        assert!(!text.contains(forbidden), "{forbidden} in {text}");
+    }
+}
