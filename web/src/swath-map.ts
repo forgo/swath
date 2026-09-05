@@ -246,6 +246,16 @@ swath-map .swath-map-switcher button[aria-pressed="true"] {
   gap: var(--swath-space-1);
 }
 swath-hud-dock > .swath-map-toggles { position: static; }
+/* Floating over a live render, the toggles need a surface of their own.
+ * swath-button's base is \`background: none\`, which reads only against the
+ * dark palette — over pale NDVI in the compose preview column (#400) they
+ * were close to invisible (#472). The same HUD surface the time card uses,
+ * plus the blur that is this product's depth cue (#388). Only the surface:
+ * the button keeps its own ink, so hover and pressed still read. */
+.swath-map-toggles swath-button::part(base) {
+  background: var(--swath-color-bg-hud);
+  backdrop-filter: var(--swath-blur-hud);
+}
 /* The time slider (issue #182) and the landing card (issue #211) are the
  * map's own chrome, class-scoped (not \`swath-map .…\`) because a shell
  * hosts them in its HUD dock (issue #285): docked, they sit in the dock's

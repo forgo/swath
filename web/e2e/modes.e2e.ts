@@ -267,3 +267,28 @@ test("composing puts the map in a preview column, painted, beside the canvas (#4
     .poll(async () => Math.round((await map.boundingBox())?.width ?? 0))
     .toBe(Math.round(wide));
 });
+
+test("the map's toggles keep a surface of their own over bright imagery (#472)", async ({
+  page,
+}) => {
+  await page.goto(demoUrl({ layer: "ndvi", center: [-105.4475, 39.265], zoom: 12 }));
+  await expect(page.locator("swath-map canvas.maplibregl-canvas")).toBeVisible();
+  await modeButton(page, "author").click();
+  await expect(page.locator("swath-shell")).toHaveAttribute("compose", "");
+
+  // swath-button's own base is `background: none`, which reads only against
+  // the dark palette; in the preview column these float over a false-colour
+  // render. They need the HUD surface, or they vanish into the pixels.
+  const base = page.locator(".swath-map-toggles swath-button").first();
+  await expect(base).toBeVisible();
+  const painted = await base.evaluate((el) => {
+    const part = el.shadowRoot?.querySelector('[part="base"]');
+    const style = part === null || part === undefined ? null : getComputedStyle(part);
+    return { background: style?.backgroundColor ?? "", backdrop: style?.backdropFilter ?? "" };
+  });
+  // A real surface, not `transparent` / `rgba(0, 0, 0, 0)`.
+  expect(painted.background).not.toBe("rgba(0, 0, 0, 0)");
+  expect(painted.background).not.toBe("transparent");
+  // And the product's depth cue, which is translucency rather than shadow.
+  expect(painted.backdrop).toContain("blur");
+});
