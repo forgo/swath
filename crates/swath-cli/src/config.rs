@@ -32,7 +32,7 @@ use swath_api::{CatalogLayer, Layer, LayerRegistry};
 use swath_core::catalog as domain;
 use swath_core::planner::Budget;
 use swath_core::raster::AssetRef;
-use swath_core::sources::{Source, SourceId, SourceKind, SourceOrigin};
+use swath_core::sources::{EgressPolicy, Source, SourceId, SourceKind, SourceOrigin};
 use swath_render::ir::Colormap;
 use swath_render::{NodataPolicy, PlanSpec, Resampling, ndvi_expr, plan_for};
 
@@ -161,6 +161,9 @@ pub(crate) struct ResolvedConfig {
     pub(crate) cors_allowed_origins: Vec<String>,
     /// Read-only serving: write routes unmounted.
     pub(crate) read_only: bool,
+    /// What this deployment's server may fetch from (#419, ADR 0030 §5).
+    /// Empty by default: federation off, the server reaches nothing.
+    pub(crate) egress: EgressPolicy,
     /// The resolved global default budget (defaults → `[budget]` →
     /// flags/env). Already overlaid into every declared layer; carried
     /// here so published openEO services and previews serve under it
@@ -243,6 +246,12 @@ pub struct ConfigFile {
     /// Shorthand for a single `[[sources]]` entry, and still the whole
     /// story for a one-directory deployment.
     watch_dir: Option<PathBuf>,
+    /// Hosts this deployment's server may fetch from (#419, ADR 0030 §5).
+    /// **Empty by default: federation is off**, and the server reaches
+    /// nothing — the behaviour Swath had before the STAC client existed.
+    /// Host names are matched exactly; there is no wildcard.
+    #[serde(default)]
+    egress_allowlist: Vec<String>,
     /// Named origins to watch (#415, ADR 0030). Each becomes its own
     /// ingest task with its own error state, so one unreachable
     /// directory cannot stop the others. `watch-dir` and `[[sources]]`
@@ -535,6 +544,9 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
         udf_store,
         cors_allowed_origins,
         read_only: args.read_only,
+        // Empty unless the operator listed hosts: federation stays off by
+        // default, which is the pre-#419 behaviour.
+        egress: EgressPolicy::allowing(file.egress_allowlist.clone()),
         budget: default_budget,
         layers,
     })
@@ -659,6 +671,20 @@ fn compile_catalog_mode(
 }
 
 /// Reads and parses the TOML config file.
+/// The deployment's egress policy, read from the same config file
+/// `swath serve` reads (#419). No config file is an empty allowlist,
+/// which is federation off — the default, and a working configuration.
+///
+/// # Errors
+///
+/// [`ConfigError`] when the file exists and does not parse.
+pub fn egress_policy(path: Option<&Path>) -> Result<EgressPolicy, ConfigError> {
+    let Some(path) = path else {
+        return Ok(EgressPolicy::default());
+    };
+    Ok(EgressPolicy::allowing(load_file(path)?.egress_allowlist))
+}
+
 fn load_file(path: &Path) -> Result<ConfigFile, ConfigError> {
     let raw = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
         path: path.to_owned(),

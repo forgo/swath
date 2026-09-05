@@ -27,7 +27,7 @@
 //! Not to be confused with [`crate::source`], the `RasterSource` port: that is
 //! how bytes are read, this is where they came from.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::catalog::{DatasetId, Datetime};
 
@@ -375,6 +375,81 @@ fn rank(kind: SourceEventKind) -> u8 {
         // Ordinary observations, and the fallback a kind added later gets
         // until it says otherwise here (`non_exhaustive`).
         _ => 1,
+    }
+}
+
+// --- Egress policy (ADR 0030 §5, #419) ---
+
+/// Bytes a fetched document may reach before it is refused. A STAC
+/// catalog page is kilobytes; a megabyte is already a document nobody
+/// meant to serve, and buffering more than that on a stranger's say-so
+/// is how a fetch becomes a denial of service.
+pub const DEFAULT_MAX_FETCH_BYTES: u64 = 1_048_576;
+
+/// Seconds a fetch may take in total.
+pub const DEFAULT_FETCH_TIMEOUT_SECS: u64 = 10;
+
+/// What a deployment permits its server to reach (ADR 0030 §5).
+///
+/// **The default is an empty allowlist**, which means federation is off:
+/// no host is reachable, and that is exactly the behaviour Swath had
+/// before this existed. Turning it on is an operator's deliberate act,
+/// host by host — there is no wildcard, because a wildcard allowlist is
+/// not an allowlist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EgressPolicy {
+    allowed: BTreeSet<String>,
+    /// Bytes a response may reach before it is refused, enforced as the
+    /// body arrives rather than after it is buffered.
+    pub max_bytes: u64,
+    /// Whole-fetch timeout, in seconds.
+    pub timeout_secs: u64,
+}
+
+impl Default for EgressPolicy {
+    fn default() -> Self {
+        Self {
+            allowed: BTreeSet::new(),
+            max_bytes: DEFAULT_MAX_FETCH_BYTES,
+            timeout_secs: DEFAULT_FETCH_TIMEOUT_SECS,
+        }
+    }
+}
+
+impl EgressPolicy {
+    /// A policy permitting exactly `hosts` (compared case-insensitively,
+    /// as host names are). An empty iterator is the default: nothing.
+    #[must_use]
+    pub fn allowing(hosts: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            allowed: hosts
+                .into_iter()
+                .map(|host| host.into().trim().to_ascii_lowercase())
+                .filter(|host| !host.is_empty())
+                .collect(),
+            ..Self::default()
+        }
+    }
+
+    /// The permitted hosts, in order — what an operator sees when asking
+    /// what this deployment may reach.
+    pub fn hosts(&self) -> impl Iterator<Item = &str> {
+        self.allowed.iter().map(String::as_str)
+    }
+
+    /// Whether anything is permitted at all. False means federation is
+    /// off, which is a working configuration and the default one.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.allowed.is_empty()
+    }
+
+    /// Whether `host` is permitted. Exact match, case-insensitive: no
+    /// suffix matching, because `evil-example.com` ends with
+    /// `example.com` and a subdomain rule is how allowlists leak.
+    #[must_use]
+    pub fn allows(&self, host: &str) -> bool {
+        self.allowed.contains(&host.trim().to_ascii_lowercase())
     }
 }
 

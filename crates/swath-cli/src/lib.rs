@@ -28,6 +28,7 @@ pub mod materialize;
 pub mod serve;
 pub mod source;
 pub(crate) mod sources;
+pub mod sources_cmd;
 
 use std::process::ExitCode;
 
@@ -108,6 +109,10 @@ pub enum Command {
     /// Materialize overview pyramids for configured layers' assets into
     /// the store root (batch, idempotent, resumable).
     Materialize(materialize::MaterializeArgs),
+    /// Sources: show the egress allowlist, or fetch one STAC document
+    /// under it. Reads only — creating a source over HTTP waits for the
+    /// auth interlock (ADR 0031).
+    Sources(sources_cmd::SourcesArgs),
 }
 
 /// One exit-code policy for every subcommand: errors are logged, not

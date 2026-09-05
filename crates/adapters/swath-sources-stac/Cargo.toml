@@ -1,0 +1,30 @@
+# SPDX headers: covered by REUSE.toml aggregate annotation for **/Cargo.toml.
+[package]
+name = "swath-sources-stac"
+description = "Server-side STAC reads behind an egress allowlist: the only place Swath makes an outbound request."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+# The one outbound HTTP client in the tree, already present transitively
+# through object_store's `http` feature (docs/SUPPLY-CHAIN.md). Default
+# features OFF: no default TLS stack, no cookies, no gzip —
+# `rustls` only. The body is read chunk by chunk through `Response::chunk`,
+# so the size cap bites as it arrives rather than after it is buffered.
+reqwest = { workspace = true, default-features = false, features = ["rustls"] }
+serde_json = { workspace = true }
+swath-core = { path = "../../swath-core", version = "0.1.0-alpha.1" }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+url = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

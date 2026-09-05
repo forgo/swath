@@ -13,6 +13,7 @@ members = [
     "crates/adapters/swath-source-cog",
     "crates/adapters/swath-icechunk",
     "crates/adapters/swath-source-virtual",
+    "crates/adapters/swath-sources-stac",
     "crates/adapters/swath-udf-wasmtime",
     "crates/swath-api",
     "crates/swath-cli",
@@ -114,6 +115,11 @@ icechunk = { version = "2.1.2", default-features = false, features = ["object-st
 # (percent-encoding done right); already in the tree transitively under
 # icechunk — a direct use, not new supply-chain surface.
 url = { version = "2.5.7" }
+# Outbound HTTP, and the ONLY place Swath makes one (ADR 0030 §5): the
+# STAC adapter's allowlisted reads. Already in the tree through
+# object_store's `http` feature; this names it directly so the policy has
+# somewhere to live. Default features off — see the adapter's manifest.
+reqwest = { version = "0.13.4", default-features = false }
 gribberish = { version = "1.6.0", default-features = false }
 hdf5-metno = { version = "0.14.0", features = ["static"] }
 

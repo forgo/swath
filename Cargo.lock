@@ -4348,6 +4348,7 @@ dependencies = [
  "swath-reproject-proj4rs",
  "swath-source-cog",
  "swath-source-virtual",
+ "swath-sources-stac",
  "swath-store-objectstore",
  "swath-testsupport",
  "swath-udf-wasmtime",
@@ -4533,6 +4534,18 @@ dependencies = [
  "swath-testsupport",
  "tokio",
  "zarrs",
+]
+
+[[package]]
+name = "swath-sources-stac"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "reqwest",
+ "serde_json",
+ "swath-core",
+ "thiserror 2.0.20",
+ "tokio",
+ "url",
 ]
 
 [[package]]
