@@ -4,10 +4,15 @@
 //! The sources resource (issue #417, ADR 0030): `GET /sources` and
 //! `GET /sources/{sourceId}` — what each origin is and how it is doing.
 //!
-//! **Read-only in this wave.** Creating, editing and deleting sources over
-//! HTTP waits for the auth interlock (#421): a route that can add an
-//! origin is a route that can point the server somewhere, and that is not
-//! shipping before there is anyone to authorise it.
+//! **Read-only, and the mutating routes are absent rather than
+//! forbidden** (ADR 0031). A route that can add an origin is a route that
+//! can point the server somewhere and spend the operator's credentials,
+//! and this server does not yet know who is asking. There is therefore no
+//! handler to authorise — a stronger guarantee than a 403, because a
+//! middleware mistake cannot undo it, and one the test suite asserts.
+//!
+//! ADR 0031 records what lifts the interlock: OIDC, an RBAC role that may
+//! manage sources as distinct from reading them, and an audit trail.
 //!
 //! # Everything here is measured
 //!

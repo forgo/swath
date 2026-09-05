@@ -298,3 +298,42 @@ async fn an_unknown_source_is_a_404() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["sources"], serde_json::json!([]));
 }
+
+// --- The auth interlock (#421, ADR 0031) ---
+
+/// The mutating routes are **absent, not forbidden**: there is no handler
+/// to authorise, which cannot be defeated by a middleware
+/// misconfiguration the way a 403 can.
+///
+/// This test is the interlock. A PR that adds `POST /sources` will fail
+/// here, and the fix is not to change this test — it is ADR 0031's
+/// lifting condition: OIDC, an RBAC role that may manage sources, and an
+/// audit trail that records who did it.
+#[tokio::test]
+async fn the_mutating_routes_are_absent_until_the_auth_interlock_lifts() {
+    let app = app(
+        vec![source("declared", SourceOrigin::Config, "/srv/incoming")],
+        Vec::new(),
+    )
+    .await;
+
+    for (method, path) in [
+        ("POST", "/sources"),
+        ("PUT", "/sources/declared"),
+        ("PATCH", "/sources/declared"),
+        ("DELETE", "/sources/declared"),
+        ("POST", "/sources/declared"),
+    ] {
+        let response = common::request_on(&app, method, path, Some(serde_json::json!({}))).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{method} {path} must have no handler at all (ADR 0031); \
+             a 4xx from a mounted route would mean one exists"
+        );
+    }
+
+    // And the read routes are exactly the surface: reachable, unchanged.
+    let (status, _) = get_json(&app, "/sources").await;
+    assert_eq!(status, StatusCode::OK);
+}

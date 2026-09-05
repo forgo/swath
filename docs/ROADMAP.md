@@ -91,7 +91,9 @@ adapter lands.
    mechanically a token-value swap (ADR 0021's freeze).
 4. **Dataset-creation API** — completes the "single pane of glass" claim.
 5. **Auth (OIDC/RBAC)** — Charter Phase 3; gates multi-tenancy, *writable* demos (maintainer
-   decision 2026-08-12), the openEO conformance class.
+   decision 2026-08-12), the openEO conformance class, and **credentialed sources** (ADR 0031,
+   #421): the sources API stays read-only until this lands, because a mutating one would let
+   anyone who can reach the port provision egress and spend the operator's credentials.
 6. **Hosted public demo** — the read-only recipe shipped and was exercised end to end
    ([`deploy/README.md`](deploy/README.md), #212); the hosted URL is parked to the auth era —
    the maintainer picks a host when (5) lands, and the CI-tested one-liner stays the demo until
