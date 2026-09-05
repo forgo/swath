@@ -79,6 +79,16 @@ checked once; the composite `setup-rust` action does toolchain + tiered caching 
 scheduled security surfaces live in `security.yml`/`scorecard.yml`/`codeql.yml`; images are
 **smoke-tested before pushing** to GHCR. Merge queue: adopt with a second regular committer.
 
+**What a PR runs, and what only `main` runs** (decided 2026-09-05, closing #426 — kept on
+their merits, not left over from the refactor lane). PRs run the whole gate including **both
+e2e serving modes**; the binary mode catches embedding regressions a dev-server run cannot see.
+Two reductions stay, because the jobs they drop test a property of `main` and not of a branch:
+**`rust-test` is ubuntu-only on PRs** (the macOS and Windows legs are the slowest in the graph
+and catch toolchain and path drift, which a merge introduces and a branch cannot), and
+**`rust-coverage` runs on `main` only** (coverage is a trend; a per-PR number invites gaming).
+Nothing is deleted or unreachable: every job runs on every push to `main`, so a merged commit
+has always had the full gate applied to it.
+
 ## 7. Release & publish
 
 **Implemented (pre-release tier)** — issue #116; the operating manual is `docs/RELEASING.md`,
