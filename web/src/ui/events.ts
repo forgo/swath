@@ -82,6 +82,9 @@ export interface SwathEventMap {
     dataset: string;
     cells: { bbox: number[]; count: number; weight: number }[];
   };
+  /** The guided import moved to a named step (#420); the host puts it
+   * in the URL so a half-finished import is a link. */
+  "swath-import-step": { step: string };
   /** The search field's spatial scope changed (#412): the mode tag the
    * field is showing, and the box actually sent to the server. Both
    * `null` means no spatial filter. */

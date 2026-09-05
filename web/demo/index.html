@@ -98,6 +98,7 @@ or bring the stack up yourself and `pnpm exec vite dev`.
       swath-layer-list[hidden],
       swath-catalog[hidden],
       swath-sources[hidden],
+      swath-import[hidden],
       swath-add-data-panel[hidden],
       swath-authoring-panel[hidden] {
         display: none;
@@ -164,6 +165,9 @@ or bring the stack up yourself and `pnpm exec vite dev`.
              first-run action that registers the committed fixtures. Lazy
              until the mode is entered. -->
         <swath-sources hidden></swath-sources>
+        <!-- The guided import (#420): the register this deployment
+             offers, and one detecting input. Lazy, like its neighbours. -->
+        <swath-import hidden></swath-import>
         <!-- Collapsed and lazy (issue #197); its first open reads the
              capabilities document, so a read-only server shows no form. -->
         <swath-add-data-panel></swath-add-data-panel>

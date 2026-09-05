@@ -201,6 +201,7 @@ where
         cors_allowed_origins,
         read_only,
         egress,
+        register,
         budget,
         layers,
     } = cfg;
@@ -213,6 +214,7 @@ where
         cors_allowed_origins,
         read_only,
         egress,
+        register,
         budget,
     };
     match layers {
@@ -290,6 +292,8 @@ struct Shared {
     /// What this server may fetch from (#419, ADR 0030 §5). Empty means
     /// federation is off, which is the default.
     egress: swath_core::sources::EgressPolicy,
+    /// The public register this deployment offers (#420).
+    register: Vec<swath_core::sources::RegisterEntry>,
     /// The resolved global budget — what published openEO services
     /// and previews serve under, rehydrated services included.
     budget: Budget,
@@ -530,10 +534,12 @@ where
     // it is doing, over the same registry the ingest tasks record into.
     // Read-only in this wave — mutating sources waits for the auth
     // interlock (#421).
-    let sources = swath_api::sources_router(Arc::new(swath_api::SourcesState::new(
-        Arc::clone(&registry),
-        &cfg.base_url,
-    )));
+    let sources = swath_api::sources_router(Arc::new(
+        swath_api::SourcesState::new(Arc::clone(&registry), &cfg.base_url)
+            // The register is what this deployment offers, marked with
+            // what its allowlist actually permits (#420).
+            .with_register(cfg.register.clone(), cfg.egress.clone()),
+    ));
     let provider = CatalogLayers::new(catalog, mode.layers);
     // The openEO authoring surface over the same provider:
     // clones share the layer set, so a POSTed service serves on the next
@@ -1485,6 +1491,7 @@ mod tests {
             udf_store: cfg.udf_store,
             cors_allowed_origins: cfg.cors_allowed_origins,
             egress: cfg.egress,
+            register: cfg.register,
             read_only: false,
             budget: cfg.budget,
         };
@@ -1542,6 +1549,7 @@ mod tests {
             udf_store: cfg.udf_store,
             cors_allowed_origins: cfg.cors_allowed_origins,
             egress: cfg.egress,
+            register: cfg.register,
             read_only: false,
             budget: cfg.budget,
         };

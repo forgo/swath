@@ -35,6 +35,9 @@ export interface AppState {
    * may stand alone — an open-ended range is a range. */
   from?: string;
   to?: string;
+  /** The guided import's current step (`step=`, #420), so a
+   * half-finished import is a link. Only meaningful under `sources`. */
+  step?: string;
   /** Read from a deep link only; never written. */
   rail?: "collapsed";
 }
@@ -51,7 +54,7 @@ export const APP_STORAGE_KEY = "swath.app-state.v1";
 
 /** Params this module writes. `rail` is read but never written, so it is
  * foreign to the writer and survives untouched. */
-const WRITTEN_PARAMS = ["view", "sel", "from", "to"] as const;
+const WRITTEN_PARAMS = ["view", "sel", "from", "to", "step"] as const;
 
 /** `YYYY-MM-DD`, and nothing else: a malformed bound is dropped rather
  * than sent to the server as a filter nobody chose. */
@@ -92,6 +95,10 @@ export function parseAppState(search: string): AppState {
   if (to !== undefined) {
     state.to = to;
   }
+  const step = params.get("step");
+  if (view === "sources" && step !== null && step !== "") {
+    state.step = step;
+  }
   if (params.get("rail") === "collapsed") {
     state.rail = "collapsed";
   }
@@ -121,6 +128,9 @@ export function withAppState(search: string, state: AppState): string {
   if (state.view === "author" && state.sel !== undefined && state.sel !== "") {
     parts.push(`sel=${encodeURIComponent(state.sel)}`);
   }
+  if (state.view === "sources" && state.step !== undefined && state.step !== "") {
+    parts.push(`step=${encodeURIComponent(state.step)}`);
+  }
   for (const [key, value] of [
     ["from", state.from],
     ["to", state.to],
@@ -135,7 +145,12 @@ export function withAppState(search: string, state: AppState): string {
 
 export function appStatesEqual(a: AppState, b: AppState): boolean {
   return (
-    a.view === b.view && a.sel === b.sel && a.rail === b.rail && a.from === b.from && a.to === b.to
+    a.view === b.view &&
+    a.sel === b.sel &&
+    a.rail === b.rail &&
+    a.from === b.from &&
+    a.to === b.to &&
+    a.step === b.step
   );
 }
 
