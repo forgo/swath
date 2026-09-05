@@ -494,7 +494,7 @@ where
         // status the API serves is measured rather than assumed.
         tokio::spawn(crate::sources::probe_loop(
             Arc::clone(&registry),
-            source.id.clone(),
+            source.clone(),
             dir.clone(),
         ));
         tokio::spawn(ingest_loop(

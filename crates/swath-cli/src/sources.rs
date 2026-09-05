@@ -26,8 +26,8 @@ use std::time::Duration;
 use swath_api::SourcePublisher;
 use swath_core::catalog::Datetime;
 use swath_core::sources::{
-    Source, SourceEvent, SourceEventKind, SourceId, SourceStatus, SourceStore, SourceStoreError,
-    state_of,
+    CredentialResolution, CredentialResolver, Source, SourceEvent, SourceEventKind, SourceId,
+    SourceStatus, SourceStore, SourceStoreError, credential_event, state_of,
 };
 
 /// Sources and their events, in this process.
@@ -195,6 +195,98 @@ fn wire_name(kind: SourceEventKind) -> &'static str {
     }
 }
 
+/// Resolves credential profiles from the process environment (#423).
+///
+/// The convention is one variable per profile:
+/// `SWATH_CREDENTIAL_<PROFILE>`, upper-cased with non-alphanumerics
+/// folded to `_`. Its **presence and non-emptiness** are the whole
+/// answer; the value is never read into anything this program keeps, and
+/// there is no type here that could hold one.
+///
+/// Why the environment rather than a secret store: the operator's
+/// platform already has custody — an instance role, a secrets mount, a
+/// systemd `EnvironmentFile` — and Swath adding its own would be one more
+/// thing to encrypt, back up and rotate for no gain (ADR 0030 §4). The
+/// cost is that Swath cannot provision credentials, which is the right
+/// trade for a tool meant to be auditable.
+/// The seam is `&str -> bool`: a variable name in, "is it set to
+/// something" out. Nothing here can bind the value to a name that
+/// outlives the check, and the tests inject a table rather than mutating
+/// the process environment.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct EnvCredentials<F = fn(&str) -> bool> {
+    present: F,
+}
+
+impl EnvCredentials {
+    /// The production wiring: the process environment.
+    #[must_use]
+    pub(crate) fn from_env() -> Self {
+        Self {
+            present: |var| std::env::var(var).is_ok_and(|value| !value.trim().is_empty()),
+        }
+    }
+}
+
+impl<F> EnvCredentials<F> {
+    /// A resolver over an explicit lookup — the seam the tests inject
+    /// through, so a credential check is asserted without the process
+    /// environment being mutated under other tests.
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "the test seam; production uses `from_env`")
+    )]
+    pub(crate) const fn with(present: F) -> Self {
+        Self { present }
+    }
+}
+
+/// The variable name a profile maps to.
+#[must_use]
+pub(crate) fn credential_var(profile: &str) -> String {
+    let folded: String = profile
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("SWATH_CREDENTIAL_{folded}")
+}
+
+impl<F: Fn(&str) -> bool + Send + Sync> CredentialResolver for EnvCredentials<F> {
+    async fn resolve(&self, profile: &str) -> CredentialResolution {
+        if (self.present)(&credential_var(profile)) {
+            CredentialResolution::Resolved
+        } else {
+            CredentialResolution::Missing
+        }
+    }
+}
+
+/// Checks `source`'s credential profile, if it names one, and records
+/// what was observed (#423). A source without a profile needs no
+/// credential, so nothing is recorded and nothing is claimed.
+pub(crate) async fn check_credential<R: CredentialResolver>(
+    registry: &SourceRegistry,
+    resolver: &R,
+    source: &Source,
+) {
+    let Some(profile) = source.credential_profile.as_deref() else {
+        return;
+    };
+    let resolution = resolver.resolve(profile).await;
+    let at = Datetime::from_unix_millis(now_unix_millis())
+        .unwrap_or_else(|_| Datetime::new("1970-01-01T00:00:00Z").expect("the epoch"));
+    let event = credential_event(&source.id, profile, at, resolution);
+    // Through `record` so the bus sees it too: a credential that stopped
+    // resolving is news.
+    registry.record(&event.source, event.kind, event.detail);
+}
+
 /// How long a reachability probe may take before the source is called
 /// unreachable. Stated rather than assumed (#417): a directory that does
 /// not answer in this long is not one an ingest task can use, and a probe
@@ -210,12 +302,16 @@ pub(crate) const PROBE_INTERVAL: Duration = Duration::from_secs(30);
 /// The probe is what makes "watching" a measured fact: it either reads
 /// the directory within [`PROBE_TIMEOUT`] or records the reason it could
 /// not. It never records a success it did not observe.
-pub(crate) async fn probe_loop(registry: Arc<SourceRegistry>, id: SourceId, dir: PathBuf) {
+pub(crate) async fn probe_loop(registry: Arc<SourceRegistry>, source: Source, dir: PathBuf) {
     loop {
         tokio::time::sleep(PROBE_INTERVAL).await;
+        // The credential first: a source whose profile stopped resolving
+        // cannot reach its target, and saying "unreachable" without
+        // saying why would send an operator to the wrong place.
+        check_credential(&registry, &EnvCredentials::from_env(), &source).await;
         match probe_once(&dir).await {
-            Ok(()) => registry.record(&id, SourceEventKind::Polled, ""),
-            Err(detail) => registry.record(&id, SourceEventKind::Failed, detail),
+            Ok(()) => registry.record(&source.id, SourceEventKind::Polled, ""),
+            Err(detail) => registry.record(&source.id, SourceEventKind::Failed, detail),
         }
     }
 }
@@ -244,9 +340,12 @@ mod tests {
     use swath_api::{BusEvent, TraceBus};
     use swath_core::catalog::Datetime;
     use swath_core::sources::SourceStore as _;
-    use swath_core::sources::{Source, SourceEventKind, SourceId, SourceKind, SourceOrigin};
+    use swath_core::sources::{
+        CredentialResolution, CredentialResolver as _, Source, SourceEventKind, SourceId,
+        SourceKind, SourceOrigin,
+    };
 
-    use super::SourceRegistry;
+    use super::{EnvCredentials, SourceRegistry};
 
     fn source(id: &str) -> Source {
         Source {
@@ -344,6 +443,98 @@ mod tests {
             swath_core::sources::SourceState::Watching { .. }
         ));
         assert_eq!(registry.statuses()[0].1.failures, 1);
+    }
+
+    /// The resolver reads presence, not value (#423): a variable set to
+    /// something resolves, and everything else does not. The seam is
+    /// `&str -> bool`, so nothing can carry a value past the check.
+    #[tokio::test]
+    async fn the_environment_resolver_answers_presence() {
+        assert_eq!(
+            super::credential_var("swath-test-423"),
+            "SWATH_CREDENTIAL_SWATH_TEST_423"
+        );
+
+        let set = EnvCredentials::with(|var: &str| var == "SWATH_CREDENTIAL_IMAGERY_READER");
+        assert_eq!(
+            set.resolve("imagery-reader").await,
+            CredentialResolution::Resolved
+        );
+        assert_eq!(
+            set.resolve("other-reader").await,
+            CredentialResolution::Missing
+        );
+
+        // The production wiring reads the environment; with nothing set
+        // for this name it answers Missing, which is the honest default.
+        assert_eq!(
+            EnvCredentials::from_env()
+                .resolve("swath-test-423-definitely-unset")
+                .await,
+            CredentialResolution::Missing
+        );
+    }
+
+    /// Checking a credential records what was observed, naming the
+    /// profile — and a source that names no profile records nothing,
+    /// because there is nothing to claim.
+    #[tokio::test]
+    async fn checking_a_credential_records_the_profile_never_a_value() {
+        let mut credentialed = source("imagery");
+        credentialed.credential_profile = Some("imagery-reader".to_owned());
+        let registry = SourceRegistry::with_sources([credentialed.clone(), source("plain")]);
+        let resolver = EnvCredentials::with(|var: &str| var == "SWATH_CREDENTIAL_IMAGERY_READER");
+
+        super::check_credential(&registry, &resolver, &credentialed).await;
+        super::check_credential(&registry, &resolver, &source("plain")).await;
+
+        let recorded = registry
+            .events(&SourceId::new("imagery"))
+            .await
+            .expect("events");
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].kind, SourceEventKind::CredentialResolved);
+        assert!(recorded[0].detail.contains("imagery-reader"));
+        // A source with no profile needs no credential, so nothing is
+        // recorded and nothing is claimed.
+        assert!(
+            registry
+                .events(&SourceId::new("plain"))
+                .await
+                .expect("events")
+                .is_empty()
+        );
+    }
+
+    /// A profile that stops resolving is recorded as such, naming the
+    /// profile — the one sentence that sends an operator to the
+    /// credential rather than to the network.
+    #[tokio::test]
+    async fn an_unresolvable_profile_is_reported_as_unresolvable() {
+        let mut credentialed = source("imagery");
+        credentialed.credential_profile = Some("imagery-reader".to_owned());
+        let registry = SourceRegistry::with_sources([credentialed.clone()]);
+
+        super::check_credential(
+            &registry,
+            &EnvCredentials::with(|_: &str| false),
+            &credentialed,
+        )
+        .await;
+        let recorded = registry
+            .events(&SourceId::new("imagery"))
+            .await
+            .expect("events");
+        assert_eq!(recorded[0].kind, SourceEventKind::CredentialMissing);
+        assert_eq!(
+            recorded[0].detail,
+            "credential profile `imagery-reader` did not resolve"
+        );
+        // And the source reads as failing for that reason.
+        assert!(matches!(
+            registry.statuses()[0].1.state,
+            swath_core::sources::SourceState::Failing { .. }
+        ));
     }
 
     /// A registry with no bus is a registry: recording still works, which

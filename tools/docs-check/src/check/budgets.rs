@@ -43,9 +43,10 @@ const BUDGETS: [(&str, usize); 24] = [
     ("docs/CHARTER.md", 1350),
     ("docs/COMPARISON.md", 1700),
     // Raised 1775 → 2050 on 2026-09-04 (#415): the reference gained the
-    // `[[sources]]` table and what a restart does to it. The ratchet takes
-    // it back down at the next consolidation.
-    ("docs/CONFIG.md", 2050),
+    // `[[sources]]` table and what a restart does to it; 2050 → 2150 on
+    // 2026-09-05 (#423) for credentials by reference. The ratchet takes it
+    // back down at the next consolidation.
+    ("docs/CONFIG.md", 2150),
     ("docs/DEMO.md", 875),
     // Raised 1800 → 2000 on 2026-09-04 (#409) and 2000 → 2150 on the same
     // day (#410): the reference gained a section per new route, and one

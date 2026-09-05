@@ -197,8 +197,9 @@ the way out, rather than answered slowly.
 **`GET /sources`**, **`GET /sources/{sourceId}`** — what each origin is and
 how it is doing (ADR 0030). Each row carries `id`, `title`, `kind`, `origin`
 (`config` or `api`, so a config-owned source cannot look editable), the
-datasets it feeds, the credential profile's **name** when there is one, and a
-`status`.
+datasets it feeds, the credential profile's **name** when there is one, whether it
+`credentialResolved` (`null` = named but never checked; absent = no profile),
+and a `status`.
 
 Every field of `status` is measured, derived from the recorded events: `state`,
 `reachable` (`null` until something has looked — never a reassuring default),

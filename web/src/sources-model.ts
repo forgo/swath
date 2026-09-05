@@ -33,6 +33,10 @@ export interface SourceRow {
   /** The credential profile's name, when the source names one. Never a
    * value: the server has no field for one. */
   credentialProfile?: string;
+  /** Whether that profile resolved the last time anything checked.
+   * `undefined` both when the source names no profile and when nothing
+   * has checked yet — `credentialNote` tells those apart. */
+  credentialResolved?: boolean;
   state: SourceState;
   /** `undefined` when nothing has looked yet — not `false`. */
   reachable?: boolean;
@@ -88,6 +92,11 @@ export function parseSources(body: unknown): SourceRow[] {
     const profile = textOf(item["credentialProfile"]);
     if (profile !== undefined) {
       row.credentialProfile = profile;
+    }
+    // Tri-state on purpose: `null` means "named but never checked", and
+    // an absent field means "names no profile at all".
+    if (typeof item["credentialResolved"] === "boolean") {
+      row.credentialResolved = item["credentialResolved"];
     }
     // Tri-state on purpose: absent is not false.
     if (typeof status["reachable"] === "boolean") {
@@ -167,6 +176,24 @@ export function freshness(row: SourceRow, now: number): string {
 export function countsLine(row: SourceRow): string {
   const ingested = `${row.ingested} ingested`;
   return row.failures === 0 ? ingested : `${ingested} · ${row.failures} failed`;
+}
+
+/** What to say about the source's credential, in plain words — or
+ * nothing at all when it names no profile. A named-but-unchecked profile
+ * says so; it is neither working nor broken, and claiming either would be
+ * an invention. The profile's **name** appears here and its value never
+ * can: the server has no field for one. */
+export function credentialNote(row: SourceRow): string | undefined {
+  if (row.credentialProfile === undefined) {
+    return undefined;
+  }
+  const state =
+    row.credentialResolved === undefined
+      ? "not checked yet"
+      : row.credentialResolved
+        ? "resolved"
+        : "did not resolve";
+  return `credential ${row.credentialProfile} · ${state}`;
 }
 
 /** Whether the screen should offer the first-run action: nothing is

@@ -197,6 +197,13 @@ pub struct SourceConfig {
     /// says what it is for.
     #[serde(default)]
     pub datasets: Vec<String>,
+    /// The **name** of a credential profile the operator provisions in
+    /// the environment (`SWATH_CREDENTIAL_<PROFILE>`) or an instance role
+    /// (ADR 0030 §4). Swath stores this name, reports whether it
+    /// resolves, and never reads the value into anything it keeps —
+    /// putting a secret here would put it in your config file, which is
+    /// exactly what this field exists to avoid.
+    pub credential_profile: Option<String>,
 }
 
 /// Everything catalog mode needs at startup.
@@ -577,7 +584,7 @@ fn compile_sources(
                 title: config.title.clone().unwrap_or_else(|| config.id.clone()),
                 bindings: config.datasets.iter().map(domain::DatasetId::new).collect(),
                 origin: SourceOrigin::Config,
-                credential_profile: None,
+                credential_profile: config.credential_profile.clone(),
             },
             config.watch_dir.clone(),
         ));
