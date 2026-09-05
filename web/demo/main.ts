@@ -40,7 +40,7 @@ import {
 //   the fire-season loop auto-plays there and nowhere else. Its own
 //   frame advances are not interactions (`swath-timechange` flags them
 //   `cinematic`): the bare URL stays bare until the user takes over.
-import { GranuleFootprints } from "../src/granule-footprints.js";
+import { type GranuleBbox, GranuleFootprints, SCOPE_SOURCE_ID } from "../src/granule-footprints.js";
 import { formatCrs, formatIngest, formatLonLat, formatZoomCell } from "../src/status-model.js";
 import { safeLocalStorage } from "../src/storage.js";
 import { defineSwathAddDataPanel, SwathAddDataPanel } from "../src/swath-add-data-panel.js";
@@ -220,6 +220,23 @@ function wireDatasetBrowser(map: SwathMap, panel: SwathCatalog): void {
   panel.addEventListener("swath-dataset-granules", (event) => {
     const detail = event.detail;
     paint()?.set(detail.granules);
+  });
+  // The search scope's box (#412), drawn so a reduced shape is seen and
+  // not only read. Its own source, dashed: a box the user did not draw is
+  // not drawn like one.
+  let scope: GranuleFootprints | undefined;
+  panel.addEventListener("swath-scope", (event) => {
+    const inner = map.map;
+    if (!inner) {
+      return;
+    }
+    scope ??= new GranuleFootprints(inner, SCOPE_SOURCE_ID, true);
+    const bbox = event.detail.bbox;
+    scope.set(
+      bbox === null || bbox.length !== 4
+        ? []
+        : [{ id: "scope", bbox: bbox as unknown as GranuleBbox }],
+    );
   });
   panel.addEventListener("swath-granule-zoom", (event) => {
     const detail = event.detail;

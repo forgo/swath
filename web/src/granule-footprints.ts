@@ -121,6 +121,9 @@ export interface FootprintGranule {
 export const FOOTPRINT_SOURCE_ID = "swath-granule-footprints";
 /** Layer id — same as the source id; one layer per source. */
 export const FOOTPRINT_LAYER_ID = "swath-granule-footprints";
+/** The search scope's outline (#412): the box actually sent to the
+ * server, drawn so a reduced shape is seen and not only read. */
+export const SCOPE_SOURCE_ID = "swath-search-scope";
 
 /** The slice of a MapLibre `Map` the footprint paint uses. */
 export interface FootprintMapLike {
@@ -182,12 +185,20 @@ const PAINT_RETRY_MS = 200;
 export class GranuleFootprints {
   readonly #map: FootprintMapLike;
   readonly #onStyleData: () => void;
+  readonly #id: string;
+  readonly #dashed: boolean;
   #collection: FootprintCollection = { type: "FeatureCollection", features: [] };
   #retryTimer: number | undefined;
   #disposed = false;
 
-  constructor(map: FootprintMapLike) {
+  /** `id` names the source and its layer, so a second instance can paint
+   * a different set — the search scope's own box (#412) — without
+   * fighting the granule outlines for one source. `dashed` draws the
+   * derived kind: a box the user did not draw is not drawn as one. */
+  constructor(map: FootprintMapLike, id: string = FOOTPRINT_SOURCE_ID, dashed = false) {
     this.#map = map;
+    this.#id = id;
+    this.#dashed = dashed;
     // Every style (re)apply wipes sources/layers; re-add on styledata.
     this.#onStyleData = () => this.#paint();
     this.#map.on("styledata", this.#onStyleData);
@@ -239,25 +250,26 @@ export class GranuleFootprints {
       return;
     }
     try {
-      const source = this.#map.getSource(FOOTPRINT_SOURCE_ID) as
+      const source = this.#map.getSource(this.#id) as
         | { setData?: (data: FootprintCollection) => void }
         | undefined;
       if (source?.setData) {
         source.setData(this.#collection);
       } else if (!source) {
-        this.#map.addSource(FOOTPRINT_SOURCE_ID, { type: "geojson", data: this.#collection });
+        this.#map.addSource(this.#id, { type: "geojson", data: this.#collection });
       }
-      if (!this.#map.getLayer(FOOTPRINT_LAYER_ID)) {
+      if (!this.#map.getLayer(this.#id)) {
         this.#map.addLayer({
-          id: FOOTPRINT_LAYER_ID,
+          id: this.#id,
           type: "line",
-          source: FOOTPRINT_SOURCE_ID,
+          source: this.#id,
           // MapLibre paint cannot read custom properties: the token is
           // resolved at paint time (ui-system.md §4.1).
           paint: {
             "line-color": readToken("--swath-color-accent"),
             "line-width": 2,
             "line-opacity": 0.9,
+            ...(this.#dashed ? { "line-dasharray": [2, 2] } : {}),
           },
         });
       }
