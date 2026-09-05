@@ -151,6 +151,7 @@ a typo fails loudly at startup.
 | `catalog` | string | none | Postgres URL of a pgstac database — presence selects catalog mode. |
 | `watch-dir` | string | none | Drop directory watched for granule manifests (catalog mode only). Shorthand for one `[[sources]]` entry named `watch-dir`. |
 | `sources` | array of tables | `[]` | Named origins to watch (`[[sources]]`, keys below; catalog mode only). |
+| `register` | array of tables | `[]` | Endpoints offered in the import flow (`[[register]]`, keys below). |
 | `egress-allowlist` | array of strings | `[]` (federation off) | Hosts the **server** may fetch from. Exact host names; no wildcard. |
 | `cors-allowed-origins` | array of strings | `[]` (CORS off) | Origin allowlist; `["*"]` allows any origin. |
 | `budget` | table | all knobs default | Global default materialization budget (`[budget]`, keys below). |
@@ -176,6 +177,21 @@ the allowlist is refused; a body past the size cap is abandoned mid-stream.
 `swath sources allowlist` prints what is permitted, `swath sources fetch <url>`
 retrieves one document under it. Both are operator actions: no HTTP route
 reaches this, and none can until the auth interlock lifts (ADR 0031).
+
+### `[[register]]` — what an operator can import from
+
+The public register: STAC endpoints offered in the import flow. **Data, not
+code** — adding one is an edit here and a restart, never a release of the web
+app. An entry is an offer; nothing is fetched until an operator asks, and only
+if its host is on `egress-allowlist`. An entry whose host is not allowed is
+still listed, with the host named, so the fix is visible.
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `id` | string | — (required) | Stable identifier; what a resumable import links to. |
+| `title` | string | the id | What to call it on screen. |
+| `url` | string | — (required) | The catalog's URL. |
+| `requester-pays` | bool | `false` | Reading it bills you; the flow warns before the read. |
 
 ### Requester-pays
 

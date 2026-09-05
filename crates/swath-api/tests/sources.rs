@@ -454,3 +454,106 @@ async fn requester_pays_and_its_consent_are_served_without_a_price() {
         assert!(!text.contains(money), "{money} in {text}");
     }
 }
+
+// --- The public register (#420) ---
+
+use swath_core::sources::{EgressPolicy, RegisterEntry};
+
+fn entry(id: &str, url: &str) -> RegisterEntry {
+    RegisterEntry {
+        id: id.to_owned(),
+        title: id.to_owned(),
+        url: url.to_owned(),
+        requester_pays: false,
+    }
+}
+
+async fn register_app(entries: Vec<RegisterEntry>, allowed: &[&str]) -> Router {
+    let store = MemoryStore::default();
+    store
+        .upsert_source(&source("s", SourceOrigin::Config, "/srv"))
+        .await
+        .expect("seed");
+    sources_router(Arc::new(
+        SourcesState::new(store, common::BASE_URL)
+            .with_register(entries, EgressPolicy::allowing(allowed.iter().copied())),
+    ))
+}
+
+/// The register lists what the deployment offers, and marks each entry
+/// with whether its host is actually reachable — an offered-but-not-
+/// allowed entry is **listed, not hidden**, so the UI can say why rather
+/// than leaving an operator to guess.
+#[tokio::test]
+async fn the_register_says_which_entries_are_reachable() {
+    let mut billed = entry("billed", "https://stac.example.org/v1");
+    billed.requester_pays = true;
+    let app = register_app(
+        vec![
+            entry("allowed", "https://stac.example.org/catalog.json"),
+            entry("blocked", "https://elsewhere.example.net/catalog.json"),
+            billed,
+        ],
+        &["stac.example.org"],
+    )
+    .await;
+
+    let (status, body) = get_json(&app, "/sources/register").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["federationOff"], false);
+    let rows = body["register"].as_array().expect("register");
+    assert_eq!(rows.len(), 3, "a blocked entry is listed, not hidden");
+
+    assert_eq!(rows[0]["host"], "stac.example.org");
+    assert_eq!(rows[0]["allowed"], true);
+    assert_eq!(rows[1]["host"], "elsewhere.example.net");
+    assert_eq!(rows[1]["allowed"], false);
+    // Requester-pays rides along, so the flow can warn before the read.
+    assert_eq!(rows[2]["requesterPays"], true);
+    assert!(rows[0].get("requesterPays").is_none());
+}
+
+/// With no allowlist nothing in the register is reachable, and the
+/// response says so once rather than leaving the UI to infer it from
+/// every row being false.
+#[tokio::test]
+async fn an_empty_allowlist_says_federation_is_off() {
+    let app = register_app(vec![entry("a", "https://stac.example.org/c.json")], &[]).await;
+    let (_, body) = get_json(&app, "/sources/register").await;
+    assert_eq!(body["federationOff"], true);
+    assert_eq!(body["register"][0]["allowed"], false);
+}
+
+/// A deployment that offers nothing serves an empty register, not an
+/// error — and the default `SourcesState` offers nothing.
+#[tokio::test]
+async fn the_register_is_empty_by_default() {
+    let app = app(Vec::new(), Vec::new()).await;
+    let (status, body) = get_json(&app, "/sources/register").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["register"], serde_json::json!([]));
+    assert_eq!(body["federationOff"], true);
+}
+
+/// `register` is a route, not a source id: the static segment wins over
+/// the parameterised one, so a deployment cannot shadow it by naming a
+/// source `register`.
+#[tokio::test]
+async fn the_register_route_is_not_shadowed_by_a_source_named_register() {
+    let store = MemoryStore::default();
+    store
+        .upsert_source(&source("register", SourceOrigin::Config, "/srv"))
+        .await
+        .expect("seed");
+    let app = sources_router(Arc::new(
+        SourcesState::new(store, common::BASE_URL).with_register(
+            vec![entry("a", "https://stac.example.org/c.json")],
+            EgressPolicy::allowing(["stac.example.org"]),
+        ),
+    ));
+    let (_, body) = get_json(&app, "/sources/register").await;
+    assert!(
+        body.get("register").is_some(),
+        "the register route answered, not the source: {body}"
+    );
+}

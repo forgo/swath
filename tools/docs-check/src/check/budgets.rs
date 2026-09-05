@@ -49,8 +49,8 @@ const BUDGETS: [(&str, usize); 24] = [
     // (#419) → 2450 for the egress allowlist and the `swath sources` flag
     // blocks (one per subcommand, as the CLI check requires); 2450 → 2650
     // on 2026-09-05, then 2725 (#424), for requester-pays and its two
-    // subcommands' flag blocks.
-    ("docs/CONFIG.md", 2725),
+    // subcommands' flag blocks; 2725 → 2900 (#420) for the register.
+    ("docs/CONFIG.md", 2900),
     ("docs/DEMO.md", 875),
     // Raised 1800 → 2000 on 2026-09-04 (#409) and 2000 → 2150 on the same
     // day (#410): the reference gained a section per new route, and one
@@ -59,8 +59,8 @@ const BUDGETS: [(&str, usize); 24] = [
     // sources resource. The ratchet takes it back down at the next
     // consolidation.
     // 2400 → 2450 on 2026-09-05 (#424): the sources row gains
-    // requester-pays and its consent.
-    ("docs/ENDPOINTS.md", 2450),
+    // requester-pays and its consent; → 2525 (#420) for the register route.
+    ("docs/ENDPOINTS.md", 2525),
     ("docs/ENGINEERING.md", 1000),
     ("docs/EXTENDING.md", 1475),
     ("docs/OPERATIONS.md", 975),

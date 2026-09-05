@@ -472,6 +472,50 @@ fn rank(kind: SourceEventKind) -> u8 {
     }
 }
 
+/// One entry of the public register (#420): a STAC endpoint an operator
+/// can import from in a single action.
+///
+/// The register is **data, not code**: it lives in the deployment's
+/// configuration, so adding an endpoint is an edit and a restart, never a
+/// release. Nothing here is fetched until an operator asks — an entry is
+/// an offer, not a subscription.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RegisterEntry {
+    /// Stable identifier, for linking to a half-finished import.
+    pub id: String,
+    /// What to call it on screen.
+    pub title: String,
+    /// The catalog's URL.
+    pub url: String,
+    /// Whether reading it bills the reader — declared by whoever wrote
+    /// the entry, because only they know the agreement.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub requester_pays: bool,
+}
+
+impl RegisterEntry {
+    /// The entry's host, when its URL has one.
+    #[must_use]
+    pub fn host(&self) -> Option<&str> {
+        // Deliberately not a URL parser: the register is text an operator
+        // wrote, and the allowlist check that matters happens in the
+        // adapter against a parsed URL. This is for display and for
+        // saying, before anything is attempted, that a host is not
+        // permitted.
+        let rest = self.url.split_once("://")?.1;
+        let authority = rest.split(['/', '?', '#']).next()?;
+        let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+        // Strip a port; an IPv6 literal keeps its brackets.
+        let host = if host.starts_with('[') {
+            host.split_once(']')
+                .map_or(host, |(h, _)| &host[..=h.len()])
+        } else {
+            host.split_once(':').map_or(host, |(h, _)| h)
+        };
+        (!host.is_empty()).then_some(host)
+    }
+}
+
 // --- Egress policy (ADR 0030 §5, #419) ---
 
 /// Bytes a fetched document may reach before it is refused. A STAC

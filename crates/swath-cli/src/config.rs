@@ -32,7 +32,9 @@ use swath_api::{CatalogLayer, Layer, LayerRegistry};
 use swath_core::catalog as domain;
 use swath_core::planner::Budget;
 use swath_core::raster::AssetRef;
-use swath_core::sources::{EgressPolicy, Source, SourceId, SourceKind, SourceOrigin};
+use swath_core::sources::{
+    EgressPolicy, RegisterEntry, Source, SourceId, SourceKind, SourceOrigin,
+};
 use swath_render::ir::Colormap;
 use swath_render::{NodataPolicy, PlanSpec, Resampling, ndvi_expr, plan_for};
 
@@ -164,6 +166,8 @@ pub(crate) struct ResolvedConfig {
     /// What this deployment's server may fetch from (#419, ADR 0030 §5).
     /// Empty by default: federation off, the server reaches nothing.
     pub(crate) egress: EgressPolicy,
+    /// The public register this deployment offers (#420).
+    pub(crate) register: Vec<RegisterEntry>,
     /// The resolved global default budget (defaults → `[budget]` →
     /// flags/env). Already overlaid into every declared layer; carried
     /// here so published openEO services and previews serve under it
@@ -261,6 +265,13 @@ pub struct ConfigFile {
     /// Host names are matched exactly; there is no wildcard.
     #[serde(default)]
     egress_allowlist: Vec<String>,
+    /// The public register (#420): STAC endpoints an operator can import
+    /// from in one action. **Data, not code** — adding one is an edit to
+    /// this file and a restart, never a release. An entry is an offer;
+    /// nothing is fetched until an operator asks, and only if its host is
+    /// on `egress-allowlist`.
+    #[serde(default)]
+    register: Vec<RegisterEntry>,
     /// Named origins to watch (#415, ADR 0030). Each becomes its own
     /// ingest task with its own error state, so one unreachable
     /// directory cannot stop the others. `watch-dir` and `[[sources]]`
@@ -556,6 +567,7 @@ pub(crate) fn resolve(args: &ServeArgs) -> Result<ResolvedConfig, ConfigError> {
         // Empty unless the operator listed hosts: federation stays off by
         // default, which is the pre-#419 behaviour.
         egress: EgressPolicy::allowing(file.egress_allowlist.clone()),
+        register: file.register.clone(),
         budget: default_budget,
         layers,
     })

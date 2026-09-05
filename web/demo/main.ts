@@ -52,6 +52,7 @@ import { safeLocalStorage } from "../src/storage.js";
 import { defineSwathAddDataPanel, SwathAddDataPanel } from "../src/swath-add-data-panel.js";
 import { defineSwathAuthoringPanel, SwathAuthoringPanel } from "../src/swath-authoring-panel.js";
 import { defineSwathCatalog, SwathCatalog } from "../src/swath-catalog.js";
+import { defineSwathImport, SwathImport } from "../src/swath-import.js";
 import { defineSwathLayerList, SwathLayerList } from "../src/swath-layer-list.js";
 import { defineSwathMap, SwathMap } from "../src/swath-map.js";
 import { defineSwathShell, SwathShell } from "../src/swath-shell.js";
@@ -83,6 +84,7 @@ const mapElement = document.querySelector("swath-map");
 const panelElement = document.querySelector("swath-layer-list");
 const datasetElement = document.querySelector("swath-catalog");
 const sourcesElement = document.querySelector("swath-sources");
+const importElement = document.querySelector("swath-import");
 const addDataElement = document.querySelector("swath-add-data-panel");
 const authoringElement = document.querySelector("swath-authoring-panel");
 SwathButton.define();
@@ -161,6 +163,7 @@ defineSwathMap();
 defineSwathLayerList();
 defineSwathCatalog();
 defineSwathSources();
+defineSwathImport();
 defineSwathAddDataPanel();
 defineSwathAuthoringPanel();
 
@@ -196,6 +199,22 @@ if (mapElement instanceof SwathMap && addDataElement instanceof SwathAddDataPane
 /** `state` with the search scope's dates set, dropping the keys that have
  * no value — the shape `exactOptionalPropertyTypes` asks for, and the one
  * `withAppState` writes from. */
+function withStep(state: AppState, step: string | undefined): AppState {
+  const next: AppState = { view: state.view };
+  for (const [key, value] of [
+    ["sel", state.sel],
+    ["rail", state.rail],
+    ["from", state.from],
+    ["to", state.to],
+    ["step", step],
+  ] as const) {
+    if (value !== undefined) {
+      Object.assign(next, { [key]: value });
+    }
+  }
+  return next;
+}
+
 function withDates(state: AppState, from: string | undefined, to: string | undefined): AppState {
   const next: AppState = { view: state.view };
   if (state.sel !== undefined) {
@@ -390,6 +409,10 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     } else if (state.compareTime !== undefined) {
       chips.push({ id: "compare", label: "vs", value: state.compareTime, removable: true });
     }
+    if (appState.step !== undefined) {
+      // The import's own chip: the step is what a resumed link points at.
+      chips.push({ id: "step", label: "import", value: appState.step, removable: true });
+    }
     if (appState.from !== undefined || appState.to !== undefined) {
       // One chip for the scope, reading the way a person says it (#411).
       chips.push({
@@ -510,6 +533,9 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
       if (datasetElement instanceof SwathCatalog) {
         datasetElement.dates = { from: next.from, to: next.to };
       }
+      if (importElement instanceof SwathImport) {
+        importElement.step = next.step ?? "source";
+      }
       applyMode(next.view);
       if (next.view === "xray") {
         map.setAttribute("xray", "");
@@ -571,6 +597,21 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     });
   }
 
+  // The guided import's step (#420): named, in the URL, so a
+  // half-finished import is a link someone can come back to.
+  if (importElement instanceof SwathImport) {
+    const flow = importElement;
+    if (appState.step !== undefined) {
+      flow.step = appState.step;
+    }
+    flow.addEventListener("swath-import-step", (event) => {
+      appState = withStep(appState, event.detail.step);
+      interact();
+      syncUrl();
+      renderChips();
+    });
+  }
+
   const xrayRail = document.querySelector("#swath-xray-rail");
   // The x-ray's display modes + analytics summary live in the rail under
   // view=xray (issue #286); the map re-homes a live overlay on assignment.
@@ -611,6 +652,12 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
       sourcesElement.hidden = !show.sources;
       if (mode === "sources") {
         sourcesElement.active = true; // lazy by contract, as the catalog is
+      }
+    }
+    if (importElement instanceof SwathImport) {
+      importElement.hidden = !show.sources;
+      if (mode === "sources") {
+        importElement.active = true;
       }
     }
     if (authoringElement instanceof HTMLElement) {

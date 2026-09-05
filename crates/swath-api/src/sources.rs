@@ -42,8 +42,8 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::routing::get;
 use swath_core::sources::{
-    Consent, Source, SourceId, SourceState, SourceStatus, SourceStore, SourceStoreError,
-    consent_of, credential_resolution, state_of,
+    Consent, EgressPolicy, RegisterEntry, Source, SourceId, SourceState, SourceStatus, SourceStore,
+    SourceStoreError, consent_of, credential_resolution, state_of,
 };
 
 use crate::error::ApiError;
@@ -54,6 +54,8 @@ use crate::model::Link;
 pub struct SourcesState<S> {
     store: S,
     base_url: String,
+    register: Vec<RegisterEntry>,
+    egress: EgressPolicy,
 }
 
 impl<S> SourcesState<S> {
@@ -63,7 +65,22 @@ impl<S> SourcesState<S> {
         while base_url.ends_with('/') {
             base_url.pop();
         }
-        Self { store, base_url }
+        Self {
+            store,
+            base_url,
+            register: Vec::new(),
+            egress: EgressPolicy::default(),
+        }
+    }
+
+    /// The register this deployment offers, and the policy that says
+    /// which of its entries are reachable (#420). Absent, the register is
+    /// empty and federation reads as off — the default.
+    #[must_use]
+    pub fn with_register(mut self, register: Vec<RegisterEntry>, egress: EgressPolicy) -> Self {
+        self.register = register;
+        self.egress = egress;
+        self
     }
 }
 
@@ -75,6 +92,7 @@ where
     axum::Router::new()
         .route("/sources", get(list_sources))
         .route("/sources/{sourceId}", get(one_source))
+        .route("/sources/register", get(register))
         .with_state(state)
 }
 
@@ -151,6 +169,80 @@ pub struct SourceList {
     pub sources: Vec<SourceItem>,
     /// `self`.
     pub links: Vec<Link>,
+}
+
+/// One offered endpoint, with whether this deployment may actually reach
+/// it (#420).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RegisterItem {
+    /// Stable identifier.
+    pub id: String,
+    /// What to call it on screen.
+    pub title: String,
+    /// The catalog's URL.
+    pub url: String,
+    /// Its host, when the URL has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    /// Whether reading it bills the reader.
+    #[serde(rename = "requesterPays", skip_serializing_if = "core::ops::Not::not")]
+    pub requester_pays: bool,
+    /// Whether this deployment's egress allowlist permits its host. An
+    /// entry that is offered but not allowed is still listed, so the UI
+    /// can say **why** it cannot be used rather than hiding it and
+    /// leaving an operator to guess.
+    pub allowed: bool,
+}
+
+/// The register: what an operator can import from in one action.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RegisterList {
+    /// The offered endpoints, in the order the config declares them.
+    pub register: Vec<RegisterItem>,
+    /// True when the deployment's egress allowlist is empty, so nothing
+    /// in the register is reachable yet — the UI says that once rather
+    /// than repeating it per row.
+    #[serde(rename = "federationOff")]
+    pub federation_off: bool,
+    /// `self`.
+    pub links: Vec<Link>,
+}
+
+/// `GET /sources/register` — the public endpoints this deployment offers,
+/// each marked with whether its host is on the egress allowlist (#420).
+///
+/// The register is data: it comes from the deployment's configuration, so
+/// adding an endpoint is an edit and a restart rather than a release.
+/// Nothing is fetched here — an entry is an offer, and the fetch is a
+/// separate operator action.
+async fn register<S>(State(app): State<Arc<SourcesState<S>>>) -> Json<RegisterList>
+where
+    S: SourceStore + 'static,
+{
+    let items = app
+        .register
+        .iter()
+        .map(|entry| {
+            let host = entry.host().map(str::to_owned);
+            RegisterItem {
+                id: entry.id.clone(),
+                title: entry.title.clone(),
+                url: entry.url.clone(),
+                allowed: host.as_deref().is_some_and(|host| app.egress.allows(host)),
+                host,
+                requester_pays: entry.requester_pays,
+            }
+        })
+        .collect();
+    Json(RegisterList {
+        register: items,
+        federation_off: app.egress.is_empty(),
+        links: vec![
+            Link::new(format!("{}/sources/register", app.base_url), "self")
+                .media_type("application/json")
+                .title("Source register"),
+        ],
+    })
 }
 
 /// The scheme of `target`: the part before `://`, or `file` for a bare

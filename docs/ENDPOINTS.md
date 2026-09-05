@@ -38,6 +38,7 @@ survive.
 | GET/HEAD | *fallback* | always | Embedded UI assets; unknown paths are plain 404 |
 | GET | `/sources` | catalog mode | Origins and their measured status (#417) |
 | GET | `/sources/{sourceId}` | catalog mode | One origin and its measured status |
+| GET | `/sources/register` | catalog mode | Endpoints offered for import, with what the allowlist permits (#420) |
 | GET | `/datasets/{datasetId}/counts` | catalog mode | Matched granules bucketed by calendar step or CRS84 cell (#410) |
 | GET | `/datasets/{datasetId}/facets` | catalog mode | What the granules in scope carry: discovered property keys with coverage, ranges and value counts (#409) |
 | GET, POST | `/datasets/{datasetId}/granules` | catalog mode | Granule browsing (paged, filterable); POST registers one (asset map or inline STAC Item — headers validated, extents derived, #196) |
@@ -210,7 +211,13 @@ Every field of `status` is measured, derived from the recorded events: `state`,
 
 Two things are deliberately absent: the target **path** (only its `scheme` is
 served — host paths do not leave the process, as with asset hrefs) and any
-secret (there is no field one could occupy). Read-only, and the mutating routes are
+secret (there is no field one could occupy). **`GET /sources/register`** — the endpoints this deployment offers to import
+from (#420), each with its `host`, whether the egress allowlist `allowed` it,
+and `requesterPays`. `federationOff` says once when the allowlist is empty.
+The register comes from the config, so adding an entry is an edit and a
+restart rather than a release. Nothing is fetched here: an entry is an offer.
+
+Read-only, and the mutating routes are
 **absent rather than forbidden** until OIDC/RBAC lands (ADR 0031) — there is
 no handler to authorise, which a middleware mistake cannot undo.
 

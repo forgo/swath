@@ -159,3 +159,21 @@ test("the search scope's dates: clears the params when the dates are gone", () =
     "?view=data",
   );
 });
+
+test("the import step rides in the URL under sources, so a half-finished import is a link", () => {
+  expect(parseAppState("?view=sources&step=review")).toEqual({
+    view: "sources",
+    step: "review",
+  });
+  expect(withAppState("", { view: "sources", step: "review" })).toBe("?view=sources&step=review");
+  // Only meaningful where the flow is: a `step` under another mode is
+  // not this module's, and is neither read nor written.
+  expect(parseAppState("?view=data&step=review").step).toBeUndefined();
+  expect(withAppState("", { view: "data", step: "review" })).toBe("?view=data");
+});
+
+test("the import step is an artifact: moving through the flow is navigation", () => {
+  const base = { view: "sources" } as const;
+  expect(appStatesEqual(base, { ...base, step: "review" })).toBe(false);
+  expect(appStatesEqual({ ...base, step: "review" }, { ...base, step: "review" })).toBe(true);
+});
