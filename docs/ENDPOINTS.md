@@ -36,6 +36,7 @@ survive.
 | GET | `/traces` | always | X-ray SSE stream of every render |
 | GET | `/healthz` | always | Liveness probe (process only) |
 | GET/HEAD | *fallback* | always | Embedded UI assets; unknown paths are plain 404 |
+| GET | `/datasets/{datasetId}/counts` | catalog mode | Matched granules bucketed by calendar step or CRS84 cell (#410) |
 | GET | `/datasets/{datasetId}/facets` | catalog mode | What the granules in scope carry: discovered property keys with coverage, ranges and value counts (#409) |
 | GET, POST | `/datasets/{datasetId}/granules` | catalog mode | Granule browsing (paged, filterable); POST registers one (asset map or inline STAC Item — headers validated, extents derived, #196) |
 | POST | `/datasets` | catalog mode | Register a dataset (id, title, bands) — #196; 409 on existing id |
@@ -164,6 +165,23 @@ from "the value is zero". Numbers report `min`/`max`; strings and
 booleans report `values` (distinct, most common first) and set
 `truncated` past 25. An `other` facet claims only its coverage. Same
 taxonomy: unknown dataset → 404, malformed parameter → 400.
+
+### `GET /datasets/{datasetId}/counts`
+
+How many granules match, bucketed — the question the timeline and the
+density overlay both ask. `by=time&step=hour|day|week|month|year` counts
+acquisition instants into calendar buckets, which partition the scope
+exactly, so the counts sum to `total`. `by=cell&size=<degrees>` counts
+footprints into a CRS84 lattice anchored at (-180, -90); a footprint
+spanning several cells counts in each, so `overlapping` is true and the
+buckets sum to at least `total`. Empty buckets are omitted — an absent
+bucket is a zero.
+
+`bbox` and `datetime` scope the count as they scope the granule page, and
+`total` is the same number that scope's `numberMatched` reports. Cost is
+one full scan per request, linear in matched rows. A bucketing that would
+return more than 2000 buckets is refused with a 400 naming the number and
+the way out, rather than answered slowly.
 
 ## openEO surface (catalog mode)
 

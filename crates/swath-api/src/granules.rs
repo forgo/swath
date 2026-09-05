@@ -80,6 +80,7 @@ where
     axum::Router::new()
         .route("/datasets/{datasetId}/granules", get(granules))
         .route("/datasets/{datasetId}/facets", get(facets))
+        .route("/datasets/{datasetId}/counts", get(counts))
         .with_state(state)
 }
 
@@ -249,6 +250,411 @@ where
         number_returned,
         links,
     }))
+}
+
+// --- Counts (#410) ---
+
+/// Buckets a counts request may ask for before the answer stops being a
+/// thing anyone can read or draw. A bucketing past this is refused with a
+/// reason — a refusal beats a slow silent answer (`docs/CHARTER.md`).
+pub const MAX_BUCKETS: usize = 2000;
+
+/// How a counts request divides its matches.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Bucketing {
+    /// Calendar buckets of the acquisition datetime.
+    Time(TimeStep),
+    /// A CRS84 lattice of `size` degrees, snapped to whole multiples of
+    /// `size` from (-180, -90).
+    Cell { size: f64 },
+}
+
+/// The calendar steps a time bucketing may use. Fixed-length steps are
+/// millisecond arithmetic; months and years are calendar arithmetic on
+/// the RFC 3339 text, which is why they are named rather than a duration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TimeStep {
+    Hour,
+    Day,
+    Week,
+    Month,
+    Year,
+}
+
+impl TimeStep {
+    fn parse(raw: &str) -> Option<Self> {
+        Some(match raw {
+            "hour" => Self::Hour,
+            "day" => Self::Day,
+            "week" => Self::Week,
+            "month" => Self::Month,
+            "year" => Self::Year,
+            _ => return None,
+        })
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Hour => "hour",
+            Self::Day => "day",
+            Self::Week => "week",
+            Self::Month => "month",
+            Self::Year => "year",
+        }
+    }
+}
+
+/// One bucket of a counts answer.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct CountBucket {
+    /// Bucket start, inclusive (RFC 3339 UTC) — time bucketings only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<String>,
+    /// Bucket end, exclusive — time bucketings only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
+    /// The cell, CRS84 `[west, south, east, north]` — cell bucketings only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bbox: Option<[f64; 4]>,
+    /// Granules of the scope in this bucket.
+    pub count: usize,
+}
+
+/// The counts answer.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct CountList {
+    /// Granules the scope matched — the same number `numberMatched`
+    /// reports for the same scope.
+    pub total: usize,
+    /// `"time"` or `"cell"`.
+    pub by: &'static str,
+    /// The calendar step, for a time bucketing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<&'static str>,
+    /// The lattice size in degrees, for a cell bucketing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// True when a granule's footprint can fall in more than one bucket,
+    /// so the counts sum to at least `total` rather than exactly it. False
+    /// for time bucketings, where each granule has one instant and the
+    /// buckets partition the scope exactly.
+    pub overlapping: bool,
+    /// The non-empty buckets, ascending (by start, then by west/south).
+    /// Empty buckets are omitted: an absent bucket is a zero, and a
+    /// timeline draws the gap from the ones it has.
+    pub buckets: Vec<CountBucket>,
+    /// `self`.
+    pub links: Vec<Link>,
+}
+
+/// `GET /datasets/{datasetId}/counts` — how many granules match, bucketed
+/// (#410). The timeline and the density overlay ask the same question of
+/// this route; only the bucketing differs.
+///
+/// `by=time&step=hour|day|week|month|year` counts acquisition instants
+/// into calendar buckets, which partition the scope exactly.
+/// `by=cell&size=<degrees>` counts footprints into a CRS84 lattice; a
+/// footprint spanning several cells counts in each, so `overlapping` is
+/// true and the buckets sum to at least `total`. `bbox` and `datetime`
+/// scope the count exactly as they scope the granule page.
+///
+/// **Cost.** One full scan of the dataset's matching granules per
+/// request — the same scan `numberMatched` already costs, plus a pass
+/// over the result to bucket it. That is honest at fixture and
+/// scale-fixture sizes and will not stay honest forever; a maintained
+/// summary is the next move, and this route's shape does not change when
+/// it arrives. A bucketing that would produce more than [`MAX_BUCKETS`]
+/// buckets is refused with a reason rather than answered slowly.
+async fn counts<C>(
+    State(app): State<Arc<GranulesState<C>>>,
+    Path(dataset_id): Path<String>,
+    Query(raw): Query<HashMap<String, String>>,
+) -> Result<Json<CountList>, ApiError>
+where
+    C: Catalog + 'static,
+{
+    let params = GranulesParams::parse(&raw)?;
+    let bucketing = parse_bucketing(&raw)?;
+    let id = DatasetId::new(&dataset_id);
+
+    app.catalog
+        .get_dataset(&id)
+        .await
+        .map_err(|err| catalog_error(&id, &err))?
+        .ok_or_else(|| ApiError::not_found(format!("no dataset `{dataset_id}`")))?;
+
+    let granules = app
+        .catalog
+        .find_granules(&id, &params.filter)
+        .await
+        .map_err(|err| catalog_error(&id, &err))?;
+    let total = granules.len();
+
+    let buckets = match bucketing {
+        Bucketing::Time(step) => time_buckets(&granules, step)?,
+        Bucketing::Cell { size } => cell_buckets(&granules, size)?,
+    };
+
+    let links = vec![
+        Link::new(
+            format!(
+                "{}/datasets/{dataset_id}/counts{}",
+                app.base_url,
+                counts_query(&params, &raw)
+            ),
+            "self",
+        )
+        .media_type("application/json")
+        .title(format!("Counts for dataset {dataset_id}")),
+    ];
+
+    Ok(Json(CountList {
+        total,
+        by: match bucketing {
+            Bucketing::Time(_) => "time",
+            Bucketing::Cell { .. } => "cell",
+        },
+        step: match bucketing {
+            Bucketing::Time(step) => Some(step.as_str()),
+            Bucketing::Cell { .. } => None,
+        },
+        size: match bucketing {
+            Bucketing::Cell { size } => Some(size),
+            Bucketing::Time(_) => None,
+        },
+        overlapping: matches!(bucketing, Bucketing::Cell { .. }),
+        buckets,
+        links,
+    }))
+}
+
+/// The self link's query: the scope, plus the bucketing echoed verbatim.
+fn counts_query(params: &GranulesParams, raw: &HashMap<String, String>) -> String {
+    let mut query = params.filter_query();
+    let mut extra: Vec<String> = Vec::new();
+    for key in ["by", "step", "size"] {
+        if let Some(value) = raw.get(key) {
+            extra.push(format!("{key}={value}"));
+        }
+    }
+    if extra.is_empty() {
+        return query;
+    }
+    if query.is_empty() {
+        query.push('?');
+    } else {
+        query.push('&');
+    }
+    query.push_str(&extra.join("&"));
+    query
+}
+
+/// `by=time&step=…` or `by=cell&size=…`. A bucketing the route cannot do
+/// is a malformed request, named in the response.
+fn parse_bucketing(raw: &HashMap<String, String>) -> Result<Bucketing, ApiError> {
+    match raw.get("by").map_or("time", String::as_str) {
+        "time" => {
+            let step = raw.get("step").map_or("day", String::as_str);
+            TimeStep::parse(step).map(Bucketing::Time).ok_or_else(|| {
+                ApiError::bad_request(format!(
+                    "step `{step}` is not one of hour, day, week, month, year"
+                ))
+            })
+        }
+        "cell" => {
+            let raw_size = raw.get("size").map_or("1", String::as_str);
+            let size: f64 = raw_size.parse().map_err(|_| {
+                ApiError::bad_request(format!("size `{raw_size}` is not a number of degrees"))
+            })?;
+            if !size.is_finite() || size <= 0.0 || size > 180.0 {
+                return Err(ApiError::bad_request(format!(
+                    "size `{raw_size}` is not a cell size in (0, 180] degrees"
+                )));
+            }
+            Ok(Bucketing::Cell { size })
+        }
+        other => Err(ApiError::bad_request(format!(
+            "by `{other}` is not `time` or `cell`"
+        ))),
+    }
+}
+
+/// The refusal a bucketing earns when it would produce more buckets than
+/// anyone can read — stated with the number, so the caller can pick a
+/// coarser one rather than guess.
+fn too_many_buckets(count: usize) -> ApiError {
+    ApiError::bad_request(format!(
+        "that bucketing yields {count} buckets, past the {MAX_BUCKETS} this route \
+         will return; ask for a coarser step or a smaller scope"
+    ))
+}
+
+/// Non-empty calendar buckets, ascending. Each granule has one instant,
+/// so the buckets partition the scope: their counts sum to `total`.
+fn time_buckets(granules: &[Granule], step: TimeStep) -> Result<Vec<CountBucket>, ApiError> {
+    let mut counts: BTreeMap<i64, usize> = BTreeMap::new();
+    for granule in granules {
+        let start = bucket_start(granule.datetime.to_unix_millis(), step);
+        *counts.entry(start).or_default() += 1;
+        if counts.len() > MAX_BUCKETS {
+            return Err(too_many_buckets(counts.len()));
+        }
+    }
+    counts
+        .into_iter()
+        .map(|(start, count)| {
+            Ok(CountBucket {
+                start: Some(render_instant(start)?),
+                end: Some(render_instant(bucket_end(start, step))?),
+                bbox: None,
+                count,
+            })
+        })
+        .collect()
+}
+
+/// The start of the `step` bucket containing `millis`.
+fn bucket_start(millis: i64, step: TimeStep) -> i64 {
+    match step {
+        TimeStep::Hour => floor_to(millis, 3_600_000),
+        TimeStep::Day => floor_to(millis, 86_400_000),
+        // Weeks run Monday-first: the epoch was a Thursday, so shift by
+        // four days before flooring and shift back.
+        TimeStep::Week => floor_to(millis + 4 * 86_400_000, 7 * 86_400_000) - 4 * 86_400_000,
+        TimeStep::Month | TimeStep::Year => calendar_floor(millis, step),
+    }
+}
+
+/// The end (exclusive) of the `step` bucket starting at `start`.
+fn bucket_end(start: i64, step: TimeStep) -> i64 {
+    match step {
+        TimeStep::Hour => start + 3_600_000,
+        TimeStep::Day => start + 86_400_000,
+        TimeStep::Week => start + 7 * 86_400_000,
+        TimeStep::Month | TimeStep::Year => calendar_next(start, step),
+    }
+}
+
+fn floor_to(millis: i64, size: i64) -> i64 {
+    millis.div_euclid(size) * size
+}
+
+/// The first instant of the month or year containing `millis`. Calendar
+/// steps are not a fixed number of milliseconds, so this goes through the
+/// RFC 3339 text the domain type already renders rather than inventing a
+/// second calendar.
+fn calendar_floor(millis: i64, step: TimeStep) -> i64 {
+    let Ok(at) = swath_core::catalog::Datetime::from_unix_millis(millis) else {
+        return millis;
+    };
+    let text = at.as_str();
+    let floored = match step {
+        TimeStep::Year => format!("{}-01-01T00:00:00Z", &text[0..4]),
+        _ => format!("{}-01T00:00:00Z", &text[0..7]),
+    };
+    swath_core::catalog::Datetime::new(floored).map_or(millis, |d| d.to_unix_millis())
+}
+
+/// The first instant of the month or year after the one starting at
+/// `start`.
+fn calendar_next(start: i64, step: TimeStep) -> i64 {
+    let Ok(at) = swath_core::catalog::Datetime::from_unix_millis(start) else {
+        return start;
+    };
+    let text = at.as_str();
+    let (year, month) = (
+        text[0..4].parse::<i32>().unwrap_or(0),
+        text[5..7].parse::<u32>().unwrap_or(1),
+    );
+    let (next_year, next_month) = match step {
+        TimeStep::Year => (year + 1, 1),
+        _ if month >= 12 => (year + 1, 1),
+        _ => (year, month + 1),
+    };
+    swath_core::catalog::Datetime::new(format!("{next_year:04}-{next_month:02}-01T00:00:00Z"))
+        .map_or(start, |d| d.to_unix_millis())
+}
+
+fn render_instant(millis: i64) -> Result<String, ApiError> {
+    swath_core::catalog::Datetime::from_unix_millis(millis)
+        .map(|at| at.to_string())
+        .map_err(|err| ApiError::internal(format!("bucket boundary is not representable: {err}")))
+}
+
+/// Non-empty lattice cells, ascending by west then south. A footprint
+/// spanning several cells counts in each — which is what a density
+/// overlay wants, and why the answer says `overlapping`.
+fn cell_buckets(granules: &[Granule], size: f64) -> Result<Vec<CountBucket>, ApiError> {
+    // The lattice is anchored at (-180, -90); a key is the integer cell
+    // index, so two footprints land in the same cell only by geometry.
+    let mut counts: BTreeMap<(i64, i64), usize> = BTreeMap::new();
+    for granule in granules {
+        let bbox = granule.bbox;
+        // An antimeridian-crossing footprint (`west > east`) would need
+        // two runs of columns; count it in the cells of each half.
+        let spans: [(f64, f64); 2] = if bbox.west > bbox.east {
+            [(bbox.west, 180.0), (-180.0, bbox.east)]
+        } else {
+            [(bbox.west, bbox.east), (f64::NAN, f64::NAN)]
+        };
+        for (west, east) in spans {
+            if west.is_nan() {
+                continue;
+            }
+            let (x0, x1) = (cell_column(west, size), cell_column(east, size));
+            let (y0, y1) = (cell_row(bbox.south, size), cell_row(bbox.north, size));
+            for x in x0..=x1 {
+                for y in y0..=y1 {
+                    *counts.entry((x, y)).or_default() += 1;
+                    if counts.len() > MAX_BUCKETS {
+                        return Err(too_many_buckets(counts.len()));
+                    }
+                }
+            }
+        }
+    }
+    Ok(counts
+        .into_iter()
+        .map(|((x, y), count)| {
+            let west = size.mul_add(f64::from(i32::try_from(x).unwrap_or(0)), -180.0);
+            let south = size.mul_add(f64::from(i32::try_from(y).unwrap_or(0)), -90.0);
+            CountBucket {
+                start: None,
+                end: None,
+                bbox: Some([west, south, west + size, south + size]),
+                count,
+            }
+        })
+        .collect())
+}
+
+/// The lattice column containing `longitude`, anchored at -180.
+fn cell_column(longitude: f64, size: f64) -> i64 {
+    lattice_index(longitude + 180.0, size)
+}
+
+/// The lattice row containing `latitude`, anchored at -90.
+fn cell_row(latitude: f64, size: f64) -> i64 {
+    lattice_index(latitude + 90.0, size)
+}
+
+/// The index of `offset` (degrees above the lattice anchor) at `size`,
+/// clamped into `i64` so a non-finite coordinate cannot panic the route.
+fn lattice_index(offset: f64, size: f64) -> i64 {
+    // A real lattice index is bounded by 360/size, so the clamp only ever
+    // fires on an absurd coordinate — and inside these bounds the value is
+    // an integral f64 that `i64` holds exactly.
+    const LIMIT: f64 = 1.0e15;
+    let index = (offset / size).floor();
+    if !index.is_finite() {
+        return 0;
+    }
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "clamped to an integral range i64 represents exactly"
+    )]
+    let clamped = index.clamp(-LIMIT, LIMIT) as i64;
+    clamped
 }
 
 // --- Facet discovery (#409) ---
