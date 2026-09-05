@@ -171,3 +171,49 @@ test("a dataset with no granules shows the ingest guidance (fixtures)", async ({
   await expect(empty).toContainText("swath ingest");
   await expect(cards(page)).toHaveCount(0);
 });
+
+// --- The timeline (#411) ---
+
+const timeline = (page: Page) => page.locator("swath-catalog swath-timeline");
+const buckets = (page: Page) => timeline(page).locator('[part="bucket"]');
+
+test("the timeline's bands come from the counts endpoint, and a drag becomes a shareable date chip", async ({
+  page,
+}) => {
+  const counts: string[] = [];
+  page.on("request", (request) => {
+    const { pathname, search } = new URL(request.url());
+    if (pathname.endsWith("/counts")) {
+      counts.push(`${pathname}${search}`);
+    }
+  });
+  await page.goto(demoUrl({ view: "data" }));
+  await waitForFittedView(page);
+  await datasetSelect(page).selectOption("hls-s30-fire");
+
+  // The bands are the server's counts, not the fetched page.
+  await expect(timeline(page)).toBeVisible();
+  await expect.poll(() => counts.length).toBeGreaterThan(0);
+  expect(counts[0]).toContain("step=month");
+  await expect(timeline(page).locator('[part="hint"]')).toHaveText("Drag to narrow the dates");
+  // With nothing filtered the control says so rather than drawing an
+  // empty second band.
+  await expect(timeline(page).locator('[part="note"]')).toContainText("no filters");
+
+  // Picking a bucket narrows the dates, and the narrowing is in the URL.
+  const first = buckets(page).first();
+  await expect(first).toBeVisible();
+  const label = await first.getAttribute("aria-label");
+  const day = (label ?? "").slice(0, 10);
+  await first.click();
+  await expect.poll(() => new URL(page.url()).searchParams.get("from")).toBe(day);
+  await expect(page.locator('swath-chip-row [data-chip="dates"]')).toBeVisible();
+  // The second band is a scoped count, never a client-side subtraction.
+  await expect
+    .poll(() => counts.filter((path) => path.includes("datetime=")).length)
+    .toBeGreaterThan(0);
+
+  // And it is navigation: back returns to the unfiltered scope.
+  await page.goBack();
+  await expect.poll(() => new URL(page.url()).searchParams.get("from")).toBeNull();
+});

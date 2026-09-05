@@ -12,7 +12,9 @@ const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-function stub(options: { granules?: unknown; facets?: unknown; result?: () => Response } = {}) {
+function stub(
+  options: { granules?: unknown; facets?: unknown; counts?: unknown; result?: () => Response } = {},
+) {
   const requests: string[] = [];
   const impl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = String(input);
@@ -39,6 +41,9 @@ function stub(options: { granules?: unknown; facets?: unknown; result?: () => Re
           ],
         },
       );
+    }
+    if (url.includes("/counts")) {
+      return options.counts === undefined ? json({ total: 0, buckets: [] }) : json(options.counts);
     }
     if (url.includes("/facets")) {
       return options.facets === undefined ? json({ total: 0, facets: [] }) : json(options.facets);
@@ -221,4 +226,66 @@ test("a facets failure costs the facets, never the granule list", async () => {
   await catalog.updateComplete;
   expect(cards(catalog)).toHaveLength(2);
   expect(catalog.shadowRoot?.querySelector('[part="facets"]')).toBeNull();
+});
+
+const MONTHS = {
+  total: 150,
+  buckets: [
+    { start: "2024-01-01T00:00:00Z", end: "2024-02-01T00:00:00Z", count: 100 },
+    { start: "2024-02-01T00:00:00Z", end: "2024-03-01T00:00:00Z", count: 50 },
+  ],
+};
+
+test("the timeline's bands both come from the counts endpoint, not from the page", async () => {
+  const s = stub({ counts: MONTHS });
+  const catalog = await mount(s);
+  catalog.active = true;
+  await catalog.updateComplete;
+  await settle();
+  await catalog.select("hls-s30");
+  await catalog.updateComplete;
+
+  // Two granules were fetched; the bands say 150, because that is what the
+  // server counted.
+  const timeline = catalog.shadowRoot?.querySelector("swath-timeline");
+  expect(timeline).not.toBeNull();
+  await timeline?.updateComplete;
+  expect(timeline?.shadowRoot?.querySelector('[part="note"]')?.textContent).toContain("150");
+  expect(s.requests.filter((r) => r.endsWith("/counts"))).toHaveLength(1);
+});
+
+test("dragging the timeline narrows the dates and re-asks for the surviving band", async () => {
+  const s = stub({ counts: MONTHS });
+  const catalog = await mount(s);
+  catalog.active = true;
+  await catalog.updateComplete;
+  await settle();
+  await catalog.select("hls-s30");
+  await catalog.updateComplete;
+
+  const dates: { from: string | null; to: string | null }[] = [];
+  catalog.addEventListener("swath-dates", (event) => dates.push(event.detail));
+  const timeline = catalog.shadowRoot?.querySelector("swath-timeline");
+  await timeline?.updateComplete;
+  const bar = timeline?.shadowRoot?.querySelector('[part="bucket"]');
+  bar?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  await settle();
+  await catalog.updateComplete;
+
+  expect(dates).toEqual([{ from: "2024-01-01", to: "2024-01-31" }]);
+  // The second band is asked for with the dates in force — a scoped count,
+  // never a client-side subtraction.
+  const scoped = s.requests.filter((r) => r.endsWith("/counts"));
+  expect(scoped.length).toBeGreaterThan(1);
+});
+
+test("a collection with no counts renders no timeline at all", async () => {
+  const s = stub();
+  const catalog = await mount(s);
+  catalog.active = true;
+  await catalog.updateComplete;
+  await settle();
+  await catalog.select("hls-s30");
+  await catalog.updateComplete;
+  expect(catalog.shadowRoot?.querySelector("swath-timeline")).toBeNull();
 });
