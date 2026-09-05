@@ -184,6 +184,26 @@ if (mapElement instanceof SwathMap && addDataElement instanceof SwathAddDataPane
   });
 }
 
+/** `state` with the search scope's dates set, dropping the keys that have
+ * no value — the shape `exactOptionalPropertyTypes` asks for, and the one
+ * `withAppState` writes from. */
+function withDates(state: AppState, from: string | undefined, to: string | undefined): AppState {
+  const next: AppState = { view: state.view };
+  if (state.sel !== undefined) {
+    next.sel = state.sel;
+  }
+  if (state.rail !== undefined) {
+    next.rail = state.rail;
+  }
+  if (from !== undefined) {
+    next.from = from;
+  }
+  if (to !== undefined) {
+    next.to = to;
+  }
+  return next;
+}
+
 /** Routes the dataset browser (issue #110) to the map: announced granules
  * become the footprint layer, a granule click becomes a bounds fit. The
  * panel fetches lazily on its own; nothing here runs until it announces. */
@@ -312,6 +332,15 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     } else if (state.compareTime !== undefined) {
       chips.push({ id: "compare", label: "vs", value: state.compareTime, removable: true });
     }
+    if (appState.from !== undefined || appState.to !== undefined) {
+      // One chip for the scope, reading the way a person says it (#411).
+      chips.push({
+        id: "dates",
+        label: "dates",
+        value: `${appState.from ?? "any"} to ${appState.to ?? "any"}`,
+        removable: true,
+      });
+    }
     if (state.xray) {
       chips.push({ id: "xray", label: "x-ray", value: "on", removable: true });
     }
@@ -328,6 +357,12 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
         map.removeAttribute("compare-layer");
         map.removeAttribute("compare-datetime");
         map.removeAttribute("swipe");
+        break;
+      case "dates":
+        appState = withDates(appState, undefined, undefined);
+        if (datasetElement instanceof SwathCatalog) {
+          datasetElement.dates = { from: undefined, to: undefined };
+        }
         break;
       case "xray":
         map.removeAttribute("xray");
@@ -414,6 +449,9 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
       lastArtifact = restored;
       const next = parseAppState(search);
       appState = next;
+      if (datasetElement instanceof SwathCatalog) {
+        datasetElement.dates = { from: next.from, to: next.to };
+      }
       applyMode(next.view);
       if (next.view === "xray") {
         map.setAttribute("xray", "");
@@ -454,6 +492,21 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
       syncUrl();
     });
   }
+  // The search scope's dates (#411): the timeline's drag and the panel's
+  // date fields both announce here, and the URL's date chip is the one
+  // visible form. A restore sets `dates` instead, which does not announce.
+  if (datasetElement instanceof SwathCatalog) {
+    const catalog = datasetElement;
+    catalog.dates = { from: appState.from, to: appState.to };
+    catalog.addEventListener("swath-dates", (event) => {
+      const { from, to } = event.detail;
+      appState = withDates(appState, from ?? undefined, to ?? undefined);
+      interact();
+      syncUrl();
+      renderChips();
+    });
+  }
+
   const xrayRail = document.querySelector("#swath-xray-rail");
   // The x-ray's display modes + analytics summary live in the rail under
   // view=xray (issue #286); the map re-homes a live overlay on assignment.

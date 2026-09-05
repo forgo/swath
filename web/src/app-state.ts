@@ -30,6 +30,11 @@ export interface AppState {
   view: ViewMode;
   /** The selected authoring node; only under `author`. */
   sel?: string;
+  /** The search scope's inclusive date bounds (`from=`/`to=`,
+   * `YYYY-MM-DD`, #411): what the timeline's drag narrowed to. Either
+   * may stand alone — an open-ended range is a range. */
+  from?: string;
+  to?: string;
   /** Read from a deep link only; never written. */
   rail?: "collapsed";
 }
@@ -46,7 +51,21 @@ export const APP_STORAGE_KEY = "swath.app-state.v1";
 
 /** Params this module writes. `rail` is read but never written, so it is
  * foreign to the writer and survives untouched. */
-const WRITTEN_PARAMS = ["view", "sel"] as const;
+const WRITTEN_PARAMS = ["view", "sel", "from", "to"] as const;
+
+/** `YYYY-MM-DD`, and nothing else: a malformed bound is dropped rather
+ * than sent to the server as a filter nobody chose. */
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseDay(value: string | null): string | undefined {
+  if (value === null || !DAY.test(value)) {
+    return undefined;
+  }
+  // Shape is not enough: `2024-13-99` is shaped like a date and is not
+  // one, and a filter nobody could have chosen must not reach the server.
+  const at = new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(at.getTime()) || at.toISOString().slice(0, 10) !== value ? undefined : value;
+}
 
 export function isViewMode(value: unknown): value is ViewMode {
   return typeof value === "string" && (VIEW_MODES as readonly string[]).includes(value);
@@ -64,6 +83,14 @@ export function parseAppState(search: string): AppState {
   const sel = params.get("sel");
   if (view === "author" && sel !== null && sel !== "") {
     state.sel = sel;
+  }
+  const from = parseDay(params.get("from"));
+  if (from !== undefined) {
+    state.from = from;
+  }
+  const to = parseDay(params.get("to"));
+  if (to !== undefined) {
+    state.to = to;
   }
   if (params.get("rail") === "collapsed") {
     state.rail = "collapsed";
@@ -94,12 +121,22 @@ export function withAppState(search: string, state: AppState): string {
   if (state.view === "author" && state.sel !== undefined && state.sel !== "") {
     parts.push(`sel=${encodeURIComponent(state.sel)}`);
   }
+  for (const [key, value] of [
+    ["from", state.from],
+    ["to", state.to],
+  ] as const) {
+    if (value !== undefined && value !== "") {
+      parts.push(`${key}=${encodeURIComponent(value)}`);
+    }
+  }
   parts.push(...foreign);
   return parts.length === 0 ? "" : `?${parts.join("&")}`;
 }
 
 export function appStatesEqual(a: AppState, b: AppState): boolean {
-  return a.view === b.view && a.sel === b.sel && a.rail === b.rail;
+  return (
+    a.view === b.view && a.sel === b.sel && a.rail === b.rail && a.from === b.from && a.to === b.to
+  );
 }
 
 /** Derived, never serialised: the inspector column is open under `author`

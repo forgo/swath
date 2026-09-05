@@ -129,3 +129,33 @@ test("storage codec: view + rail only (never sel); corruption and junk shapes ar
   storage.setItem(APP_STORAGE_KEY, '{"view":"xray","rail":"open"}');
   expect(loadAppPreference(storage)).toEqual({ view: "xray" });
 });
+
+test("the search scope's dates: round-trips both bounds, and either alone", () => {
+  expect(parseAppState("?view=data&from=2024-01-01&to=2024-02-29")).toEqual({
+    view: "data",
+    from: "2024-01-01",
+    to: "2024-02-29",
+  });
+  expect(parseAppState("?from=2024-01-01")).toEqual({ view: "layers", from: "2024-01-01" });
+  expect(withAppState("", { view: "data", from: "2024-01-01", to: "2024-02-29" })).toBe(
+    "?view=data&from=2024-01-01&to=2024-02-29",
+  );
+  expect(withAppState("", { view: "layers", to: "2024-02-29" })).toBe("?to=2024-02-29");
+});
+
+test("the search scope's dates: drops a bound that is not a date, rather than filtering by nonsense", () => {
+  expect(parseAppState("?from=yesterday&to=2024-13-99").from).toBeUndefined();
+  expect(parseAppState("?from=yesterday&to=2024-13-99").to).toBeUndefined();
+});
+
+test("the search scope's dates: is an artifact: changing the dates is navigation, not a camera move", () => {
+  const base = { view: "data" } as const;
+  expect(appStatesEqual(base, { ...base, from: "2024-01-01" })).toBe(false);
+  expect(appStatesEqual({ ...base, to: "2024-02-29" }, { ...base, to: "2024-02-29" })).toBe(true);
+});
+
+test("the search scope's dates: clears the params when the dates are gone", () => {
+  expect(withAppState("?view=data&from=2024-01-01&to=2024-02-29", { view: "data" })).toBe(
+    "?view=data",
+  );
+});

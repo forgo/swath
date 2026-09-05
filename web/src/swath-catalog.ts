@@ -27,6 +27,8 @@ import {
 import type { FacetSummary } from "./facets-model.js";
 import { coverageNote, facetSummary, parseFacets } from "./facets-model.js";
 import type { LonLatBounds } from "./swath-map.js";
+import { SwathTimeline } from "./swath-timeline.js";
+import { buildTimeline, EMPTY_TIMELINE, type Timeline } from "./timeline-model.js";
 import { SwathButton } from "./ui/button.js";
 import { el } from "./ui/dom.js";
 import { SwathElement } from "./ui/element.js";
@@ -123,6 +125,8 @@ export class SwathCatalog extends SwathElement {
   #granules: CatalogGranule[] = [];
   #granulesError: string | undefined;
   #facets: FacetSummary = { total: 0, facets: [] };
+  #timeline: Timeline = EMPTY_TIMELINE;
+  #timelineElement: SwathTimeline | undefined;
   #sort: GranuleSort = "newest";
   #filter: GranuleFilter = {};
   #inView = false;
@@ -208,6 +212,7 @@ export class SwathCatalog extends SwathElement {
     this.#granules = [];
     this.#granulesError = undefined;
     this.#facets = { total: 0, facets: [] };
+    this.#timeline = EMPTY_TIMELINE;
     this.requestUpdate();
     if (id === "") {
       this.#announce("", []);
@@ -239,9 +244,18 @@ export class SwathCatalog extends SwathElement {
         facets = { total: 0, facets: [] };
       }
     }
+    // The two bands (#411), both from the counts endpoint: what the
+    // collection holds, and what survives the dates in force. Neither is
+    // inferred from the page above — a count we did not get from the
+    // server is not a count we draw.
+    let timeline: Timeline = EMPTY_TIMELINE;
+    if (failure === undefined) {
+      timeline = await this.#loadTimeline(id);
+    }
     if (this.#selected !== id) {
       return; // stale: the user moved on while this fetch was in flight
     }
+    this.#timeline = timeline;
     this.#loading = false;
     this.#granulesError = failure;
     this.#granules = granules;
@@ -249,6 +263,99 @@ export class SwathCatalog extends SwathElement {
     if (failure === undefined) {
       this.#announce(id, granules);
     }
+    this.requestUpdate();
+  }
+
+  /** The date bounds in force, as the URL carries them (#411). Setting
+   * them applies the filter and re-asks for the surviving band; it does
+   * not emit, so a restore from the URL cannot write history back. */
+  get dates(): { from: string | undefined; to: string | undefined } {
+    return { from: this.#filter.from, to: this.#filter.to };
+  }
+
+  set dates(value: { from: string | undefined; to: string | undefined }) {
+    if (this.#filter.from === value.from && this.#filter.to === value.to) {
+      return;
+    }
+    this.#filter = { ...this.#filter, from: value.from, to: value.to };
+    this.requestUpdate();
+    void this.#refreshTimeline();
+  }
+
+  /** The counts behind the two bands. The scoped call carries the dates
+   * in force; with none, the same answer serves both bands and the
+   * control says the filters remove nothing. */
+  async #loadTimeline(id: string): Promise<Timeline> {
+    const counts = (datetime?: string): Promise<unknown> =>
+      this.api.json(
+        this.api.url(`/datasets/${encodeURIComponent(id)}/counts`, { step: "month", datetime }),
+      );
+    try {
+      const scope = this.#datetimeScope();
+      const exists = await counts();
+      const survives = scope === undefined ? exists : await counts(scope);
+      return buildTimeline(exists, survives);
+    } catch {
+      // A timeline failure costs the timeline, never the granule list.
+      return EMPTY_TIMELINE;
+    }
+  }
+
+  /** The `datetime=` the current date filter means, or nothing when
+   * neither bound is set. */
+  #datetimeScope(): string | undefined {
+    const { from, to } = this.#filter;
+    if (from === undefined && to === undefined) {
+      return undefined;
+    }
+    return `${from ?? ".."}/${to === undefined ? ".." : `${to}T23:59:59Z`}`;
+  }
+
+  /** The two bands, plus the control that narrows the dates. Nothing
+   * when the axis is empty: a timeline with no buckets is not a control,
+   * it is a blank. */
+  #timelineBlock(): HTMLElement | undefined {
+    if (this.#timeline.buckets.length === 0) {
+      return undefined;
+    }
+    // Built once so a drag does not lose the element mid-gesture.
+    const element = this.#timelineElement ?? new SwathTimeline();
+    if (this.#timelineElement === undefined) {
+      this.#timelineElement = element;
+      element.setAttribute("part", "timeline");
+      element.addEventListener("swath-dates", (event) => {
+        event.stopPropagation();
+        const { from, to } = event.detail;
+        this.#filter = {
+          ...this.#filter,
+          from: from ?? undefined,
+          to: to ?? undefined,
+        };
+        this.emit("swath-dates", { from, to });
+        void this.#refreshTimeline();
+      });
+    }
+    // Only on a real change: assigning re-anchors the control, and a
+    // re-render mid-drag must not drop the range the user is drawing.
+    if (element.timeline !== this.#timeline) {
+      element.timeline = this.#timeline;
+    }
+    return element;
+  }
+
+  /** Re-ask for the surviving band after the dates changed. The held band
+   * is unscoped and cannot have moved, but asking for both keeps one code
+   * path and one source of truth. */
+  async #refreshTimeline(): Promise<void> {
+    const id = this.#selected;
+    if (id === "") {
+      return;
+    }
+    const timeline = await this.#loadTimeline(id);
+    if (this.#selected !== id) {
+      return;
+    }
+    this.#timeline = timeline;
     this.requestUpdate();
   }
 
@@ -366,7 +473,14 @@ export class SwathCatalog extends SwathElement {
         event.stopPropagation();
         const value = String(event.detail.value);
         this.#filter = { ...this.#filter, [key]: value === "" ? undefined : value };
+        // The date fields and the timeline narrow the same scope, so they
+        // announce the same way: one path to the URL's date chip.
+        this.emit("swath-dates", {
+          from: this.#filter.from ?? null,
+          to: this.#filter.to ?? null,
+        });
         this.requestUpdate();
+        void this.#refreshTimeline();
       });
     }
     const inView = el("swath-toggle", {
@@ -490,8 +604,10 @@ export class SwathCatalog extends SwathElement {
       body = el("ul", { part: "grid" }, ...items);
     }
     const facets = this.#facetBlock();
+    const timeline = this.#timelineBlock();
     this.renderRoot.replaceChildren(
       filters,
+      ...(timeline === undefined ? [] : [timeline]),
       ...(facets === undefined ? [] : [facets]),
       toolbar,
       body,
@@ -501,6 +617,7 @@ export class SwathCatalog extends SwathElement {
 
 /** Registers `<swath-catalog>`; safe to call more than once. */
 export function defineSwathCatalog(): void {
+  SwathTimeline.define();
   SwathCatalog.define();
 }
 
