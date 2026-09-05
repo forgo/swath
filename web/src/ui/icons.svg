@@ -9,6 +9,10 @@
   <symbol id="layers" viewBox="0 0 16 16"><path d="M8 2.5 14 5.5 8 8.5 2 5.5Z"/><path d="m2 8.5 6 3 6-3"/><path d="m2 11.5 6 3 6-3"/></symbol>
   <symbol id="data" viewBox="0 0 16 16"><ellipse cx="8" cy="4" rx="5.5" ry="2"/><path d="M2.5 4v8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2V4"/><path d="M2.5 8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2"/></symbol>
   <symbol id="author" viewBox="0 0 16 16"><rect x="2" y="2.5" width="4" height="4" rx="1"/><rect x="10" y="9.5" width="4" height="4" rx="1"/><path d="M6 4.5h2.5a2 2 0 0 1 2 2V9.5"/></symbol>
+  <!-- sources (#418): a tray receiving from an origin — what feeds this
+       deployment, distinct from `data` (what it holds) and `upload` (what
+       you hand it). -->
+  <symbol id="sources" viewBox="0 0 16 16"><path d="M2.5 9.5v3a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-3"/><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"/><path d="M8 2v5"/><path d="m5.75 4.75 2.25 2.25 2.25-2.25"/></symbol>
   <symbol id="xray" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="1.5"/><path d="M8 2.5v2M8 11.5v2M2.5 8h2M11.5 8h2"/></symbol>
   <symbol id="eye" viewBox="0 0 16 16"><path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="2"/></symbol>
   <symbol id="eye-off" viewBox="0 0 16 16"><path d="M3 3l10 10"/><path d="M6.6 4.1A6.9 6.9 0 0 1 8 3.5c4 0 6.5 4.5 6.5 4.5a11 11 0 0 1-2 2.4"/><path d="M4.4 5.4A10.6 10.6 0 0 0 1.5 8S4 12.5 8 12.5a6.7 6.7 0 0 0 2.6-.5"/><path d="M6.6 6.6a2 2 0 0 0 2.8 2.8"/></symbol>

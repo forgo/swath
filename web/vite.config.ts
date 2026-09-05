@@ -36,6 +36,7 @@ export default defineConfig(({ command }) => ({
       "/processes": SWATH,
       "/result": SWATH,
       "/services": SWATH,
+      "/sources": SWATH,
       "/uploads": SWATH,
       // Exactly `/` (a RegExp key): the landing/capabilities document the
       // add-data panel reads (#197). The demo page itself lives at /demo/,

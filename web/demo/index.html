@@ -97,6 +97,7 @@ or bring the stack up yourself and `pnpm exec vite dev`.
        * element+attribute selector outranks it. */
       swath-layer-list[hidden],
       swath-catalog[hidden],
+      swath-sources[hidden],
       swath-add-data-panel[hidden],
       swath-authoring-panel[hidden] {
         display: none;
@@ -159,6 +160,10 @@ or bring the stack up yourself and `pnpm exec vite dev`.
         <!-- Data mode's catalog (issue #288): lazy until the mode is entered;
              every thumbnail is a preview the engine rendered. -->
         <swath-catalog hidden></swath-catalog>
+        <!-- Sources mode (#418): what is watching, what is broken, and the
+             first-run action that registers the committed fixtures. Lazy
+             until the mode is entered. -->
+        <swath-sources hidden></swath-sources>
         <!-- Collapsed and lazy (issue #197); its first open reads the
              capabilities document, so a read-only server shows no form. -->
         <swath-add-data-panel></swath-add-data-panel>

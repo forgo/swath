@@ -55,6 +55,7 @@ import { defineSwathCatalog, SwathCatalog } from "../src/swath-catalog.js";
 import { defineSwathLayerList, SwathLayerList } from "../src/swath-layer-list.js";
 import { defineSwathMap, SwathMap } from "../src/swath-map.js";
 import { defineSwathShell, SwathShell } from "../src/swath-shell.js";
+import { defineSwathSources, SwathSources } from "../src/swath-sources.js";
 import { SwathButton } from "../src/ui/button.js";
 import { type Chip, SwathChipRow } from "../src/ui/chip-row.js";
 import { SwathCommandPalette } from "../src/ui/command-palette.js";
@@ -81,6 +82,7 @@ import {
 const mapElement = document.querySelector("swath-map");
 const panelElement = document.querySelector("swath-layer-list");
 const datasetElement = document.querySelector("swath-catalog");
+const sourcesElement = document.querySelector("swath-sources");
 const addDataElement = document.querySelector("swath-add-data-panel");
 const authoringElement = document.querySelector("swath-authoring-panel");
 SwathButton.define();
@@ -158,6 +160,7 @@ if (stac !== null && stac !== "") {
 defineSwathMap();
 defineSwathLayerList();
 defineSwathCatalog();
+defineSwathSources();
 defineSwathAddDataPanel();
 defineSwathAuthoringPanel();
 
@@ -522,7 +525,13 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
   // overlay on (a user act); leaving leaves it. The rail's collapse is a
   // device preference: storage only, never the URL (honoured from a
   // `rail=collapsed` link without rewriting it).
-  const MODE_TITLES = { layers: "Layers", data: "Data", author: "Author", xray: "X-ray" } as const;
+  const MODE_TITLES = {
+    layers: "Layers",
+    data: "Data",
+    sources: "Sources",
+    author: "Author",
+    xray: "X-ray",
+  } as const;
   const authorDock = document.querySelector("#swath-author-dock");
   const authorStrip = document.querySelector("#swath-author-strip");
   const authorInspector = document.querySelector("#swath-author-inspector");
@@ -584,6 +593,7 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     }
     const show = {
       layers: mode === "layers" || mode === "xray",
+      sources: mode === "sources",
       data: mode === "layers" || mode === "data",
       author: mode === "layers" || mode === "author",
     };
@@ -596,6 +606,12 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     }
     if (addDataElement instanceof HTMLElement) {
       addDataElement.hidden = !show.data;
+    }
+    if (sourcesElement instanceof SwathSources) {
+      sourcesElement.hidden = !show.sources;
+      if (mode === "sources") {
+        sourcesElement.active = true; // lazy by contract, as the catalog is
+      }
     }
     if (authoringElement instanceof HTMLElement) {
       authoringElement.hidden = !show.author;
@@ -664,6 +680,7 @@ function wire(map: SwathMap, panel: SwathLayerList): void {
     railElement.items = [
       { id: "layers", label: "Layers", icon: "layers" },
       { id: "data", label: "Data", icon: "data" },
+      { id: "sources", label: "Sources", icon: "sources" },
       { id: "author", label: "Author", icon: "author" },
       { id: "xray", label: "X-ray", icon: "xray" },
     ];
