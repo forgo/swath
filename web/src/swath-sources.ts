@@ -21,6 +21,7 @@
 import { SwathApi } from "./api.js";
 import { describeReport, loadFixtureStack } from "./fixture-stack.js";
 import {
+  billingNote,
   countsLine,
   credentialNote,
   freshness,
@@ -166,6 +167,10 @@ export class SwathSources extends SwathElement {
     );
     if (row.lastError !== undefined) {
       item.append(el("p", { part: "error", role: "alert" }, row.lastError));
+    }
+    const billing = billingNote(row);
+    if (billing !== undefined) {
+      item.append(el("p", { part: "meta" }, billing));
     }
     const credential = credentialNote(row);
     if (credential !== undefined) {

@@ -356,6 +356,7 @@ mod tests {
             bindings: Vec::new(),
             origin: SourceOrigin::Config,
             credential_profile: None,
+            requester_pays: false,
         }
     }
 

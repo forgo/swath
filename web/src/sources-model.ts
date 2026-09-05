@@ -37,6 +37,10 @@ export interface SourceRow {
    * `undefined` both when the source names no profile and when nothing
    * has checked yet — `credentialNote` tells those apart. */
   credentialResolved?: boolean;
+  /** Whether reading this source bills the reader (#424). */
+  requesterPays?: boolean;
+  /** Who agreed to be billed, when anyone has. */
+  consentedBy?: string;
   state: SourceState;
   /** `undefined` when nothing has looked yet — not `false`. */
   reachable?: boolean;
@@ -92,6 +96,13 @@ export function parseSources(body: unknown): SourceRow[] {
     const profile = textOf(item["credentialProfile"]);
     if (profile !== undefined) {
       row.credentialProfile = profile;
+    }
+    if (item["requesterPays"] === true) {
+      row.requesterPays = true;
+    }
+    const consented = textOf(item["consentedBy"]);
+    if (consented !== undefined) {
+      row.consentedBy = consented;
     }
     // Tri-state on purpose: `null` means "named but never checked", and
     // an absent field means "names no profile at all".
@@ -194,6 +205,20 @@ export function credentialNote(row: SourceRow): string | undefined {
         ? "resolved"
         : "did not resolve";
   return `credential ${row.credentialProfile} · ${state}`;
+}
+
+/** What to say about billing, or nothing at all for a source that does
+ * not bill the reader. Names who agreed, or says plainly that nobody has
+ * and the source will not be read until someone does. **Never a price**:
+ * Swath does not know the operator's rate card, and a wrong figure is
+ * worse than none. */
+export function billingNote(row: SourceRow): string | undefined {
+  if (row.requesterPays !== true) {
+    return undefined;
+  }
+  return row.consentedBy === undefined
+    ? "requester-pays · not read until someone agrees to be billed"
+    : `requester-pays · ${row.consentedBy} agreed to be billed`;
 }
 
 /** Whether the screen should offer the first-run action: nothing is

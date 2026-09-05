@@ -344,3 +344,56 @@ async fn an_unsuccessful_status_is_reported() {
     };
     assert_eq!(status, 404);
 }
+
+// --- What a read cost (#424) ---
+
+/// The proof step's figures are measured from the requests that actually
+/// happened: bytes from the body, requests counted per send, redirects
+/// included. Nothing here is estimated.
+#[tokio::test]
+async fn a_read_reports_the_bytes_and_requests_it_actually_made() {
+    let body = r#"{"type":"Catalog","id":"measured"}"#;
+    let server = Server::start(Reply::Json(body.to_owned())).await;
+    let client = StacClient::new(allowing_localhost()).expect("client");
+
+    let (bytes, cost) = client
+        .fetch_measured(&server.url("/catalog.json"))
+        .await
+        .expect("a measured fetch");
+    assert_eq!(bytes.len(), body.len());
+    assert_eq!(cost.bytes, body.len() as u64, "measured, not estimated");
+    assert_eq!(cost.requests, 1);
+    assert_eq!(server.accepted(), 1, "the count matches the sockets");
+}
+
+/// A redirect is a second request, and a requester-pays bucket bills for
+/// it — so the count says two, not one.
+#[tokio::test]
+async fn a_redirect_counts_as_the_extra_request_it_is() {
+    let target = Server::start(Reply::Json(r#"{"id":"moved"}"#.to_owned())).await;
+    let start = Server::start(Reply::Redirect(target.url("/moved.json"))).await;
+    let client = StacClient::new(allowing_localhost()).expect("client");
+
+    let (_, cost) = client
+        .fetch_measured(&start.url("/catalog.json"))
+        .await
+        .expect("an on-host redirect");
+    assert_eq!(cost.requests, 2);
+    assert_eq!(start.accepted() + target.accepted(), 2);
+}
+
+/// The cost carries no currency, and cannot: it is two integers. This
+/// asserts the shape rather than the formatting, because the formatting
+/// is where a dollar sign would sneak in.
+#[test]
+fn a_cost_is_bytes_and_requests_and_nothing_else() {
+    let cost = swath_sources_stac::FetchCost {
+        bytes: 4096,
+        requests: 3,
+    };
+    let rendered = format!("{cost:?}");
+    for currency in ["$", "usd", "USD", "€", "cost:", "price", "dollar"] {
+        assert!(!rendered.contains(currency), "{currency} in {rendered}");
+    }
+    assert!(rendered.contains("4096") && rendered.contains('3'));
+}

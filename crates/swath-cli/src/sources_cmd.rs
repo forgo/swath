@@ -20,6 +20,8 @@
 use std::io::Write as _;
 
 use clap::{Args, Subcommand};
+use swath_core::catalog::Datetime;
+use swath_core::sources::{ConsentRefusal, Source, SourceEvent, consent_event, may_read};
 use swath_sources_stac::{FetchError, StacClient};
 
 use crate::config;
@@ -47,6 +49,22 @@ pub enum SourcesCommand {
         /// An `http(s)` URL whose host is on the allowlist.
         url: String,
     },
+    /// Prove what reading a source costs: one bounded read, reporting
+    /// the bytes and requests it actually made (#424). Never a money
+    /// figure — Swath does not know your rate card.
+    Prove {
+        /// The source being proved, as named in the config. Its
+        /// requester-pays consent is checked before anything is read.
+        id: String,
+        /// An `http(s)` URL whose host is on the allowlist.
+        url: String,
+    },
+    /// Record consent to be billed for reading a requester-pays source.
+    /// Once, explicitly, per source.
+    Consent {
+        /// The source consented to.
+        id: String,
+    },
 }
 
 /// What can go wrong running `swath sources`.
@@ -59,12 +77,61 @@ pub enum SourcesError {
     /// The fetch was refused, or failed.
     #[error(transparent)]
     Fetch(#[from] FetchError),
+    /// The source bills the reader and no consent is recorded. Nothing
+    /// was read.
+    #[error(transparent)]
+    Consent(#[from] ConsentRefusal),
+    /// The named source is not in the config.
+    #[error("no source `{id}` in this deployment's config")]
+    NoSuchSource {
+        /// The id asked for.
+        id: String,
+    },
     /// Federation is off and the caller asked for a fetch.
     #[error(
         "this deployment's egress allowlist is empty, so nothing is fetchable; \
          add hosts under `egress-allowlist` in the config to turn federation on"
     )]
     FederationOff,
+}
+
+/// The source named `id`, and the events this process has for it.
+///
+/// Config-declared sources are the only ones that exist across a
+/// restart, and their consent rides in the config too — so what this
+/// returns is what the file says, which is the whole truth available
+/// before the auth interlock lifts.
+fn find_source(
+    config: Option<&std::path::Path>,
+    id: &str,
+) -> Result<(Source, Vec<SourceEvent>), SourcesError> {
+    let sources = config::declared_sources(config)?;
+    let (source, consented_by) = sources
+        .into_iter()
+        .find(|(source, _)| source.id.as_str() == id)
+        .ok_or_else(|| SourcesError::NoSuchSource { id: id.to_owned() })?;
+    let events = consented_by
+        .map(|by| vec![consent_event(&source.id, &by, now())])
+        .unwrap_or_default();
+    Ok((source, events))
+}
+
+/// Who this deployment can say is acting: the OS user running the
+/// command. Not an authenticated identity — there is none yet
+/// (ADR 0031) — and labelled as what it is rather than as more.
+fn operator() -> String {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "unknown".to_owned())
+}
+
+/// Now, as the domain's instant type.
+fn now() -> Datetime {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    Datetime::from_unix_millis(millis)
+        .unwrap_or_else(|_| Datetime::new("1970-01-01T00:00:00Z").expect("the epoch"))
 }
 
 /// Runs the subcommand, owning its runtime as `serve` does.
@@ -101,6 +168,43 @@ async fn run_async(args: SourcesArgs) -> Result<(), SourcesError> {
                     secs = policy.timeout_secs,
                 );
             }
+            Ok(())
+        }
+        SourcesCommand::Consent { id } => {
+            let (source, _) = find_source(args.config.as_deref(), &id)?;
+            let by = operator();
+            let at = now();
+            let event = consent_event(&source.id, &by, at);
+            // Recorded where every other source fact is recorded. There
+            // is no persistence for it yet beyond the running process
+            // (ADR 0030's registry), so this prints what would be
+            // recorded and the operator puts it in the config — the
+            // honest state of a domain whose write path waits for auth.
+            tracing::info!(
+                "consent recorded for `{id}` by {by} at {at}: add \
+                 `requester-pays-consented-by = \"{by}\"` to the source in your config \
+                 to make it survive a restart",
+                at = event.at,
+            );
+            Ok(())
+        }
+        SourcesCommand::Prove { id, url } => {
+            let (source, events) = find_source(args.config.as_deref(), &id)?;
+            // Checked BEFORE the client exists, so a refused read is not
+            // a read that failed — it is one that never happened.
+            may_read(&source, &events)?;
+            if policy.is_empty() {
+                return Err(SourcesError::FederationOff);
+            }
+            let client = StacClient::new(policy)?;
+            let (_, cost) = client.fetch_measured(&url).await?;
+            // Bytes and requests, measured. No currency: see `FetchCost`.
+            tracing::info!(
+                "read `{url}`: {bytes} bytes over {requests} request(s) — \
+                 what that costs is between you and your provider",
+                bytes = cost.bytes,
+                requests = cost.requests,
+            );
             Ok(())
         }
         SourcesCommand::Fetch { url } => {
@@ -184,6 +288,97 @@ mod tests {
             command: SourcesCommand::Allowlist,
         })
         .expect("an empty allowlist is a working configuration");
+    }
+
+    /// A requester-pays source with no recorded consent is refused, and
+    /// **nothing is read**: the listener in this test counts accepts and
+    /// expects zero, so the refusal is a read that never happened rather
+    /// than one that failed (#424).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_requester_pays_read_without_consent_never_opens_a_socket() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let accepts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = std::sync::Arc::clone(&accepts);
+        tokio::spawn(async move {
+            while listener.accept().await.is_ok() {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+
+        let dir = TempDir::new("cli-consent");
+        let path = dir.path().join("swath.toml");
+        std::fs::write(
+            &path,
+            "store-root = \"/data\"\n\
+             catalog = \"postgres://x\"\n\
+             egress-allowlist = [\"127.0.0.1\"]\n\
+             \n\
+             [[sources]]\n\
+             id = \"billed\"\n\
+             watch-dir = \"/data/billed\"\n\
+             requester-pays = true\n",
+        )
+        .expect("write");
+
+        let error = super::run_async(SourcesArgs {
+            config: Some(path.clone()),
+            command: SourcesCommand::Prove {
+                id: "billed".to_owned(),
+                url: format!("http://127.0.0.1:{port}/catalog.json"),
+            },
+        })
+        .await
+        .expect_err("nobody agreed to be billed");
+        assert!(matches!(error, SourcesError::Consent(_)), "{error:?}");
+        assert_eq!(
+            accepts.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "a refused read is one that never happened"
+        );
+
+        // With consent recorded in the config, the same read proceeds —
+        // so the refusal above was the gate and not a broken command.
+        std::fs::write(
+            &path,
+            std::fs::read_to_string(&path).expect("read").replace(
+                "requester-pays = true\n",
+                "requester-pays = true\nrequester-pays-consented-by = \"operator\"\n",
+            ),
+        )
+        .expect("write");
+        let error = super::run_async(SourcesArgs {
+            config: Some(path),
+            command: SourcesCommand::Prove {
+                id: "billed".to_owned(),
+                url: format!("http://127.0.0.1:{port}/catalog.json"),
+            },
+        })
+        .await
+        .expect_err("the socket answers nothing parseable");
+        // It got past the gate: whatever failed, it was not consent.
+        assert!(!matches!(error, SourcesError::Consent(_)), "{error:?}");
+    }
+
+    /// Proving a source the config does not declare is a named refusal,
+    /// not a silent no-op.
+    #[tokio::test]
+    async fn proving_an_unknown_source_says_so() {
+        let error = super::run_async(SourcesArgs {
+            config: None,
+            command: SourcesCommand::Prove {
+                id: "nope".to_owned(),
+                url: "https://example.org/c.json".to_owned(),
+            },
+        })
+        .await
+        .expect_err("no config declares it");
+        assert!(
+            matches!(error, SourcesError::NoSuchSource { .. }),
+            "{error:?}"
+        );
     }
 
     /// The policy's caps are the domain's defaults — the subcommand does

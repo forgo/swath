@@ -47,8 +47,10 @@ const BUDGETS: [(&str, usize); 24] = [
     // 2026-09-05 (#423) for credentials by reference. The ratchet takes it
     // back down at the next consolidation; 2150 → 2450 on 2026-09-05
     // (#419) → 2450 for the egress allowlist and the `swath sources` flag
-    // blocks (one per subcommand, as the CLI check requires).
-    ("docs/CONFIG.md", 2450),
+    // blocks (one per subcommand, as the CLI check requires); 2450 → 2650
+    // on 2026-09-05, then 2725 (#424), for requester-pays and its two
+    // subcommands' flag blocks.
+    ("docs/CONFIG.md", 2725),
     ("docs/DEMO.md", 875),
     // Raised 1800 → 2000 on 2026-09-04 (#409) and 2000 → 2150 on the same
     // day (#410): the reference gained a section per new route, and one
@@ -56,7 +58,9 @@ const BUDGETS: [(&str, usize); 24] = [
     // stream's second event kind; 2200 → 2400 the same day (#417) for the
     // sources resource. The ratchet takes it back down at the next
     // consolidation.
-    ("docs/ENDPOINTS.md", 2400),
+    // 2400 → 2450 on 2026-09-05 (#424): the sources row gains
+    // requester-pays and its consent.
+    ("docs/ENDPOINTS.md", 2450),
     ("docs/ENGINEERING.md", 1000),
     ("docs/EXTENDING.md", 1475),
     ("docs/OPERATIONS.md", 975),
