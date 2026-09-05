@@ -42,6 +42,7 @@ prepare or carry the mechanics of a decision; the ADR is the ruling.
 | 0027 | 2026-09-03 | Artifacts push history, the camera replaces it (amends 0021 decision 3) | Accepted | Amends 0021 |
 | 0028 | 2026-09-03 | Composing inverts the slots; the map is never smaller than a preview (amends 0021 §1) | Accepted | Amends 0021 |
 | 0029 | 2026-09-04 | A granule carries every other STAC property, opaquely (amends 0023) | Accepted | Amends 0023 |
+| 0030 | 2026-09-04 | The sources domain: origins, credentials by reference, allowlisted egress | Accepted | — |
 
 Historical pointers: ADRs 0002, 0003 and 0005 each say they supersede a note in "CHARTER.md §8";
 the charter has since been rewritten and those notes no longer exist — the ADRs are the record.

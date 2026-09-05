@@ -50,6 +50,7 @@ pub mod planner;
 pub mod raster;
 pub mod reproject;
 pub mod source;
+pub mod sources;
 pub mod tile;
 pub mod trace;
 pub mod udf;
