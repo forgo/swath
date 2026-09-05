@@ -124,6 +124,12 @@ export const FOOTPRINT_LAYER_ID = "swath-granule-footprints";
 /** The search scope's outline (#412): the box actually sent to the
  * server, drawn so a reduced shape is seen and not only read. */
 export const SCOPE_SOURCE_ID = "swath-search-scope";
+/** The hovered result's outline (#413) — its own source so hovering does
+ * not repaint every footprint. */
+export const HOVER_SOURCE_ID = "swath-granule-hover";
+/** The density surface (#413): where the results are when there are too
+ * many outlines to read. */
+export const DENSITY_SOURCE_ID = "swath-result-density";
 
 /** The slice of a MapLibre `Map` the footprint paint uses. */
 export interface FootprintMapLike {
