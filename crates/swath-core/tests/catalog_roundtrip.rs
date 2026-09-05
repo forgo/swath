@@ -171,6 +171,32 @@ fn granule_asset() -> impl Strategy<Value = GranuleAsset> {
         })
 }
 
+/// Foreign STAC properties: the keys Swath neither owns nor interprets
+/// (#407). Deliberately includes namespaced keys from other extensions and
+/// values of every JSON shape, because the passthrough must be opaque —
+/// preserving a number but flattening an object would still be data loss.
+fn foreign_properties() -> impl Strategy<Value = BTreeMap<String, serde_json::Value>> {
+    let key = proptest::sample::select(vec![
+        "eo:cloud_cover",
+        "platform",
+        "instrument",
+        "proj:epsg",
+        "sat:orbit_state",
+        "view:sun_elevation",
+        "custom",
+    ])
+    .prop_map(str::to_owned);
+    let value = proptest::prop_oneof![
+        Just(serde_json::Value::Null),
+        proptest::bool::ANY.prop_map(serde_json::Value::from),
+        (0i64..1_000).prop_map(serde_json::Value::from),
+        "[a-z]{1,8}".prop_map(serde_json::Value::from),
+        proptest::collection::vec(0i64..100, 0..3).prop_map(|v| serde_json::json!(v)),
+        (0i64..10, "[a-z]{1,4}").prop_map(|(n, s)| serde_json::json!({ "n": n, "s": s })),
+    ];
+    proptest::collection::btree_map(key, value, 0..5)
+}
+
 fn granule() -> impl Strategy<Value = Granule> {
     (
         identifier(),
@@ -179,15 +205,17 @@ fn granule() -> impl Strategy<Value = Granule> {
         datetime(),
         proptest::collection::btree_map(band_name(), granule_asset(), 0..6),
         proptest::option::of(datetime()),
+        foreign_properties(),
     )
         .prop_map(
-            |(id, dataset, bbox, datetime, assets, ingested_at)| Granule {
+            |(id, dataset, bbox, datetime, assets, ingested_at, properties)| Granule {
                 id: GranuleId::new(id),
                 dataset: DatasetId::new(dataset),
                 bbox,
                 datetime,
                 assets: BTreeMap::from_iter(assets),
                 ingested_at,
+                properties,
             },
         )
 }
@@ -310,6 +338,7 @@ fn hls_granule() -> Granule {
         // Pinned Some: the persisted `swath:ingested_at` property shape is
         // part of the contractual document (issue #31).
         ingested_at: Some(Datetime::new("2024-06-06T18:00:00Z").unwrap()),
+        properties: BTreeMap::new(),
     }
 }
 
@@ -339,4 +368,91 @@ fn colormap_spellings_are_contractual() {
         let back: Colormap = serde_json::from_value(json).expect("deserializes");
         assert_eq!(back, map);
     }
+}
+
+/// The passthrough is opaque, and never duplicates a projected fact (#407).
+#[test]
+fn foreign_properties_survive_and_owned_ones_do_not_duplicate() {
+    let doc = serde_json::json!({
+        "type": "Feature",
+        "stac_version": "1.1.0",
+        "id": "g1",
+        "collection": "c1",
+        "bbox": [-1.0, -1.0, 1.0, 1.0],
+        "properties": {
+            "datetime": "2024-06-06T17:54:00Z",
+            "swath:ingested_at": "2024-06-06T18:00:00Z",
+            "eo:cloud_cover": 12.5,
+            "platform": "sentinel-2a",
+            "proj:epsg": 32613,
+            "sat:orbit_state": "descending",
+            "nested": { "a": [1, 2, 3] },
+        },
+        "assets": { "b04": { "href": "b04.tif" } },
+    });
+    let granule = granule_from_stac_item(&doc).expect("a valid item");
+
+    // Foreign keys are carried verbatim, whatever their JSON shape — a
+    // passthrough that preserved numbers but flattened objects would still
+    // be data loss.
+    assert_eq!(
+        granule.properties["eo:cloud_cover"],
+        serde_json::json!(12.5)
+    );
+    assert_eq!(
+        granule.properties["platform"],
+        serde_json::json!("sentinel-2a")
+    );
+    assert_eq!(
+        granule.properties["nested"],
+        serde_json::json!({ "a": [1, 2, 3] })
+    );
+
+    // The keys Swath projects onto its own fields are NOT also carried:
+    // one authority per fact, so a round-trip cannot resurrect a stale copy.
+    assert!(!granule.properties.contains_key("datetime"));
+    assert!(!granule.properties.contains_key("swath:ingested_at"));
+    assert_eq!(granule.datetime.as_str(), "2024-06-06T17:54:00Z");
+    assert_eq!(
+        granule
+            .ingested_at
+            .as_ref()
+            .map(swath_core::catalog::Datetime::as_str),
+        Some("2024-06-06T18:00:00Z")
+    );
+
+    // And they come back out, once each.
+    let out = granule_to_stac_item(&granule);
+    let properties = out["properties"].as_object().expect("properties object");
+    assert_eq!(properties["eo:cloud_cover"], serde_json::json!(12.5));
+    assert_eq!(
+        properties["datetime"],
+        serde_json::json!("2024-06-06T17:54:00Z")
+    );
+    assert_eq!(
+        properties["swath:ingested_at"],
+        serde_json::json!("2024-06-06T18:00:00Z")
+    );
+}
+
+/// An item that carries nothing foreign gets an empty map, not a
+/// placeholder — and its document is byte-identical to the pre-#407 one.
+#[test]
+fn an_item_with_no_foreign_properties_is_unchanged() {
+    let granule = granule_from_stac_item(&serde_json::json!({
+        "type": "Feature",
+        "stac_version": "1.1.0",
+        "id": "g1",
+        "collection": "c1",
+        "bbox": [-1.0, -1.0, 1.0, 1.0],
+        "properties": { "datetime": "2024-06-06T17:54:00Z" },
+        "assets": {},
+    }))
+    .expect("a valid item");
+    assert!(granule.properties.is_empty());
+    let out = granule_to_stac_item(&granule);
+    assert_eq!(
+        out["properties"],
+        serde_json::json!({ "datetime": "2024-06-06T17:54:00Z" })
+    );
 }

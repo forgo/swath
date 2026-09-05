@@ -7,6 +7,7 @@
 //! each; the asset names are the bare fixture file names the local store
 //! root resolves (`tests/fixtures/README.md`).
 
+use std::collections::BTreeMap;
 use swath_core::catalog::{
     Bbox, Colormap, Dataset, DatasetId, Datetime, Extent, Granule, GranuleAsset, GranuleId, Layer,
     PlanKind, Resampling, Rescale, TimeRange,
@@ -120,6 +121,7 @@ pub fn hls_catalog_granule() -> Granule {
         ]
         .into(),
         ingested_at: Some(datetime("2024-06-06T18:00:00Z")),
+        properties: BTreeMap::new(),
     }
 }
 
@@ -161,6 +163,7 @@ pub fn fire_granule(dataset: &str, tile: &str, day: &str, at: &str) -> Granule {
         ]
         .into(),
         ingested_at: Some(datetime("2024-11-01T00:00:00Z")),
+        properties: BTreeMap::new(),
     }
 }
 

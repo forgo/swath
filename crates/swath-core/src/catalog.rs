@@ -586,6 +586,20 @@ pub struct Granule {
     /// `properties."swath:ingested_at"` on the STAC Item. `None` for
     /// granules registered outside the event path.
     pub ingested_at: Option<Datetime>,
+    /// Every other STAC property, verbatim and OPAQUE (ADR 0026 amends
+    /// ADR 0023).
+    ///
+    /// `eo:cloud_cover`, `platform`, `instrument`, `proj:epsg` — Swath
+    /// preserves and serves these and interprets none of them. Before this
+    /// existed they were dropped silently on the way in, so the STAC
+    /// round-trip identity held only for documents Swath itself wrote, and
+    /// nothing could be filtered on what was never kept.
+    ///
+    /// The keys Swath owns or projects onto its own fields — `datetime`,
+    /// `swath:*` — are NOT duplicated here: one authority per fact.
+    /// Ordered so serialization is deterministic and snapshots are stable.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub properties: BTreeMap<String, serde_json::Value>,
 }
 
 /// The granule filter [`Catalog::find_granules`] takes: optional bbox

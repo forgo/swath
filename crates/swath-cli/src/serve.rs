@@ -881,6 +881,7 @@ mod tests {
                 datetime: Datetime::new("2024-06-06T17:54:00Z").expect("valid datetime"),
                 assets: BTreeMap::new(),
                 ingested_at: None,
+                properties: BTreeMap::new(),
             },
             arrived_at: Datetime::new("2026-08-08T12:00:00Z").expect("valid datetime"),
         }

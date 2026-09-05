@@ -129,6 +129,7 @@ fn granule(dataset: &str, id: &str, bbox: Bbox, datetime: &str) -> Granule {
         // Some on purpose: every live round-trip assertion then also covers
         // the ingest-timestamp property (#31).
         ingested_at: Some(Datetime::new("2024-06-06T18:00:00Z").unwrap()),
+        properties: BTreeMap::new(),
     }
 }
 

@@ -418,5 +418,6 @@ fn read_manifest(path: &Path) -> Result<Granule, EventError> {
             .map(|(band, uri)| (band, GranuleAsset::raster(uri)))
             .collect(),
         ingested_at: None,
+        properties: BTreeMap::new(),
     })
 }

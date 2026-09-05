@@ -381,6 +381,7 @@ where
         datetime,
         assets,
         ingested_at: None,
+        properties: BTreeMap::new(),
     })
 }
 

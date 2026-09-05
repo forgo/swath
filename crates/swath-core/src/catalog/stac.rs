@@ -182,6 +182,12 @@ pub fn granule_to_stac_item(granule: &Granule) -> Value {
         })
         .collect();
     let mut properties = Map::new();
+    // The passthrough goes out first, so a projected key can never be
+    // shadowed by a stale carried copy — `is_projected_property` keeps them
+    // out on the way in, and writing ours last makes that belt-and-braces.
+    for (key, value) in &granule.properties {
+        properties.insert(key.clone(), value.clone());
+    }
     properties.insert("datetime".to_owned(), json!(granule.datetime.as_str()));
     if let Some(ingested_at) = &granule.ingested_at {
         // Granule-level swath-owned metadata rides under a namespaced
@@ -297,6 +303,16 @@ pub fn granule_from_stac_item(doc: &Value) -> Result<Granule, StacError> {
         );
     }
 
+    // Everything else the item carried, verbatim (#407). The keys Swath
+    // owns or projects onto its own fields are excluded so nothing is
+    // stored twice — one authority per fact — and so a round-trip cannot
+    // resurrect a stale copy of a field the domain has since changed.
+    let carried: std::collections::BTreeMap<String, Value> = properties
+        .iter()
+        .filter(|(key, _)| !is_projected_property(key))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+
     Ok(Granule {
         id: GranuleId::new(string(obj, "id")?),
         dataset: DatasetId::new(string(obj, "collection")?),
@@ -304,7 +320,19 @@ pub fn granule_from_stac_item(doc: &Value) -> Result<Granule, StacError> {
         datetime,
         assets,
         ingested_at,
+        properties: carried,
     })
+}
+
+/// Whether a STAC property is one Swath projects onto a domain field, and
+/// therefore must not also ride in the opaque passthrough (#407).
+///
+/// `datetime` becomes `Granule::datetime`; the `swath:` namespace is ours
+/// (design doc §3) and every key in it is either projected today or
+/// reserved for projection. Keeping a second copy in `properties` would
+/// give two answers to one question the moment either changed.
+fn is_projected_property(key: &str) -> bool {
+    key == "datetime" || key.starts_with("swath:")
 }
 
 // --- small strict-access helpers; every failure names the JSON path ---
@@ -535,6 +563,7 @@ mod tests {
                 ),
             ]),
             ingested_at: Some(Datetime::new("2024-06-06T18:00:00Z").unwrap()),
+            properties: BTreeMap::new(),
         }
     }
 
