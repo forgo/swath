@@ -69,7 +69,11 @@ const BUDGETS: [(&str, usize); 24] = [
     ("docs/RECIPES.md", 545),
     ("docs/RELEASING.md", 600),
     ("docs/REQUIREMENTS.md", 1400),
-    ("docs/ROADMAP.md", 1850),
+    // Raised 1850 → 2100 on 2026-09-05: §1 gained the five milestones
+    // shipped since M13 (M12, M14–M17). §3 shed four candidates that had
+    // shipped, so the net growth is the shipped record — which is the one
+    // part of this doc that only ever grows.
+    ("docs/ROADMAP.md", 2100),
     // New on 2026-08-29 (#347): the Cargo.toml dependency essays, in one place.
     // Raised 1100 → 1175 on 2026-09-05 (#419): reqwest becomes a direct
     // dependency and a named dependency gets a paragraph.
