@@ -159,6 +159,7 @@ mod tests {
             datetime: Datetime::new(datetime).unwrap(),
             assets: std::collections::BTreeMap::new(),
             ingested_at: None,
+            properties: std::collections::BTreeMap::new(),
         }
     }
 

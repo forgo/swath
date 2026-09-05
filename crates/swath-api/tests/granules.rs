@@ -9,6 +9,7 @@
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::Router;
@@ -46,6 +47,7 @@ fn granule(id: &str, bbox: [f64; 4], datetime: &str) -> Granule {
         ]
         .into(),
         ingested_at: None,
+        properties: BTreeMap::new(),
     }
 }
 

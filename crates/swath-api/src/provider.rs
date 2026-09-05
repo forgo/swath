@@ -622,6 +622,7 @@ mod tests {
                 ),
             ]),
             ingested_at: ingested_at.map(|t| Datetime::new(t).unwrap()),
+            properties: BTreeMap::new(),
         }
     }
 

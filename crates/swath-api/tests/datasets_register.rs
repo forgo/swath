@@ -11,6 +11,7 @@
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::Router;
@@ -260,6 +261,7 @@ async fn inline_stac_item_registers_and_collection_must_match() {
         )]
         .into(),
         ingested_at: None,
+        properties: BTreeMap::new(),
     };
     let item = swath_core::catalog::stac::granule_to_stac_item(&granule);
     let response = common::request_on(
