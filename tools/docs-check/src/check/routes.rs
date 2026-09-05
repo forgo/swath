@@ -22,11 +22,12 @@ pub(super) const DOC: &str = "docs/ENDPOINTS.md";
 /// The router files and the "Mounted" value their routes carry in the
 /// doc's table — exactly the files `docs/ENDPOINTS.md` names as where
 /// "the route tables live in code".
-const ROUTERS: [(&str, &str); 4] = [
+const ROUTERS: [(&str, &str); 5] = [
     ("crates/swath-api/src/routes.rs", "always"),
     ("crates/swath-api/src/granules.rs", "catalog mode"),
     ("crates/swath-api/src/openeo/mod.rs", "catalog mode"),
     ("crates/swath-api/src/datasets.rs", "catalog mode"),
+    ("crates/swath-api/src/sources.rs", "catalog mode"),
 ];
 
 /// axum's routing method helpers — the identifiers that name HTTP

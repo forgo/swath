@@ -345,6 +345,52 @@ pub trait SourceStore: Send + Sync {
     ) -> impl core::future::Future<Output = Result<Vec<SourceEvent>, SourceStoreError>> + Send;
 }
 
+/// A shared store is a store: the serving binary keeps one registry
+/// behind an `Arc` and hands the same handle to the ingest tasks and to
+/// the API, rather than wrapping it twice.
+impl<S: SourceStore + ?Sized> SourceStore for std::sync::Arc<S> {
+    fn upsert_source(
+        &self,
+        source: &Source,
+    ) -> impl core::future::Future<Output = Result<(), SourceStoreError>> + Send {
+        (**self).upsert_source(source)
+    }
+
+    fn get_source(
+        &self,
+        id: &SourceId,
+    ) -> impl core::future::Future<Output = Result<Option<Source>, SourceStoreError>> + Send {
+        (**self).get_source(id)
+    }
+
+    fn list_sources(
+        &self,
+    ) -> impl core::future::Future<Output = Result<Vec<Source>, SourceStoreError>> + Send {
+        (**self).list_sources()
+    }
+
+    fn delete_source(
+        &self,
+        id: &SourceId,
+    ) -> impl core::future::Future<Output = Result<(), SourceStoreError>> + Send {
+        (**self).delete_source(id)
+    }
+
+    fn record_event(
+        &self,
+        event: &SourceEvent,
+    ) -> impl core::future::Future<Output = Result<(), SourceStoreError>> + Send {
+        (**self).record_event(event)
+    }
+
+    fn events(
+        &self,
+        id: &SourceId,
+    ) -> impl core::future::Future<Output = Result<Vec<SourceEvent>, SourceStoreError>> + Send {
+        (**self).events(id)
+    }
+}
+
 /// The statuses of `sources`, keyed by id — one derivation per source, so
 /// a caller cannot accidentally read one source's events against
 /// another's identity.

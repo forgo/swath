@@ -50,9 +50,10 @@ const BUDGETS: [(&str, usize); 24] = [
     // Raised 1800 → 2000 on 2026-09-04 (#409) and 2000 → 2150 on the same
     // day (#410): the reference gained a section per new route, and one
     // route is one section; 2150 → 2200 the same day (#416) for the trace
-    // stream's second event kind. The ratchet takes it back down at the
-    // next consolidation.
-    ("docs/ENDPOINTS.md", 2200),
+    // stream's second event kind; 2200 → 2400 the same day (#417) for the
+    // sources resource. The ratchet takes it back down at the next
+    // consolidation.
+    ("docs/ENDPOINTS.md", 2400),
     ("docs/ENGINEERING.md", 1000),
     ("docs/EXTENDING.md", 1475),
     ("docs/OPERATIONS.md", 975),
