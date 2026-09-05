@@ -12,7 +12,7 @@ const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-function stub(options: { granules?: unknown; result?: () => Response } = {}) {
+function stub(options: { granules?: unknown; facets?: unknown; result?: () => Response } = {}) {
   const requests: string[] = [];
   const impl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = String(input);
@@ -39,6 +39,9 @@ function stub(options: { granules?: unknown; result?: () => Response } = {}) {
           ],
         },
       );
+    }
+    if (url.includes("/facets")) {
+      return options.facets === undefined ? json({ total: 0, facets: [] }) : json(options.facets);
     }
     if (url.includes("/datasets/empty-set/granules")) {
       return json({ granules: [] });
@@ -161,4 +164,61 @@ test("zoom on activation; empty guidance; count + sort + filters", async () => {
   expect(catalog.shadowRoot?.querySelector('[part="empty"]')?.textContent).toBe(
     GRANULES_EMPTY_GUIDANCE,
   );
+});
+
+test("facets are the collection's own: a key is offered only because a granule carries it", async () => {
+  const s = stub({
+    facets: {
+      total: 2,
+      facets: [
+        { key: "eo:cloud_cover", kind: "number", coverage: 2, min: 0, max: 42 },
+        {
+          key: "platform",
+          kind: "string",
+          coverage: 1,
+          values: [{ value: "sentinel-2a", count: 1 }],
+        },
+      ],
+    },
+  });
+  const catalog = await mount(s);
+  catalog.active = true;
+  await catalog.updateComplete;
+  await settle();
+  await catalog.select("hls-s30");
+  await catalog.updateComplete;
+
+  const block = catalog.shadowRoot?.querySelector('[part="facets"]');
+  expect(block?.textContent).toContain("eo:cloud_cover");
+  expect(block?.textContent).toContain("0 – 42");
+  // Coverage below the total keeps "absent" distinguishable from "zero".
+  expect(block?.textContent).toContain("on 1 of 2");
+  expect(block?.textContent).toContain("on every granule");
+});
+
+test("a collection whose items carry nothing renders no facet block at all", async () => {
+  const s = stub();
+  const catalog = await mount(s);
+  catalog.active = true;
+  await catalog.updateComplete;
+  await settle();
+  await catalog.select("hls-s30");
+  await catalog.updateComplete;
+  expect(catalog.shadowRoot?.querySelector('[part="facets"]')).toBeNull();
+});
+
+test("a facets failure costs the facets, never the granule list", async () => {
+  const s = stub({ facets: null });
+  const impl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+    String(input).includes("/facets")
+      ? new Response("nope", { status: 500 })
+      : s.impl(input, init)) as typeof fetch;
+  const catalog = await mount({ impl, requests: s.requests });
+  catalog.active = true;
+  await catalog.updateComplete;
+  await settle();
+  await catalog.select("hls-s30");
+  await catalog.updateComplete;
+  expect(cards(catalog)).toHaveLength(2);
+  expect(catalog.shadowRoot?.querySelector('[part="facets"]')).toBeNull();
 });

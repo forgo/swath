@@ -44,7 +44,10 @@ const BUDGETS: [(&str, usize); 24] = [
     ("docs/COMPARISON.md", 1700),
     ("docs/CONFIG.md", 1775),
     ("docs/DEMO.md", 875),
-    ("docs/ENDPOINTS.md", 1800),
+    // Raised 1800 → 2000 on 2026-09-04 (#409): the reference gained a
+    // section for the facets route, and one route is one section. The
+    // ratchet takes it back down at the next consolidation.
+    ("docs/ENDPOINTS.md", 2000),
     ("docs/ENGINEERING.md", 1000),
     ("docs/EXTENDING.md", 1475),
     ("docs/OPERATIONS.md", 975),
