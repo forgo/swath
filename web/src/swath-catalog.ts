@@ -26,6 +26,13 @@ import {
 } from "./catalog-model.js";
 import type { FacetSummary } from "./facets-model.js";
 import { coverageNote, facetSummary, parseFacets } from "./facets-model.js";
+import {
+  parseSpatialInput,
+  REDUCED_NOTE,
+  type ScopeMode,
+  type SpatialScope,
+  scopeTag,
+} from "./spatial-scope.js";
 import type { LonLatBounds } from "./swath-map.js";
 import { SwathTimeline } from "./swath-timeline.js";
 import { buildTimeline, EMPTY_TIMELINE, type Timeline } from "./timeline-model.js";
@@ -104,6 +111,21 @@ export class SwathCatalog extends SwathElement {
         color: var(--swath-color-fg-muted);
       }
       [part="facet-coverage"] { color: var(--swath-color-fg-muted); }
+      [part="scope"] {
+        display: flex;
+        align-items: baseline;
+        gap: var(--swath-space-2);
+        font-size: var(--swath-text-xs);
+      }
+      [part="scope-tag"] {
+        font-family: var(--swath-font-mono);
+        padding-inline: var(--swath-space-1);
+        border: var(--swath-border-hairline);
+        border-radius: var(--swath-radius-sm);
+        color: var(--swath-color-fg-muted);
+      }
+      [part="scope-note"] { color: var(--swath-color-fg-muted); }
+      [part="scope-error"] { color: var(--swath-color-danger); }
     `,
   ];
   static override properties = {
@@ -130,6 +152,11 @@ export class SwathCatalog extends SwathElement {
   #sort: GranuleSort = "newest";
   #filter: GranuleFilter = {};
   #inView = false;
+  /** The pasted spatial filter (#412), or nothing. Independent of the
+   * viewport toggle: whichever is on names itself in the tag. */
+  #scope: SpatialScope | undefined;
+  #scopeText = "";
+  #scopeError: string | undefined;
   #viewBounds: LonLatBounds | undefined;
   #cards = new Map<string, SwathGranuleCard>();
   #inFlight = 0;
@@ -309,6 +336,96 @@ export class SwathCatalog extends SwathElement {
       return undefined;
     }
     return `${from ?? ".."}/${to === undefined ? ".." : `${to}T23:59:59Z`}`;
+  }
+
+  /** The bounds the list is filtered by: the pasted box when there is
+   * one, the map's view when the toggle is on, nothing otherwise. */
+  #scopeBounds(): LonLatBounds | undefined {
+    if (this.#scope !== undefined) {
+      const [west, south, east, north] = this.#scope.bbox;
+      return { west, south, east, north };
+    }
+    return this.#inView ? this.#viewBounds : undefined;
+  }
+
+  /** The search area. `GranuleQuery` is bbox + datetime, so the label
+   * says box, the placeholder shows one, and nothing here offers a shape
+   * search the port cannot do. */
+  #areaField(): SwathField {
+    const field = el("swath-field", {
+      type: "text",
+      name: "area",
+      label: "Area",
+      placeholder: "west, south, east, north — or paste GeoJSON",
+      value: this.#scopeText,
+    });
+    field.addEventListener("swath-change", (event) => {
+      event.stopPropagation();
+      this.#applyScopeText(String(event.detail.value));
+    });
+    return field;
+  }
+
+  /** The pasted text as a scope. An unusable paste is an error the field
+   * shows, never a filter that quietly does nothing. */
+  #applyScopeText(text: string): void {
+    this.#scopeText = text;
+    if (text.trim() === "") {
+      this.#scope = undefined;
+      this.#scopeError = undefined;
+    } else {
+      const parsed = parseSpatialInput(text);
+      if (parsed.ok) {
+        this.#scope = { mode: "bbox", bbox: parsed.bbox, reduced: parsed.reduced };
+        this.#scopeError = undefined;
+      } else {
+        this.#scope = undefined;
+        this.#scopeError = parsed.reason;
+      }
+    }
+    this.emit("swath-scope", {
+      mode: this.#scopeMode() ?? null,
+      bbox: this.#scope === undefined ? null : [...this.#scope.bbox],
+    });
+    this.requestUpdate();
+  }
+
+  /** Which spatial filter is in force, or nothing when none is. A pasted
+   * box wins over the viewport: it is the more specific thing the user
+   * asked for. */
+  #scopeMode(): ScopeMode | undefined {
+    if (this.#scope !== undefined) {
+      return "bbox";
+    }
+    return this.#inView ? "viewport" : undefined;
+  }
+
+  /** The tag, and the reduction note when there is one. Always visible
+   * while a spatial filter is active — never inferred from an icon. */
+  #scopeLine(): HTMLElement | undefined {
+    const mode = this.#scopeMode();
+    if (mode === undefined && this.#scopeError === undefined) {
+      return undefined;
+    }
+    const parts: (HTMLElement | string)[] = [];
+    if (mode !== undefined) {
+      parts.push(el("span", { part: "scope-tag" }, scopeTag(mode)));
+      parts.push(
+        el(
+          "span",
+          { part: "scope-note" },
+          this.#scope?.reduced === true
+            ? REDUCED_NOTE
+            : mode === "viewport"
+              ? "Searching the box the map is showing."
+              : "Searching the box you gave.",
+        ),
+      );
+    }
+    if (this.#scopeError !== undefined) {
+      parts.push(el("span", { part: "scope-error", role: "alert" }, this.#scopeError));
+    }
+    return el("p", { part: "scope" }, ...parts);
   }
 
   /** The two bands, plus the control that narrows the dates. Nothing
@@ -492,6 +609,10 @@ export class SwathCatalog extends SwathElement {
     inView.addEventListener("swath-change", (event) => {
       event.stopPropagation();
       this.#inView = event.detail.value === true;
+      this.emit("swath-scope", {
+        mode: this.#scopeMode() ?? null,
+        bbox: this.#scope === undefined ? null : [...this.#scope.bbox],
+      });
       this.requestUpdate();
     });
     const filters = el(
@@ -500,12 +621,14 @@ export class SwathCatalog extends SwathElement {
       datasetField,
       el("div", { part: "dates" }, from, to),
       inView,
+      this.#areaField(),
+      ...(this.#scopeLine() === undefined ? [] : [this.#scopeLine() as HTMLElement]),
     );
 
     const visible = sortGranules(
       filterGranules(this.#granules, {
         ...this.#filter,
-        view: this.#inView ? this.#viewBounds : undefined,
+        view: this.#scopeBounds(),
       }),
       this.#sort,
     );

@@ -217,3 +217,54 @@ test("the timeline's bands come from the counts endpoint, and a drag becomes a s
   await page.goBack();
   await expect.poll(() => new URL(page.url()).searchParams.get("from")).toBeNull();
 });
+
+// --- The scope tag (#412) ---
+
+const areaField = (page: Page) => page.locator('swath-catalog swath-field[name="area"] input');
+const scopeLine = (page: Page) => page.locator('swath-catalog [part="scope"]');
+
+test("the search field states its scope, and a pasted shape is reduced to its box and says so", async ({
+  page,
+}) => {
+  await page.goto(demoUrl({ view: "data" }));
+  await waitForFittedView(page);
+  await datasetSelect(page).selectOption("hls-s30");
+
+  // No spatial filter, no tag — the tag is never a decoration.
+  await expect(scopeLine(page)).toHaveCount(0);
+
+  await areaField(page).fill("-106, 39, -105, 40");
+  await areaField(page).blur();
+  await expect(scopeLine(page)).toContainText("bbox");
+  await expect(scopeLine(page)).toContainText("Searching the box you gave.");
+
+  // A pasted polygon: the tag stays `bbox` — the port has no intersects —
+  // and the copy says which box is being used.
+  await areaField(page).fill(
+    JSON.stringify({
+      type: "Polygon",
+      coordinates: [
+        [
+          [-106, 39],
+          [-105, 39.5],
+          [-105.5, 40],
+          [-106, 39],
+        ],
+      ],
+    }),
+  );
+  await areaField(page).blur();
+  await expect(scopeLine(page)).toContainText("Using the bounding box of the shape you pasted.");
+
+  // And the derived box is on the map, so the reduction is seen.
+  await expect
+    .poll(async () =>
+      page.evaluate((id) => {
+        const map = document.querySelector("swath-map") as {
+          map?: { getLayer(i: string): unknown };
+        };
+        return map.map?.getLayer(id) !== undefined;
+      }, "swath-search-scope"),
+    )
+    .toBe(true);
+});

@@ -71,6 +71,10 @@ export interface SwathEventMap {
   "swath-mode-change": { mode: string };
   /** A palette command was chosen (`<swath-command-palette>`, #292). */
   "swath-command": { id: string };
+  /** The search field's spatial scope changed (#412): the mode tag the
+   * field is showing, and the box actually sent to the server. Both
+   * `null` means no spatial filter. */
+  "swath-scope": { mode: "viewport" | "bbox" | null; bbox: number[] | null };
   /** The timeline was dragged to narrow the dates (#411); `null` on
    * either side means "no bound", which is how a cleared drag reads. */
   "swath-dates": { from: string | null; to: string | null };

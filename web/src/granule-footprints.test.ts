@@ -16,6 +16,7 @@ import {
   type GranuleBbox,
   GranuleFootprints,
   parseBbox,
+  SCOPE_SOURCE_ID,
   unionBbox,
 } from "./granule-footprints.js";
 
@@ -238,4 +239,25 @@ test("frameBounds: several granules at one instant are one footprint", () => {
   ];
   // A pass can cover an area with more than one granule; fit shows all of it.
   expect(frameBounds(frames, footprints, frames[0] as string)).toEqual([0, 0, 3, 3]);
+});
+
+test("a second painter owns its own source and layer, so the scope box does not fight the footprints (#412)", () => {
+  const map = new FakeMap();
+  const footprints = new GranuleFootprints(map);
+  const scope = new GranuleFootprints(map, SCOPE_SOURCE_ID, true);
+  footprints.set([{ id: "g1", bbox: [0, 0, 1, 1] }]);
+  scope.set([{ id: "scope", bbox: [-10, -10, 10, 10] }]);
+
+  expect([...map.sources.keys()].sort()).toEqual([FOOTPRINT_SOURCE_ID, SCOPE_SOURCE_ID].sort());
+  expect(footprints.collection.features).toHaveLength(1);
+  expect(scope.collection.features[0]?.geometry.coordinates[0]?.[0]).toEqual([-10, -10]);
+  // The derived box is dashed: a box the user did not draw is not drawn
+  // like one.
+  const layer = map.layers.get(SCOPE_SOURCE_ID) as { paint?: Record<string, unknown> };
+  expect(layer?.paint?.["line-dasharray"]).toEqual([2, 2]);
+  expect(
+    (map.layers.get(FOOTPRINT_LAYER_ID) as { paint?: Record<string, unknown> })?.paint?.[
+      "line-dasharray"
+    ],
+  ).toBeUndefined();
 });

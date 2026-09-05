@@ -5,6 +5,7 @@ import { afterEach, beforeAll, expect, test } from "vitest";
 import { SwathApi } from "./api.js";
 import { GRANULES_EMPTY_GUIDANCE } from "./catalog-model.js";
 import { clearThumbnailCache, defineSwathCatalog, type SwathCatalog } from "./swath-catalog.js";
+import { createSwathEvent } from "./ui/events.js";
 
 const SERVER = "https://swath.test";
 const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -288,4 +289,95 @@ test("a collection with no counts renders no timeline at all", async () => {
   await catalog.select("hls-s30");
   await catalog.updateComplete;
   expect(catalog.shadowRoot?.querySelector("swath-timeline")).toBeNull();
+});
+
+const AREA = (catalog: SwathCatalog) =>
+  catalog.shadowRoot?.querySelector<HTMLElement & { value: string }>('swath-field[name="area"]') ??
+  undefined;
+
+const scopeLine = (catalog: SwathCatalog) =>
+  catalog.shadowRoot?.querySelector('[part="scope"]')?.textContent ?? "";
+
+async function typeArea(catalog: SwathCatalog, text: string): Promise<void> {
+  AREA(catalog)?.dispatchEvent(createSwathEvent("swath-change", { name: "area", value: text }));
+  await catalog.updateComplete;
+}
+
+test("no spatial filter, no tag — and the viewport toggle names itself when it is the filter", async () => {
+  const s = stub();
+  const catalog = await mount(s);
+  catalog.active = true;
+  await catalog.updateComplete;
+  await settle();
+  expect(catalog.shadowRoot?.querySelector('[part="scope"]')).toBeNull();
+
+  const toggle = catalog.shadowRoot?.querySelector('swath-toggle[name="in-view"]');
+  toggle?.dispatchEvent(createSwathEvent("swath-change", { name: "in-view", value: true }));
+  await catalog.updateComplete;
+  expect(scopeLine(catalog)).toContain("viewport");
+});
+
+test("a pasted box is used as given; a pasted shape is reduced and says so", async () => {
+  const s = stub();
+  const catalog = await mount(s);
+  catalog.active = true;
+  await catalog.updateComplete;
+  await settle();
+
+  const scopes: { mode: string | null; bbox: number[] | null }[] = [];
+  catalog.addEventListener("swath-scope", (event) => scopes.push(event.detail));
+
+  await typeArea(catalog, "-106, 39, -105, 40");
+  expect(scopeLine(catalog)).toContain("bbox");
+  expect(scopeLine(catalog)).toContain("Searching the box you gave.");
+  expect(scopes.at(-1)).toEqual({ mode: "bbox", bbox: [-106, 39, -105, 40] });
+
+  await typeArea(
+    catalog,
+    JSON.stringify({
+      type: "Polygon",
+      coordinates: [
+        [
+          [-106, 39],
+          [-105, 39.5],
+          [-105.5, 40],
+          [-106, 39],
+        ],
+      ],
+    }),
+  );
+  expect(scopeLine(catalog)).toContain("Using the bounding box of the shape you pasted.");
+  // The box the server actually gets is the envelope — announced, so the
+  // map can draw it.
+  expect(scopes.at(-1)).toEqual({ mode: "bbox", bbox: [-106, 39, -105, 40] });
+});
+
+test("an unusable paste is an error, never a filter that quietly does nothing", async () => {
+  const s = stub();
+  const catalog = await mount(s);
+  catalog.active = true;
+  await catalog.updateComplete;
+  await settle();
+
+  const scopes: { bbox: number[] | null }[] = [];
+  catalog.addEventListener("swath-scope", (event) => scopes.push(event.detail));
+  await typeArea(catalog, "denver");
+  expect(catalog.shadowRoot?.querySelector('[part="scope-error"]')?.textContent).toContain(
+    "west, south, east, north",
+  );
+  expect(scopes.at(-1)?.bbox).toBeNull();
+  // And no tag, because no spatial filter is in force.
+  expect(catalog.shadowRoot?.querySelector('[part="scope-tag"]')).toBeNull();
+});
+
+test("clearing the area drops the filter and the tag with it", async () => {
+  const s = stub();
+  const catalog = await mount(s);
+  catalog.active = true;
+  await catalog.updateComplete;
+  await settle();
+  await typeArea(catalog, "-106, 39, -105, 40");
+  expect(catalog.shadowRoot?.querySelector('[part="scope-tag"]')).not.toBeNull();
+  await typeArea(catalog, "");
+  expect(catalog.shadowRoot?.querySelector('[part="scope"]')).toBeNull();
 });
