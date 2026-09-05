@@ -208,8 +208,9 @@ Every field of `status` is measured, derived from the recorded events: `state`,
 
 Two things are deliberately absent: the target **path** (only its `scheme` is
 served — host paths do not leave the process, as with asset hrefs) and any
-secret (there is no field one could occupy). Read-only in this wave; mutating
-sources waits for the auth interlock.
+secret (there is no field one could occupy). Read-only, and the mutating routes are
+**absent rather than forbidden** until OIDC/RBAC lands (ADR 0031) — there is
+no handler to authorise, which a middleware mistake cannot undo.
 
 ## openEO surface (catalog mode)
 
