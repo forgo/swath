@@ -71,6 +71,17 @@ export interface SwathEventMap {
   "swath-mode-change": { mode: string };
   /** A palette command was chosen (`<swath-command-palette>`, #292). */
   "swath-command": { id: string };
+  /** A result row is under the pointer or the focus ring (#413): the map
+   * draws that granule's footprint. A `null` bbox means "nothing under
+   * the cursor any more". */
+  "swath-granule-hover": { dataset: string; id: string; bbox: number[] | null };
+  /** Where the results are, when there are too many to outline (#413).
+   * Cells come from the counts endpoint; `cells` empty means the map goes
+   * back to drawing footprints. */
+  "swath-dataset-density": {
+    dataset: string;
+    cells: { bbox: number[]; count: number; weight: number }[];
+  };
   /** The search field's spatial scope changed (#412): the mode tag the
    * field is showing, and the box actually sent to the server. Both
    * `null` means no spatial filter. */

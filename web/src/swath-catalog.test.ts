@@ -381,3 +381,113 @@ test("clearing the area drops the filter and the tag with it", async () => {
   await typeArea(catalog, "");
   expect(catalog.shadowRoot?.querySelector('[part="scope"]')).toBeNull();
 });
+
+/** `n` granules of the fixture dataset, distinct ids and footprints. */
+const manyGranules = (n: number) => ({
+  granules: Array.from({ length: n }, (_, i) => ({
+    id: `G.${String(i).padStart(3, "0")}`,
+    bbox: [10 + (i % 10) * 0.1, 45 + Math.floor(i / 10) * 0.1, 10.5 + (i % 10) * 0.1, 45.5],
+    datetime: `2026-06-${String((i % 28) + 1).padStart(2, "0")}T10:00:00Z`,
+  })),
+});
+
+const CELLS = {
+  total: 60,
+  by: "cell",
+  overlapping: true,
+  buckets: [
+    { bbox: [10, 45, 11, 46], count: 40 },
+    { bbox: [11, 45, 12, 46], count: 20 },
+  ],
+};
+
+test("hovering a result draws its footprint, and so does focusing it", async () => {
+  const s = stub();
+  const catalog = await mount(s);
+  catalog.active = true;
+  await catalog.updateComplete;
+  await settle();
+  await catalog.select("hls-s30");
+  await catalog.updateComplete;
+
+  const hovers: { id: string; bbox: number[] | null }[] = [];
+  catalog.addEventListener("swath-granule-hover", (event) => hovers.push(event.detail));
+  const [first] = cards(catalog);
+  // Delegated to the shadow root, so the events are the ones a pointer
+  // and a focus ring really deliver — bubbling and composed.
+  first?.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, composed: true }));
+  expect(hovers[0]?.bbox).toEqual([10.3, 45.6, 11.1, 46.4]);
+
+  first?.dispatchEvent(new PointerEvent("pointerout", { bubbles: true, composed: true }));
+  await settle();
+  // Leaving clears it rather than leaving a stale outline behind.
+  expect(hovers.at(-1)?.bbox).toBeNull();
+
+  // Keyboard focus draws the same footprint a pointer does.
+  first?.dispatchEvent(new FocusEvent("focusin", { bubbles: true, composed: true }));
+  expect(hovers.at(-1)?.bbox).toEqual([10.3, 45.6, 11.1, 46.4]);
+});
+
+test("below the threshold the map gets footprints and no density", async () => {
+  const s = stub({ granules: manyGranules(10), counts: CELLS });
+  const catalog = await mount(s);
+  const footprints: number[] = [];
+  const densities: number[] = [];
+  catalog.addEventListener("swath-dataset-granules", (e) =>
+    footprints.push(e.detail.granules.length),
+  );
+  catalog.addEventListener("swath-dataset-density", (e) => densities.push(e.detail.cells.length));
+  catalog.active = true;
+  await catalog.updateComplete;
+  await settle();
+  await catalog.select("hls-s30");
+  await catalog.updateComplete;
+
+  expect(footprints).toEqual([10]);
+  expect(densities).toEqual([0]);
+  // No cell request was made: a surface nobody will draw is a request
+  // nobody needed.
+  expect(s.requests.filter((r) => r.endsWith("/counts"))).toHaveLength(1);
+});
+
+test("above the threshold the map gets the density instead — never both", async () => {
+  const s = stub({ granules: manyGranules(60), counts: CELLS });
+  const catalog = await mount(s);
+  const footprints: number[] = [];
+  const densities: { bbox: number[]; weight: number }[][] = [];
+  catalog.addEventListener("swath-dataset-granules", (e) =>
+    footprints.push(e.detail.granules.length),
+  );
+  catalog.addEventListener("swath-dataset-density", (e) => densities.push(e.detail.cells));
+  catalog.active = true;
+  await catalog.updateComplete;
+  await settle();
+  await catalog.select("hls-s30");
+  await catalog.updateComplete;
+
+  expect(footprints).toEqual([0]);
+  expect(densities[0]?.map((cell) => cell.weight)).toEqual([1, 0.5]);
+  // The surface is the server's cells, not the fetched page bucketed here.
+  expect(densities[0]?.[0]?.bbox).toEqual([10, 45, 11, 46]);
+  // And the count line says what the map is doing.
+  expect(catalog.shadowRoot?.querySelector('[part="count"]')?.textContent).toContain(
+    "the map shows where they are",
+  );
+});
+
+test("the first screenful of previews is asked for at once; the rest wait to be scrolled to", async () => {
+  const s = stub({ granules: manyGranules(30) });
+  const catalog = await mount(s);
+  catalog.active = true;
+  await catalog.updateComplete;
+  await settle();
+  await catalog.select("hls-s30");
+  await catalog.updateComplete;
+  await settle();
+
+  const previews = s.requests.filter((r) => r === "POST /result").length;
+  // Leading with pictures: the first screen is full. Thirty cards do not
+  // mean thirty renders — a card never scrolled to costs nothing.
+  expect(previews).toBeGreaterThan(0);
+  expect(previews).toBeLessThan(30);
+});

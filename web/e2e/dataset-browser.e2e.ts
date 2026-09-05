@@ -268,3 +268,37 @@ test("the search field states its scope, and a pasted shape is reduced to its bo
     )
     .toBe(true);
 });
+
+// --- Results: hover draws, focus draws too (#413) ---
+
+test("hovering a result draws its footprint, and the keyboard reaches the same thing", async ({
+  page,
+}) => {
+  await page.goto(demoUrl({ view: "data" }));
+  await waitForFittedView(page);
+  await datasetSelect(page).selectOption("hls-s30");
+  const first = cards(page).first();
+  await expect(first).toBeVisible();
+
+  const painted = async (): Promise<number> =>
+    page.evaluate((id) => {
+      const element = document.querySelector("swath-map") as {
+        map?: { getSource(i: string): { serialize(): { data?: unknown } } | undefined };
+      } | null;
+      const data = element?.map?.getSource(id)?.serialize().data as
+        | { features?: unknown[] }
+        | undefined;
+      return data?.features?.length ?? 0;
+    }, "swath-granule-hover");
+
+  await first.hover();
+  await expect.poll(painted).toBe(1);
+  // Leaving clears it rather than leaving a stale outline behind.
+  await page.mouse.move(5, 5);
+  await expect.poll(painted).toBe(0);
+
+  // The focus ring draws the same footprint a pointer does: the card's
+  // own focusable surface, which is what Tab reaches.
+  await first.locator("swath-card").focus();
+  await expect.poll(painted).toBe(1);
+});

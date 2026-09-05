@@ -24,6 +24,15 @@ import {
   previewKind,
   sortGranules,
 } from "./catalog-model.js";
+import {
+  buildDensity,
+  DENSITY_CELL_DEGREES,
+  type Density,
+  densityNote,
+  EAGER_PREVIEWS,
+  EMPTY_DENSITY,
+  isDense,
+} from "./density-model.js";
 import type { FacetSummary } from "./facets-model.js";
 import { coverageNote, facetSummary, parseFacets } from "./facets-model.js";
 import {
@@ -157,6 +166,14 @@ export class SwathCatalog extends SwathElement {
   #scope: SpatialScope | undefined;
   #scopeText = "";
   #scopeError: string | undefined;
+  /** Where the results are when there are too many to outline (#413). */
+  #density: Density = EMPTY_DENSITY;
+  /** Cards waiting to enter the view before their preview is asked for. */
+  #observer: IntersectionObserver | undefined;
+  #pendingThumbnails = new Map<string, () => void>();
+  /** The result the pointer or the focus ring is on, if any (#413). */
+  #hovered: string | undefined;
+  #hoverWired = false;
   #viewBounds: LonLatBounds | undefined;
   #cards = new Map<string, SwathGranuleCard>();
   #inFlight = 0;
@@ -276,13 +293,18 @@ export class SwathCatalog extends SwathElement {
     // inferred from the page above — a count we did not get from the
     // server is not a count we draw.
     let timeline: Timeline = EMPTY_TIMELINE;
+    let density: Density = EMPTY_DENSITY;
     if (failure === undefined) {
       timeline = await this.#loadTimeline(id);
+      // Only when the outlines would be noise: a surface nobody will draw
+      // is a request nobody needed.
+      density = isDense(granules.length) ? await this.#loadDensity(id) : EMPTY_DENSITY;
     }
     if (this.#selected !== id) {
       return; // stale: the user moved on while this fetch was in flight
     }
     this.#timeline = timeline;
+    this.#density = density;
     this.#loading = false;
     this.#granulesError = failure;
     this.#granules = granules;
@@ -325,6 +347,24 @@ export class SwathCatalog extends SwathElement {
     } catch {
       // A timeline failure costs the timeline, never the granule list.
       return EMPTY_TIMELINE;
+    }
+  }
+
+  /** Where the results are, at the density lattice. A failure costs the
+   * surface, never the list. */
+  async #loadDensity(id: string): Promise<Density> {
+    try {
+      return buildDensity(
+        await this.api.json(
+          this.api.url(`/datasets/${encodeURIComponent(id)}/counts`, {
+            by: "cell",
+            size: DENSITY_CELL_DEGREES,
+            datetime: this.#datetimeScope(),
+          }),
+        ),
+      );
+    } catch {
+      return EMPTY_DENSITY;
     }
   }
 
@@ -499,11 +539,132 @@ export class SwathCatalog extends SwathElement {
     return el("section", { part: "facets", "aria-label": "What these granules carry" }, ...rows);
   }
 
+  /** What the map should draw for `granules`. Below the threshold, every
+   * footprint. Above it, the density surface instead — N overlapping
+   * outlines are noise, not information — and the footprints are cleared
+   * so the two never stack. */
   #announce(dataset: string, granules: readonly CatalogGranule[]): void {
+    const dense = isDense(granules.length);
     this.emit("swath-dataset-granules", {
       dataset,
-      granules: granules.map((g) => ({ id: g.id, bbox: g.bbox, datetime: g.datetime })),
+      granules: dense
+        ? []
+        : granules.map((g) => ({ id: g.id, bbox: g.bbox, datetime: g.datetime })),
     });
+    this.emit("swath-dataset-density", {
+      dataset,
+      cells: dense
+        ? this.#density.cells.map((cell) => ({
+            bbox: [...cell.bbox],
+            count: cell.count,
+            weight: cell.weight,
+          }))
+        : [],
+    });
+  }
+
+  /** Hover and focus, delegated to the shadow root rather than bound per
+   * card (#413). The list is rebuilt on every render, and a card moved
+   * out and back in leaves the browser's pointer bookkeeping behind — so
+   * the listeners live on the one node that never moves.
+   *
+   * Focus draws the same footprint the pointer does, which is what makes
+   * the map reachable from the keyboard. */
+  #wireHover(): void {
+    if (this.#hoverWired) {
+      return;
+    }
+    this.#hoverWired = true;
+    const cardOf = (event: Event): SwathGranuleCard | undefined =>
+      event
+        .composedPath()
+        .find(
+          (node): node is SwathGranuleCard =>
+            node instanceof HTMLElement && node.tagName === "SWATH-GRANULE-CARD",
+        );
+    const over = (event: Event): void => {
+      const id = cardOf(event)?.getAttribute("granule-id");
+      if (id === null || id === undefined || id === this.#hovered) {
+        return;
+      }
+      const granule = this.#granules.find((each) => each.id === id);
+      if (granule === undefined) {
+        return;
+      }
+      this.#hovered = id;
+      this.emit("swath-granule-hover", {
+        dataset: this.#selected,
+        id,
+        bbox: [...granule.bbox],
+      });
+    };
+    // A leave is only real if nothing is entered right after it: the list
+    // is rebuilt under the cursor, and a card moved out and back in emits
+    // out-then-over. Deferring the clear by a task lets that pair cancel.
+    let pending: number | undefined;
+    const out = (): void => {
+      if (this.#hovered === undefined || pending !== undefined) {
+        return;
+      }
+      pending = window.setTimeout(() => {
+        pending = undefined;
+        const id = this.#hovered;
+        if (id === undefined) {
+          return;
+        }
+        this.#hovered = undefined;
+        this.emit("swath-granule-hover", { dataset: this.#selected, id, bbox: null });
+      }, 0);
+    };
+    this.renderRoot.addEventListener("pointerover", (event) => {
+      if (cardOf(event) !== undefined && pending !== undefined) {
+        window.clearTimeout(pending);
+        pending = undefined;
+      }
+      over(event);
+    });
+    this.renderRoot.addEventListener("focusin", over);
+    this.renderRoot.addEventListener("pointerout", out);
+    this.renderRoot.addEventListener("focusout", out);
+  }
+
+  /** The preview. The first screenful is asked for at once — leading
+   * with pictures is the point — and everything past it waits until the
+   * card is nearly in view (#413). A card never scrolled to costs
+   * nothing: its request was never made, which is a stronger form of
+   * "cancel on scroll" than aborting one already in flight.
+   *
+   * Without an `IntersectionObserver` the preview is asked for straight
+   * away: the behaviour before this change, correct and merely eager. */
+  #lazyThumbnail(
+    dataset: CatalogDataset,
+    granule: CatalogGranule,
+    card: SwathGranuleCard,
+    eager: boolean,
+  ): void {
+    if (eager || typeof IntersectionObserver === "undefined") {
+      this.#thumbnail(dataset, granule, card);
+      return;
+    }
+    this.#observer ??= new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) {
+            continue;
+          }
+          const element = entry.target as SwathGranuleCard;
+          const id = element.getAttribute("granule-id") ?? "";
+          this.#pendingThumbnails.get(id)?.();
+          this.#pendingThumbnails.delete(id);
+          this.#observer?.unobserve(element);
+        }
+      },
+      // A card just off the bottom is about to be read: start it a
+      // little early so the picture is there when the scroll stops.
+      { root: null, rootMargin: "200px" },
+    );
+    this.#pendingThumbnails.set(granule.id, () => this.#thumbnail(dataset, granule, card));
+    this.#observer.observe(card);
   }
 
   /** The engine's preview for one granule, at most N at a time, cached
@@ -552,6 +713,7 @@ export class SwathCatalog extends SwathElement {
   }
 
   protected render(): void {
+    this.#wireHover();
     if (this.active && !this.#loaded) {
       void this.reload();
     }
@@ -662,7 +824,9 @@ export class SwathCatalog extends SwathElement {
       { part: "count", role: "status" },
       this.#selected === ""
         ? ""
-        : `${visible.length} of ${this.#granules.length} granule${this.#granules.length === 1 ? "" : "s"}`,
+        : isDense(visible.length)
+          ? densityNote(this.#density, visible.length)
+          : `${visible.length} of ${this.#granules.length} granule${this.#granules.length === 1 ? "" : "s"}`,
     );
     const toolbar = el("div", { part: "toolbar" }, count, sort, layout);
 
@@ -711,7 +875,7 @@ export class SwathCatalog extends SwathElement {
             });
           });
           this.#cards.set(granule.id, card);
-          this.#thumbnail(dataset, granule, card);
+          this.#lazyThumbnail(dataset, granule, card, seen.size <= EAGER_PREVIEWS);
         }
         card.datasetId = dataset.id;
         card.datetime = granule.datetime;

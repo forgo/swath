@@ -40,7 +40,13 @@ import {
 //   the fire-season loop auto-plays there and nowhere else. Its own
 //   frame advances are not interactions (`swath-timechange` flags them
 //   `cinematic`): the bare URL stays bare until the user takes over.
-import { type GranuleBbox, GranuleFootprints, SCOPE_SOURCE_ID } from "../src/granule-footprints.js";
+import {
+  type GranuleBbox,
+  GranuleFootprints,
+  HOVER_SOURCE_ID,
+  SCOPE_SOURCE_ID,
+} from "../src/granule-footprints.js";
+import { ResultDensity } from "../src/result-density.js";
 import { formatCrs, formatIngest, formatLonLat, formatZoomCell } from "../src/status-model.js";
 import { safeLocalStorage } from "../src/storage.js";
 import { defineSwathAddDataPanel, SwathAddDataPanel } from "../src/swath-add-data-panel.js";
@@ -236,6 +242,38 @@ function wireDatasetBrowser(map: SwathMap, panel: SwathCatalog): void {
       bbox === null || bbox.length !== 4
         ? []
         : [{ id: "scope", bbox: bbox as unknown as GranuleBbox }],
+    );
+  });
+  // The hovered result's own outline (#413): its own source, so hovering
+  // never repaints the footprint set underneath it.
+  let hover: GranuleFootprints | undefined;
+  panel.addEventListener("swath-granule-hover", (event) => {
+    const inner = map.map;
+    if (!inner) {
+      return;
+    }
+    hover ??= new GranuleFootprints(inner, HOVER_SOURCE_ID);
+    const bbox = event.detail.bbox;
+    hover.set(
+      bbox === null || bbox.length !== 4
+        ? []
+        : [{ id: event.detail.id, bbox: bbox as unknown as GranuleBbox }],
+    );
+  });
+  // Where the results are, when there are too many outlines to read.
+  let density: ResultDensity | undefined;
+  panel.addEventListener("swath-dataset-density", (event) => {
+    const inner = map.map;
+    if (!inner) {
+      return;
+    }
+    density ??= new ResultDensity(inner);
+    density.set(
+      event.detail.cells.map((cell) => ({
+        bbox: cell.bbox as unknown as GranuleBbox,
+        count: cell.count,
+        weight: cell.weight,
+      })),
     );
   });
   panel.addEventListener("swath-granule-zoom", (event) => {
