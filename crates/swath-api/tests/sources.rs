@@ -79,6 +79,7 @@ fn source(id: &str, origin: SourceOrigin, target: &str) -> Source {
         bindings: vec![DatasetId::new("hls-s30")],
         origin,
         credential_profile: None,
+        requester_pays: false,
     }
 }
 
@@ -397,5 +398,59 @@ async fn the_credential_resolution_is_served_and_the_value_is_not() {
     let text = body.to_string();
     for forbidden in ["secret", "token", "password", "AKIA", "access_key"] {
         assert!(!text.contains(forbidden), "{forbidden} in {text}");
+    }
+}
+
+// --- Requester-pays consent (#424) ---
+
+/// A requester-pays source says so, and says who agreed to be billed —
+/// or does not, which is what stops it being read. No money appears
+/// anywhere in the response: Swath does not know the operator's rate
+/// card, and a wrong figure would be worse than none.
+#[tokio::test]
+async fn requester_pays_and_its_consent_are_served_without_a_price() {
+    let mut billed = source("billed", SourceOrigin::Config, "s3://requester-pays");
+    billed.requester_pays = true;
+    let mut agreed = source("agreed", SourceOrigin::Config, "s3://requester-pays");
+    agreed.requester_pays = true;
+
+    let app = app(
+        vec![
+            billed,
+            agreed,
+            source("free", SourceOrigin::Config, "/srv/incoming"),
+        ],
+        vec![event(
+            "agreed",
+            SourceEventKind::RequesterPaysConsented,
+            "2026-09-05T12:00:00Z",
+            "operator",
+        )],
+    )
+    .await;
+    let (_, body) = get_json(&app, "/sources").await;
+    let by_id: BTreeMap<&str, &serde_json::Value> = body["sources"]
+        .as_array()
+        .expect("sources")
+        .iter()
+        .map(|row| (row["id"].as_str().expect("id"), row))
+        .collect();
+
+    // Billed and unconsented: the flag is there and the consent is not.
+    assert_eq!(by_id["billed"]["requesterPays"], true);
+    assert!(by_id["billed"].get("consentedBy").is_none());
+
+    // Billed and agreed: who agreed is served, because that is the fact.
+    assert_eq!(by_id["agreed"]["requesterPays"], true);
+    assert_eq!(by_id["agreed"]["consentedBy"], "operator");
+
+    // An ordinary source's row is unchanged — no new fields to read.
+    assert!(by_id["free"].get("requesterPays").is_none());
+    assert!(by_id["free"].get("consentedBy").is_none());
+
+    // And nowhere in the whole response is there a price.
+    let text = body.to_string();
+    for money in ["$", "usd", "USD", "price", "dollar", "€", "cost"] {
+        assert!(!text.contains(money), "{money} in {text}");
     }
 }

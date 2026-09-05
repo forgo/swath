@@ -43,6 +43,7 @@ fn source(profile: Option<&str>) -> Source {
         bindings: vec![DatasetId::new("hls-s30")],
         origin: SourceOrigin::Config,
         credential_profile: profile.map(str::to_owned),
+        requester_pays: false,
     }
 }
 

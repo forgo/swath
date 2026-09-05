@@ -42,8 +42,8 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::routing::get;
 use swath_core::sources::{
-    Source, SourceId, SourceState, SourceStatus, SourceStore, SourceStoreError,
-    credential_resolution, state_of,
+    Consent, Source, SourceId, SourceState, SourceStatus, SourceStore, SourceStoreError,
+    consent_of, credential_resolution, state_of,
 };
 
 use crate::error::ApiError;
@@ -110,6 +110,14 @@ pub struct SourceItem {
     /// resolve, so there is nothing to report.
     #[serde(rename = "credentialResolved", skip_serializing_if = "Option::is_none")]
     pub credential_resolved: Option<Option<bool>>,
+    /// Whether reading this source bills the reader (#424). Omitted when
+    /// it does not, so an ordinary source's row is unchanged.
+    #[serde(rename = "requesterPays", skip_serializing_if = "core::ops::Not::not")]
+    pub requester_pays: bool,
+    /// Who consented to being billed, and when — absent when nobody has.
+    /// A requester-pays source with no consent here is not read.
+    #[serde(rename = "consentedBy", skip_serializing_if = "Option::is_none")]
+    pub consented_by: Option<String>,
     /// What the source is doing, derived from its events.
     pub status: SourceStatusItem,
 }
@@ -153,7 +161,12 @@ fn scheme_of(target: &str) -> String {
         .map_or_else(|| "file".to_owned(), |(scheme, _)| scheme.to_owned())
 }
 
-fn item(source: Source, status: &SourceStatus, credential: Option<bool>) -> SourceItem {
+fn item(
+    source: Source,
+    status: &SourceStatus,
+    credential: Option<bool>,
+    consent: Option<Consent>,
+) -> SourceItem {
     let credential_resolved = source.credential_profile.as_ref().map(|_| credential);
     SourceItem {
         id: source.id.to_string(),
@@ -167,6 +180,8 @@ fn item(source: Source, status: &SourceStatus, credential: Option<bool>) -> Sour
         datasets: source.bindings.iter().map(ToString::to_string).collect(),
         credential_profile: source.credential_profile,
         credential_resolved,
+        requester_pays: source.requester_pays,
+        consented_by: consent.map(|consent| consent.by),
         status: status_item(status),
     }
 }
@@ -204,7 +219,8 @@ where
         let events = app.store.events(&source.id).await.map_err(store_error)?;
         let status = state_of(&events);
         let credential = credential_resolution(&events);
-        items.push(item(source, &status, credential));
+        let consent = consent_of(&events);
+        items.push(item(source, &status, credential, consent));
     }
     Ok(Json(SourceList {
         sources: items,
@@ -235,7 +251,8 @@ where
     let events = app.store.events(&source_id).await.map_err(store_error)?;
     let status = state_of(&events);
     let credential = credential_resolution(&events);
-    Ok(Json(item(source, &status, credential)))
+    let consent = consent_of(&events);
+    Ok(Json(item(source, &status, credential, consent)))
 }
 
 /// Store failures, translated as every other backend failure is.

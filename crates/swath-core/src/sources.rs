@@ -107,6 +107,14 @@ pub struct Source {
     /// value: there is no field here one could be put in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_profile: Option<String>,
+    /// Whether reading this source bills the reader (a requester-pays
+    /// bucket, #424). Declared by the operator, because only they know
+    /// what their agreement with the provider says — Swath cannot detect
+    /// it and will not guess.
+    ///
+    /// A source marked this way is not read until consent is recorded.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub requester_pays: bool,
 }
 
 /// Where a source's definition lives — which is whether editing it
@@ -156,6 +164,10 @@ pub enum SourceEventKind {
     /// Recorded as an observation: `detail` names the **profile**, never
     /// a value, because nothing in this crate can hold one.
     CredentialResolved,
+    /// The operator consented to being billed for reads of this source
+    /// (#424). `detail` says who consented, as well as this deployment
+    /// can know — see [`Consent::by`].
+    RequesterPaysConsented,
     /// The credential profile did not resolve. `detail` names the profile
     /// and says so; a source in this state cannot reach its target, and
     /// the UI can say why without inventing a reason.
@@ -286,6 +298,88 @@ pub fn credential_resolution(events: &[SourceEvent]) -> Option<bool> {
         }
     }
     latest.map(|event| event.kind == SourceEventKind::CredentialResolved)
+}
+
+/// A recorded consent to be billed for reading a source (#424).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Consent {
+    /// Who consented, as well as this deployment can know.
+    ///
+    /// Today that is the operator identity available to the process that
+    /// recorded it — the OS user running the command. It is **not** an
+    /// authenticated identity, because there is no authentication yet
+    /// (ADR 0031); when there is, this becomes the authenticated subject
+    /// and the audit trail becomes a real one. Recording the weaker fact
+    /// honestly is better than recording nothing and better than
+    /// implying more than we know.
+    pub by: String,
+    /// When (RFC 3339 UTC).
+    pub at: Datetime,
+}
+
+/// The consent recorded for a source, or `None` — read off the events
+/// like every other state, so it cannot be set by someone forgetting to
+/// unset it.
+#[must_use]
+pub fn consent_of(events: &[SourceEvent]) -> Option<Consent> {
+    let mut latest: Option<&SourceEvent> = None;
+    for event in events {
+        if event.kind != SourceEventKind::RequesterPaysConsented {
+            continue;
+        }
+        if latest.is_none_or(|current| newer(event, current)) {
+            latest = Some(event);
+        }
+    }
+    latest.map(|event| Consent {
+        by: event.detail.clone(),
+        at: event.at.clone(),
+    })
+}
+
+/// The event a consent produces.
+#[must_use]
+pub fn consent_event(source: &SourceId, by: &str, at: Datetime) -> SourceEvent {
+    SourceEvent {
+        source: source.clone(),
+        at,
+        kind: SourceEventKind::RequesterPaysConsented,
+        detail: by.to_owned(),
+    }
+}
+
+/// Why a read was refused before it was attempted (#424).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ConsentRefusal {
+    /// The source bills the reader and nobody has agreed to that.
+    #[error(
+        "`{id}` is a requester-pays source and no consent is recorded:          reading it bills this deployment, so an operator agrees to that once,          explicitly, before the first read"
+    )]
+    NoConsent {
+        /// The source that was not read.
+        id: SourceId,
+    },
+}
+
+/// Whether `source` may be read, given its recorded `events`.
+///
+/// A source that does not bill the reader is always readable. One that
+/// does is readable only once consent is recorded — and this is a pure
+/// check the caller makes **before** opening a connection, so a refused
+/// read is not a read that failed, it is a read that never happened.
+///
+/// # Errors
+///
+/// [`ConsentRefusal::NoConsent`] when the source bills the reader and no
+/// consent has been recorded.
+pub fn may_read(source: &Source, events: &[SourceEvent]) -> Result<(), ConsentRefusal> {
+    if !source.requester_pays || consent_of(events).is_some() {
+        return Ok(());
+    }
+    Err(ConsentRefusal::NoConsent {
+        id: source.id.clone(),
+    })
 }
 
 /// What a credential profile lookup found. **There is no variant that

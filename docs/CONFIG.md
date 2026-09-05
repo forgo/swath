@@ -113,6 +113,25 @@ nearest, everything else averages, nodata-aware.
 
 <!-- config-check:end flags swath sources fetch -->
 
+<!-- config-check:begin flags swath sources prove -->
+
+| Flag | Env | Value | Meaning |
+|---|---|---|---|
+| `--config` | `SWATH_CONFIG` | `PATH` | The config file to read the allowlist and the source from. |
+| `id` | — | `ID` | The source being proved; its consent is checked first. |
+| `url` | — | `URL` | An `http(s)` URL whose host is on the allowlist. |
+
+<!-- config-check:end flags swath sources prove -->
+
+<!-- config-check:begin flags swath sources consent -->
+
+| Flag | Env | Value | Meaning |
+|---|---|---|---|
+| `--config` | `SWATH_CONFIG` | `PATH` | The config file the source is declared in. |
+| `id` | — | `ID` | The source consented to. |
+
+<!-- config-check:end flags swath sources consent -->
+
 ## The TOML config file
 
 Kebab-case keys; **unknown keys are rejected** (`deny_unknown_fields`) —
@@ -158,6 +177,19 @@ the allowlist is refused; a body past the size cap is abandoned mid-stream.
 retrieves one document under it. Both are operator actions: no HTTP route
 reaches this, and none can until the auth interlock lifts (ADR 0031).
 
+### Requester-pays
+
+A source marked `requester-pays` bills whoever reads it, so Swath will not read
+it until someone says they accept that: `swath sources consent <id>` records
+who and when, and you write that name into `requester-pays-consented-by` so it
+survives a restart. Without it a read is **refused before a connection is
+attempted** — a read that never happened, not one that failed.
+
+`swath sources prove <id> <url>` performs one bounded read and reports the
+**bytes and requests** it actually made. It never states a money figure:
+Swath does not know your rate card, your egress agreement or your region, and a
+wrong number there would be worse than none.
+
 ### `[[sources]]` — where data comes from
 
 Each entry is one watched origin with its own ingest task and its own
@@ -171,6 +203,8 @@ its siblings keep running (ADR 0030).
 | `watch-dir` | string | — (required) | Directory watched for `<granule-id>.json` manifests. |
 | `datasets` | array of strings | `[]` | Which datasets this source feeds. Declared, so a source that has ingested nothing still says what it is for. |
 | `credential-profile` | string | none | The **name** of a credential the operator provisions. Never a value. |
+| `requester-pays` | bool | `false` | Reading this source bills you. Not read until consent is recorded. |
+| `requester-pays-consented-by` | string | none | Who agreed to be billed. Written after `swath sources consent`. |
 
 Swath resolves a profile by name and reports whether it resolved; it never
 stores, logs, serves or traces the secret (ADR 0030). The environment

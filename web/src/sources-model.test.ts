@@ -3,6 +3,7 @@
 
 import { expect, test } from "vitest";
 import {
+  billingNote,
   countsLine,
   credentialNote,
   freshness,
@@ -141,4 +142,26 @@ test("the credential note names the profile, and tells unchecked from broken", (
   withProfile.sources[0] = { ...withProfile.sources[0], credentialResolved: true };
   const [ok] = parseSources(withProfile);
   expect(ok && credentialNote(ok)).toBe("credential imagery-reader · resolved");
+});
+
+test("the billing note names who agreed, or says nobody has — and never a price", () => {
+  const plain = { ...served({ state: "watching" }) } as {
+    sources: Record<string, unknown>[];
+  };
+  const [ordinary] = parseSources(plain);
+  expect(ordinary && billingNote(ordinary)).toBeUndefined();
+
+  plain.sources[0] = { ...plain.sources[0], requesterPays: true };
+  const [unconsented] = parseSources(plain);
+  expect(unconsented && billingNote(unconsented)).toBe(
+    "requester-pays · not read until someone agrees to be billed",
+  );
+
+  plain.sources[0] = { ...plain.sources[0], consentedBy: "operator" };
+  const [agreed] = parseSources(plain);
+  const note = (agreed && billingNote(agreed)) ?? "";
+  expect(note).toBe("requester-pays · operator agreed to be billed");
+  for (const money of ["$", "USD", "price", "dollar"]) {
+    expect(note).not.toContain(money);
+  }
 });

@@ -207,6 +207,15 @@ pub struct SourceConfig {
     /// putting a secret here would put it in your config file, which is
     /// exactly what this field exists to avoid.
     pub credential_profile: Option<String>,
+    /// Whether reading this source bills the reader (#424). Declared,
+    /// because only the operator knows what their agreement says.
+    #[serde(default)]
+    pub requester_pays: bool,
+    /// Who consented to being billed for this source, if anyone. Written
+    /// by the operator after `swath sources consent`, so the consent
+    /// survives a restart — the config is the durable channel until the
+    /// auth interlock lifts (ADR 0031).
+    pub requester_pays_consented_by: Option<String>,
 }
 
 /// Everything catalog mode needs at startup.
@@ -578,6 +587,9 @@ fn compile_sources(
                 bindings: Vec::new(),
                 origin: SourceOrigin::Config,
                 credential_profile: None,
+                // A watched local directory is never requester-pays:
+                // nothing bills you for reading your own disk.
+                requester_pays: false,
             },
             dir,
         ));
@@ -597,6 +609,7 @@ fn compile_sources(
                 bindings: config.datasets.iter().map(domain::DatasetId::new).collect(),
                 origin: SourceOrigin::Config,
                 credential_profile: config.credential_profile.clone(),
+                requester_pays: config.requester_pays,
             },
             config.watch_dir.clone(),
         ));
@@ -671,6 +684,36 @@ fn compile_catalog_mode(
 }
 
 /// Reads and parses the TOML config file.
+/// The sources this deployment declares, each with whoever consented to
+/// being billed for it (#424). No config file is no sources.
+///
+/// # Errors
+///
+/// [`ConfigError`] when the file exists and does not parse.
+pub fn declared_sources(path: Option<&Path>) -> Result<Vec<(Source, Option<String>)>, ConfigError> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+    let file = load_file(path)?;
+    let consent: BTreeMap<String, Option<String>> = file
+        .sources
+        .iter()
+        .map(|config| {
+            (
+                config.id.clone(),
+                config.requester_pays_consented_by.clone(),
+            )
+        })
+        .collect();
+    Ok(compile_sources(file.watch_dir.clone(), &file.sources)?
+        .into_iter()
+        .map(|(source, _)| {
+            let consented = consent.get(source.id.as_str()).cloned().flatten();
+            (source, consented)
+        })
+        .collect())
+}
+
 /// The deployment's egress policy, read from the same config file
 /// `swath serve` reads (#419). No config file is an empty allowlist,
 /// which is federation off — the default, and a working configuration.

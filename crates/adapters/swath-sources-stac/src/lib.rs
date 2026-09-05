@@ -121,6 +121,22 @@ pub enum FetchError {
 /// between two allowlisted hosts still terminates.
 pub const MAX_REDIRECTS: usize = 4;
 
+/// What a read actually cost, measured (#424).
+///
+/// **Bytes and requests, and nothing else.** No currency appears here or
+/// anywhere downstream: Swath does not know the operator's rate card,
+/// their egress agreement or their region, and a wrong money figure is
+/// worse than no money figure. What it can measure it reports; what it
+/// cannot it leaves to the operator and their provider's bill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FetchCost {
+    /// Bytes received in the response body.
+    pub bytes: u64,
+    /// HTTP requests made, redirects included — a requester-pays bucket
+    /// bills per request as well as per byte.
+    pub requests: u32,
+}
+
 /// Reads STAC documents from allowlisted hosts.
 #[derive(Debug, Clone)]
 pub struct StacClient {
@@ -207,6 +223,17 @@ impl StacClient {
     ///
     /// See [`Self::fetch_json`].
     pub async fn fetch_bytes(&self, url: &str) -> Result<Vec<u8>, FetchError> {
+        Ok(self.fetch_measured(url).await?.0)
+    }
+
+    /// Fetches `url` under the policy and reports what the read cost
+    /// (#424): the bytes received and the requests made, both counted as
+    /// they happened rather than estimated.
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::fetch_json`].
+    pub async fn fetch_measured(&self, url: &str) -> Result<(Vec<u8>, FetchCost), FetchError> {
         // The deadline covers redirects too: four hops that each take
         // nine seconds is not "within ten seconds".
         let deadline = Duration::from_secs(self.policy.timeout_secs);
@@ -220,9 +247,13 @@ impl StacClient {
     /// The redirect loop: every hop is checked against the allowlist
     /// before it is followed, which is the whole reason redirects are not
     /// left to the HTTP client.
-    async fn follow(&self, url: &str) -> Result<Vec<u8>, FetchError> {
+    async fn follow(&self, url: &str) -> Result<(Vec<u8>, FetchCost), FetchError> {
         let mut current = self.check(url)?;
+        let mut cost = FetchCost::default();
         for _ in 0..=MAX_REDIRECTS {
+            // Counted before the send: a request that fails still
+            // happened, and a bucket still bills for it.
+            cost.requests = cost.requests.saturating_add(1);
             let response = self.http.get(current.clone()).send().await.map_err(|err| {
                 FetchError::Transport {
                     detail: err.to_string(),
@@ -259,7 +290,9 @@ impl StacClient {
                     status: status.as_u16(),
                 });
             }
-            return self.read_capped(response).await;
+            let body = self.read_capped(response).await?;
+            cost.bytes = body.len() as u64;
+            return Ok((body, cost));
         }
         Err(FetchError::TooManyRedirects {
             url: url.to_owned(),

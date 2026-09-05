@@ -1254,6 +1254,7 @@ mod tests {
             bindings: Vec::new(),
             origin: swath_core::sources::SourceOrigin::Config,
             credential_profile: None,
+            requester_pays: false,
         }
     }
 
