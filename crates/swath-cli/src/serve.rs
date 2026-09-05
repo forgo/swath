@@ -218,7 +218,17 @@ where
             let layer_count = registry.identities().len();
             // Static layers are config kinds (truecolor/ndvi) — never a
             // UDF plan — so no executor is wired and `NoUdf` is honest.
-            run_server(&shared, registry, layer_count, None, None, false, shutdown).await
+            run_server(
+                &shared,
+                registry,
+                layer_count,
+                None,
+                None,
+                false,
+                swath_api::TraceBus::default(),
+                shutdown,
+            )
+            .await
         }
         LayerSource::Catalog(mode) => serve_catalog(&shared, mode, shutdown).await,
     }
@@ -445,6 +455,11 @@ where
     // origin records its failure and its siblings keep running.
     let registry =
         SourceRegistry::with_sources(mode.sources.iter().map(|(source, _)| source.clone()));
+    // One bus for the whole process: the ingest tasks publish onto it
+    // before the router exists, and `GET /traces` serves the same one, so
+    // renders and source events ride the same rails (#416).
+    let traces = swath_api::TraceBus::default();
+    registry.publishing_to(traces.publisher());
     for (source, dir) in &mode.sources {
         tracing::info!(
             "source {id}: watching {dir} for granule manifests",
@@ -541,6 +556,7 @@ where
         Some(extra),
         executor,
         uploads,
+        traces,
         shutdown,
     )
     .await
@@ -606,6 +622,7 @@ async fn run_server<L, F>(
     extra: Option<axum::Router>,
     udf: Option<swath_api::SharedUdfExecutor>,
     uploads: bool,
+    traces: swath_api::TraceBus,
     shutdown: F,
 ) -> Result<(), ServeError>
 where
@@ -626,7 +643,11 @@ where
         PyramidSource::new(CompositeSource::new(Arc::clone(&store)), store),
         Proj4rsReproject,
         &cfg.base_url,
-    );
+    )
+    // The bus the ingest tasks already publish onto (#416): renders and
+    // source events ride the same rails, so one `GET /traces` stream
+    // carries both and the Sources screen needs no polling.
+    .with_trace_bus(traces);
     if extra.is_some() {
         state = state.with_openeo();
     }

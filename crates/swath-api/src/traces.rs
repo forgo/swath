@@ -49,13 +49,14 @@
 //! unsubscribes, and nothing leaks — there is no per-connection task to
 //! reap.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, ready};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::response::sse::{Event, KeepAlive, KeepAliveStream, Sse};
 use futures_core::Stream;
@@ -118,6 +119,181 @@ impl TraceEvent {
     }
 }
 
+/// One source event on its way to the stream (#416): what happened to a
+/// source, timestamped by the **server**, so freshness is computed from
+/// the event's own instant rather than from a client's clock.
+#[derive(Debug, Clone)]
+pub struct IngestEvent {
+    /// Monotonic per-process sequence number — the SSE `id:` field.
+    pub id: u64,
+    /// The source this happened to.
+    pub source: String,
+    /// When, RFC 3339 UTC.
+    pub at: String,
+    /// What happened: the `SourceEventKind` wire name.
+    pub kind: &'static str,
+    /// The event's own words. Never a credential value (ADR 0030 §4).
+    pub detail: String,
+    /// Events of this kind folded into this one by the throttle, so a
+    /// busy source reports its volume without emitting it (#416).
+    pub coalesced: u32,
+}
+
+/// The `data:` payload of an `ingest` event.
+#[derive(serde::Serialize)]
+struct IngestEnvelope<'a> {
+    source: &'a str,
+    at: &'a str,
+    event: &'a str,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    detail: &'a str,
+    #[serde(skip_serializing_if = "is_zero")]
+    coalesced: u32,
+}
+
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if takes a reference"
+)]
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
+impl IngestEvent {
+    /// This event on the wire: `event: ingest`, `id:`, envelope `data:`.
+    fn to_sse(&self) -> Event {
+        let envelope = IngestEnvelope {
+            source: &self.source,
+            at: &self.at,
+            event: self.kind,
+            detail: &self.detail,
+            coalesced: self.coalesced,
+        };
+        let data = serde_json::to_string(&envelope).expect("ingest envelope is infallible");
+        Event::default()
+            .event("ingest")
+            .id(self.id.to_string())
+            .data(data)
+    }
+}
+
+/// What the bus carries. Renders and source events ride the same rails —
+/// which is why the Sources screen can be live without polling anything.
+#[derive(Debug, Clone)]
+pub enum BusEvent {
+    /// One rendered tile.
+    Trace(TraceEvent),
+    /// One thing that happened to a source (#416).
+    Ingest(IngestEvent),
+}
+
+impl BusEvent {
+    fn to_sse(&self) -> Event {
+        match self {
+            Self::Trace(event) => event.to_sse(),
+            Self::Ingest(event) => event.to_sse(),
+        }
+    }
+}
+
+/// How often one source may put a *routine* event on the bus. A busy
+/// filedrop can register granules far faster than anyone reads them, and
+/// the bus is a live view rather than a log — so routine events are
+/// coalesced to one per window and the suppressed count rides along.
+/// Failures are never throttled: they are rare, and they are the reason
+/// anyone is looking.
+pub const INGEST_THROTTLE: Duration = Duration::from_secs(1);
+
+/// Per-source throttle state.
+#[derive(Debug)]
+struct Throttle {
+    last: Instant,
+    suppressed: u32,
+}
+
+/// Publishes source events onto the bus (#416). Cloneable, and holds no
+/// borrow of the router — an ingest task spawned before the API exists
+/// still publishes onto the same bus the stream serves.
+#[derive(Clone)]
+pub struct SourcePublisher {
+    sender: broadcast::Sender<BusEvent>,
+    next_id: Arc<AtomicU64>,
+    throttle: Arc<Mutex<BTreeMap<String, Throttle>>>,
+}
+
+impl fmt::Debug for SourcePublisher {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SourcePublisher").finish_non_exhaustive()
+    }
+}
+
+impl SourcePublisher {
+    /// Publishes one source event, subject to the throttle. Never blocks
+    /// and never fails, exactly as the render path's publish does — an
+    /// ingest task must not stall on telemetry.
+    ///
+    /// `at` is the server's own timestamp for the event, so the
+    /// freshness a client renders is computed from when the thing
+    /// happened rather than from the client's clock.
+    ///
+    /// Returns whether the event went out; a suppressed event is counted
+    /// and reported by the next one.
+    pub fn publish(&self, source: &str, kind: &'static str, at: &str, detail: &str) -> bool {
+        self.publish_at(source, kind, at, detail, Instant::now())
+    }
+
+    /// [`Self::publish`] with an explicit "now", so the throttle is
+    /// testable without sleeping.
+    pub fn publish_at(
+        &self,
+        source: &str,
+        kind: &'static str,
+        at: &str,
+        detail: &str,
+        now: Instant,
+    ) -> bool {
+        // A failure is never suppressed: it is rare, and it is the whole
+        // reason anyone is watching.
+        let routine = kind != "failed";
+        let coalesced = {
+            let mut held = self.throttle.lock().expect("ingest throttle");
+            match held.get_mut(source) {
+                Some(state) if routine && now.duration_since(state.last) < INGEST_THROTTLE => {
+                    state.suppressed = state.suppressed.saturating_add(1);
+                    return false;
+                }
+                Some(state) => {
+                    let suppressed = state.suppressed;
+                    state.last = now;
+                    state.suppressed = 0;
+                    suppressed
+                }
+                None => {
+                    held.insert(
+                        source.to_owned(),
+                        Throttle {
+                            last: now,
+                            suppressed: 0,
+                        },
+                    );
+                    0
+                }
+            }
+        };
+        let event = IngestEvent {
+            id: self.next_id.fetch_add(1, Ordering::Relaxed),
+            source: source.to_owned(),
+            at: at.to_owned(),
+            kind,
+            detail: detail.to_owned(),
+            coalesced,
+        };
+        // Err just means nobody is watching right now.
+        let _ = self.sender.send(BusEvent::Ingest(event));
+        true
+    }
+}
+
 /// The `event: lagged` a subscriber receives after falling behind:
 /// `missed` events were dropped for it; the stream continues live.
 fn lagged_event(missed: u64) -> Event {
@@ -130,9 +306,12 @@ fn lagged_event(missed: u64) -> Event {
 /// subscribers receive them as SSE (module docs have the full contract).
 #[derive(Debug)]
 pub struct TraceBus {
-    sender: broadcast::Sender<TraceEvent>,
-    next_id: AtomicU64,
+    sender: broadcast::Sender<BusEvent>,
+    next_id: Arc<AtomicU64>,
     keepalive: Duration,
+    /// Per-source publish throttle state (#416): the last instant an
+    /// ingest event went out, and how many were folded into the next one.
+    ingest: Arc<Mutex<BTreeMap<String, Throttle>>>,
 }
 
 impl Default for TraceBus {
@@ -151,8 +330,9 @@ impl TraceBus {
         let (sender, _) = broadcast::channel(capacity);
         Self {
             sender,
-            next_id: AtomicU64::new(0),
+            next_id: Arc::new(AtomicU64::new(0)),
             keepalive,
+            ingest: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
@@ -169,7 +349,26 @@ impl TraceBus {
             trace,
         };
         // Err just means nobody is watching right now.
-        let _ = self.sender.send(event);
+        let _ = self.sender.send(BusEvent::Trace(event));
+    }
+
+    /// A raw subscriber, for tests that assert what reaches the bus
+    /// without going through the SSE encoding.
+    #[must_use]
+    pub fn subscribe_for_test(&self) -> broadcast::Receiver<BusEvent> {
+        self.sender.subscribe()
+    }
+
+    /// A handle the ingest tasks publish source events through (#416).
+    /// Cheap to clone and independent of the router's lifetime, so a
+    /// watch spawned before the API is built can still reach the bus.
+    #[must_use]
+    pub fn publisher(&self) -> SourcePublisher {
+        SourcePublisher {
+            sender: self.sender.clone(),
+            next_id: Arc::clone(&self.next_id),
+            throttle: Arc::clone(&self.ingest),
+        }
     }
 
     /// The SSE response for one `GET /traces` subscriber: every trace
@@ -182,11 +381,11 @@ impl TraceBus {
 
 /// The future one `recv` occupies: takes the receiver, returns it with
 /// the result so the stream can re-arm for the next event.
-type RecvFut = Pin<Box<dyn Future<Output = (broadcast::Receiver<TraceEvent>, RecvResult)> + Send>>;
+type RecvFut = Pin<Box<dyn Future<Output = (broadcast::Receiver<BusEvent>, RecvResult)> + Send>>;
 
-type RecvResult = Result<TraceEvent, RecvError>;
+type RecvResult = Result<BusEvent, RecvError>;
 
-fn recv_next(mut receiver: broadcast::Receiver<TraceEvent>) -> RecvFut {
+fn recv_next(mut receiver: broadcast::Receiver<BusEvent>) -> RecvFut {
     Box::pin(async move {
         let result = receiver.recv().await;
         (receiver, result)
@@ -203,7 +402,7 @@ pub(crate) struct TraceEvents {
 }
 
 impl TraceEvents {
-    fn new(receiver: broadcast::Receiver<TraceEvent>) -> Self {
+    fn new(receiver: broadcast::Receiver<BusEvent>) -> Self {
         Self {
             next: recv_next(receiver),
         }
@@ -233,14 +432,14 @@ impl Stream for TraceEvents {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use swath_core::crs::Crs;
     use swath_core::raster::AssetRef;
     use swath_core::tile::TileCoord;
     use swath_core::trace::{Provenance, Strategy, Timings, Trace};
 
-    use super::{Envelope, TraceBus, TraceEvent};
+    use super::{BusEvent, Envelope, INGEST_THROTTLE, TraceBus};
 
     fn sample_trace() -> Trace {
         Trace {
@@ -455,13 +654,94 @@ mod tests {
         bus.publish("truecolor", coord, Arc::new(sample_trace()));
         bus.publish("ndvi", coord, Arc::new(sample_trace()));
 
-        let first: TraceEvent = receiver.recv().await.unwrap();
-        let second: TraceEvent = receiver.recv().await.unwrap();
+        let BusEvent::Trace(first) = receiver.recv().await.unwrap() else {
+            panic!("a render publishes a trace event")
+        };
+        let BusEvent::Trace(second) = receiver.recv().await.unwrap() else {
+            panic!("a render publishes a trace event")
+        };
         assert_eq!((first.id, second.id), (0, 1));
         assert_eq!(first.tile, "12/848/1561", "tile is z/x/y, not z/row/col");
         assert_eq!(
             (first.layer.as_str(), second.layer.as_str()),
             ("truecolor", "ndvi")
         );
+    }
+
+    /// Source events ride the same rails as renders (#416): one bus, two
+    /// kinds, and the ingest envelope carries the **server's** instant so
+    /// freshness is never computed from a client clock alone.
+    #[tokio::test]
+    async fn ingest_events_ride_the_bus_with_their_own_timestamp() {
+        let bus = TraceBus::new(8, Duration::from_mins(1));
+        let mut receiver = bus.sender.subscribe();
+        let publisher = bus.publisher();
+
+        assert!(publisher.publish("fire", "started", "2026-09-04T10:00:00Z", "/data/fire"));
+        let BusEvent::Ingest(event) = receiver.recv().await.unwrap() else {
+            panic!("an ingest publish is an ingest event")
+        };
+        assert_eq!(event.source, "fire");
+        assert_eq!(event.kind, "started");
+        assert_eq!(event.at, "2026-09-04T10:00:00Z");
+        assert_eq!(event.coalesced, 0);
+
+        let sse = format!("{:?}", BusEvent::Ingest(event.clone()).to_sse());
+        assert!(sse.contains("ingest"), "the wire event names itself: {sse}");
+
+        // Renders and source events share the sequence, so a client's
+        // gap detection works across both.
+        let coord = TileCoord::new(1, 0, 0).unwrap();
+        bus.publish("truecolor", coord, Arc::new(sample_trace()));
+        let BusEvent::Trace(render) = receiver.recv().await.unwrap() else {
+            panic!("a render publishes a trace event")
+        };
+        assert_eq!(render.id, event.id + 1);
+    }
+
+    /// A busy source cannot flood the bus: routine events are coalesced
+    /// to one per window and the suppressed count rides on the next one.
+    /// A failure is never suppressed — it is why anyone is watching.
+    #[tokio::test]
+    async fn a_busy_source_is_coalesced_but_a_failure_is_never_suppressed() {
+        let bus = TraceBus::new(16, Duration::from_mins(1));
+        let mut receiver = bus.sender.subscribe();
+        let publisher = bus.publisher();
+        let start = Instant::now();
+
+        assert!(publisher.publish_at("fire", "ingested", "t0", "a", start));
+        // Nine more in the same window: counted, not sent.
+        for i in 0..9 {
+            assert!(
+                !publisher.publish_at(
+                    "fire",
+                    "ingested",
+                    "t0",
+                    "b",
+                    start + Duration::from_millis(i)
+                ),
+                "a routine event inside the window is suppressed"
+            );
+        }
+        // A failure in the same window still goes out, immediately.
+        assert!(publisher.publish_at("fire", "failed", "t0", "denied", start));
+        // And the next routine event past the window reports the volume.
+        assert!(publisher.publish_at(
+            "fire",
+            "ingested",
+            "t1",
+            "c",
+            start + INGEST_THROTTLE + Duration::from_millis(1)
+        ));
+
+        let mut seen = Vec::new();
+        while let Ok(BusEvent::Ingest(event)) = receiver.try_recv() {
+            seen.push((event.kind, event.coalesced));
+        }
+        assert_eq!(seen, [("ingested", 0), ("failed", 9), ("ingested", 0)]);
+
+        // A different source has its own window: one busy origin does not
+        // silence another.
+        assert!(publisher.publish_at("archive", "ingested", "t0", "z", start));
     }
 }

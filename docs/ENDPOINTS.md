@@ -33,7 +33,7 @@ survive.
 | GET | `/tilesets` | always | Tilesets list (canonical resource collection; same document) |
 | GET | `/tilesets/{layerId}` | always | Tileset metadata incl. derived bounding box |
 | GET | `/tilesets/{layerId}/tiles/{tileMatrix}/{tileRow}/{tileCol}` | always | The tile: PNG bytes + `x-swath-trace`; optional `datetime=` frame selection (ADR 0015) |
-| GET | `/traces` | always | X-ray SSE stream of every render |
+| GET | `/traces` | always | SSE stream: every render (`trace`) and every source event (`ingest`, #416) |
 | GET | `/healthz` | always | Liveness probe (process only) |
 | GET/HEAD | *fallback* | always | Embedded UI assets; unknown paths are plain 404 |
 | GET | `/datasets/{datasetId}/counts` | catalog mode | Matched granules bucketed by calendar step or CRS84 cell (#410) |
@@ -127,6 +127,13 @@ provenance, stage timings, the planner's considered strategies with reasons,
 (catalog-backed renders, ADR 0015) the `temporal` decision, and (UDF renders,
 ADR 0018) `udf_ms` plus the deterministic `udf_fuel_used`. Slow
 subscribers lose events (`lagged`), never delaying a tile.
+
+The stream also carries `ingest` events — one per thing that happened to a
+source (ADR 0030): `{"source","at","event","detail","coalesced"}`. `at` is the
+**server's** instant, so freshness comes from when the thing happened, not a
+client's clock. Routine events are coalesced to one per source per second and
+the suppressed count rides on the next one; a failure is never suppressed. A
+source with no events has none here, and the UI shows an em dash.
 
 **`GET /healthz`** — liveness only, `200 ok`; no registry, store, or catalog
 I/O ([`OPERATIONS.md`](OPERATIONS.md) §5).
