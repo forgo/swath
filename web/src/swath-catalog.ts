@@ -165,6 +165,7 @@ export class SwathCatalog extends SwathElement {
    * viewport toggle: whichever is on names itself in the tag. */
   #scope: SpatialScope | undefined;
   #scopeText = "";
+  #area: SwathField | undefined;
   #scopeError: string | undefined;
   /** Where the results are when there are too many to outline (#413). */
   #density: Density = EMPTY_DENSITY;
@@ -392,6 +393,13 @@ export class SwathCatalog extends SwathElement {
    * says box, the placeholder shows one, and nothing here offers a shape
    * search the port cannot do. */
   #areaField(): SwathField {
+    // Built once and kept: rebuilding it on every render drops focus
+    // mid-typing and loses the change event a blur would have delivered.
+    // Same reason the timeline element is memoised.
+    if (this.#area !== undefined) {
+      this.#area.value = this.#scopeText;
+      return this.#area;
+    }
     const field = el("swath-field", {
       type: "text",
       name: "area",
@@ -403,6 +411,7 @@ export class SwathCatalog extends SwathElement {
       event.stopPropagation();
       this.#applyScopeText(String(event.detail.value));
     });
+    this.#area = field;
     return field;
   }
 
