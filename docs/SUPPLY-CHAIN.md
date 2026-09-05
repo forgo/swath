@@ -69,6 +69,12 @@ without a C toolchain).
   decodes tiles; default features off — Swath drives it through its own object_store-backed
   reader (no reqwest, no coupling to the object_store version its optional feature pins).
   `async-trait` comes with it: the `AsyncFileReader` trait is an `#[async_trait]` trait.
+- **reqwest** — outbound HTTP, and the only place Swath makes one (ADR 0030 §5,
+  #419): the STAC adapter's allowlisted reads. Already in the tree via
+  object_store's `http` feature; `swath-sources-stac` names it directly so the
+  egress policy has somewhere to live. Default features off, `rustls` only, and
+  redirects disabled — the allowlist is re-checked at every hop. Only that
+  adapter may name it.
 - **object_store** — the one storage abstraction (local fs, in-memory, S3-compatible behind
   one trait); `http` only where the UDF module fetcher needs it.
 - **proj4rs** — projection math is bind, never build (ADR 0002): pure-Rust proj4 for the

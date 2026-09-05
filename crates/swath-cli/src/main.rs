@@ -16,5 +16,6 @@ fn main() -> ExitCode {
         Command::Serve(args) => report(swath_cli::serve::run(&args)),
         Command::Ingest(args) => report(swath_cli::ingest::run(&args)),
         Command::Materialize(args) => report(swath_cli::materialize::run(&args)),
+        Command::Sources(args) => report(swath_cli::sources_cmd::run(args)),
     }
 }

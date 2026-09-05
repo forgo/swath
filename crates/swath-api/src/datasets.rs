@@ -16,9 +16,17 @@
 //!   direct asset map (band → COG/manifest URL) or an **inline** STAC
 //!   Item document (`{"stac_item": {…}}`, the #30 converter underneath —
 //!   STAC stays hidden from Swath's own vocabulary, but STAC-speaking
-//!   pipelines register without translation). The server never fetches
-//!   remote metadata URLs — the client supplies the document (the #197
+//!   pipelines register without translation). **These routes never fetch
+//!   remote metadata URLs**: the client supplies the document (the #197
 //!   panel fetches in-browser), so registration adds no SSRF surface.
+//!
+//!   Since #419 the *server* can fetch, but only through
+//!   `swath-sources-stac`, only to a host on the deployment's egress
+//!   allowlist (empty by default), never following a redirect off it, and
+//!   never on a request that reaches these handlers. The no-SSRF property
+//!   here is therefore preserved **by policy as well as by absence**, and
+//!   ADR 0030 §5 is the policy; a reader relying on it should rely on the
+//!   allowlist, not on the absence.
 //!
 //! **Headers are validated before anything is accepted:** every asset is
 //! `describe`d through the serving source stack; an unreadable or

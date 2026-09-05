@@ -86,6 +86,33 @@ nearest, everything else averages, nodata-aware.
 
 <!-- config-check:end flags swath materialize -->
 
+### `swath sources`
+
+<!-- config-check:begin flags swath sources -->
+
+| Flag | Env | Value | Meaning |
+|---|---|---|---|
+| `--config` | `SWATH_CONFIG` | `PATH` | TOML config file the egress allowlist is read from (the same file `swath serve` reads). |
+
+<!-- config-check:end flags swath sources -->
+
+<!-- config-check:begin flags swath sources allowlist -->
+
+| Flag | Env | Value | Meaning |
+|---|---|---|---|
+| `--config` | `SWATH_CONFIG` | `PATH` | The config file to read the allowlist from. |
+
+<!-- config-check:end flags swath sources allowlist -->
+
+<!-- config-check:begin flags swath sources fetch -->
+
+| Flag | Env | Value | Meaning |
+|---|---|---|---|
+| `--config` | `SWATH_CONFIG` | `PATH` | The config file to read the allowlist from. |
+| `url` | — | `URL` | An `http(s)` URL whose host is on the allowlist. |
+
+<!-- config-check:end flags swath sources fetch -->
+
 ## The TOML config file
 
 Kebab-case keys; **unknown keys are rejected** (`deny_unknown_fields`) —
@@ -105,6 +132,7 @@ a typo fails loudly at startup.
 | `catalog` | string | none | Postgres URL of a pgstac database — presence selects catalog mode. |
 | `watch-dir` | string | none | Drop directory watched for granule manifests (catalog mode only). Shorthand for one `[[sources]]` entry named `watch-dir`. |
 | `sources` | array of tables | `[]` | Named origins to watch (`[[sources]]`, keys below; catalog mode only). |
+| `egress-allowlist` | array of strings | `[]` (federation off) | Hosts the **server** may fetch from. Exact host names; no wildcard. |
 | `cors-allowed-origins` | array of strings | `[]` (CORS off) | Origin allowlist; `["*"]` allows any origin. |
 | `budget` | table | all knobs default | Global default materialization budget (`[budget]`, keys below). |
 | `layers` | array of tables | `[]` | Static layer definitions (`[[layers]]`, keys below). Mutually exclusive with catalog mode. |
@@ -116,6 +144,19 @@ Validation at startup: catalog mode requires `[[datasets]]` (and vice
 versa, as do `watch-dir` and `[[sources]]`); static `[[layers]]` and
 catalog mode are mutually exclusive; layer ids are unique across datasets
 (shared URL space), dataset ids unique, source ids unique.
+
+### `egress-allowlist` — what the server may reach
+
+Empty by default: the server fetches nothing, as it did before it could fetch
+at all. Listing a host turns federation on for that host and no other — names
+match exactly, because a suffix rule would let `evil-example.com` through on an
+`example.com` entry.
+
+An unlisted host is refused before a connection is attempted; a redirect off
+the allowlist is refused; a body past the size cap is abandoned mid-stream.
+`swath sources allowlist` prints what is permitted, `swath sources fetch <url>`
+retrieves one document under it. Both are operator actions: no HTTP route
+reaches this, and none can until the auth interlock lifts (ADR 0031).
 
 ### `[[sources]]` — where data comes from
 

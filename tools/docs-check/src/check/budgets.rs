@@ -45,8 +45,10 @@ const BUDGETS: [(&str, usize); 24] = [
     // Raised 1775 → 2050 on 2026-09-04 (#415): the reference gained the
     // `[[sources]]` table and what a restart does to it; 2050 → 2150 on
     // 2026-09-05 (#423) for credentials by reference. The ratchet takes it
-    // back down at the next consolidation.
-    ("docs/CONFIG.md", 2150),
+    // back down at the next consolidation; 2150 → 2450 on 2026-09-05
+    // (#419) → 2450 for the egress allowlist and the `swath sources` flag
+    // blocks (one per subcommand, as the CLI check requires).
+    ("docs/CONFIG.md", 2450),
     ("docs/DEMO.md", 875),
     // Raised 1800 → 2000 on 2026-09-04 (#409) and 2000 → 2150 on the same
     // day (#410): the reference gained a section per new route, and one
@@ -65,7 +67,9 @@ const BUDGETS: [(&str, usize); 24] = [
     ("docs/REQUIREMENTS.md", 1400),
     ("docs/ROADMAP.md", 1850),
     // New on 2026-08-29 (#347): the Cargo.toml dependency essays, in one place.
-    ("docs/SUPPLY-CHAIN.md", 1100),
+    // Raised 1100 → 1175 on 2026-09-05 (#419): reqwest becomes a direct
+    // dependency and a named dependency gets a paragraph.
+    ("docs/SUPPLY-CHAIN.md", 1175),
     ("docs/design/authoring-dag.md", 2250),
     ("docs/design/authoring-ux.md", 3025),
     // New on 2026-09-03 (#390): the voice/elevation/closed-set companion to

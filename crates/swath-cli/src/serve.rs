@@ -200,6 +200,7 @@ where
         udf_store,
         cors_allowed_origins,
         read_only,
+        egress,
         budget,
         layers,
     } = cfg;
@@ -211,6 +212,7 @@ where
         udf_store,
         cors_allowed_origins,
         read_only,
+        egress,
         budget,
     };
     match layers {
@@ -285,6 +287,9 @@ struct Shared {
     /// layer at all (the default).
     cors_allowed_origins: Vec<String>,
     read_only: bool,
+    /// What this server may fetch from (#419, ADR 0030 §5). Empty means
+    /// federation is off, which is the default.
+    egress: swath_core::sources::EgressPolicy,
     /// The resolved global budget — what published openEO services
     /// and previews serve under, rehydrated services included.
     budget: Budget,
@@ -503,6 +508,16 @@ where
             Arc::clone(&registry),
             source.id.clone(),
         ));
+    }
+    // What this server may reach, said once at startup so an operator can
+    // see it without reading the config back (#419, ADR 0030 §5).
+    if cfg.egress.is_empty() {
+        tracing::info!("egress allowlist: empty — the server fetches nothing");
+    } else {
+        tracing::info!(
+            "egress allowlist: {hosts}",
+            hosts = cfg.egress.hosts().collect::<Vec<_>>().join(", "),
+        );
     }
     let layer_count = mode.layers.len();
     // The granule browsing surface: read-only
@@ -1468,6 +1483,7 @@ mod tests {
             cache: cfg.cache,
             udf_store: cfg.udf_store,
             cors_allowed_origins: cfg.cors_allowed_origins,
+            egress: cfg.egress,
             read_only: false,
             budget: cfg.budget,
         };
@@ -1524,6 +1540,7 @@ mod tests {
             cache: cfg.cache,
             udf_store: cfg.udf_store,
             cors_allowed_origins: cfg.cors_allowed_origins,
+            egress: cfg.egress,
             read_only: false,
             budget: cfg.budget,
         };

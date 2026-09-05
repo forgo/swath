@@ -48,7 +48,7 @@ flowchart TB
   RENDER["swath-render: tiler, warp/resample kernels (via swath-warp), process compiler, Render IR, encoder"]
   CORE["swath-core (no I/O): planner, catalog domain, ingest step, manifest v1 (re-exported from swath-manifest), tile/TMS math, Trace"]
   PORTS[["Ports (swath-core traits): RasterSource, Reproject, Catalog, TileCache, EventSource, IngestReferencer, ModuleStore/ModuleFetcher"]]
-  ADS["Adapters: swath-source-cog, swath-source-virtual, swath-pyramid-objectstore, swath-reproject-proj4rs, swath-catalog-pgstac, swath-store-objectstore, swath-events-filedrop, swath-icechunk, swath-referencer, swath-udf-wasmtime, swath-store-objectstore"]
+  ADS["Adapters: swath-source-cog, swath-source-virtual, swath-pyramid-objectstore, swath-reproject-proj4rs, swath-catalog-pgstac, swath-store-objectstore, swath-events-filedrop, swath-icechunk, swath-referencer, swath-udf-wasmtime, swath-sources-stac"]
   EXT[("External: object storage, Postgres/pgstac, granule files")]
   CLI["swath-cli — wires adapters; serve + filedrop ingest loop"]
 
@@ -63,7 +63,7 @@ All nodes are implemented (per-module detail lives in each crate's rustdoc); the
 `VirtualiZarr` sidecar is deliberately absent — the conformance *reference* for
 `swath-referencer` (ADR 0006), not a runtime component.
 
-_Last verified against sources `c2102315d7a7`._
+_Last verified against sources `00fd144abf60`._
 
 ## 5. The Core (pure logic)
 
@@ -190,7 +190,7 @@ seam.
 | OGC API - EDR | 3 | not started |
 | OGC API - Features | 3 | not started |
 
-_Last verified against sources `fe8e68d1ceeb`._
+_Last verified against sources `7cd74ee27784`._
 
 ## 8. Data flows
 
@@ -235,14 +235,14 @@ The Cargo workspace is exactly the §4 component model on disk: `crates/` holds 
 `swath-manifest` (the extracted manifest v1 schema, ADR 0016), `swath-render`, `swath-warp`
 (the extracted GDAL-exact kernel, ADR 0016), `swath-planner` (the extracted cost model, ADR
 0016), `swath-api`, `swath-cli`, `swath-referencer`, `swath-e2e`, and the never-shipped test
-crates plus `swath-udf-guest` (the UDF authoring kit, ADR 0018), with the ten adapter
+crates plus `swath-udf-guest` (the UDF authoring kit, ADR 0018), with the eleven adapter
 crates under `crates/adapters/`; beside it, `web/`, `python/`, `tests/`, `examples/udf/`
 (the UDF example modules' standalone wasm32 workspace), `prototypes/` (dated experiments,
 immutable once concluded), and `docs/`. Phase-1 adapters are direct dependencies of the binary — Cargo features gate the
 embedded UI and HDF5 weight, not adapter selection (§14 covers extension beyond compile
 time).
 
-_Last verified against sources `c2102315d7a7`._
+_Last verified against sources `00fd144abf60`._
 
 ## 13. Frontend architecture
 
