@@ -23,7 +23,7 @@
  * the mode and leaves it alone on leaving.
  */
 
-export const VIEW_MODES = ["layers", "data", "author", "xray"] as const;
+export const VIEW_MODES = ["layers", "data", "sources", "author", "xray"] as const;
 export type ViewMode = (typeof VIEW_MODES)[number];
 
 export interface AppState {

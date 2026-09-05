@@ -12,6 +12,7 @@ const NAMES = [
   "data",
   "author",
   "xray",
+  "sources",
   "eye",
   "eye-off",
   "more",
@@ -54,7 +55,7 @@ test("the sheet defines exactly the contract's icon names", () => {
 // Two names for one drawing is a UI that cannot say two things (#384):
 // `share` and `link` shipped byte-identical path data, so the rail's
 // "copy a deep link to this view" and a tileset's "here is a reference"
-// were the same chain glyph. A closed set of 29 cannot afford a duplicate.
+// were the same chain glyph. A closed set of 30 cannot afford a duplicate.
 test("no two icons are the same drawing", async () => {
   const drawings = new Map<string, string[]>();
   for (const name of iconNames()) {

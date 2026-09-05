@@ -38,6 +38,7 @@ export interface CommandContext {
 const MODE_LABELS: Record<ViewMode, string> = {
   layers: "Layers",
   data: "Data",
+  sources: "Sources",
   author: "Author",
   xray: "X-ray",
 };
