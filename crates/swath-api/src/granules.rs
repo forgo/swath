@@ -113,6 +113,14 @@ pub struct GranuleItem {
     /// Band name → asset (the source refs a layer's plan resolves
     /// against), in band-name order.
     pub assets: BTreeMap<String, GranuleAssetItem>,
+    /// Every other STAC property the item carried, verbatim and opaque
+    /// (ADR 0029) — `eo:cloud_cover`, `platform`, `proj:epsg` and the rest.
+    ///
+    /// Omitted when empty, so a granule without foreign properties serves
+    /// exactly the bytes it did before this field existed: the shape change
+    /// is additive and no client sees a field disappear.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub properties: BTreeMap<String, serde_json::Value>,
 }
 
 /// The granule page: `granules` plus pagination bookkeeping.
@@ -138,6 +146,7 @@ impl From<Granule> for GranuleItem {
             bbox: granule.bbox.to_array(),
             datetime: granule.datetime.to_string(),
             ingested_at: granule.ingested_at.map(|t| t.to_string()),
+            properties: granule.properties,
             assets: granule
                 .assets
                 .into_iter()

@@ -297,3 +297,50 @@ async fn malformed_parameters_are_schema_valid_400_exceptions() {
         );
     }
 }
+
+/// Foreign STAC properties reach the granule row, verbatim (#408) — and a
+/// granule without them serves exactly the bytes it did before the field
+/// existed, so the shape change is additive.
+#[tokio::test]
+async fn properties_are_served_on_the_row_and_omitted_when_empty() {
+    let mut carried = granule(
+        "g-with",
+        [-106.1, 39.2, -105.9, 39.4],
+        "2024-06-06T17:54:00Z",
+    );
+    carried.properties = BTreeMap::from([
+        ("eo:cloud_cover".to_owned(), serde_json::json!(12.5)),
+        ("nested".to_owned(), serde_json::json!({ "a": [1, 2, 3] })),
+    ]);
+    let bare = granule(
+        "g-bare",
+        [-106.1, 39.2, -105.9, 39.4],
+        "2024-06-05T17:54:00Z",
+    );
+
+    let app = app(vec![carried, bare]);
+    let (status, body) = get_json(&app, "/datasets/hls-s30/granules").await;
+    assert_eq!(status, StatusCode::OK);
+    let rows = body["granules"].as_array().expect("a granule array");
+
+    let with = rows
+        .iter()
+        .find(|row| row["id"] == "g-with")
+        .expect("the carried granule");
+    assert_eq!(
+        with["properties"]["eo:cloud_cover"],
+        serde_json::json!(12.5)
+    );
+    assert_eq!(
+        with["properties"]["nested"],
+        serde_json::json!({ "a": [1, 2, 3] })
+    );
+
+    // Omitted, not `{}`: a client that never knew about the field sees the
+    // same document it always did.
+    let without = rows
+        .iter()
+        .find(|row| row["id"] == "g-bare")
+        .expect("the bare granule");
+    assert!(without.get("properties").is_none());
+}

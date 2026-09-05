@@ -469,3 +469,61 @@ async fn seen_before_start_is_still_announced() {
     let event = next(&mut source).await.unwrap().unwrap();
     assert_eq!(event.granule.id, GranuleId::new("old"));
 }
+
+/// A dropped manifest may carry STAC properties, and they reach the catalog
+/// verbatim (#408). Before ADR 0029 there was nowhere for them to go.
+#[tokio::test]
+async fn dropped_properties_reach_the_catalog_verbatim() {
+    let dir = TempDir::new("filedrop-properties");
+    let catalog = MemoryCatalog::default();
+    catalog.upsert_dataset(&hls_dataset()).await.unwrap();
+
+    let granule = "g-2024158";
+    let staged = dir.path().join(format!(".{granule}.json"));
+    std::fs::write(
+        &staged,
+        format!(
+            r#"{{
+                "dataset": "hls-s30",
+                "granule": "{granule}",
+                "bbox": [-106.1, 39.2, -105.9, 39.4],
+                "datetime": "2024-06-06T17:54:00Z",
+                "assets": {{ "b04": "{granule}-b04.tif" }},
+                "properties": {{
+                    "eo:cloud_cover": 12.5,
+                    "platform": "sentinel-2a",
+                    "nested": {{ "a": [1, 2, 3] }}
+                }}
+            }}"#
+        ),
+    )
+    .unwrap();
+    std::fs::rename(&staged, dir.path().join(format!("{granule}.json"))).unwrap();
+
+    let mut source = watcher(dir.path());
+    let event = next(&mut source).await.unwrap().unwrap();
+    let stored = ingest_granule(&catalog, &event).await.unwrap();
+
+    // Verbatim, whatever the shape — a passthrough that kept numbers and
+    // flattened objects would still be data loss.
+    assert_eq!(stored.properties["eo:cloud_cover"], serde_json::json!(12.5));
+    assert_eq!(
+        stored.properties["platform"],
+        serde_json::json!("sentinel-2a")
+    );
+    assert_eq!(
+        stored.properties["nested"],
+        serde_json::json!({ "a": [1, 2, 3] })
+    );
+}
+
+/// A manifest written before properties existed still parses, and produces
+/// exactly the granule it did before.
+#[tokio::test]
+async fn a_manifest_without_properties_is_unchanged() {
+    let dir = TempDir::new("filedrop-no-properties");
+    let mut source = watcher(dir.path());
+    drop_manifest(dir.path(), "hls-s30", "g-2024158");
+    let event = next(&mut source).await.unwrap().unwrap();
+    assert!(event.granule.properties.is_empty());
+}

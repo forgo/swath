@@ -143,8 +143,10 @@ ties by id). Query parameters: `bbox` (CRS84 footprint intersection),
 (1..=1000, default 100), `offset`; a `next` link appears while pages
 remain. Unknown dataset → 404; malformed parameter → 400; no matches →
 an empty 200 page. Asset `href`s are store keys, never serving-host
-paths; rows carry `id`, `bbox`, `datetime`, `ingestedAt`, and `assets`,
-wrapped with `numberMatched`/`numberReturned` and `links`.
+paths; rows carry `id`, `bbox`, `datetime`, `ingestedAt`, `assets`, and
+`properties` — every other STAC property the item arrived with, verbatim and
+opaque (ADR 0029), omitted when empty — wrapped with
+`numberMatched`/`numberReturned` and `links`.
 
 ## openEO surface (catalog mode)
 
