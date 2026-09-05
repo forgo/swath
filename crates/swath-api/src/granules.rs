@@ -79,6 +79,7 @@ where
 {
     axum::Router::new()
         .route("/datasets/{datasetId}/granules", get(granules))
+        .route("/datasets/{datasetId}/facets", get(facets))
         .with_state(state)
 }
 
@@ -250,6 +251,228 @@ where
     }))
 }
 
+// --- Facet discovery (#409) ---
+
+/// Distinct values a string or boolean facet reports before it gives up
+/// and says so. A key with more values than this is not a filter anyone
+/// can pick from; reporting the first `MAX_FACET_VALUES` and admitting
+/// the truncation beats inventing a summary.
+pub const MAX_FACET_VALUES: usize = 25;
+
+/// One distinct value of a facet, with how many granules carry it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct FacetValue {
+    /// The value as it appears in the property.
+    pub value: serde_json::Value,
+    /// Granules in scope carrying exactly this value.
+    pub count: usize,
+}
+
+/// What kind of thing a facet's values are — the UI's only licence to
+/// render one control rather than another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FacetKind {
+    /// Every value is a number: `min`/`max` describe the range.
+    Number,
+    /// Every value is a string: `values` enumerates them.
+    String,
+    /// Every value is a boolean: `values` enumerates true and false.
+    Boolean,
+    /// The values are objects, arrays, or a mix of kinds. Coverage is
+    /// reported; nothing else is claimed, and no control is implied.
+    Other,
+}
+
+/// One discovered facet: a property key some granule in scope carries,
+/// with the coverage that says how many do.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Facet {
+    /// The property key, verbatim (`eo:cloud_cover`, `platform`, …).
+    pub key: String,
+    /// What the values are.
+    pub kind: FacetKind,
+    /// Granules in scope that carry the key at all. Less than `total`
+    /// means the key is absent from some granules — which is why a
+    /// missing value is distinguishable from a value of zero.
+    pub coverage: usize,
+    /// The distinct values, most common first, for `string` and
+    /// `boolean` facets. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<FacetValue>>,
+    /// True when the key has more than [`MAX_FACET_VALUES`] distinct
+    /// values and `values` is therefore a prefix, not the set.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+    /// Smallest and largest value, for `number` facets. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    /// See [`Facet::min`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+}
+
+/// The facets of a dataset under the request's scope.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct FacetList {
+    /// Granules the scope matched — the denominator every `coverage` is
+    /// read against.
+    pub total: usize,
+    /// The discovered facets, in key order. Empty when the granules in
+    /// scope carry no foreign properties: there is nothing to filter on,
+    /// and the UI must render nothing rather than a dead control.
+    pub facets: Vec<Facet>,
+    /// `self`.
+    pub links: Vec<Link>,
+}
+
+/// `GET /datasets/{datasetId}/facets` — what the granules in scope
+/// actually carry (#409).
+///
+/// The facets are derived per request from the items themselves, never
+/// from a fixed list: a key appears here only because some granule in
+/// scope has it, so a control the UI renders from this response always
+/// has data behind it. `bbox` and `datetime` scope the discovery exactly
+/// as they scope [`granules`], so the facets describe the set the user is
+/// looking at; `limit`/`offset` do not apply — this is an aggregation
+/// over the whole match, not a page of it.
+///
+/// Coverage is reported per key, so "no value" stays distinguishable from
+/// "the value is zero". Same taxonomy as the granules route: unknown
+/// dataset → 404, malformed parameter → 400.
+async fn facets<C>(
+    State(app): State<Arc<GranulesState<C>>>,
+    Path(dataset_id): Path<String>,
+    Query(raw): Query<HashMap<String, String>>,
+) -> Result<Json<FacetList>, ApiError>
+where
+    C: Catalog + 'static,
+{
+    let params = GranulesParams::parse(&raw)?;
+    let id = DatasetId::new(&dataset_id);
+
+    app.catalog
+        .get_dataset(&id)
+        .await
+        .map_err(|err| catalog_error(&id, &err))?
+        .ok_or_else(|| ApiError::not_found(format!("no dataset `{dataset_id}`")))?;
+
+    let granules = app
+        .catalog
+        .find_granules(&id, &params.filter)
+        .await
+        .map_err(|err| catalog_error(&id, &err))?;
+
+    let total = granules.len();
+    let facets = discover_facets(&granules);
+    let links = vec![
+        Link::new(
+            format!(
+                "{}/datasets/{dataset_id}/facets{}",
+                app.base_url,
+                params.filter_query()
+            ),
+            "self",
+        )
+        .media_type("application/json")
+        .title(format!("Facets of dataset {dataset_id}")),
+    ];
+
+    Ok(Json(FacetList {
+        total,
+        facets,
+        links,
+    }))
+}
+
+/// Every property key the granules carry, summarised by what its values
+/// are. Pure over its input — the handler's only domain logic, kept here
+/// so the tests can reach it without an HTTP round trip.
+fn discover_facets(granules: &[Granule]) -> Vec<Facet> {
+    // Key → (coverage, the values seen, in first-seen order with counts).
+    let mut seen: BTreeMap<&str, Vec<&serde_json::Value>> = BTreeMap::new();
+    for granule in granules {
+        for (key, value) in &granule.properties {
+            seen.entry(key.as_str()).or_default().push(value);
+        }
+    }
+
+    seen.into_iter()
+        .map(|(key, values)| {
+            let coverage = values.len();
+            let kind = facet_kind(&values);
+            let (mut min, mut max, mut distinct, mut truncated) = (None, None, None, false);
+            match kind {
+                FacetKind::Number => {
+                    let numbers: Vec<f64> = values.iter().filter_map(|v| v.as_f64()).collect();
+                    min = numbers.iter().copied().reduce(f64::min);
+                    max = numbers.iter().copied().reduce(f64::max);
+                }
+                FacetKind::String | FacetKind::Boolean => {
+                    let (list, more) = tally(&values);
+                    distinct = Some(list);
+                    truncated = more;
+                }
+                // An object, an array, or a mix: coverage is all we can
+                // honestly say, and the UI renders no control for it.
+                FacetKind::Other => {}
+            }
+            Facet {
+                key: key.to_owned(),
+                kind,
+                coverage,
+                values: distinct,
+                truncated,
+                min,
+                max,
+            }
+        })
+        .collect()
+}
+
+/// The one kind every value shares, or [`FacetKind::Other`] when they do
+/// not share one. A key whose values are a mix is not a filter.
+fn facet_kind(values: &[&serde_json::Value]) -> FacetKind {
+    let kind_of = |value: &serde_json::Value| match value {
+        serde_json::Value::Number(_) => FacetKind::Number,
+        serde_json::Value::String(_) => FacetKind::String,
+        serde_json::Value::Bool(_) => FacetKind::Boolean,
+        _ => FacetKind::Other,
+    };
+    let mut kinds = values.iter().map(|value| kind_of(value));
+    match kinds.next() {
+        Some(first) if kinds.all(|kind| kind == first) => first,
+        // No values at all cannot happen (a key is here because a granule
+        // carried it), but an empty set is honestly `Other`.
+        _ => FacetKind::Other,
+    }
+}
+
+/// Distinct values with counts, most common first (ties by value, so the
+/// order is total and the response is stable), capped at
+/// [`MAX_FACET_VALUES`]; the flag says whether anything was left out.
+fn tally(values: &[&serde_json::Value]) -> (Vec<FacetValue>, bool) {
+    let mut counts: BTreeMap<String, (serde_json::Value, usize)> = BTreeMap::new();
+    for value in values {
+        let entry = counts
+            .entry(value.to_string())
+            .or_insert_with(|| ((*value).clone(), 0));
+        entry.1 += 1;
+    }
+    let mut tallied: Vec<(String, serde_json::Value, usize)> = counts
+        .into_iter()
+        .map(|(sortable, (value, count))| (sortable, value, count))
+        .collect();
+    tallied.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+    let truncated = tallied.len() > MAX_FACET_VALUES;
+    let list = tallied
+        .into_iter()
+        .take(MAX_FACET_VALUES)
+        .map(|(_, value, count)| FacetValue { value, count })
+        .collect();
+    (list, truncated)
+}
+
 /// Catalog failures, translated exactly as layer resolution translates
 /// them: a missing dataset is 404, everything else an honest 500.
 fn catalog_error(dataset: &DatasetId, err: &CatalogError) -> ApiError {
@@ -321,6 +544,25 @@ impl GranulesParams {
             "{base}/datasets/{dataset_id}/granules?{query}",
             query = params.join("&"),
         )
+    }
+
+    /// The scope alone — `bbox` and `datetime` echoed verbatim, leading
+    /// `?` included, empty when the request named neither. Facets are an
+    /// aggregation over the whole match, so the page window has no place
+    /// in their self link.
+    fn filter_query(&self) -> String {
+        let mut params: Vec<String> = Vec::new();
+        if let Some(bbox) = &self.bbox_raw {
+            params.push(format!("bbox={bbox}"));
+        }
+        if let Some(datetime) = &self.datetime_raw {
+            params.push(format!("datetime={datetime}"));
+        }
+        if params.is_empty() {
+            String::new()
+        } else {
+            format!("?{query}", query = params.join("&"))
+        }
     }
 }
 

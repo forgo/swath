@@ -24,6 +24,8 @@ import {
   previewKind,
   sortGranules,
 } from "./catalog-model.js";
+import type { FacetSummary } from "./facets-model.js";
+import { coverageNote, facetSummary, parseFacets } from "./facets-model.js";
 import type { LonLatBounds } from "./swath-map.js";
 import { SwathButton } from "./ui/button.js";
 import { el } from "./ui/dom.js";
@@ -83,6 +85,23 @@ export class SwathCatalog extends SwathElement {
         color: var(--swath-color-fg-muted);
       }
       [part="error"] { color: var(--swath-color-danger); }
+      [part="facets"] {
+        margin: 0 0 var(--swath-space-3);
+        display: grid;
+        gap: var(--swath-space-1);
+        font-size: var(--swath-text-xs);
+      }
+      [part="facets"] > div {
+        display: grid;
+        grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+        gap: var(--swath-space-2);
+        align-items: baseline;
+      }
+      [part="facet-key"] {
+        font-family: var(--swath-font-mono);
+        color: var(--swath-color-fg-muted);
+      }
+      [part="facet-coverage"] { color: var(--swath-color-fg-muted); }
     `,
   ];
   static override properties = {
@@ -103,6 +122,7 @@ export class SwathCatalog extends SwathElement {
   #selected = "";
   #granules: CatalogGranule[] = [];
   #granulesError: string | undefined;
+  #facets: FacetSummary = { total: 0, facets: [] };
   #sort: GranuleSort = "newest";
   #filter: GranuleFilter = {};
   #inView = false;
@@ -187,6 +207,7 @@ export class SwathCatalog extends SwathElement {
     this.#selected = id;
     this.#granules = [];
     this.#granulesError = undefined;
+    this.#facets = { total: 0, facets: [] };
     this.requestUpdate();
     if (id === "") {
       this.#announce("", []);
@@ -205,16 +226,53 @@ export class SwathCatalog extends SwathElement {
     } catch (error) {
       failure = error instanceof Error ? error.message : String(error);
     }
+    // What the items actually carry (#409). A facet exists only because
+    // the server found the key on a granule in scope, so nothing rendered
+    // from this can be a control over data that is not there. A failure
+    // here is not a granule failure: the list still loads, and the facet
+    // block simply says nothing.
+    let facets: FacetSummary = { total: 0, facets: [] };
+    if (failure === undefined) {
+      try {
+        facets = parseFacets(await this.api.json(`/datasets/${encodeURIComponent(id)}/facets`));
+      } catch {
+        facets = { total: 0, facets: [] };
+      }
+    }
     if (this.#selected !== id) {
       return; // stale: the user moved on while this fetch was in flight
     }
     this.#loading = false;
     this.#granulesError = failure;
     this.#granules = granules;
+    this.#facets = facets;
     if (failure === undefined) {
       this.#announce(id, granules);
     }
     this.requestUpdate();
+  }
+
+  /** The discovered facets, one line each: the key, what its values are,
+   * and how much of the scope carries it. Nothing when the items carry
+   * nothing — an empty block, not an empty control. */
+  #facetBlock(): HTMLElement | undefined {
+    if (this.#facets.facets.length === 0) {
+      return undefined;
+    }
+    const rows = this.#facets.facets.map((facet) =>
+      el(
+        "div",
+        {},
+        el("span", { part: "facet-key" }, facet.key),
+        el(
+          "span",
+          {},
+          facetSummary(facet),
+          el("span", { part: "facet-coverage" }, ` · ${coverageNote(facet, this.#facets.total)}`),
+        ),
+      ),
+    );
+    return el("section", { part: "facets", "aria-label": "What these granules carry" }, ...rows);
   }
 
   #announce(dataset: string, granules: readonly CatalogGranule[]): void {
@@ -431,7 +489,13 @@ export class SwathCatalog extends SwathElement {
       }
       body = el("ul", { part: "grid" }, ...items);
     }
-    this.renderRoot.replaceChildren(filters, toolbar, body);
+    const facets = this.#facetBlock();
+    this.renderRoot.replaceChildren(
+      filters,
+      ...(facets === undefined ? [] : [facets]),
+      toolbar,
+      body,
+    );
   }
 }
 

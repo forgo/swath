@@ -36,6 +36,7 @@ survive.
 | GET | `/traces` | always | X-ray SSE stream of every render |
 | GET | `/healthz` | always | Liveness probe (process only) |
 | GET/HEAD | *fallback* | always | Embedded UI assets; unknown paths are plain 404 |
+| GET | `/datasets/{datasetId}/facets` | catalog mode | What the granules in scope carry: discovered property keys with coverage, ranges and value counts (#409) |
 | GET, POST | `/datasets/{datasetId}/granules` | catalog mode | Granule browsing (paged, filterable); POST registers one (asset map or inline STAC Item — headers validated, extents derived, #196) |
 | POST | `/datasets` | catalog mode | Register a dataset (id, title, bands) — #196; 409 on existing id |
 | GET | `/.well-known/openeo` | catalog mode | openEO version discovery |
@@ -147,6 +148,22 @@ paths; rows carry `id`, `bbox`, `datetime`, `ingestedAt`, `assets`, and
 `properties` — every other STAC property the item arrived with, verbatim and
 opaque (ADR 0029), omitted when empty — wrapped with
 `numberMatched`/`numberReturned` and `links`.
+
+### `GET /datasets/{datasetId}/facets`
+
+What the granules in scope actually carry. Keys are discovered from the
+items, never from a fixed list: a key appears only because some granule
+has it, so a control built from this response always has data behind it.
+`bbox` and `datetime` scope the discovery as they scope the granule page;
+`limit`/`offset` do not apply — this aggregates the whole match.
+
+Each facet carries `key`, a `kind` (`number`, `string`, `boolean`, or
+`other` for objects, arrays and mixed keys), and `coverage`: how many of
+`total` granules carry the key, which keeps "no value" distinguishable
+from "the value is zero". Numbers report `min`/`max`; strings and
+booleans report `values` (distinct, most common first) and set
+`truncated` past 25. An `other` facet claims only its coverage. Same
+taxonomy: unknown dataset → 404, malformed parameter → 400.
 
 ## openEO surface (catalog mode)
 
