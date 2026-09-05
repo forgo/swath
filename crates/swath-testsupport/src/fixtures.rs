@@ -177,3 +177,101 @@ pub fn park_fire(days: &[(&str, &str)]) -> (Dataset, Vec<Granule>) {
         .collect();
     (fire_dataset("park-fire"), granules)
 }
+
+/// The scale fixture (#414): `count` granules of `dataset`, generated from
+/// the **already committed** T10TFK COGs — rows, not bytes. Nothing here
+/// reads a clock or a random number: every id, instant and box is derived
+/// from the index, so two runs produce byte-identical granules.
+///
+/// The series starts at `2024-01-01T00:00:00Z` and steps six hours per
+/// granule (so a day holds four, and a month's bucket is a round number),
+/// and each footprint is the Park Fire box walked east and north on a
+/// 16-column lattice in hundredths of a degree — enough distinct cells to
+/// exercise density bucketing without leaving the tile's neighbourhood.
+#[must_use]
+pub fn scale_granules(dataset: &str, count: usize) -> Vec<Granule> {
+    (0..count).map(|i| scale_granule(dataset, i)).collect()
+}
+
+/// One granule of the scale fixture, addressed by index.
+#[must_use]
+pub fn scale_granule(dataset: &str, index: usize) -> Granule {
+    let index = i64::try_from(index).expect("the scale fixture is indexed in range");
+    let hours = index * 6;
+    let (day, hour) = (hours / 24, hours % 24);
+    // 2024 is a leap year; the fixture never runs past it at the sizes the
+    // suites use, and the assertion below says so rather than wrapping
+    // silently into a wrong year.
+    assert!(
+        day < 366,
+        "the scale fixture spans one year: {index} is past it"
+    );
+    let (month, day_of_month) = month_and_day(day);
+    let at = format!("2024-{month:02}-{day_of_month:02}T{hour:02}:00:00Z");
+
+    let column = f64::from(u32::try_from(index % 16).expect("a lattice column"));
+    let row = f64::from(u32::try_from(index / 16).expect("a lattice row"));
+    let (dx, dy) = (column * 0.01, row * 0.01);
+    let asset = |band: &str| GranuleAsset::raster(format!("hlss30-t10tfk-2024204-{band}.tif"));
+    Granule {
+        id: GranuleId::new(format!("scale-{index:05}")),
+        dataset: DatasetId::new(dataset),
+        bbox: Bbox {
+            west: FIRE_BBOX.west + dx,
+            south: FIRE_BBOX.south + dy,
+            east: FIRE_BBOX.east + dx,
+            north: FIRE_BBOX.north + dy,
+        },
+        datetime: datetime(&at),
+        assets: [
+            ("b04".to_owned(), asset("b04")),
+            ("b8a".to_owned(), asset("b8a")),
+        ]
+        .into(),
+        ingested_at: Some(datetime("2024-12-31T00:00:00Z")),
+        properties: BTreeMap::new(),
+    }
+}
+
+/// The 1-based calendar month and day of a 0-based day of 2024.
+fn month_and_day(day_of_year: i64) -> (i64, i64) {
+    const LENGTHS: [i64; 12] = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut remaining = day_of_year;
+    for (index, length) in LENGTHS.iter().enumerate() {
+        if remaining < *length {
+            return (
+                i64::try_from(index).expect("twelve months") + 1,
+                remaining + 1,
+            );
+        }
+        remaining -= *length;
+    }
+    unreachable!("day_of_year is bounded by the caller")
+}
+
+/// The scale fixture's dataset: the Park Fire bands, the lattice's full
+/// extent, no config layers.
+#[must_use]
+pub fn scale_dataset(id: &str, count: usize) -> Dataset {
+    let last = scale_granule(id, count.saturating_sub(1));
+    Dataset {
+        id: DatasetId::new(id),
+        title: "Scale fixture".to_owned(),
+        description: "Synthetic rows over the committed T10TFK COGs (#414).".to_owned(),
+        license: "CC0-1.0".to_owned(),
+        extent: Extent {
+            bbox: Bbox {
+                west: FIRE_BBOX.west,
+                south: FIRE_BBOX.south,
+                east: last.bbox.east,
+                north: last.bbox.north,
+            },
+            interval: TimeRange {
+                start: Some(datetime("2024-01-01T00:00:00Z")),
+                end: Some(last.datetime.clone()),
+            },
+        },
+        bands: ["b04", "b8a"].map(str::to_owned).into_iter().collect(),
+        layers: Vec::new(),
+    }
+}
