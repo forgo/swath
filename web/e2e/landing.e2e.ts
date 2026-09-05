@@ -26,6 +26,7 @@ import {
   mapView,
   layerRow as panelButton,
   playButton,
+  railMode,
   scrubTo,
   slider,
   waitForFittedView,
@@ -167,7 +168,16 @@ test("the invitation turns x-ray on, keeps the loop going, and joins the link", 
   await expect(landingCard(page)).toBeHidden(); // invitation accepted
   // The click left the pointer over the map (hover-paused); off it, the
   // loop is still the landing's and resumes under the overlay.
-  await page.mouse.move(10, 300);
+  //
+  // Hovering a real element rather than moving to a bare coordinate
+  // (#336): `mouse.move` asks the browser to synthesise a boundary event
+  // across a DOM that just changed under the pointer, and Linux Chromium
+  // does not always deliver it — which made this assertion a test of
+  // event delivery rather than of the viewer. `locator.hover()` waits for
+  // actionability and moves through the element, so the leave is real.
+  // The resume logic itself is pinned deterministically in
+  // `swath-map.test.ts` ("accepting the invitation while hover-paused").
+  await railMode(page, "layers").hover();
   await expect(playButton(page)).toHaveAttribute("aria-pressed", "true");
   await expect(page).toHaveURL(/xray/);
 });

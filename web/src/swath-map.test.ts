@@ -1027,3 +1027,28 @@ test("swath-cursor: the centre on a move, the pointer under the mouse, one event
   expect(seen[1]?.source).toBe("pointer");
   expect(seen[1]?.lng).toBeCloseTo(11, 1);
 });
+
+/// The flake hypothesis for #336, as a unit test: accept the invitation
+/// while the pointer is over the map (hover-paused), then leave. If the
+/// loop does not resume, the e2e's 5-second wait was watching a product
+/// bug rather than a slow runner.
+test("cinematic: accepting the invitation while hover-paused still resumes on leave (#336)", async () => {
+  fakePlayClock();
+  stubSwathApi({ temporal: { layer: "ndvi", dataset: "hls-s30-fire" } });
+  const el = mount({ server: SERVER, cinematic: "" });
+  await el.ready;
+  const { card, play } = landing(el);
+  await waitForTiles(el);
+
+  // The pointer is over the map when the invitation is clicked — which
+  // is exactly where the click leaves it.
+  el.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
+  expect(play.getAttribute("aria-pressed")).toBe("false");
+  card.querySelector<HTMLButtonElement>("button.swath-map-landing-invite")?.click();
+  expect(el.hasAttribute("xray")).toBe(true);
+
+  // Off the map: the loop is still the landing's and resumes under the
+  // overlay.
+  el.dispatchEvent(new PointerEvent("pointerleave", { pointerType: "mouse" }));
+  expect(play.getAttribute("aria-pressed")).toBe("true");
+});
