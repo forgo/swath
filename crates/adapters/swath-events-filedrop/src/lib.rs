@@ -127,6 +127,13 @@ struct Manifest {
     datetime: String,
     /// Band name → asset URI/key, as serving will read them.
     assets: BTreeMap<String, String>,
+    /// Optional STAC properties to attach to the granule, carried verbatim
+    /// and opaquely (ADR 0029): `eo:cloud_cover`, `platform`, and so on.
+    ///
+    /// Defaulted, so every manifest written before this existed still
+    /// parses and produces the same granule.
+    #[serde(default)]
+    properties: BTreeMap<String, serde_json::Value>,
 }
 
 /// A polling file-drop [`EventSource`] over one directory.
@@ -418,6 +425,6 @@ fn read_manifest(path: &Path) -> Result<Granule, EventError> {
             .map(|(band, uri)| (band, GranuleAsset::raster(uri)))
             .collect(),
         ingested_at: None,
-        properties: BTreeMap::new(),
+        properties: manifest.properties,
     })
 }
