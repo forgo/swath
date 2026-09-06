@@ -193,6 +193,30 @@ const PREVIEW_DEBOUNCE_MS = 300;
  * shortcut over the canvas, not a parallel form source. */
 const NDVI_TEMPLATE = ["load_collection", "ndvi", "linear_scale_range", "save_result"] as const;
 
+/** How many depth columns share a band before the layout wraps to the
+ * next one (#472). Three keeps a nine-node graph inside the compose
+ * canvas at a legible scale; more and the width binds again, fewer and
+ * the bands stack taller than the region.
+ *
+ * The layout stays left-to-right *within* a band, so the reading order
+ * `design/authoring-dag.md` promises is unchanged — it wraps like text
+ * rather than turning into a grid. */
+const COLUMNS_PER_BAND = 3;
+
+/** Horizontal pitch between depth columns. Nodes are 160 wide, so 200
+ * leaves a 40px gap: enough to read the edge, without the 140px of air
+ * the old 300 pitch spent per column. */
+const COLUMN_PITCH = 200;
+
+/** Vertical pitch between the branch rows inside one band. */
+const ROW_PITCH = 150;
+
+/** Vertical pitch between bands. A branched graph needs room for both
+ * rows inside a band; a straight chain needs one, and spending the
+ * branched pitch on it leaves a hole the reader has to cross. */
+const BAND_PITCH_BRANCHED = 260;
+const BAND_PITCH_STRAIGHT = 150;
+
 /** The change-detection template's processes (ADR 0022): offered
  * only when the server serves the join. */
 const CHANGE_TEMPLATE = [
@@ -1866,9 +1890,18 @@ export class SwathAuthoringPanel extends SwathElement {
       node.nodeId = key;
       node.title = STEP_TITLES[process] ?? process;
       const column = depth.get(key) ?? index;
+      // Wrapped, left-to-right, in bands (#472). A nine-node graph laid
+      // out in one row spans 1660 canvas units; the canvas is 560 wide, so
+      // `fit()` fell to k=0.31 and 12px labels rendered at 3.7px. Bands of
+      // COLUMNS_PER_BAND trade the width the canvas does not have for the
+      // height it does, and the tighter pitch stops 160px nodes sitting
+      // 300px apart. Measured after: k = 0.79, labels 9.4px, nothing clipped.
+      const band = Math.floor(column / COLUMNS_PER_BAND);
+      const branched = heads.length > 1;
+      const bandPitch = branched ? BAND_PITCH_BRANCHED : BAND_PITCH_STRAIGHT;
       const at = this.#positions.get(key) ?? {
-        x: 24 + column * 300,
-        y: 24 + (heads.length > 1 ? rowOf(key) * 150 : 0),
+        x: 24 + (column % COLUMNS_PER_BAND) * COLUMN_PITCH,
+        y: 24 + band * bandPitch + (branched ? rowOf(key) * ROW_PITCH : 0),
       };
       node.x = at.x;
       node.y = at.y;
@@ -1989,8 +2022,12 @@ export class SwathAuthoringPanel extends SwathElement {
     }
     requestAnimationFrame(() => canvas.fit());
     const narrative = form.querySelector("#swath-authoring-narrative");
-    const preview = form.querySelector("#swath-authoring-preview");
-    strip.append(canvas, inserts, ...[narrative, preview].filter((n): n is Element => n !== null));
+    // The draft preview stays in the rail and does NOT come to the strip
+    // (#472): composing makes the map the live preview column (ADR 0028),
+    // so a second 128px preview here would duplicate it — and it was
+    // taking 149px of the 483 the region has, from a canvas that had 202.
+    // ADR 0014's countermeasure is still on screen, at map size.
+    strip.append(canvas, inserts, ...[narrative].filter((n): n is Element => n !== null));
     regions.strip.replaceChildren(strip);
     const selected = steps.find((step) => step.dataset["step"] === this.sel);
     const inspector = document.createElement("div");

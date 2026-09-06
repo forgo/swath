@@ -407,7 +407,17 @@ export const PANEL_SHEET = css`
   background: color-mix(in srgb, var(--swath-color-danger) 12%, transparent);
 }
 /* Shell regions (#291): the strip over the map, the inspector column. */
-.swath-authoring-strip { display: grid; gap: var(--swath-space-2); }
+/* The canvas takes the height the strip has, rather than a fixed five
+ * rows of it (#472): composing gave the region its height and the canvas
+ * was still 200px of it, so a nine-node graph fit at k=0.31 and its
+ * labels rendered at under 4px. The floor keeps the old height when the
+ * region is short. */
+.swath-authoring-strip {
+  display: grid;
+  gap: var(--swath-space-2);
+  block-size: 100%;
+  grid-template-rows: minmax(calc(var(--swath-space-8) * 5), 1fr) auto auto;
+}
 .swath-authoring-chips {
   display: flex;
   align-items: center;
@@ -436,7 +446,8 @@ export const PANEL_SHEET = css`
 .swath-authoring-chip[data-invalid="true"] { border-color: var(--swath-color-danger); }
 .swath-authoring-chip-gap { display: inline-flex; }
 .swath-authoring-canvas {
-  block-size: calc(var(--swath-space-8) * 5);
+  /* Sized by the strip's grid (above); the floor lives there. */
+  min-block-size: calc(var(--swath-space-8) * 5);
   border: var(--swath-border-hairline);
   border-radius: var(--swath-radius-md);
 }

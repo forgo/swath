@@ -96,6 +96,11 @@ or bring the stack up yourself and `pnpm exec vite dev`.
        * `display: block`, which would beat the UA's [hidden] rule — this
        * element+attribute selector outranks it. */
       swath-layer-list[hidden],
+      /* The pipeline strip fills the dock's body so the canvas can take
+         the height composing gave it (#472); without a definite height
+         here the strip is only as tall as its content and the canvas
+         stays at its 200px floor. */
+      #swath-author-strip { block-size: 100%; }
       swath-catalog[hidden],
       swath-sources[hidden],
       swath-import[hidden],
